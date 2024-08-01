@@ -1,0 +1,13 @@
+[project]
+name = "winnow"
+authors = [{name="InstaDeep"}]
+description = "Score calibration and false discovery estimation for de novo peptide sequencing."
+readme = "README.md"
+dynamic = ["version"]
+
+[build-system]
+requires = ["setuptools", "setuptools_scm"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["winnow"]
