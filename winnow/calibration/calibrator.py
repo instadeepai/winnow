@@ -80,8 +80,10 @@ class ProbabilityCalibrator:
     ]:
         for dependency in self.dependencies.values():
             dependency.compute(dataset=dataset)
-
+            
         for feature in self.feature_dict.values():
+            if labelled:
+                feature.prepare(dataset=dataset)
             feature.compute(dataset=dataset)
 
         feature_columns = [dataset.confidence_column]

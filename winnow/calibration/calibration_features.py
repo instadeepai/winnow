@@ -80,6 +80,12 @@ class CalibrationFeatures(metaclass=ABCMeta):
         """
 
     @abstractmethod
+    def prepare(
+        self, dataset: CalibrationDataset
+    ) -> None:
+        pass
+
+    @abstractmethod
     def compute(
         self, dataset: CalibrationDataset
     ) -> Dict[str, pd.Series]:
@@ -142,6 +148,11 @@ class PrositFeatures(CalibrationFeatures):
     def columns(self) -> List[str]:
         return ['ion_matches', 'ion_match_intensity']
 
+    def prepare(
+        self, dataset: CalibrationDataset
+    ) -> None:
+        return
+
     def compute(self, dataset: CalibrationDataset) -> Dict[str, pd.Series]:
         inputs = pd.DataFrame()
         inputs['peptide_sequences'] = np.array([
@@ -198,6 +209,11 @@ class ChimericFeatures(CalibrationFeatures):
     def columns(self) -> List[str]:
         return ['chimeric_ion_matches', 'chimeric_ion_match_intensity']
 
+    def prepare(
+        self, dataset: CalibrationDataset
+    ) -> None:
+        return
+
     def compute(self, dataset: CalibrationDataset) -> Dict[str, pd.Series]:
         inputs = pd.DataFrame()
         inputs['peptide_sequences'] = np.array([
@@ -239,6 +255,7 @@ class ChimericFeatures(CalibrationFeatures):
         dataset.metadata['chimeric_ion_matches'] = ion_matches
         dataset.metadata['chimeric_ion_match_intensity'] = match_intensity
 
+
 class MassErrorFeature(CalibrationFeatures):
     """Calculates the difference between the precursor and theoretical mass
     """
@@ -259,6 +276,11 @@ class MassErrorFeature(CalibrationFeatures):
     @property
     def name(self) -> str:
         return 'Mass Error'
+
+    def prepare(
+        self, dataset: CalibrationDataset
+    ) -> None:
+        return
 
     def compute(
         self, dataset: CalibrationDataset,
@@ -286,6 +308,11 @@ class BeamFeatures(CalibrationFeatures):
     @property
     def columns(self) -> List[str]:
         return ['margin', 'median_margin', 'entropy']
+
+    def prepare(
+        self, dataset: CalibrationDataset
+    ) -> None:
+        return
 
     def compute(self, dataset: CalibrationDataset) -> Dict[str, pd.Series]:
         top_probs = [
@@ -341,6 +368,28 @@ class RetentionTimeFeature(CalibrationFeatures):
     def columns(self) -> List[str]:
         return ['iRT error']
 
+    def prepare(
+        self, dataset: CalibrationDataset
+    ) -> None:
+        # -- Make calibration dataset
+        train_data = dataset.metadata.copy(deep=True)
+        train_data = train_data.sort_values(by='confidence', ascending=False)
+        train_data = train_data.iloc[:int(self.train_fraction*len(train_data))]
+
+        # -- Get predictions
+        inputs = pd.DataFrame()
+        inputs['peptide_sequences'] = np.array([
+            ''.join(peptide) for peptide in train_data['prediction'].apply(map_modification)
+            ]
+        )
+        inputs = inputs.set_index(train_data.index)
+        predictions = self.prosit_model.predict(inputs)
+        train_data['iRT'] = predictions['irt']
+
+        # -- Fit model
+        X, y = train_data['Retention time'].values, train_data['iRT'].values
+        self.irt_predictor.fit(X.reshape(-1, 1), y)
+
     def compute(self, dataset: CalibrationDataset) -> Dict[str, pd.Series]:
         # -- Get predictions
         inputs = pd.DataFrame()
@@ -350,15 +399,6 @@ class RetentionTimeFeature(CalibrationFeatures):
         )
         predictions = self.prosit_model.predict(inputs)
         dataset.metadata['iRT'] = predictions['irt']
-        
-        # -- Make calibration dataset
-        train_data = dataset.metadata.copy(deep=True)
-        train_data = train_data.sort_values(by='confidence', ascending=False)
-        train_data = train_data.iloc[:int(self.train_fraction*len(train_data))]
-
-        # -- Fit model
-        X, y = train_data['Retention time'].values, train_data['iRT'].values
-        self.irt_predictor.fit(X.reshape(-1, 1), y)
 
         # - Predict iRT
         dataset.metadata['predicted iRT'] = self.irt_predictor.predict(
