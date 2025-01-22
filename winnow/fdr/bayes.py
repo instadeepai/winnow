@@ -136,3 +136,67 @@ class EmpiricalBayesFDRControl(FDRControl):
             concentration1=self.mixture_parameters.incorrect_beta,
         )
         return incorrect_distribution.icdf(1-threshold)
+    
+    def compute_fdr(self, score: float) -> float:
+        # P(S >= score | incorrect) = 1 - F_incorrect(s)
+        P_score_given_incorrect = 1 - jax.scipy.stats.beta.cdf(
+            a=self.mixture_parameters.incorrect_alpha,
+            b=self.mixture_parameters.incorrect_beta,
+            x=score
+            )
+        # P(S >= score | correct) = 1 - F_correct(s)
+        P_score_given_correct = 1 - jax.scipy.stats.beta.cdf(
+            a=self.mixture_parameters.correct_alpha,
+            b=self.mixture_parameters.correct_beta,
+            x=score
+            )
+
+        # Mixture tail probability P(S >= s)
+        P_mixture_tail = (
+            self.mixture_parameters.proportion * P_score_given_correct +
+            (1 - self.mixture_parameters.proportion) * P_score_given_incorrect
+        )
+
+        # P(incorrect | S >= s)
+        P_incorrect_given_score = (1 - self.mixture_parameters.proportion) * P_score_given_incorrect / P_mixture_tail
+        # P(correct | S >= s)
+        P_correct_given_score = self.mixture_parameters.proportion * P_score_given_correct / P_mixture_tail
+
+        return P_incorrect_given_score / (P_incorrect_given_score + P_correct_given_score)
+
+    def compute_posterior_probability(self, score: float) -> float:
+        # P(incorrect | S = s) = [P(incorrect) * P(S = s | incorrect)] / P(S = s)
+
+        # f(S = s | incorrect)
+        f_score_given_incorrect = jax.scipy.stats.beta.pdf(
+            a=self.mixture_parameters.incorrect_alpha,
+            b=self.mixture_parameters.incorrect_beta,
+            x=score
+        )
+        # f(S = s | correct)
+        f_score_given_correct = jax.scipy.stats.beta.pdf(
+            a=self.mixture_parameters.correct_alpha,
+            b=self.mixture_parameters.correct_beta,
+            x=score
+        )
+
+        # Mixture probability f(S = s)
+        f_score = (
+            self.mixture_parameters.proportion * f_score_given_correct +
+            (1 - self.mixture_parameters.proportion) * f_score_given_incorrect
+        )
+        
+        return (1 - self.mixture_parameters.proportion) * f_score_given_incorrect / f_score
+
+    def compute_p_value(self, score: float) -> float:
+        # P(S >= score | incorrect) = 1 - F_incorrect(s)
+        P_score_given_incorrect = 1 - jax.scipy.stats.beta.cdf(
+            a=self.mixture_parameters.incorrect_alpha,
+            b=self.mixture_parameters.incorrect_beta,
+            x=score
+            )
+        return P_score_given_incorrect
+
+    def compute_expect_score(self, score: float, total_matches: int) -> float:
+        p_value = self.compute_p_value(score)
+        return total_matches * p_value

@@ -56,12 +56,32 @@ class FDRControl(metaclass=ABCMeta):
 
         Args:
             threshold (float):
-                The target FDR threshold. Must satsify 0 < `thresold` < 1.
+                The target FDR threshold. Must satsify 0 < `threshold` < 1.
 
         Returns:
             float:
                 The confidence cutoff correspnding to the target FDR threshold.
         """
+        pass
+
+    @abstractmethod
+    def compute_fdr(self, score: float) -> float:
+        """Compute FDR for a given confidence score."""
+        pass
+
+    @abstractmethod
+    def compute_posterior_probability(self, score: float) -> float:
+        """Compute posterior error probability, or local FDR, for a given confidence score."""
+        pass
+
+    @abstractmethod
+    def compute_p_value(self, score: float) -> float:
+        """Compute the p-value for a given confidence score."""
+        pass
+    
+    @abstractmethod
+    def compute_expect_score(self, score: float, total_matches: int) -> float:
+        """Compute the expected number of false discoveries for a given score."""
         pass
 
     def get_confidence_curve(
