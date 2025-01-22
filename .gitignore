@@ -1,5 +1,8 @@
 .venv
+.tenv
 
 *.egg*
 
 __pycache__
+
+winnow_data

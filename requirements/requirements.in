@@ -10,3 +10,6 @@ pyteomics
 instanovo
 numpyro
 jax
+tensorflow_probability
+jupyter
+ipywidgets
