@@ -1,0 +1,7 @@
+.venv
+
+winnow_data
+
+__pycache__
+
+*.egg-info
