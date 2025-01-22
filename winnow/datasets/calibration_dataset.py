@@ -314,3 +314,6 @@ class CalibrationDataset:
     def __len__(self) -> int:
         assert self.metadata.shape[0] == len(self.predictions)
         return len(self.predictions)
+
+    def to_csv(self, path: str) -> None:
+        self.metadata.to_csv(path)

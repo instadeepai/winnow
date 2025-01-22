@@ -100,7 +100,3 @@ class ProbabilityCalibrator:
         features = self.compute_features(dataset=dataset, labelled=False)
         correct_probs = self.classifier.predict_proba(features)
         dataset.metadata['calibrated_confidence'] = correct_probs[:, 1].tolist()
-    
-    @staticmethod
-    def to_csv(dataset: CalibrationDataset, path: str) -> None:
-        dataset.metadata.to_csv(path)
