@@ -1,6 +1,7 @@
 .venv
 
 winnow_data
+calibrated_datasets
 
 __pycache__
 
