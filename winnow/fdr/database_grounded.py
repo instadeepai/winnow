@@ -46,6 +46,7 @@ class DatabaseGroundedFDRControl(FDRControl):
             lambda row: row['num_matches'] == len(row['peptide']) == len(row['prediction']),
             axis=1
         )
+        self.preds = dataset[['correct', 'confidence']]
         
         dataset = dataset.sort_values(by='confidence', axis=0, ascending=False)
         precision = np.cumsum(dataset['correct']) / np.arange(1, len(dataset) + 1)
@@ -56,3 +57,8 @@ class DatabaseGroundedFDRControl(FDRControl):
 
     def get_confidence_cutoff(self, threshold: float) -> float:
         return self.confidence_scores[bisect.bisect_left(self.fdr_thresholds, threshold)]
+
+    def compute_fdr(self, score: float) -> float:
+        # FDR = [no. false positives >= score s] / [no. total matches >= score s]
+        preds_ge_score = self.preds[self.preds['confidence'] >= score]
+        return (len(preds_ge_score['correct']) - sum(preds_ge_score['correct'])) / len(preds_ge_score['correct'])

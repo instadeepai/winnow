@@ -165,6 +165,7 @@ class EmpiricalBayesFDRControl(FDRControl):
         return P_incorrect_given_score / (P_incorrect_given_score + P_correct_given_score)
 
     def compute_posterior_probability(self, score: float) -> float:
+        """Compute posterior error probability, or local FDR, for a given confidence score."""
         # P(incorrect | S = s) = [P(incorrect) * P(S = s | incorrect)] / P(S = s)
 
         # f(S = s | incorrect)
@@ -189,6 +190,7 @@ class EmpiricalBayesFDRControl(FDRControl):
         return (1 - self.mixture_parameters.proportion) * f_score_given_incorrect / f_score
 
     def compute_p_value(self, score: float) -> float:
+        """Compute the p-value for a given confidence score."""
         # P(S >= score | incorrect) = 1 - F_incorrect(s)
         P_score_given_incorrect = 1 - jax.scipy.stats.beta.cdf(
             a=self.mixture_parameters.incorrect_alpha,
@@ -198,5 +200,6 @@ class EmpiricalBayesFDRControl(FDRControl):
         return P_score_given_incorrect
 
     def compute_expect_score(self, score: float, total_matches: int) -> float:
+        """Compute the expected number of false discoveries for a given score."""
         p_value = self.compute_p_value(score)
         return total_matches * p_value

@@ -69,21 +69,6 @@ class FDRControl(metaclass=ABCMeta):
         """Compute FDR for a given confidence score."""
         pass
 
-    @abstractmethod
-    def compute_posterior_probability(self, score: float) -> float:
-        """Compute posterior error probability, or local FDR, for a given confidence score."""
-        pass
-
-    @abstractmethod
-    def compute_p_value(self, score: float) -> float:
-        """Compute the p-value for a given confidence score."""
-        pass
-    
-    @abstractmethod
-    def compute_expect_score(self, score: float, total_matches: int) -> float:
-        """Compute the expected number of false discoveries for a given score."""
-        pass
-
     def get_confidence_curve(
         self, resolution: float, min_confidence: float, max_confidence: float
     ) -> Tuple[Float[np.ndarray, "threshold"], Float[np.ndarray, "threshold"]]:
