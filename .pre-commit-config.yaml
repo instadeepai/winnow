@@ -1,5 +1,9 @@
 default_stages: [pre-commit]
 
+default_install_hook_types:
+  - pre-commit
+  - commit-msg
+
 repos:
   - repo: https://github.com/PyCQA/flake8
     rev: 7.1.1
