@@ -1,4 +1,4 @@
-"""A module with the base interface for FDR control classes"""
+"""A module with the base interface for FDR control classes."""
 
 from abc import ABCMeta
 from abc import abstractmethod
@@ -6,16 +6,15 @@ from typing import Iterable, Tuple, TypeVar
 
 import numpy as np
 
-from jaxtyping import Float 
+from jaxtyping import Float
 
 from winnow.datasets.psm_dataset import PSMDataset
 
-T = TypeVar('T', bound=Iterable)
+T = TypeVar("T", bound=Iterable)
 
 
 class FDRControl(metaclass=ABCMeta):
-    """The interface for FDR control classes.
-    """
+    """The interface for FDR control classes."""
 
     @abstractmethod
     def fit(self, dataset: T) -> None:
@@ -27,7 +26,7 @@ class FDRControl(metaclass=ABCMeta):
         """
         pass
 
-    def filter(self, dataset: PSMDataset, threshold: float) -> PSMDataset:
+    def filter_entries(self, dataset: PSMDataset, threshold: float) -> PSMDataset:
         """Filter PSMs to return results at a given FDR threshold.
 
         Args:
@@ -35,8 +34,8 @@ class FDRControl(metaclass=ABCMeta):
                 The dataset of PSMs with confidence scores to filter.
 
             threshold (float):
-                The FDR control threshold to limit to. Must satsify
-                0 < `thresold` < 1.
+                The FDR control threshold to limit to. Must satisfy
+                0 < `threshold` < 1.
 
         Returns:
             Dataset:
@@ -56,17 +55,17 @@ class FDRControl(metaclass=ABCMeta):
 
         Args:
             threshold (float):
-                The target FDR threshold. Must satsify 0 < `thresold` < 1.
+                The target FDR threshold. Must satisfy 0 < `threshold` < 1.
 
         Returns:
             float:
-                The confidence cutoff correspnding to the target FDR threshold.
+                The confidence cutoff corresponding to the target FDR threshold.
         """
         pass
 
     def get_confidence_curve(
         self, resolution: float, min_confidence: float, max_confidence: float
-    ) -> Tuple[Float[np.ndarray, "threshold"], Float[np.ndarray, "threshold"]]:
+    ) -> Tuple[Float[np.ndarray, "threshold"], Float[np.ndarray, "threshold"]]:  # noqa: F821
         """Return the curve with the confidence cutoff for corresponding FDR thresholds.
 
         Args:
@@ -80,6 +79,9 @@ class FDRControl(metaclass=ABCMeta):
         """
         fdr_thresholds = np.arange(min_confidence, max_confidence, resolution)
         confidence_scores = np.array(
-            [self.get_confidence_cutoff(threshold=threshold) for threshold in fdr_thresholds]
+            [
+                self.get_confidence_cutoff(threshold=threshold)
+                for threshold in fdr_thresholds
+            ]
         )
         return fdr_thresholds, confidence_scores
