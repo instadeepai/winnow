@@ -1,7 +1,7 @@
 from abc import ABCMeta, abstractmethod
 import bisect
 from math import exp, isnan
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Iterator
 
 
 import pandas as pd
@@ -161,7 +161,7 @@ def find_matching_ions(
 
 def compute_ion_identifications(
     dataset: pd.DataFrame, source_column: str, mz_tolerance: float
-) -> zip[Tuple[List[float], List[float]]]:
+) -> Iterator[Tuple[List[float], List[float]]]:
     """Computes the ion match rate and match intensity for each spectrum in the dataset.
 
     Finds how well the theoretical ions (from the `source_column`) match the experimental ions in the dataset.
