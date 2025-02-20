@@ -8,6 +8,7 @@ numpy
 numpyro
 pandas
 polars
+pre-commit
 pyteomics
 scikit-learn
 scipy

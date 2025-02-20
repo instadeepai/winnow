@@ -9,42 +9,57 @@ from winnow.fdr.base import FDRControl
 
 
 class DatabaseGroundedFDRControl(FDRControl):
-    """Perform FDR control by grounding to database predictions
+    """Performs False Discovery Rate (FDR) control by grounding predictions against a reference database.
+
+    This method estimates FDR thresholds by comparing model-predicted peptides to ground-truth peptides from a database.
     """
 
-    def __init__(self) -> "DatabaseGroundedFDRControl":
-        self.fdr_thresholds = []
-        self.confidence_scores = []
+    def __init__(self) -> None:
+        self.fdr_thresholds: list[float] = []
+        self.confidence_scores: list[float] = []
 
-    def fit(
-        self, dataset: pd.DataFrame, residue_masses: dict[str, float],
-        isotope_error_range: Tuple[int, int]=(0, 1), drop: int = 10
+    def fit(  # type: ignore
+        self,
+        dataset: pd.DataFrame,
+        residue_masses: dict[str, float],
+        isotope_error_range: Tuple[int, int] = (0, 1),
+        drop: int = 10,
     ) -> None:
-        """Compute the precision recall curve of model predictions against database predictions.
+        """Computes the precision-recall curve by comparing model predictions to database-grounded peptide sequences.
 
         Args:
-            dataset (pandas.DataFrame['peptide', 'prediction', 'confidence']):
-                A data frame with the spectra, gold peptides and model predictions.
+            dataset (pd.DataFrame):
+                A DataFrame containing the following columns:
+                - 'peptide': Ground-truth peptide sequences.
+                - 'prediction': Model-predicted peptide sequences.
+                - 'confidence': Confidence scores associated with predictions.
+
+            residue_masses (dict[str, float]): A dictionary mapping amino acid residues to their respective masses.
+
+            isotope_error_range (Tuple[int, int], optional): Range of isotope errors to consider when matching peptides. Defaults to (0, 1).
+
+            drop (int): Number of top-scoring predictions to exclude when computing FDR thresholds. Defaults to 10.
         """
         metrics = Metrics(
-            residues=residue_masses,
-            isotope_error_range=isotope_error_range
+            residues=residue_masses, isotope_error_range=isotope_error_range
         )
 
-        dataset['peptide'] = dataset['peptide'].apply(metrics._split_peptide)
-        dataset['prediction'] = dataset['prediction'].apply(metrics._split_peptide)
+        dataset["peptide"] = dataset["peptide"].apply(metrics._split_peptide)
+        dataset["prediction"] = dataset["prediction"].apply(metrics._split_peptide)
 
-
-        dataset['num_matches'] = dataset.apply(
+        dataset["num_matches"] = dataset.apply(
             lambda row: (
-                metrics._novor_match(row['peptide'], row['prediction'])
-                if isinstance(row['prediction'], list) else 0
+                metrics._novor_match(row["peptide"], row["prediction"])
+                if isinstance(row["prediction"], list)
+                else 0
             ),
-            axis=1
+            axis=1,
         )
-        dataset['correct'] = dataset.apply(
-            lambda row: row['num_matches'] == len(row['peptide']) == len(row['prediction']),
-            axis=1
+        dataset["correct"] = dataset.apply(
+            lambda row: row["num_matches"]
+            == len(row["peptide"])
+            == len(row["prediction"]),
+            axis=1,
         )
         self.preds = dataset[['correct', 'confidence']]
         
