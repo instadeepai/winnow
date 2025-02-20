@@ -159,10 +159,8 @@ class EmpiricalBayesFDRControl(FDRControl):
 
         # P(incorrect | S >= s)
         P_incorrect_given_score = (1 - self.mixture_parameters.proportion) * P_score_given_incorrect / P_mixture_tail
-        # P(correct | S >= s)
-        P_correct_given_score = self.mixture_parameters.proportion * P_score_given_correct / P_mixture_tail
 
-        return P_incorrect_given_score / (P_incorrect_given_score + P_correct_given_score)
+        return P_incorrect_given_score
 
     def compute_posterior_probability(self, score: float) -> float:
         """Compute posterior error probability, or local FDR, for a given confidence score."""
