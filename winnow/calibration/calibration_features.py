@@ -2,7 +2,7 @@ from abc import ABCMeta, abstractmethod
 import bisect
 from math import exp, isnan
 from typing import Dict, List, Tuple
-
+import warnings
 
 import pandas as pd
 import numpy as np
@@ -356,6 +356,12 @@ class ChimericFeatures(CalibrationFeatures):
         # Ensure dataset.predictions is not None
         _raise_value_error(dataset.predictions, "dataset.predictions")
 
+        if any(len(items) < 2 for items in dataset.predictions):  # type: ignore
+            warnings.warn(
+                "Some beam search results have fewer than two sequences. "
+                "This may affect the efficacy of computed chimeric features."
+            )
+
         inputs = pd.DataFrame()
         inputs["peptide_sequences"] = np.array(
             [
@@ -532,6 +538,12 @@ class BeamFeatures(CalibrationFeatures):
         """
         # Ensure dataset.predictions is not None
         _raise_value_error(dataset.predictions, "dataset.predictions")
+
+        if any(len(prediction) < 3 for prediction in dataset.predictions):  # type: ignore
+            warnings.warn(
+                "Some beam search results have fewer than three sequences. "
+                "This may affect the efficacy of computed beam features."
+            )
 
         top_probs = [
             exp(prediction[0].sequence_log_probability) if len(prediction) > 1 else 0.0  # type: ignore
