@@ -63,6 +63,11 @@ class FDRControl(metaclass=ABCMeta):
         """
         pass
 
+    @abstractmethod
+    def compute_fdr(self, score: float) -> float:
+        """Compute FDR for a given confidence score."""
+        pass
+
     def get_confidence_curve(
         self, resolution: float, min_confidence: float, max_confidence: float
     ) -> Tuple[Float[np.ndarray, "threshold"], Float[np.ndarray, "threshold"]]:  # noqa: F821

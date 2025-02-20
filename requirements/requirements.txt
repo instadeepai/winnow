@@ -512,6 +512,7 @@ typing-extensions==4.12.2
     #   lightning-utilities
     #   multidict
     #   pytorch-lightning
+    #   referencing
     #   torch
 tzdata==2025.1
     # via pandas

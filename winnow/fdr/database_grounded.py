@@ -61,25 +61,19 @@ class DatabaseGroundedFDRControl(FDRControl):
             == len(row["prediction"]),
             axis=1,
         )
-
-        dataset = dataset.sort_values(by="confidence", axis=0, ascending=False)
-        precision = np.cumsum(dataset["correct"]) / np.arange(1, len(dataset) + 1)
-        confidence = np.array(dataset["confidence"])
+        self.preds = dataset[['correct', 'confidence']]
+        
+        dataset = dataset.sort_values(by='confidence', axis=0, ascending=False)
+        precision = np.cumsum(dataset['correct']) / np.arange(1, len(dataset) + 1)
+        confidence = np.array(dataset['confidence'])
 
         self.fdr_thresholds = list(1.0 - precision[drop:])
         self.confidence_scores = list(confidence[drop:])
 
     def get_confidence_cutoff(self, threshold: float) -> float:
-        """Determines the confidence score cutoff corresponding to a specified FDR threshold.
+        return self.confidence_scores[bisect.bisect_left(self.fdr_thresholds, threshold)]
 
-        This function finds the lowest confidence score for which the estimated FDR is at most `threshold`.
-
-        Args:
-            threshold (float): Desired FDR threshold (between 0 and 1).
-
-        Returns:
-            float: The minimum confidence score required to maintain the given FDR threshold.
-        """
-        return self.confidence_scores[
-            bisect.bisect_left(self.fdr_thresholds, threshold)
-        ]
+    def compute_fdr(self, score: float) -> float:
+        # FDR = [no. false positives >= score s] / [no. total matches >= score s]
+        preds_ge_score = self.preds[self.preds['confidence'] >= score]
+        return (len(preds_ge_score['correct']) - sum(preds_ge_score['correct'])) / len(preds_ge_score['correct'])
