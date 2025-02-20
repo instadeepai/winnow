@@ -1,0 +1,15 @@
+instanovo
+ipykernel
+ipywidgets
+jax
+jaxtyping
+koinapy
+numpy
+numpyro
+pandas
+polars
+pyteomics
+scikit-learn
+scipy
+seaborn
+tensorflow_probability
