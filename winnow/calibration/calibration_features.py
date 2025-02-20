@@ -356,16 +356,17 @@ class ChimericFeatures(CalibrationFeatures):
         # Ensure dataset.predictions is not None
         _raise_value_error(dataset.predictions, "dataset.predictions")
 
-        if any(len(items) < 2 for items in dataset.predictions):  # type: ignore
+        count = sum(len(prediction) < 2 for prediction in dataset.predictions)  # type: ignore
+        if count > 0:
             warnings.warn(
-                "Some beam search results have fewer than two sequences. "
+                f"{count} beam search results have fewer than two sequences. "
                 "This may affect the efficacy of computed chimeric features."
             )
 
         inputs = pd.DataFrame()
         inputs["peptide_sequences"] = np.array(
             [
-                "".join(map_modification(items[1].sequence)) if len(items) > 2 else ""  # type: ignore
+                "".join(map_modification(items[1].sequence)) if len(items) > 1 else ""  # type: ignore
                 for items in dataset.predictions
             ]
         )
@@ -539,18 +540,19 @@ class BeamFeatures(CalibrationFeatures):
         # Ensure dataset.predictions is not None
         _raise_value_error(dataset.predictions, "dataset.predictions")
 
-        if any(len(prediction) < 3 for prediction in dataset.predictions):  # type: ignore
+        count = sum(len(prediction) < 3 for prediction in dataset.predictions)  # type: ignore
+        if count > 0:
             warnings.warn(
-                "Some beam search results have fewer than three sequences. "
+                f"{count} beam search results have fewer than three sequences. "
                 "This may affect the efficacy of computed beam features."
             )
 
         top_probs = [
-            exp(prediction[0].sequence_log_probability) if len(prediction) > 1 else 0.0  # type: ignore
+            exp(prediction[0].sequence_log_probability) if len(prediction) >= 1 else 0.0  # type: ignore
             for prediction in dataset.predictions
         ]
         second_probs = [
-            exp(prediction[1].sequence_log_probability) if len(prediction) > 2 else 0.0  # type: ignore
+            exp(prediction[1].sequence_log_probability) if len(prediction) >= 2 else 0.0  # type: ignore
             for prediction in dataset.predictions
         ]
         second_margin = [
@@ -559,7 +561,7 @@ class BeamFeatures(CalibrationFeatures):
         ]
         runner_up_probs = [
             [exp(item.sequence_log_probability) for item in prediction[1:]]  # type: ignore
-            if len(prediction) > 3  # type: ignore
+            if len(prediction) >= 3  # type: ignore
             else [0.0]
             for prediction in dataset.predictions
         ]
