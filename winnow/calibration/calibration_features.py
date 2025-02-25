@@ -2,7 +2,7 @@ from abc import ABCMeta, abstractmethod
 import bisect
 from math import exp, isnan
 from typing import Dict, List, Tuple
-
+import warnings
 
 import pandas as pd
 import numpy as np
@@ -29,8 +29,10 @@ def map_modification(peptide: List[str]) -> List[str]:
     return ["M[UNIMOD:35]" if residue == "M(ox)" else residue for residue in peptide]
 
 
-def _raise_value_error():
-    raise ValueError('"predictions" contains None values.')
+def _raise_value_error(value, name: str):
+    """Raise a ValueError if the given value is None."""
+    if value is None:
+        raise ValueError(f"{name} cannot be None")
 
 
 class FeatureDependency(metaclass=ABCMeta):
@@ -351,12 +353,20 @@ class ChimericFeatures(CalibrationFeatures):
         Args:
             dataset (CalibrationDataset): The dataset containing metadata for predictions.
         """
+        # Ensure dataset.predictions is not None
+        _raise_value_error(dataset.predictions, "dataset.predictions")
+
+        count = sum(len(prediction) < 2 for prediction in dataset.predictions)  # type: ignore
+        if count > 0:
+            warnings.warn(
+                f"{count} beam search results have fewer than two sequences. "
+                "This may affect the efficacy of computed chimeric features."
+            )
+
         inputs = pd.DataFrame()
         inputs["peptide_sequences"] = np.array(
             [
-                "".join(map_modification(items[1].sequence))
-                if items is not None
-                else _raise_value_error()
+                "".join(map_modification(items[1].sequence)) if len(items) > 1 else ""  # type: ignore
                 for items in dataset.predictions
             ]
         )
@@ -527,16 +537,22 @@ class BeamFeatures(CalibrationFeatures):
         Args:
             dataset (CalibrationDataset): The dataset containing beam search predictions.
         """
+        # Ensure dataset.predictions is not None
+        _raise_value_error(dataset.predictions, "dataset.predictions")
+
+        count = sum(len(prediction) < 3 for prediction in dataset.predictions)  # type: ignore
+        if count > 0:
+            warnings.warn(
+                f"{count} beam search results have fewer than three sequences. "
+                "This may affect the efficacy of computed beam features."
+            )
+
         top_probs = [
-            exp(prediction[0].sequence_log_probability)
-            if prediction is not None
-            else _raise_value_error()
+            exp(prediction[0].sequence_log_probability) if len(prediction) >= 1 else 0.0  # type: ignore
             for prediction in dataset.predictions
         ]
         second_probs = [
-            exp(prediction[1].sequence_log_probability)
-            if prediction is not None
-            else _raise_value_error()
+            exp(prediction[1].sequence_log_probability) if len(prediction) >= 2 else 0.0  # type: ignore
             for prediction in dataset.predictions
         ]
         second_margin = [
@@ -544,16 +560,21 @@ class BeamFeatures(CalibrationFeatures):
             for top_prob, second_prob in zip(top_probs, second_probs)
         ]
         runner_up_probs = [
-            [exp(item.sequence_log_probability) for item in prediction[1:]]
-            if prediction is not None
-            else _raise_value_error()
+            [exp(item.sequence_log_probability) for item in prediction[1:]]  # type: ignore
+            if len(prediction) >= 3  # type: ignore
+            else [0.0]
             for prediction in dataset.predictions
         ]
         normalised_runner_up_probs = [
             [probability / sum(probabilities) for probability in probabilities]
+            if sum(probabilities) != 0
+            else 0.0
             for probabilities in runner_up_probs
         ]
-        runner_up_entropy = [entropy(probs) for probs in normalised_runner_up_probs]
+        runner_up_entropy = [
+            entropy(probs) if probs != 0 else 0.0
+            for probs in normalised_runner_up_probs
+        ]
         runner_up_median = [median(probs) for probs in runner_up_probs]
         median_margin = [
             top_prob - median_prob
