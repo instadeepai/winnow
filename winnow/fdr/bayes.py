@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from scipy import optimize
 
 import jax
 import jax.numpy as jnp
@@ -178,11 +179,7 @@ class EmpiricalBayesFDRControl(FDRControl):
             float:
                 The confidence score cutoff corresponding to the specified FDR level.
         """
-        incorrect_distribution = numpyro.distributions.Beta(
-            concentration0=self.mixture_parameters.incorrect_alpha,
-            concentration1=self.mixture_parameters.incorrect_beta,
-        )
-        return incorrect_distribution.icdf(1-threshold)
+        return optimize.bisect(lambda cutoff: self.compute_fdr(cutoff) - threshold, 0., 1.) 
     
     def compute_fdr(self, score: float) -> float:
         # P(S >= score | incorrect) = 1 - F_incorrect(s)
