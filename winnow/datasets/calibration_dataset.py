@@ -69,86 +69,86 @@ class CalibrationDataset:
         """Returns the column name that stores confidence scores in the dataset."""
         return "confidence"
 
+    @staticmethod
+    def _load_predictions(beam_predictions_path: Path):
+        with open(
+            beam_predictions_path / "predictions_list.pkl", "rb"
+        ) as predictions_file:
+            return pickle.load(predictions_file)
+
+    @staticmethod
+    def _load_dataset(predictions_path: Path):
+        return pd.read_csv(predictions_path)
+
+    @staticmethod
+    def _process_dataset(dataset: pd.DataFrame, has_labels: bool):
+        rename_dict = {"preds": "prediction", "log_probs": "confidence"}
+        if has_labels:
+            rename_dict["targets"] = "peptide"
+        dataset.rename(rename_dict, axis=1, inplace=True)
+        dataset.loc[dataset["confidence"] == -1.0, "confidence"] = float("-inf")
+        dataset["confidence"] = dataset["confidence"].apply(np.exp)
+        if has_labels:
+            dataset["peptide"] = dataset["peptide"].apply(
+                lambda x: x.replace("L", "I") if isinstance(x, str) else x
+            )
+        dataset["prediction"] = dataset["prediction"].apply(
+            lambda x: x.replace("L", "I") if isinstance(x, str) else x
+        )
+        return dataset
+
+    @staticmethod
+    def _load_spectrum_data(spectrum_path: Path):
+        return pl.read_ipc(spectrum_path).to_pandas()
+
+    @staticmethod
+    def _merge_spectrum_data(dataset: pd.DataFrame, spectrum_dataset: pd.DataFrame):
+        return pd.merge(
+            dataset, spectrum_dataset, on=["spectrum_index", "global_index"], how="left"
+        )
+
+    @staticmethod
+    def _evaluate_predictions(dataset: pd.DataFrame, has_labels: bool):
+        if has_labels:
+            dataset["peptide"] = dataset["peptide"].apply(metrics._split_peptide)
+            dataset["valid_peptide"] = dataset["peptide"].apply(
+                lambda x: isinstance(x, list)
+            )
+        dataset["prediction"] = dataset["prediction"].apply(metrics._split_peptide)
+        dataset["valid_prediction"] = dataset["prediction"].apply(
+            lambda x: isinstance(x, list)
+        )
+        if has_labels:
+            dataset["num_matches"] = dataset.apply(
+                lambda row: metrics._novor_match(row["peptide"], row["prediction"])
+                if isinstance(row["peptide"], list)
+                and isinstance(row["prediction"], list)
+                else 0,
+                axis=1,
+            )
+            dataset["correct"] = dataset.apply(
+                lambda row: (
+                    row["num_matches"] == len(row["peptide"]) == len(row["prediction"])
+                    if isinstance(row["peptide"], list)
+                    and isinstance(row["prediction"], list)
+                    else False
+                ),
+                axis=1,
+            )
+        return dataset
+
     @classmethod
     def from_predictions_csv(
         cls, beam_predictions_path: Path, spectrum_path: Path, predictions_path: Path
     ) -> "CalibrationDataset":
-        """Loads a CalibrationDataset from a CSV file containing model predictions.
-
-        Args:
-            beam_predictions_path (Path): Path to the directory containing beam search predictions.
-            spectrum_path (Path): Path to the IPC file containing spectrum data.
-            predictions_path (Path): Path to the CSV file containing prediction results.
-
-        Returns:
-            CalibrationDataset: An instance containing the loaded dataset.
-        """
-        #  -- Load predictions
-        with open(
-            beam_predictions_path / "predictions_list.pkl", "rb"
-        ) as predictions_file:
-            predictions = pickle.load(predictions_file)
-
-        # -- Load predictions metadata
-        dataset = pd.read_csv(predictions_path)
-        dataset.rename(
-            {"targets": "peptide", "preds": "prediction", "log_probs": "confidence"},
-            axis=1,
-            inplace=True,
-        )
-        dataset.loc[dataset["confidence"] == -1.0, "confidence"] = float("-inf")
-        dataset["confidence"] = dataset["confidence"].apply(np.exp)
-        dataset["peptide"] = dataset["peptide"].apply(
-            lambda peptide: peptide.replace("L", "I")
-            if isinstance(peptide, str)
-            else peptide
-        )
-        dataset["prediction"] = dataset["prediction"].apply(
-            lambda peptide: peptide.replace("L", "I")
-            if isinstance(peptide, str)
-            else peptide
-        )
-
-        # -- Load spectra
-        spectrum_dataset = pl.read_ipc(spectrum_path).to_pandas()
-        dataset = pd.merge(
-            dataset, spectrum_dataset, on=["spectrum_index", "global_index"], how="left"
-        )
-
-        # -- Evaluate identifications
-        dataset["peptide"] = dataset["peptide"].apply(metrics._split_peptide)
-        dataset["prediction"] = dataset["prediction"].apply(metrics._split_peptide)
-
-        dataset["valid_peptide"] = dataset["peptide"].apply(
-            lambda peptide: isinstance(peptide, list)
-        )
-        dataset["valid_prediction"] = dataset["prediction"].apply(
-            lambda prediction: isinstance(prediction, list)
-        )
-
-        # Compute match statistics
-        dataset["num_matches"] = dataset.apply(
-            lambda row: (
-                metrics._novor_match(row["peptide"], row["prediction"])
-                if not (
-                    isinstance(row["peptide"], float)
-                    or isinstance(row["prediction"], float)
-                )
-                else 0
-            ),
-            axis=1,
-        )
-        dataset["correct"] = dataset.apply(
-            lambda row: (
-                row["num_matches"] == len(row["peptide"]) == len(row["prediction"])
-                if not (
-                    isinstance(row["peptide"], float)
-                    or isinstance(row["prediction"], float)
-                )
-                else False
-            ),
-            axis=1,
-        )
+        """Loads a CalibrationDataset from a CSV file, handling both labelled and unlabelled inputs."""
+        predictions = cls._load_predictions(beam_predictions_path)
+        dataset = cls._load_dataset(predictions_path)
+        has_labels = "targets" in dataset.columns
+        dataset = cls._process_dataset(dataset, has_labels)
+        spectrum_dataset = cls._load_spectrum_data(spectrum_path)
+        dataset = cls._merge_spectrum_data(dataset, spectrum_dataset)
+        dataset = cls._evaluate_predictions(dataset, has_labels)
         return cls(metadata=dataset, predictions=predictions)
 
     @classmethod
