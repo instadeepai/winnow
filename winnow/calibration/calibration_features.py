@@ -548,11 +548,11 @@ class BeamFeatures(CalibrationFeatures):
             )
 
         top_probs = [
-            exp(prediction[0].sequence_log_probability) if len(prediction) >= 1 else 0.0  # type: ignore
+            exp(prediction[0].log_probability) if len(prediction) >= 1 else 0.0  # type: ignore
             for prediction in dataset.predictions
         ]
         second_probs = [
-            exp(prediction[1].sequence_log_probability) if len(prediction) >= 2 else 0.0  # type: ignore
+            exp(prediction[1].log_probability) if len(prediction) >= 2 else 0.0  # type: ignore
             for prediction in dataset.predictions
         ]
         second_margin = [
@@ -560,7 +560,7 @@ class BeamFeatures(CalibrationFeatures):
             for top_prob, second_prob in zip(top_probs, second_probs)
         ]
         runner_up_probs = [
-            [exp(item.sequence_log_probability) for item in prediction[1:]]  # type: ignore
+            [exp(item.log_probability) for item in prediction[1:]]  # type: ignore
             if len(prediction) >= 3  # type: ignore
             else [0.0]
             for prediction in dataset.predictions

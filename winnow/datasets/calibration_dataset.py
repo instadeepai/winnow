@@ -9,13 +9,13 @@ Classes:
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-import pickle
 import re
 from typing import Any, Callable, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import polars as pl
+import polars.selectors as cs
 from pyteomics import mztab, mgf
 
 from instanovo.utils.metrics import Metrics
@@ -70,15 +70,63 @@ class CalibrationDataset:
         return "confidence"
 
     @staticmethod
-    def _load_predictions(beam_predictions_path: Path):
-        with open(
-            beam_predictions_path / "predictions_list.pkl", "rb"
-        ) as predictions_file:
-            return pickle.load(predictions_file)
+    def _load_dataset(predictions_path: Path) -> Tuple[pl.DataFrame, pl.DataFrame]:
+        df = pl.read_csv(predictions_path)
+        beam_df = df.select(cs.contains("_beam_"))
+        preds_df = df.select(
+            ~cs.contains(
+                ["_beam_", "_log_probs_"]
+            )  # TODO: check what cols are necessary
+        )
+        return preds_df, beam_df
 
     @staticmethod
-    def _load_dataset(predictions_path: Path):
-        return pd.read_csv(predictions_path)
+    def _process_beams(beam_df):
+        def split_peptide_with_mods(peptide: str):
+            if peptide is None:
+                return None  # Handle missing values
+
+            # Regex pattern to capture amino acids and modified residues
+            pattern = r"[A-Z](?:\(\+?\-?\d+\.\d+\))?"
+            return re.findall(pattern, peptide)
+
+        beam_df = beam_df.with_columns(
+            [
+                pl.col(col).apply(split_peptide_with_mods)
+                for col in beam_df.select(cs.string()).columns
+            ]
+        )
+
+        def convert_row_to_scored_sequences(
+            row: dict,
+        ) -> Optional[List[ScoredSequence]]:
+            scored_sequences = []
+
+            for i in range(int(len(row) / 2)):
+                seq_col = f"preds_beam_{i}"
+                log_prob_col = f"log_probs_beam_{i}"
+
+                sequence = row.get(seq_col)
+                log_prob = row.get(log_prob_col, float("-inf"))
+
+                if sequence is not None and log_prob > float("-inf"):
+                    scored_sequences.append(
+                        ScoredSequence(
+                            sequence=sequence, mass_error=None, log_probability=log_prob
+                        )
+                    )
+
+            return (
+                scored_sequences if scored_sequences else None
+            )  # Ensure empty beams become None
+
+        # Convert the entire DataFrame
+        scored_sequences_list: List[Optional[List[ScoredSequence]]] = [
+            convert_row_to_scored_sequences(row)
+            for row in beam_df.iter_rows(named=True)
+        ]
+
+        return scored_sequences_list
 
     @staticmethod
     def _process_dataset(dataset: pd.DataFrame, has_labels: bool):
@@ -95,6 +143,9 @@ class CalibrationDataset:
         dataset["prediction"] = dataset["prediction"].apply(
             lambda x: x.replace("L", "I") if isinstance(x, str) else x
         )
+        dataset["preds_tokenised"] = dataset["preds_tokenised"].apply(
+            lambda x: x.replace("L", "I") if isinstance(x, str) else x
+        )
         return dataset
 
     @staticmethod
@@ -102,10 +153,38 @@ class CalibrationDataset:
         return pl.read_ipc(spectrum_path).to_pandas()
 
     @staticmethod
-    def _merge_spectrum_data(dataset: pd.DataFrame, spectrum_dataset: pd.DataFrame):
-        return pd.merge(
-            dataset, spectrum_dataset, on=["spectrum_index", "global_index"], how="left"
-        )
+    def _merge_spectrum_data(
+        dataset: pd.DataFrame, spectrum_dataset: pd.DataFrame, has_labels: bool
+    ):
+        if has_labels:
+            spectrum_dataset = spectrum_dataset[
+                [
+                    "id",
+                    "Retention time",
+                    "Mass",
+                    "Modified sequence",
+                    "mz_theo",
+                    "local_index",
+                    "spectrum_index",
+                    "global_index",
+                ]
+            ]  # TODO: check this
+            return pd.merge(
+                dataset,
+                spectrum_dataset,
+                on=["spectrum_index", "global_index"],
+                how="left",  # TODO: check this with new IN output
+            )
+        else:
+            spectrum_dataset = spectrum_dataset[
+                ["id", "Retention time", "Mass", "Modified sequence"]
+            ]  # TODO: check this
+            return pd.merge(
+                dataset,
+                spectrum_dataset,
+                on="id",
+                how="left",  # TODO: check that this doesn't produce NaNs anywhere if id not found in raw file
+            )
 
     @staticmethod
     def _evaluate_predictions(dataset: pd.DataFrame, has_labels: bool):
@@ -139,15 +218,20 @@ class CalibrationDataset:
 
     @classmethod
     def from_predictions_csv(
-        cls, beam_predictions_path: Path, spectrum_path: Path, predictions_path: Path
+        cls, spectrum_path: Path, predictions_path: Path
     ) -> "CalibrationDataset":
         """Loads a CalibrationDataset from a CSV file, handling both labelled and unlabelled inputs."""
-        predictions = cls._load_predictions(beam_predictions_path)
-        dataset = cls._load_dataset(predictions_path)
+        # TODO:
+        # 1 Read in two input files: IN output and input.
+        # 2 Create beam features in expected format to create dataset.predictions
+        # 3 Merge the two input files to create dataset.metadata
+        # 4 Evaluate merged metadata
+        dataset, predictions = cls._load_dataset(predictions_path)
+        predictions = cls._process_beams(predictions)
         has_labels = "targets" in dataset.columns
-        dataset = cls._process_dataset(dataset, has_labels)
+        dataset = cls._process_dataset(dataset.to_pandas(), has_labels)
         spectrum_dataset = cls._load_spectrum_data(spectrum_path)
-        dataset = cls._merge_spectrum_data(dataset, spectrum_dataset)
+        dataset = cls._merge_spectrum_data(dataset, spectrum_dataset, has_labels)
         dataset = cls._evaluate_predictions(dataset, has_labels)
         return cls(metadata=dataset, predictions=predictions)
 
