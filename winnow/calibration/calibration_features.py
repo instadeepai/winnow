@@ -364,6 +364,7 @@ class ChimericFeatures(CalibrationFeatures):
             )
 
         inputs = pd.DataFrame()
+        # inputs["peptide_sequences"] = dataset["peptide"].apply(metrics._split_peptide)
         inputs["peptide_sequences"] = np.array(
             [
                 "".join(map_modification(items[1].sequence)) if len(items) > 1 else ""  # type: ignore
@@ -371,7 +372,9 @@ class ChimericFeatures(CalibrationFeatures):
             ]
         )
         inputs["precursor_charges"] = np.array(dataset.metadata["precursor_charge"])
-        inputs["collision_energies"] = np.array(len(dataset.metadata) * [25])
+        inputs["collision_energies"] = np.array(
+            len(dataset.metadata) * [25]
+        )  # TODO: why 25?
         model = koinapy.Koina("Prosit_2020_intensity_HCD", "koina.wilhelmlab.org:443")
         predictions: pd.DataFrame = model.predict(inputs)
         predictions["Index"] = predictions.index
@@ -548,11 +551,11 @@ class BeamFeatures(CalibrationFeatures):
             )
 
         top_probs = [
-            exp(prediction[0].sequence_log_probability) if len(prediction) >= 1 else 0.0  # type: ignore
+            exp(prediction[0].log_probability) if len(prediction) >= 1 else 0.0  # type: ignore
             for prediction in dataset.predictions
         ]
         second_probs = [
-            exp(prediction[1].sequence_log_probability) if len(prediction) >= 2 else 0.0  # type: ignore
+            exp(prediction[1].log_probability) if len(prediction) >= 2 else 0.0  # type: ignore
             for prediction in dataset.predictions
         ]
         second_margin = [
@@ -560,7 +563,7 @@ class BeamFeatures(CalibrationFeatures):
             for top_prob, second_prob in zip(top_probs, second_probs)
         ]
         runner_up_probs = [
-            [exp(item.sequence_log_probability) for item in prediction[1:]]  # type: ignore
+            [exp(item.log_probability) for item in prediction[1:]]  # type: ignore
             if len(prediction) >= 3  # type: ignore
             else [0.0]
             for prediction in dataset.predictions
