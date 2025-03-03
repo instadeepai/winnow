@@ -82,21 +82,6 @@ class CalibrationDataset:
 
     @staticmethod
     def _process_beams(beam_df):
-        def split_peptide_with_mods(peptide: str):
-            if peptide is None:
-                return None  # Handle missing values
-
-            # Regex pattern to capture amino acids and modified residues
-            pattern = r"[A-Z](?:\(\+?\-?\d+\.\d+\))?"
-            return re.findall(pattern, peptide)
-
-        beam_df = beam_df.with_columns(
-            [
-                pl.col(col).apply(split_peptide_with_mods)
-                for col in beam_df.select(cs.string()).columns
-            ]
-        )
-
         def convert_row_to_scored_sequences(
             row: dict,
         ) -> Optional[List[ScoredSequence]]:
@@ -119,6 +104,14 @@ class CalibrationDataset:
             return (
                 scored_sequences if scored_sequences else None
             )  # Ensure empty beams become None
+
+        beam_df = beam_df.with_columns(
+            [
+                pl.col(col).str.replace_all("L", "I")
+                for col in beam_df.columns
+                if "preds_beam" in col
+            ]
+        )
 
         # Convert the entire DataFrame
         scored_sequences_list: List[Optional[List[ScoredSequence]]] = [
@@ -150,7 +143,14 @@ class CalibrationDataset:
 
     @staticmethod
     def _load_spectrum_data(spectrum_path: Path):
-        return pl.read_ipc(spectrum_path).to_pandas()
+        return pl.read_ipc(spectrum_path)
+
+    @staticmethod
+    def _process_spectrum_data(spectrum_df: pl.DataFrame):
+        print(
+            "Filtering out spectra with precursor charges above 10."
+        )  # TODO: remove or make optional
+        return spectrum_df.filter(pl.col("Charge") <= 10).to_pandas()
 
     @staticmethod
     def _merge_spectrum_data(
@@ -177,14 +177,11 @@ class CalibrationDataset:
             )
         else:
             spectrum_dataset = spectrum_dataset[
-                ["id", "Retention time", "Mass", "Modified sequence"]
-            ]  # TODO: check this
-            return pd.merge(
-                dataset,
-                spectrum_dataset,
-                on="id",
-                how="left",  # TODO: check that this doesn't produce NaNs anywhere if id not found in raw file
-            )
+                ["Retention time", "Mass", "Modified sequence"]
+            ]
+            return pd.concat(
+                [dataset, spectrum_dataset.iloc[0 : len(dataset)]], axis=1
+            )  # TODO: patch this better. For now, unlabelled inputs and outputs must contain the same information in the same order.
 
     @staticmethod
     def _evaluate_predictions(dataset: pd.DataFrame, has_labels: bool):
@@ -231,6 +228,7 @@ class CalibrationDataset:
         has_labels = "targets" in dataset.columns
         dataset = cls._process_dataset(dataset.to_pandas(), has_labels)
         spectrum_dataset = cls._load_spectrum_data(spectrum_path)
+        spectrum_dataset = cls._process_spectrum_data(spectrum_dataset)
         dataset = cls._merge_spectrum_data(dataset, spectrum_dataset, has_labels)
         dataset = cls._evaluate_predictions(dataset, has_labels)
         return cls(metadata=dataset, predictions=predictions)
