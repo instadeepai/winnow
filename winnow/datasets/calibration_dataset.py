@@ -71,7 +71,20 @@ class CalibrationDataset:
 
     @staticmethod
     def _load_dataset(predictions_path: Path) -> Tuple[pl.DataFrame, pl.DataFrame]:
+        def _process_dataset(
+            df: pl.DataFrame,
+        ) -> pl.DataFrame:  # TODO: remove this method or make its alterations optional
+            """Filter out rows with modifications."""
+            print(
+                "Filtering out predictions containing modifications and invalid precursor charges."
+            )
+            df = df.filter(~pl.col("preds").str.contains("(", literal=True))
+            df = df.filter(~pl.col("targets").str.contains(r"[a-z]"))
+            df = df.filter(pl.col("precursor_charge") <= 10)
+            return df
+
         df = pl.read_csv(predictions_path)
+        df = _process_dataset(df)
         beam_df = df.select(cs.contains("_beam_"))
         preds_df = df.select(
             ~cs.contains(
@@ -146,20 +159,10 @@ class CalibrationDataset:
         return pl.read_ipc(spectrum_path)
 
     @staticmethod
-    def _process_spectrum_data(spectrum_df: pl.DataFrame):
-        print(
-            "Filtering out spectra with precursor charges above 10."
-        )  # TODO: remove or make optional
-        return spectrum_df.filter(pl.col("Charge") <= 10).to_pandas()
-
-    @staticmethod
-    def _merge_spectrum_data(
-        dataset: pd.DataFrame, spectrum_dataset: pd.DataFrame, has_labels: bool
-    ):
+    def _process_spectrum_data(df: pl.DataFrame, has_labels: bool):
         if has_labels:
-            spectrum_dataset = spectrum_dataset[
+            df = df.select(  # TODO: check the inclusion/exclusion of columns
                 [
-                    "id",
                     "Retention time",
                     "Mass",
                     "Modified sequence",
@@ -167,18 +170,40 @@ class CalibrationDataset:
                     "local_index",
                     "spectrum_index",
                     "global_index",
+                    "Mass values",
+                    "Intensity",
                 ]
-            ]  # TODO: check this
+            )
+        else:
+            df = df[  # TODO: check the inclusion/exclusion of columns
+                [
+                    "Retention time",
+                    "Mass",
+                    "Modified sequence",
+                    "Mass values",
+                    "Intensity",
+                ]
+            ]
+        df = df.rename({"Mass values": "mz_array", "Intensity": "intensity_array"})
+        return df.to_pandas()
+
+    @staticmethod
+    def _merge_spectrum_data(
+        dataset: pd.DataFrame, spectrum_dataset: pd.DataFrame, has_labels: bool
+    ):
+        if has_labels:
             return pd.merge(
                 dataset,
                 spectrum_dataset,
                 on=["spectrum_index", "global_index"],
-                how="left",  # TODO: check this with new IN output
+                how="left",
             )
         else:
-            spectrum_dataset = spectrum_dataset[
-                ["Retention time", "Mass", "Modified sequence"]
-            ]
+            spectrum_dataset = (
+                spectrum_dataset[  # TODO: check the inclusion/exclusion of columns
+                    ["Retention time", "Mass", "Modified sequence"]
+                ]
+            )
             return pd.concat(
                 [dataset, spectrum_dataset.iloc[0 : len(dataset)]], axis=1
             )  # TODO: patch this better. For now, unlabelled inputs and outputs must contain the same information in the same order.
@@ -228,7 +253,7 @@ class CalibrationDataset:
         has_labels = "targets" in dataset.columns
         dataset = cls._process_dataset(dataset.to_pandas(), has_labels)
         spectrum_dataset = cls._load_spectrum_data(spectrum_path)
-        spectrum_dataset = cls._process_spectrum_data(spectrum_dataset)
+        spectrum_dataset = cls._process_spectrum_data(spectrum_dataset, has_labels)
         dataset = cls._merge_spectrum_data(dataset, spectrum_dataset, has_labels)
         dataset = cls._evaluate_predictions(dataset, has_labels)
         return cls(metadata=dataset, predictions=predictions)

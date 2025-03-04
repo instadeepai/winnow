@@ -364,6 +364,7 @@ class ChimericFeatures(CalibrationFeatures):
             )
 
         inputs = pd.DataFrame()
+        # inputs["peptide_sequences"] = dataset["peptide"].apply(metrics._split_peptide)
         inputs["peptide_sequences"] = np.array(
             [
                 "".join(map_modification(items[1].sequence)) if len(items) > 1 else ""  # type: ignore
@@ -371,7 +372,9 @@ class ChimericFeatures(CalibrationFeatures):
             ]
         )
         inputs["precursor_charges"] = np.array(dataset.metadata["precursor_charge"])
-        inputs["collision_energies"] = np.array(len(dataset.metadata) * [25])
+        inputs["collision_energies"] = np.array(
+            len(dataset.metadata) * [25]
+        )  # TODO: why 25?
         model = koinapy.Koina("Prosit_2020_intensity_HCD", "koina.wilhelmlab.org:443")
         predictions: pd.DataFrame = model.predict(inputs)
         predictions["Index"] = predictions.index
