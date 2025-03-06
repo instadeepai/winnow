@@ -2,7 +2,13 @@
 
 winnow_data
 calibrated_datasets
+mount_folder
+validation_dataset_mount
 
 __pycache__
 
 *.egg-info
+
+*.ipc
+*.csv
+*.parquet

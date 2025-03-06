@@ -70,7 +70,9 @@ class CalibrationDataset:
         return "confidence"
 
     @staticmethod
-    def _load_dataset(predictions_path: Path) -> Tuple[pl.DataFrame, pl.DataFrame]:
+    def _load_dataset(
+        predictions_path: Path,
+    ) -> Tuple[pl.DataFrame, pl.DataFrame, bool]:
         def _process_dataset(
             df: pl.DataFrame,
             has_labels: bool,
@@ -139,7 +141,9 @@ class CalibrationDataset:
 
     @staticmethod
     def _process_dataset(dataset: pd.DataFrame, has_labels: bool):
-        dataset = dataset.drop(["preds_tokenised", "token_log_probs"], axis=1)  # TODO: just a neatness patch for outputs
+        dataset = dataset.drop(
+            ["preds_tokenised", "token_log_probs"], axis=1
+        )  # TODO: just a neatness patch for outputs
 
         rename_dict = {"preds": "prediction", "log_probs": "confidence"}
         if has_labels:

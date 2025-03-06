@@ -179,30 +179,37 @@ class EmpiricalBayesFDRControl(FDRControl):
             float:
                 The confidence score cutoff corresponding to the specified FDR level.
         """
-        return optimize.bisect(lambda cutoff: self.compute_fdr(cutoff) - threshold, 0., 1.) 
-    
+        return optimize.bisect(
+            lambda cutoff: self.compute_fdr(cutoff) - threshold, 0.0, 1.0
+        )
+
     def compute_fdr(self, score: float) -> float:
+        """Compute false discovery rate for a given confidence score."""
         # P(S >= score | incorrect) = 1 - F_incorrect(s)
-        P_score_given_incorrect = 1 - jax.scipy.stats.beta.cdf(
+        P_score_given_incorrect = 1 - jax.scipy.stats.beta.cdf(  # noqa: N806
             a=self.mixture_parameters.incorrect_alpha,
             b=self.mixture_parameters.incorrect_beta,
-            x=score
-            )
+            x=score,
+        )
         # P(S >= score | correct) = 1 - F_correct(s)
-        P_score_given_correct = 1 - jax.scipy.stats.beta.cdf(
+        P_score_given_correct = 1 - jax.scipy.stats.beta.cdf(  # noqa: N806
             a=self.mixture_parameters.correct_alpha,
             b=self.mixture_parameters.correct_beta,
-            x=score
-            )
+            x=score,
+        )
 
         # Mixture tail probability P(S >= s)
-        P_mixture_tail = (
-            self.mixture_parameters.proportion * P_score_given_correct +
-            (1 - self.mixture_parameters.proportion) * P_score_given_incorrect
+        P_mixture_tail = (  # noqa: N806
+            self.mixture_parameters.proportion * P_score_given_correct
+            + (1 - self.mixture_parameters.proportion) * P_score_given_incorrect
         )
 
         # P(incorrect | S >= s)
-        P_incorrect_given_score = (1 - self.mixture_parameters.proportion) * P_score_given_incorrect / P_mixture_tail
+        P_incorrect_given_score = (  # noqa: N806
+            (1 - self.mixture_parameters.proportion)
+            * P_score_given_incorrect
+            / P_mixture_tail
+        )
 
         return P_incorrect_given_score.item()
 
@@ -214,34 +221,36 @@ class EmpiricalBayesFDRControl(FDRControl):
         f_score_given_incorrect = jax.scipy.stats.beta.pdf(
             a=self.mixture_parameters.incorrect_alpha,
             b=self.mixture_parameters.incorrect_beta,
-            x=score
+            x=score,
         )
         # f(S = s | correct)
         f_score_given_correct = jax.scipy.stats.beta.pdf(
             a=self.mixture_parameters.correct_alpha,
             b=self.mixture_parameters.correct_beta,
-            x=score
+            x=score,
         )
 
         # Mixture probability f(S = s)
         f_score = (
-            self.mixture_parameters.proportion * f_score_given_correct +
-            (1 - self.mixture_parameters.proportion) * f_score_given_incorrect
+            self.mixture_parameters.proportion * f_score_given_correct
+            + (1 - self.mixture_parameters.proportion) * f_score_given_incorrect
         )
-        
-        return ((1 - self.mixture_parameters.proportion) * f_score_given_incorrect / f_score).item()
+
+        return (
+            (1 - self.mixture_parameters.proportion) * f_score_given_incorrect / f_score
+        ).item()
 
     def compute_p_value(self, score: float) -> float:
         """Compute the p-value for a given confidence score."""
         # P(S >= score | incorrect) = 1 - F_incorrect(s)
-        P_score_given_incorrect = 1 - jax.scipy.stats.beta.cdf(
+        P_score_given_incorrect = 1 - jax.scipy.stats.beta.cdf(  # noqa: N806
             a=self.mixture_parameters.incorrect_alpha,
             b=self.mixture_parameters.incorrect_beta,
-            x=score
-            )
+            x=score,
+        )
         return P_score_given_incorrect.item()
 
     def compute_expect_score(self, score: float, total_matches: int) -> float:
         """Compute the expected number of false discoveries for a given score."""
         p_value = self.compute_p_value(score)
-        return (total_matches * p_value).item()
+        return total_matches * p_value
