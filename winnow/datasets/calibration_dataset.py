@@ -73,25 +73,28 @@ class CalibrationDataset:
     def _load_dataset(predictions_path: Path) -> Tuple[pl.DataFrame, pl.DataFrame]:
         def _process_dataset(
             df: pl.DataFrame,
+            has_labels: bool,
         ) -> pl.DataFrame:  # TODO: remove this method or make its alterations optional
             """Filter out rows with modifications."""
             print(
                 "Filtering out predictions containing modifications and invalid precursor charges."
             )
+            if has_labels:
+                df = df.filter(~pl.col("targets").str.contains(r"[a-z]"))
             df = df.filter(~pl.col("preds").str.contains("(", literal=True))
-            df = df.filter(~pl.col("targets").str.contains(r"[a-z]"))
             df = df.filter(pl.col("precursor_charge") <= 10)
             return df
 
         df = pl.read_csv(predictions_path)
-        df = _process_dataset(df)
+        has_labels = "targets" in df.columns
+        df = _process_dataset(df, has_labels)
         beam_df = df.select(cs.contains("_beam_"))
         preds_df = df.select(
             ~cs.contains(
                 ["_beam_", "_log_probs_"]
             )  # TODO: check what cols are necessary
         )
-        return preds_df, beam_df
+        return preds_df, beam_df, has_labels
 
     @staticmethod
     def _process_beams(beam_df):
@@ -136,20 +139,22 @@ class CalibrationDataset:
 
     @staticmethod
     def _process_dataset(dataset: pd.DataFrame, has_labels: bool):
+        dataset = dataset.drop(["preds_tokenised", "token_log_probs"], axis=1)  # TODO: just a neatness patch for outputs
+
         rename_dict = {"preds": "prediction", "log_probs": "confidence"}
         if has_labels:
             rename_dict["targets"] = "peptide"
         dataset.rename(rename_dict, axis=1, inplace=True)
+
         dataset.loc[dataset["confidence"] == -1.0, "confidence"] = float("-inf")
+
         dataset["confidence"] = dataset["confidence"].apply(np.exp)
+
         if has_labels:
             dataset["peptide"] = dataset["peptide"].apply(
                 lambda x: x.replace("L", "I") if isinstance(x, str) else x
             )
         dataset["prediction"] = dataset["prediction"].apply(
-            lambda x: x.replace("L", "I") if isinstance(x, str) else x
-        )
-        dataset["preds_tokenised"] = dataset["preds_tokenised"].apply(
             lambda x: x.replace("L", "I") if isinstance(x, str) else x
         )
         return dataset
@@ -165,7 +170,7 @@ class CalibrationDataset:
                 [
                     "Retention time",
                     "Mass",
-                    "Modified sequence",
+                    # "Modified sequence",  # TODO: leaving out for neatness of outputs
                     "mz_theo",
                     "local_index",
                     "spectrum_index",
@@ -179,7 +184,7 @@ class CalibrationDataset:
                 [
                     "Retention time",
                     "Mass",
-                    "Modified sequence",
+                    # "Modified sequence",  # TODO: leaving out for neatness of outputs
                     "Mass values",
                     "Intensity",
                 ]
@@ -199,11 +204,6 @@ class CalibrationDataset:
                 how="left",
             )
         else:
-            spectrum_dataset = (
-                spectrum_dataset[  # TODO: check the inclusion/exclusion of columns
-                    ["Retention time", "Mass", "Modified sequence"]
-                ]
-            )
             return pd.concat(
                 [dataset, spectrum_dataset.iloc[0 : len(dataset)]], axis=1
             )  # TODO: patch this better. For now, unlabelled inputs and outputs must contain the same information in the same order.
@@ -243,14 +243,8 @@ class CalibrationDataset:
         cls, spectrum_path: Path, predictions_path: Path
     ) -> "CalibrationDataset":
         """Loads a CalibrationDataset from a CSV file, handling both labelled and unlabelled inputs."""
-        # TODO:
-        # 1 Read in two input files: IN output and input.
-        # 2 Create beam features in expected format to create dataset.predictions
-        # 3 Merge the two input files to create dataset.metadata
-        # 4 Evaluate merged metadata
-        dataset, predictions = cls._load_dataset(predictions_path)
+        dataset, predictions, has_labels = cls._load_dataset(predictions_path)
         predictions = cls._process_beams(predictions)
-        has_labels = "targets" in dataset.columns
         dataset = cls._process_dataset(dataset.to_pandas(), has_labels)
         spectrum_dataset = cls._load_spectrum_data(spectrum_path)
         spectrum_dataset = cls._process_spectrum_data(spectrum_dataset, has_labels)
