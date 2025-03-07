@@ -51,7 +51,7 @@ repos:
     rev: 6.3.0
     hooks:
       - id: pydocstyle
-        additional_dependencies: ["toml"]
+        additional_dependencies: ["tomli"]
         args:
           - --convention=google
           - --add-ignore=D100,D104,D105,D107,D417
