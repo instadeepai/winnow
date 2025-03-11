@@ -6,6 +6,7 @@ import numpy as np
 
 from instanovo.utils.metrics import Metrics
 from winnow.fdr.base import FDRControl
+from winnow.datasets.calibration_dataset import residue_set
 
 
 class DatabaseGroundedFDRControl(FDRControl):
@@ -42,15 +43,15 @@ class DatabaseGroundedFDRControl(FDRControl):
             drop (int): Number of top-scoring predictions to exclude when computing FDR thresholds. Defaults to 10.
         """
         metrics = Metrics(
-            residues=residue_masses, isotope_error_range=isotope_error_range
+            residue_set=residue_set, isotope_error_range=isotope_error_range
         )
 
-        dataset["peptide"] = dataset["peptide"].apply(metrics._split_peptide)
-        dataset["prediction"] = dataset["prediction"].apply(metrics._split_peptide)
+        dataset["sequence"] = dataset["sequence"].apply(metrics._split_peptide)
+        # dataset["prediction"] = dataset["prediction"].apply(metrics._split_peptide)
 
         dataset["num_matches"] = dataset.apply(
             lambda row: (
-                metrics._novor_match(row["peptide"], row["prediction"])
+                metrics._novor_match(row["sequence"], row["prediction"])
                 if isinstance(row["prediction"], list)
                 else 0
             ),
@@ -58,7 +59,7 @@ class DatabaseGroundedFDRControl(FDRControl):
         )
         dataset["correct"] = dataset.apply(
             lambda row: row["num_matches"]
-            == len(row["peptide"])
+            == len(row["sequence"])
             == len(row["prediction"]),
             axis=1,
         )
@@ -75,9 +76,9 @@ class DatabaseGroundedFDRControl(FDRControl):
 
     def get_confidence_cutoff(self, threshold: float) -> float:
         """Compute confidence cutoff for a given FDR threshold."""
-        return self.confidence_scores[
-            bisect.bisect_left(self.fdr_thresholds, threshold)
-        ]
+        return float(
+            self.confidence_scores[bisect.bisect_left(self.fdr_thresholds, threshold)]
+        )
 
     def compute_fdr(self, score: float) -> float:
         """Compute false discovery rate for a given confidence score."""

@@ -180,7 +180,9 @@ class EmpiricalBayesFDRControl(FDRControl):
                 The confidence score cutoff corresponding to the specified FDR level.
         """
         return optimize.bisect(
-            lambda cutoff: self.compute_fdr(cutoff) - threshold, 0.0, 1.0
+            lambda cutoff: self.compute_fdr(cutoff) - threshold,
+            0.0,
+            1.0,
         )
 
     def compute_fdr(self, score: float) -> float:

@@ -16,9 +16,10 @@ from winnow.datasets.calibration_dataset import CalibrationDataset
 
 
 def map_modification(peptide: List[str]) -> List[str]:
-    """Maps a peptide sequence's modifications to standard notation.
+    """Converts carbamidomethylated Cysteine to an unmodified token representation in a peptide sequence.
 
-    Converts oxidation of methionine notation "M(ox)" to "M[UNIMOD:35]" in a peptide sequence.
+    This is to ensure compatibility with Prosit models, which say:
+        "Each C is treated as Cysteine with carbamidomethylation (fixed modification in MaxQuant)".
 
     Args:
         peptide (List[str]): A list of residues representing the peptide sequence.
@@ -26,7 +27,7 @@ def map_modification(peptide: List[str]) -> List[str]:
     Returns:
         List[str]: A list of residues with modifications mapped to standard notation.
     """
-    return ["M[UNIMOD:35]" if residue == "M(ox)" else residue for residue in peptide]
+    return ["C" if residue == "C[UNIMOD:4]" else residue for residue in peptide]
 
 
 def _raise_value_error(value, name: str):
@@ -364,7 +365,6 @@ class ChimericFeatures(CalibrationFeatures):
             )
 
         inputs = pd.DataFrame()
-        # inputs["peptide_sequences"] = dataset["peptide"].apply(metrics._split_peptide)
         inputs["peptide_sequences"] = np.array(
             [
                 "".join(map_modification(items[1].sequence)) if len(items) > 1 else ""  # type: ignore
@@ -372,9 +372,7 @@ class ChimericFeatures(CalibrationFeatures):
             ]
         )
         inputs["precursor_charges"] = np.array(dataset.metadata["precursor_charge"])
-        inputs["collision_energies"] = np.array(
-            len(dataset.metadata) * [25]
-        )  # TODO: why 25?
+        inputs["collision_energies"] = np.array(len(dataset.metadata) * [25])
         model = koinapy.Koina("Prosit_2020_intensity_HCD", "koina.wilhelmlab.org:443")
         predictions: pd.DataFrame = model.predict(inputs)
         predictions["Index"] = predictions.index
@@ -479,7 +477,7 @@ class MassErrorFeature(CalibrationFeatures):
             if isinstance(peptide, list)
             else float("-inf")
         )
-        dataset.metadata[self.name] = dataset.metadata["Mass"] - (
+        dataset.metadata[self.name] = dataset.metadata["precursor_mass"] - (
             theoretical_mass + self.h2o_mass + self.proton_mass
         )
 
@@ -551,11 +549,11 @@ class BeamFeatures(CalibrationFeatures):
             )
 
         top_probs = [
-            exp(prediction[0].log_probability) if len(prediction) >= 1 else 0.0  # type: ignore
+            exp(prediction[0].sequence_log_probability) if len(prediction) >= 1 else 0.0  # type: ignore
             for prediction in dataset.predictions
         ]
         second_probs = [
-            exp(prediction[1].log_probability) if len(prediction) >= 2 else 0.0  # type: ignore
+            exp(prediction[1].sequence_log_probability) if len(prediction) >= 2 else 0.0  # type: ignore
             for prediction in dataset.predictions
         ]
         second_margin = [
@@ -563,7 +561,7 @@ class BeamFeatures(CalibrationFeatures):
             for top_prob, second_prob in zip(top_probs, second_probs)
         ]
         runner_up_probs = [
-            [exp(item.log_probability) for item in prediction[1:]]  # type: ignore
+            [exp(item.sequence_log_probability) for item in prediction[1:]]  # type: ignore
             if len(prediction) >= 3  # type: ignore
             else [0.0]
             for prediction in dataset.predictions
@@ -661,7 +659,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         train_data["iRT"] = predictions["irt"]
 
         # -- Fit model
-        x, y = train_data["Retention time"].values, train_data["iRT"].values
+        x, y = train_data["retention_time"].values, train_data["iRT"].values
         self.irt_predictor.fit(x.reshape(-1, 1), y)
 
     def compute(self, dataset: CalibrationDataset) -> None:
@@ -688,7 +686,7 @@ class RetentionTimeFeature(CalibrationFeatures):
 
         # - Predict iRT
         dataset.metadata["predicted iRT"] = self.irt_predictor.predict(
-            dataset.metadata["Retention time"].values.reshape(-1, 1)
+            dataset.metadata["retention_time"].values.reshape(-1, 1)
         )
         dataset.metadata["iRT error"] = np.abs(
             dataset.metadata["predicted iRT"] - dataset.metadata["iRT"]
