@@ -180,11 +180,11 @@ class CalibrationDataset:
             scored_sequences = []
             num_beams = len(row) // 2
 
-            for i in range(num_beams):
+            for beam in range(num_beams):
                 seq_col, log_prob_col, token_log_prob_col = (
-                    f"preds_beam_{i}",
-                    f"log_probs_beam_{i}",
-                    f"token_log_probs_{i}",
+                    f"preds_beam_{beam}",
+                    f"log_probs_beam_{beam}",
+                    f"token_log_probs_{beam}",
                 )
                 sequence, log_prob, token_log_prob = (
                     row.get(seq_col),
@@ -239,7 +239,9 @@ class CalibrationDataset:
             rename_dict["sequence"] = "sequence_untokenised"
         dataset.rename(rename_dict, axis=1, inplace=True)
 
-        dataset["prediction"] = dataset["prediction"].apply(lambda x: x.split(", "))
+        dataset["prediction"] = dataset["prediction"].apply(
+            lambda peptide: peptide.split(", ")
+        )
 
         dataset.loc[dataset["confidence"] == -1.0, "confidence"] = float("-inf")
 
@@ -247,16 +249,24 @@ class CalibrationDataset:
 
         if has_labels:
             dataset["sequence_untokenised"] = dataset["sequence_untokenised"].apply(
-                lambda x: x.replace("L", "I") if isinstance(x, str) else x
+                lambda peptide: peptide.replace("L", "I")
+                if isinstance(peptide, str)
+                else peptide
             )
             dataset["sequence"] = dataset["sequence_untokenised"].apply(
                 metrics._split_peptide
             )
         dataset["prediction"] = dataset["prediction"].apply(
-            lambda x: ["I" if c == "L" else c for c in x] if isinstance(x, list) else x
+            lambda peptide: [
+                "I" if amino_acid == "L" else amino_acid for amino_acid in peptide
+            ]
+            if isinstance(peptide, list)
+            else peptide
         )
         dataset["prediction_untokenised"] = dataset["prediction_untokenised"].apply(
-            lambda x: x.replace("L", "I") if isinstance(x, str) else x
+            lambda peptide: peptide.replace("L", "I")
+            if isinstance(peptide, str)
+            else peptide
         )
 
         return dataset
@@ -295,7 +305,11 @@ class CalibrationDataset:
         if has_labels:
             df["sequence"] = (
                 df["sequence"]
-                .apply(lambda x: x.replace("L", "I") if isinstance(x, str) else x)
+                .apply(
+                    lambda peptide: peptide.replace("L", "I")
+                    if isinstance(peptide, str)
+                    else peptide
+                )
                 .apply(metrics._split_peptide)
             )
         return df
@@ -348,10 +362,10 @@ class CalibrationDataset:
         """
         if has_labels:
             dataset["valid_peptide"] = dataset["sequence"].apply(
-                lambda x: isinstance(x, list)
+                lambda peptide: isinstance(peptide, list)
             )
         dataset["valid_prediction"] = dataset["prediction"].apply(
-            lambda x: isinstance(x, list)
+            lambda peptide: isinstance(peptide, list)
         )
         if has_labels:
             dataset["num_matches"] = dataset.apply(
