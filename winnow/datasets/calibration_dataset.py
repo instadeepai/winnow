@@ -425,6 +425,14 @@ class CalibrationDataset:
         """
         self.metadata.to_csv(path)
 
+    def to_parquet(self, path: str) -> None:
+        """Saves the dataset metadata to a parquet file.
+
+        Args:
+            path (str): Path to the output parquet file.
+        """
+        self.metadata.to_parquet(path)
+
     def __getitem__(self, index) -> Tuple[pd.Series, List[ScoredSequence]]:
         """Retrieves a metadata row and its corresponding prediction.
 
