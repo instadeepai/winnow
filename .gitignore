@@ -9,7 +9,7 @@ __pycache__
 winnow_data
 calibrated_datasets
 mount_folder
-validation_dataset_mount
+input_data
 *.ipc
 *.csv
 *.parquet
