@@ -296,7 +296,7 @@ def estimate(
             confidence_feature=confidence_column
         )
         database_fdr_control.fit(
-            dataset=calibrated_dataset.metadata[confidence_column],
+            dataset=calibrated_dataset.metadata,
             residue_masses=RESIDUE_MASSES,
         )
         confidence_cutoff = database_fdr_control.get_confidence_cutoff(
