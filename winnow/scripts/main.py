@@ -5,6 +5,7 @@ from pathlib import Path
 
 import yaml
 
+from rich.logging import RichHandler
 import typer
 from typing_extensions import Annotated
 
@@ -78,6 +79,7 @@ class FDRMethod(Enum):
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 logger.addHandler(logging.StreamHandler())
+logger.addHandler(RichHandler())
 
 app = typer.Typer(
     name="winnow",
@@ -103,6 +105,7 @@ def load_dataset(
     Returns:
         CalibrationDataset: A calibration dataset
     """
+    logger.info(f"Loading dataset from {data_source}.")
     with open(dataset_config_path) as dataset_config_file:
         if data_source is DataSource.winnow:
             winnow_dataset_config = WinnowDatasetConfig(
@@ -155,6 +158,7 @@ def filter_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
     Returns:
         CalibrationDataset: The filtered dataset
     """
+    logger.info("Filtering dataset.")
     filtered_dataset = (
         dataset.filter_entries(
             metadata_predicate=lambda row: not isinstance(row["prediction"], list),
@@ -204,6 +208,7 @@ def calibrate(
         output_path (Annotated[Path, typer.Option, optional): The path to write the output to.
     """
     # -- Load dataset
+    logger.info("Loading datasets.")
     calibration_dataset = load_dataset(
         data_source=calibration_data_source,
         dataset_config_path=calibration_dataset_config_path,
@@ -238,8 +243,8 @@ def calibrate(
     calibrator.predict(filtered_prediction_dataset)
 
     # -- Write output
-    if output_path:
-        filtered_prediction_dataset.save(data_dir=output_path)
+    logger.info("Writing output.")
+    filtered_prediction_dataset.save(data_dir=output_path)
 
 
 @app.command(
@@ -285,6 +290,7 @@ def estimate(
         output_path (Annotated[ Path, typer.Option, optional): The path to the config with the specification of the dataset.
     """
     # -- Load dataset
+    logger.info("Loading datasets.")
     calibrated_dataset = load_dataset(
         data_source=calibrated_data_source,
         dataset_config_path=calibrated_dataset_config_path,
@@ -292,26 +298,34 @@ def estimate(
 
     # -- Initialize estimator
     if method is FDRMethod.database:
+        logger.info("Initializing database-grounded FDR estimator.")
         database_fdr_control = DatabaseGroundedFDRControl(
             confidence_feature=confidence_column
         )
+        logger.info("Fitting database-grounded FDR estimator.")
         database_fdr_control.fit(
             dataset=calibrated_dataset.metadata,
             residue_masses=RESIDUE_MASSES,
         )
+        logger.info("Estimating FDR threshold.")
         confidence_cutoff = database_fdr_control.get_confidence_cutoff(
             threshold=fdr_threshold
         )
     elif method is FDRMethod.winnow:
+        logger.info("Initializing Winnow FDR estimator.")
         mixture_fdr_control = EmpiricalBayesFDRControl()
+        logger.info("Fitting Winnow FDR estimator.")
         mixture_fdr_control.fit(dataset=calibrated_dataset.metadata[confidence_column])
+        logger.info("Estimating FDR threshold.")
         confidence_cutoff = mixture_fdr_control.get_confidence_cutoff(
             threshold=fdr_threshold
         )
 
     # -- Filter data
+    logger.info("Filtering data.")
     output_data = calibrated_dataset.metadata
     output_data = output_data[output_data[confidence_column] >= confidence_cutoff]
 
     # -- Write output
+    logger.info("Writing output.")
     output_data.to_csv(output_path)
