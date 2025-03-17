@@ -318,7 +318,7 @@ class CalibrationDataset:
     def _merge_spectrum_data(
         beam_dataset: pd.DataFrame, spectrum_dataset: pd.DataFrame
     ) -> pd.DataFrame:
-        """Merge the input and output data from the de novo sequencing model, using inner join on `scan_number`.
+        """Merge the input and output data from the de novo sequencing model, using inner join on `spectrum_id`.
 
         Args:
             beam_dataset (pd.DataFrame): DataFrame containing the predictions.
@@ -330,14 +330,14 @@ class CalibrationDataset:
         merged_df = pd.merge(
             beam_dataset,
             spectrum_dataset,
-            on=["scan_number"],
+            on=["spectrum_id"],
             suffixes=("_from_beams", ""),
         )
         merged_df = merged_df.drop(
             columns=[
                 col + "_from_beams"
                 for col in beam_dataset.columns
-                if col in spectrum_dataset.columns and col != "scan_number"
+                if col in spectrum_dataset.columns and col != "spectrum_id"
             ],
             axis=1,
         )
