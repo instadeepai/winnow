@@ -40,5 +40,10 @@ optional-dependencies.dev = {file = ["requirements/requirements-dev.txt"]}
 [tool.uv]
 override-dependencies = ["seaborn==0.12.2"]
 
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+]
+
 [project.scripts]
 winnow='winnow.scripts.main:app'
