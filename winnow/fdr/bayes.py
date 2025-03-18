@@ -77,10 +77,10 @@ class EmpiricalBayesFDRControl(FDRControl):
 
         mixture_distributions = [
             numpyro.distributions.Beta(
-                concentration0=correct_alpha, concentration1=correct_beta
+                concentration0=correct_beta, concentration1=correct_alpha
             ),
             numpyro.distributions.Beta(
-                concentration0=incorrect_alpha, concentration1=incorrect_beta
+                concentration0=incorrect_beta, concentration1=incorrect_alpha
             ),
         ]
 
