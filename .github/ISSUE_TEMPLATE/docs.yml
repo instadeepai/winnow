@@ -1,0 +1,17 @@
+name: Documentation
+description: Report a proposal or issue related to the documentation (code and/or webpage).
+title: "docs: "
+labels: ["documentation"]
+
+body:
+  - type: textarea
+    attributes:
+      label: "Summary:"
+      description: >
+        Provide a brief summary of the documentation to be added/updated.
+
+  - type: textarea
+    attributes:
+      label: "Additional Notes:"
+      description: >
+        Any additional notes.
