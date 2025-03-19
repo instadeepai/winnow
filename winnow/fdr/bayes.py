@@ -10,6 +10,7 @@ from winnow.fdr.base import FDRControl
 
 
 EPS = 1e-7
+FDR_EPS = 1e-8
 
 
 @dataclass
@@ -180,43 +181,55 @@ class EmpiricalBayesFDRControl(FDRControl):
                 The confidence score cutoff corresponding to the specified FDR level.
         """
         return optimize.bisect(
-            lambda cutoff: self.compute_fdr(cutoff) - threshold,
-            0.0,
-            1.0,
+            lambda cutoff: self.compute_fdr(cutoff) - threshold, 0.0, 1.0
         )
 
     def compute_fdr(self, score: float) -> float:
-        """Compute false discovery rate for a given confidence score."""
+        """Compute FDR estimate at a given confidence cutoff.
+
+        Args:
+            score (float): The confidence cutoff.
+
+        Returns:
+            float: The FDR estimate
+        """
         # P(S >= score | incorrect) = 1 - F_incorrect(s)
-        P_score_given_incorrect = 1 - jax.scipy.stats.beta.cdf(  # noqa: N806
+        p_score_given_incorrect = 1 - jax.scipy.stats.beta.cdf(
             a=self.mixture_parameters.incorrect_alpha,
             b=self.mixture_parameters.incorrect_beta,
             x=score,
         )
         # P(S >= score | correct) = 1 - F_correct(s)
-        P_score_given_correct = 1 - jax.scipy.stats.beta.cdf(  # noqa: N806
+        p_score_given_correct = 1 - jax.scipy.stats.beta.cdf(
             a=self.mixture_parameters.correct_alpha,
             b=self.mixture_parameters.correct_beta,
             x=score,
         )
 
         # Mixture tail probability P(S >= s)
-        P_mixture_tail = (  # noqa: N806
-            self.mixture_parameters.proportion * P_score_given_correct
-            + (1 - self.mixture_parameters.proportion) * P_score_given_incorrect
+        p_mixture_tail = (
+            self.mixture_parameters.proportion * p_score_given_correct
+            + (1 - self.mixture_parameters.proportion) * p_score_given_incorrect
         )
 
         # P(incorrect | S >= s)
-        P_incorrect_given_score = (  # noqa: N806
+        p_incorrect_given_score = (
             (1 - self.mixture_parameters.proportion)
-            * P_score_given_incorrect
-            / (P_mixture_tail + 1e-8)
+            * p_score_given_incorrect
+            / (p_mixture_tail + FDR_EPS)
         )
 
-        return P_incorrect_given_score.item()
+        return p_incorrect_given_score.item()
 
     def compute_posterior_probability(self, score: float) -> float:
-        """Compute posterior error probability, or local FDR, for a given confidence score."""
+        """Compute posterior error probability, or local FDR, for a given confidence score.
+
+        Args:
+            score (float): The confidence score.
+
+        Returns:
+            float: The PEP estimate
+        """
         # P(incorrect | S = s) = [P(incorrect) * P(S = s | incorrect)] / P(S = s)
 
         # f(S = s | incorrect)
@@ -243,16 +256,30 @@ class EmpiricalBayesFDRControl(FDRControl):
         ).item()
 
     def compute_p_value(self, score: float) -> float:
-        """Compute the p-value for a given confidence score."""
+        """Compute the p-value for a given confidence score.
+
+        Args:
+            score (float): The confidence score.
+
+        Returns:
+            float: The p-value estimate
+        """
         # P(S >= score | incorrect) = 1 - F_incorrect(s)
-        P_score_given_incorrect = 1 - jax.scipy.stats.beta.cdf(  # noqa: N806
+        p_score_given_incorrect = 1 - jax.scipy.stats.beta.cdf(
             a=self.mixture_parameters.incorrect_alpha,
             b=self.mixture_parameters.incorrect_beta,
             x=score,
         )
-        return P_score_given_incorrect.item()
+        return p_score_given_incorrect.item()
 
     def compute_expect_score(self, score: float, total_matches: int) -> float:
-        """Compute the expected number of false discoveries for a given score."""
+        """Compute the expected number of false discoveries for a given score.
+
+        Args:
+            score (float): The confidence score.
+
+        Returns:
+            float: The expect score estimate
+        """
         p_value = self.compute_p_value(score)
         return total_matches * p_value

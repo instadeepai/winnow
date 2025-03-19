@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 from typing import Any, Callable, List, Optional, Tuple
+import pickle
 
 import numpy as np
 import pandas as pd
@@ -102,6 +103,28 @@ class CalibrationDataset:
 
     metadata: pd.DataFrame
     predictions: List[Optional[List[ScoredSequence]]]
+
+    def save(self, data_dir: Path) -> None:
+        """Save a `CalibrationDataset` to a directory.
+
+        Args:
+            data_dir (Path): Directory to save the dataset. This will contain `metadata.csv` and
+                            optionally, `predictions.pkl` for serialized beam search results.
+        """
+        data_dir.mkdir(parents=True)
+        with (data_dir / "metadata.csv").open(mode="w") as metadata_file:
+            output_metadata = self.metadata.copy(deep=True)
+            output_metadata["peptide"] = output_metadata["peptide"].apply(
+                lambda peptide_list: "".join(peptide_list)
+            )
+            output_metadata["prediction"] = output_metadata["prediction"].apply(
+                lambda peptide_list: "".join(peptide_list)
+            )
+            output_metadata.to_csv(metadata_file, index=False)
+
+        if self.predictions:
+            with (data_dir / "predictions.pkl").open(mode="wb") as predictions_file:
+                pickle.dump(self.predictions, predictions_file)
 
     @property
     def confidence_column(self) -> str:
@@ -684,6 +707,19 @@ class CalibrationDataset:
         """
         self.metadata.to_csv(path)
 
+    def to_parquet(self, path: str) -> None:
+        """Saves the dataset metadata to a parquet file.
+
+        Args:
+            path (str): Path to the output parquet file.
+        """
+        self.metadata.to_parquet(path)
+
+    def __len__(self) -> int:
+        """Returns the number of entries in the dataset."""
+        assert self.metadata.shape[0] == len(self.predictions)
+        return len(self.predictions)
+
     def __getitem__(self, index) -> Tuple[pd.Series, List[ScoredSequence]]:
         """Retrieves a metadata row and its corresponding prediction.
 
@@ -694,8 +730,3 @@ class CalibrationDataset:
             Tuple[pd.Series, List[ScoredSequence]]: The metadata row and its associated predictions.
         """
         return self.metadata.iloc[index], self.predictions[index]
-
-    def __len__(self) -> int:
-        """Returns the number of entries in the dataset."""
-        assert self.metadata.shape[0] == len(self.predictions)
-        return len(self.predictions)

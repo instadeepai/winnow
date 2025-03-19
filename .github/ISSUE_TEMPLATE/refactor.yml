@@ -1,0 +1,23 @@
+name: Refactor
+description: Make a proposal for refactoring code.
+title: "refactor: "
+labels: ["refactor"]
+
+body:
+  - type: textarea
+    attributes:
+      label: "Summary:"
+      description: >
+        Provide a brief summary of the refactor.
+
+  - type: textarea
+    attributes:
+      label: "Description & Purpose:"
+      description: >
+        Detail which parts of the codebase will be refactored and why.
+
+  - type: textarea
+    attributes:
+      label: "Additional Notes:"
+      description: >
+        Any additional notes.

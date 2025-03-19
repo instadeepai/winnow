@@ -13,6 +13,8 @@ dependencies = [
     "numpyro>=0.17.0",
     "tensorflow-probability>=0.25.0",
     "numba==0.60.0",
+    "tomli>=2.2.1",
+    "typer>=0.15.2",
 ]
 
 [build-system]
@@ -28,4 +30,8 @@ instanovo = { git = "ssh://git@gitlab.com/instadeep/dtu-denovo-sequencing.git" }
 [dependency-groups]
 dev = [
     "pre-commit>=4.1.0",
+    "pytest>=8.3.5",
 ]
+
+[project.scripts]
+winnow='winnow.scripts.main:app'

@@ -1,17 +1,15 @@
 .venv
 
+.vscode
+
 __pycache__
 
 *.egg-info
 
-.vscode
-
-winnow_data
-calibrated_datasets
-mount_folder
-input_data
-*.ipc
+*.txt
 *.csv
 *.parquet
-test*
-configs
+*.ipc
+*.pkl
+*.json
+*.yaml
