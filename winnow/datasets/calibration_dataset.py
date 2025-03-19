@@ -488,6 +488,14 @@ class CalibrationDataset:
         """
         self.metadata.to_csv(path)
 
+    def to_parquet(self, path: str) -> None:
+        """Saves the dataset metadata to a parquet file.
+
+        Args:
+            path (str): Path to the output parquet file.
+        """
+        self.metadata.to_parquet(path)
+
     def __len__(self) -> int:
         """Returns the number of entries in the dataset."""
         assert self.metadata.shape[0] == len(self.predictions)
