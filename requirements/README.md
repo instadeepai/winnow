@@ -1,1 +1,1 @@
-I used Python 3.9, and I had to manually bump seaborn to 0.12.2 after installation. This causes instanovo to compain, but this is probably not an issue, since we don't use instanovo for plotting.
+I used Python 3.9, and I had to manually bump seaborn to 0.12.2 after installation. This causes instanovo to complain, but this is probably not an issue, since we don't use instanovo for plotting.

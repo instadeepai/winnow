@@ -187,7 +187,8 @@ def compute_ion_identifications(
         )
         for _, row in dataset.iterrows()
     ]
-    return zip(*matches)
+    ion_matches, match_intensity = zip(*matches)
+    return ion_matches, match_intensity
 
 
 class PrositFeatures(CalibrationFeatures):

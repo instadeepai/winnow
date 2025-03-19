@@ -62,19 +62,46 @@ class DatabaseGroundedFDRControl(FDRControl):
             == len(row["prediction"]),
             axis=1,
         )
-        self.preds = dataset[['correct', self.confidence_feature]]
-        
-        dataset = dataset.sort_values(by=self.confidence_feature, axis=0, ascending=False)
-        precision = np.cumsum(dataset['correct']) / np.arange(1, len(dataset) + 1)
+        self.preds = dataset[["correct", self.confidence_feature]]
+
+        dataset = dataset.sort_values(
+            by=self.confidence_feature, axis=0, ascending=False
+        )
+        precision = np.cumsum(dataset["correct"]) / np.arange(1, len(dataset) + 1)
         confidence = np.array(dataset[self.confidence_feature])
 
         self.fdr_thresholds = list(1.0 - precision[drop:])
         self.confidence_scores = list(confidence[drop:])
 
     def get_confidence_cutoff(self, threshold: float) -> float:
-        return self.confidence_scores[bisect.bisect_left(self.fdr_thresholds, threshold)]
+        """Compute the confidence score cutoff for a given FDR threshold.
+
+        This function determines the confidence score above which PSMs should be retained
+        to maintain the desired FDR level.
+
+        Args:
+            threshold (float):
+                The target FDR threshold, where 0 < threshold < 1.
+
+        Returns:
+            float:
+                The confidence score cutoff corresponding to the specified FDR level.
+        """
+        return self.confidence_scores[
+            bisect.bisect_left(self.fdr_thresholds, threshold)
+        ]
 
     def compute_fdr(self, score: float) -> float:
+        """Compute FDR estimate at a given confidence cutoff.
+
+        Args:
+            score (float): The confidence cutoff.
+
+        Returns:
+            float: The FDR estimate
+        """
         # FDR = [no. false positives >= score s] / [no. total matches >= score s]
         preds_ge_score = self.preds[self.preds[self.confidence_feature] >= score]
-        return (len(preds_ge_score['correct']) - sum(preds_ge_score['correct'])) / len(preds_ge_score['correct'])
+        return (len(preds_ge_score["correct"]) - sum(preds_ge_score["correct"])) / len(
+            preds_ge_score["correct"]
+        )
