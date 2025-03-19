@@ -1,8 +1,15 @@
 .venv
 
-winnow_data
-calibrated_datasets
+.vscode
 
 __pycache__
 
 *.egg-info
+
+*.txt
+*.csv
+*.parquet
+*.ipc
+*.pkl
+*.json
+*.yaml
