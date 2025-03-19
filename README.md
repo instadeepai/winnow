@@ -30,7 +30,7 @@
 <h3 align="center">winnow</h3>
 
   <p align="center">
-    Confidence calibration and FDR control for de novo peptide sequencing
+    Confidence calibration and FDR control for *de novo* peptide sequencing
     <br />
     <a href="https://github.com/instadeepai/winnow"><strong>Explore the docs »</strong></a>
     <br />
@@ -76,9 +76,9 @@ To mitigate this, intermediate steps are introduced to:
 1. Assign confidence scores to PSMs that better correlate with correctness.
 2. Estimate and control the false discovery rate (FDR) by filtering identifications based on confidence scores.
 
-For database search-based peptide sequencing, PSM rescoring and target-decoy competition (TDC) are standard approaches, supported by an extensive ecosystem of tools. However, de novo peptide sequencing lacks standardized methods for these tasks.
+For database search-based peptide sequencing, PSM rescoring and target-decoy competition (TDC) are standard approaches, supported by an extensive ecosystem of tools. However, *de novo* peptide sequencing lacks standardized methods for these tasks.
 
-`winnow` aims to fill this gap by implementing the calibrate-estimate framework for FDR estimation. Unlike TDC, this approach is directly applicable to de novo sequencing models. Additionally, its calibration step naturally incorporates common confidence rescoring workflows as part of FDR estimation.
+`winnow` aims to fill this gap by implementing the calibrate-estimate framework for FDR estimation. Unlike TDC, this approach is directly applicable to *de novo* sequencing models. Additionally, its calibration step naturally incorporates common confidence rescoring workflows as part of FDR estimation.
 
 `winnow` provides both a CLI and a Python package, offering flexibility in performing confidence calibration and FDR estimation.
 
