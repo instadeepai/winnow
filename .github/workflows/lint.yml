@@ -12,6 +12,6 @@ jobs:
         with:
           version: "0.6.6"
       - name: Install dependencies
-        run: uv sync --all-extras --dev
+        run: uv sync --only-dev
       - name: Run pre-commit hooks
         run: uv run pre-commit run --all-files
