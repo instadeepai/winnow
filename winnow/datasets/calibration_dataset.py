@@ -10,6 +10,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 import re
+import ast
 from typing import Any, Callable, List, Optional, Tuple
 import pickle
 
@@ -114,9 +115,10 @@ class CalibrationDataset:
         data_dir.mkdir(parents=True)
         with (data_dir / "metadata.csv").open(mode="w") as metadata_file:
             output_metadata = self.metadata.copy(deep=True)
-            output_metadata["peptide"] = output_metadata["peptide"].apply(
-                lambda peptide_list: "".join(peptide_list)
-            )
+            if "sequence" in output_metadata.columns:
+                output_metadata["sequence"] = output_metadata["sequence"].apply(
+                    lambda peptide_list: "".join(peptide_list)
+                )
             output_metadata["prediction"] = output_metadata["prediction"].apply(
                 lambda peptide_list: "".join(peptide_list)
             )
@@ -648,6 +650,49 @@ class CalibrationDataset:
             axis=1,
         )
         return cls(metadata=dataset, predictions=[None] * len(dataset))
+
+    @classmethod
+    def load(cls, data_dir: Path) -> "CalibrationDataset":
+        """Load `CalibrationDataset` saved using the `save` method from a directory.
+
+        Args:
+            data_dir (Path): Path to a directory containing `metadata.csv` and
+                            optionally, `predictions.pkl` for serialized beam search results.
+
+        Returns:
+            CalibrationDataset: The loaded dataset.
+        """
+        with (data_dir / "metadata.csv").open(mode="r") as metadata_file:
+            metadata = pd.read_csv(metadata_file)
+            if "sequence" in metadata.columns:
+                metadata["sequence"] = metadata["sequence"].apply(
+                    metrics._split_peptide
+                )
+            metadata["prediction"] = metadata["prediction"].apply(
+                metrics._split_peptide
+            )
+            metadata["mz_array"] = metadata["mz_array"].apply(
+                lambda s: ast.literal_eval(s)
+                if "," in s
+                else ast.literal_eval(
+                    re.sub(r"(\n?)(\s+)", ", ", re.sub(r"\[\s+", "[", s))
+                )
+            )
+            metadata["intensity_array"] = metadata["intensity_array"].apply(
+                lambda s: ast.literal_eval(s)
+                if "," in s
+                else ast.literal_eval(
+                    re.sub(r"(\n?)(\s+)", ", ", re.sub(r"\[\s+", "[", s))
+                )
+            )
+
+        predictions_path = data_dir / "predictions.pkl"
+        if predictions_path.exists():
+            with (data_dir / "predictions.pkl").open(mode="rb") as predictions_file:
+                predictions = pickle.load(predictions_file)
+        else:
+            predictions = None
+        return cls(metadata=metadata, predictions=predictions)
 
     def filter_entries(
         self,
