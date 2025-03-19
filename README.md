@@ -30,7 +30,7 @@
 <h3 align="center">winnow</h3>
 
   <p align="center">
-    Confidence calibration and FDR control for *de novo* peptide sequencing
+    Confidence calibration and FDR control for <i>de novo</i> peptide sequencing
     <br />
     <a href="https://github.com/instadeepai/winnow"><strong>Explore the docs »</strong></a>
     <br />
@@ -123,11 +123,11 @@ The `winnow` package is organized into three sub-modules:
 
 1. `winnow.datasets` – Handles data loading and saving, including the `CalibrationDataset` class for mapping peptide sequencing output formats.
 2. `winnow.calibration` – Implements confidence calibration. Key components include:
-  - `ProbabilityCalibrator` (defines the calibration model)
-  - `CalibrationFeature` (an extensible interface for defining calibration features)
+    - `ProbabilityCalibrator` (defines the calibration model)
+    - `CalibrationFeature` (an extensible interface for defining calibration features)
 3. `winnow.fdr` – Implements FDR estimation methods:
-  - `DatabaseGroundedFDRControl` (for database-grounded FDR control)
-  - `EmpiricalBayesFDRControl` (uses an empirical Bayesian mixture model for FDR estimation)
+    - `DatabaseGroundedFDRControl` (for database-grounded FDR control)
+    - `EmpiricalBayesFDRControl` (uses an empirical Bayesian mixture model for FDR estimation)
 
 For an example, check out the [example notebook](https://github.com/instadeepai/winnow/blob/main/examples/fdr_plots.ipynb).
 
