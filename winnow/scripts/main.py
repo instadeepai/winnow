@@ -49,7 +49,6 @@ class InstaNovoDatasetConfig:
 
     beam_predictions_path: Path
     spectrum_path: Path
-    predictions_path: Path
 
 
 @dataclass
@@ -123,7 +122,6 @@ def load_dataset(
                     instanovo_dataset_config.beam_predictions_path
                 ),
                 spectrum_path=Path(instanovo_dataset_config.spectrum_path),
-                predictions_path=Path(instanovo_dataset_config.predictions_path),
             )
         elif data_source is DataSource.mztab:
             mztab_dataset_config = MZTabDatasetConfig(
@@ -150,7 +148,7 @@ def load_dataset(
 
 
 def filter_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
-    """Filter out rows whose predictions are empty or contain unsupported PTMs.
+    """Filter out rows whose predictions are empty or contain unsupported PSMs.
 
     Args:
         dataset (CalibrationDataset): The dataset to be filtered
@@ -163,13 +161,10 @@ def filter_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
         dataset.filter_entries(
             metadata_predicate=lambda row: not isinstance(row["prediction"], list),
         )
-        .filter_entries(
-            metadata_predicate=lambda row: "N(+.98)" in row["prediction"],
-        )
-        .filter_entries(
-            metadata_predicate=lambda row: "Q(+.98)" in row["prediction"],
-        )
         .filter_entries(metadata_predicate=lambda row: not row["prediction"])
+        .filter_entries(
+            metadata_predicate=lambda row: row["precursor_charge"] > 6
+        )  # Prosit-specific filtering, see https://github.com/Nesvilab/FragPipe/issues/1775
     )
     return filtered_dataset
 
@@ -274,9 +269,7 @@ def estimate(
     ],
     output_path: Annotated[
         Path,
-        typer.Option(
-            help="The path to the config with the specification of the dataset."
-        ),
+        typer.Option(help="The path to write the output to."),
     ],
 ) -> None:
     """Estimate FDR and filter for a threshold.
@@ -287,7 +280,7 @@ def estimate(
         calibrated_data_source (Annotated[ DataSource, typer.Option, optional): The type of PSM dataset to be calibrated.
         calibrated_dataset_config_path (Annotated[ Path, typer.Option, optional): The path to the config with the specification of the dataset.
         confidence_column (Annotated[ str, typer.Option, optional): Name of the column with confidence scores.
-        output_path (Annotated[ Path, typer.Option, optional): The path to the config with the specification of the dataset.
+        output_path (Annotated[ Path, typer.Option, optional): The path to write the output to.
     """
     # -- Load dataset
     logger.info("Loading datasets.")

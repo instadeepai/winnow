@@ -102,7 +102,6 @@ class ProbabilityCalibrator:
         features, labels = self.compute_features(dataset=dataset, labelled=True)
         self.classifier.fit(features, labels)
 
-    # TODO: make feature calculation out-of-place
     def compute_features(
         self, dataset: CalibrationDataset, labelled: bool
     ) -> Union[

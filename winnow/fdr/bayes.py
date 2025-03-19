@@ -57,22 +57,22 @@ class EmpiricalBayesFDRControl(FDRControl):
         )
         correct_alpha = numpyro.param(
             "correct_alpha",
-            init_value=0.7,
+            init_value=10.0,
             constraints=numpyro.distributions.constraints.open_interval(0.0, 1.0),
         )
         correct_beta = numpyro.param(
             "correct_beta",
-            init_value=0.5,
+            init_value=1.0,
             constraints=numpyro.distributions.constraints.open_interval(0.0, 1.0),
         )
         incorrect_alpha = numpyro.param(
             "incorrect_alpha",
-            init_value=0.4,
+            init_value=1.0,
             constraints=numpyro.distributions.constraints.open_interval(0.0, 1.0),
         )
         incorrect_beta = numpyro.param(
             "incorrect_beta",
-            init_value=0.6,
+            init_value=10.0,
             constraints=numpyro.distributions.constraints.open_interval(0.0, 1.0),
         )
 

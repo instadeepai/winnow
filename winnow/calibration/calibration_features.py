@@ -1,7 +1,7 @@
 from abc import ABCMeta, abstractmethod
 import bisect
 from math import exp, isnan
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Iterator
 import warnings
 
 import pandas as pd
@@ -16,9 +16,10 @@ from winnow.datasets.calibration_dataset import CalibrationDataset
 
 
 def map_modification(peptide: List[str]) -> List[str]:
-    """Maps a peptide sequence's modifications to standard notation.
+    """Converts carbamidomethylated Cysteine to an unmodified token representation in a peptide sequence.
 
-    Converts oxidation of methionine notation "M(ox)" to "M[UNIMOD:35]" in a peptide sequence.
+    This is to ensure compatibility with Prosit models, which say:
+        "Each C is treated as Cysteine with carbamidomethylation (fixed modification in MaxQuant)".
 
     Args:
         peptide (List[str]): A list of residues representing the peptide sequence.
@@ -26,7 +27,7 @@ def map_modification(peptide: List[str]) -> List[str]:
     Returns:
         List[str]: A list of residues with modifications mapped to standard notation.
     """
-    return ["M[UNIMOD:35]" if residue == "M(ox)" else residue for residue in peptide]
+    return ["C" if residue == "C[UNIMOD:4]" else residue for residue in peptide]
 
 
 def _raise_value_error(value, name: str):
@@ -163,7 +164,7 @@ def find_matching_ions(
 
 def compute_ion_identifications(
     dataset: pd.DataFrame, source_column: str, mz_tolerance: float
-) -> Tuple[Tuple[float], Tuple[float]]:
+) -> Iterator[Tuple[List[float], List[float]]]:
     """Computes the ion match rate and match intensity for each spectrum in the dataset.
 
     Finds how well the theoretical ions (from the `source_column`) match the experimental ions in the dataset.
@@ -187,8 +188,7 @@ def compute_ion_identifications(
         )
         for _, row in dataset.iterrows()
     ]
-    ion_matches, match_intensity = zip(*matches)
-    return ion_matches, match_intensity
+    return zip(*matches)
 
 
 class PrositFeatures(CalibrationFeatures):
@@ -477,7 +477,7 @@ class MassErrorFeature(CalibrationFeatures):
             if isinstance(peptide, list)
             else float("-inf")
         )
-        dataset.metadata[self.name] = dataset.metadata["Mass"] - (
+        dataset.metadata[self.name] = dataset.metadata["precursor_mass"] - (
             theoretical_mass + self.h2o_mass + self.proton_mass
         )
 
@@ -659,7 +659,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         train_data["iRT"] = predictions["irt"]
 
         # -- Fit model
-        x, y = train_data["Retention time"].values, train_data["iRT"].values
+        x, y = train_data["retention_time"].values, train_data["iRT"].values
         self.irt_predictor.fit(x.reshape(-1, 1), y)
 
     def compute(self, dataset: CalibrationDataset) -> None:
@@ -686,7 +686,7 @@ class RetentionTimeFeature(CalibrationFeatures):
 
         # - Predict iRT
         dataset.metadata["predicted iRT"] = self.irt_predictor.predict(
-            dataset.metadata["Retention time"].values.reshape(-1, 1)
+            dataset.metadata["retention_time"].values.reshape(-1, 1)
         )
         dataset.metadata["iRT error"] = np.abs(
             dataset.metadata["predicted iRT"] - dataset.metadata["iRT"]
