@@ -78,10 +78,10 @@ class EmpiricalBayesFDRControl(FDRControl):
 
         mixture_distributions = [
             numpyro.distributions.Beta(
-                concentration0=correct_alpha, concentration1=correct_beta
+                concentration0=correct_beta, concentration1=correct_alpha
             ),
             numpyro.distributions.Beta(
-                concentration0=incorrect_alpha, concentration1=incorrect_beta
+                concentration0=incorrect_beta, concentration1=incorrect_alpha
             ),
         ]
 
@@ -180,73 +180,106 @@ class EmpiricalBayesFDRControl(FDRControl):
             float:
                 The confidence score cutoff corresponding to the specified FDR level.
         """
-        return optimize.bisect(lambda cutoff: self.compute_fdr(cutoff) - threshold, 0., 1.) 
-    
+        return optimize.bisect(
+            lambda cutoff: self.compute_fdr(cutoff) - threshold, 0.0, 1.0
+        )
+
     def compute_fdr(self, score: float) -> float:
+        """Compute FDR estimate at a given confidence cutoff.
+
+        Args:
+            score (float): The confidence cutoff.
+
+        Returns:
+            float: The FDR estimate
+        """
         # P(S >= score | incorrect) = 1 - F_incorrect(s)
-        P_score_given_incorrect = 1 - jax.scipy.stats.beta.cdf(
+        p_score_given_incorrect = 1 - jax.scipy.stats.beta.cdf(
             a=self.mixture_parameters.incorrect_alpha,
             b=self.mixture_parameters.incorrect_beta,
-            x=score
-            )
+            x=score,
+        )
         # P(S >= score | correct) = 1 - F_correct(s)
-        P_score_given_correct = 1 - jax.scipy.stats.beta.cdf(
+        p_score_given_correct = 1 - jax.scipy.stats.beta.cdf(
             a=self.mixture_parameters.correct_alpha,
             b=self.mixture_parameters.correct_beta,
-            x=score
-            )
+            x=score,
+        )
 
         # Mixture tail probability P(S >= s)
-        P_mixture_tail = (
-            self.mixture_parameters.proportion * P_score_given_correct +
-            (1 - self.mixture_parameters.proportion) * P_score_given_incorrect
+        p_mixture_tail = (
+            self.mixture_parameters.proportion * p_score_given_correct
+            + (1 - self.mixture_parameters.proportion) * p_score_given_incorrect
         )
 
         # P(incorrect | S >= s)
-        P_incorrect_given_score = (
+        p_incorrect_given_score = (
             (1 - self.mixture_parameters.proportion)
-            * P_score_given_incorrect
-            / (P_mixture_tail + FDR_EPS)
+            * p_score_given_incorrect
+            / (p_mixture_tail + FDR_EPS)
         )
 
-        return P_incorrect_given_score.item()
+        return p_incorrect_given_score.item()
 
     def compute_posterior_probability(self, score: float) -> float:
-        """Compute posterior error probability, or local FDR, for a given confidence score."""
+        """Compute posterior error probability, or local FDR, for a given confidence score.
+
+        Args:
+            score (float): The confidence score.
+
+        Returns:
+            float: The PEP estimate
+        """
         # P(incorrect | S = s) = [P(incorrect) * P(S = s | incorrect)] / P(S = s)
 
         # f(S = s | incorrect)
         f_score_given_incorrect = jax.scipy.stats.beta.pdf(
             a=self.mixture_parameters.incorrect_alpha,
             b=self.mixture_parameters.incorrect_beta,
-            x=score
+            x=score,
         )
         # f(S = s | correct)
         f_score_given_correct = jax.scipy.stats.beta.pdf(
             a=self.mixture_parameters.correct_alpha,
             b=self.mixture_parameters.correct_beta,
-            x=score
+            x=score,
         )
 
         # Mixture probability f(S = s)
         f_score = (
-            self.mixture_parameters.proportion * f_score_given_correct +
-            (1 - self.mixture_parameters.proportion) * f_score_given_incorrect
+            self.mixture_parameters.proportion * f_score_given_correct
+            + (1 - self.mixture_parameters.proportion) * f_score_given_incorrect
         )
-        
-        return ((1 - self.mixture_parameters.proportion) * f_score_given_incorrect / f_score).item()
+
+        return (
+            (1 - self.mixture_parameters.proportion) * f_score_given_incorrect / f_score
+        ).item()
 
     def compute_p_value(self, score: float) -> float:
-        """Compute the p-value for a given confidence score."""
+        """Compute the p-value for a given confidence score.
+
+        Args:
+            score (float): The confidence score.
+
+        Returns:
+            float: The p-value estimate
+        """
         # P(S >= score | incorrect) = 1 - F_incorrect(s)
-        P_score_given_incorrect = 1 - jax.scipy.stats.beta.cdf(
+        p_score_given_incorrect = 1 - jax.scipy.stats.beta.cdf(
             a=self.mixture_parameters.incorrect_alpha,
             b=self.mixture_parameters.incorrect_beta,
-            x=score
-            )
-        return P_score_given_incorrect.item()
+            x=score,
+        )
+        return p_score_given_incorrect.item()
 
     def compute_expect_score(self, score: float, total_matches: int) -> float:
-        """Compute the expected number of false discoveries for a given score."""
+        """Compute the expected number of false discoveries for a given score.
+
+        Args:
+            score (float): The confidence score.
+
+        Returns:
+            float: The expect score estimate
+        """
         p_value = self.compute_p_value(score)
-        return (total_matches * p_value).item()
+        return total_matches * p_value

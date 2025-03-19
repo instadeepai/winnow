@@ -6,6 +6,7 @@ Classes:
     CalibrationDataset: The main class for storing and processing calibration datasets.
 """
 
+import ast
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -64,10 +65,72 @@ class CalibrationDataset:
     metadata: pd.DataFrame
     predictions: List[Optional[List[ScoredSequence]]]
 
+    def save(self, data_dir: Path) -> None:
+        """Save a `CalibrationDataset` to a directory.
+
+        Args:
+            data_dir (Path): Directory to save the dataset. This will contain `metadata.csv` and
+                            optionally, `predictions.pkl` for serialized beam search results.
+        """
+        data_dir.mkdir(parents=True)
+        with (data_dir / "metadata.csv").open(mode="w") as metadata_file:
+            output_metadata = self.metadata.copy(deep=True)
+            output_metadata["peptide"] = output_metadata["peptide"].apply(
+                lambda peptide_list: "".join(peptide_list)
+            )
+            output_metadata["prediction"] = output_metadata["prediction"].apply(
+                lambda peptide_list: "".join(peptide_list)
+            )
+            output_metadata.to_csv(metadata_file, index=False)
+
+        if self.predictions:
+            with (data_dir / "predictions.pkl").open(mode="wb") as predictions_file:
+                pickle.dump(self.predictions, predictions_file)
+
     @property
     def confidence_column(self) -> str:
         """Returns the column name that stores confidence scores in the dataset."""
         return "confidence"
+
+    @classmethod
+    def load(cls, data_dir: Path) -> "CalibrationDataset":
+        """Load `CalibrationDataset` saved using the `save` method from a directory.
+
+        Args:
+            data_dir (Path): Path to a directory containing `metadata.csv` and
+                            optionally, `predictions.pkl` for serialized beam search results.
+
+        Returns:
+            CalibrationDataset: The loaded dataset.
+        """
+        with (data_dir / "metadata.csv").open(mode="r") as metadata_file:
+            metadata = pd.read_csv(metadata_file)
+            metadata["peptide"] = metadata["peptide"].apply(metrics._split_peptide)
+            metadata["prediction"] = metadata["prediction"].apply(
+                metrics._split_peptide
+            )
+            metadata["mz_array"] = metadata["mz_array"].apply(
+                lambda s: ast.literal_eval(s)
+                if "," in s
+                else ast.literal_eval(
+                    re.sub(r"(\n?)(\s+)", ", ", re.sub(r"\[\s+", "[", s))
+                )
+            )
+            metadata["intensity_array"] = metadata["intensity_array"].apply(
+                lambda s: ast.literal_eval(s)
+                if "," in s
+                else ast.literal_eval(
+                    re.sub(r"(\n?)(\s+)", ", ", re.sub(r"\[\s+", "[", s))
+                )
+            )
+
+        predictions_path = data_dir / "predictions.pkl"
+        if predictions_path.exists():
+            with (data_dir / "predictions.pkl").open(mode="rb") as predictions_file:
+                predictions = pickle.load(predictions_file)
+        else:
+            predictions = None
+        return cls(metadata=metadata, predictions=predictions)
 
     @classmethod
     def from_predictions_csv(
@@ -425,6 +488,11 @@ class CalibrationDataset:
         """
         self.metadata.to_csv(path)
 
+    def __len__(self) -> int:
+        """Returns the number of entries in the dataset."""
+        assert self.metadata.shape[0] == len(self.predictions)
+        return len(self.predictions)
+
     def __getitem__(self, index) -> Tuple[pd.Series, List[ScoredSequence]]:
         """Retrieves a metadata row and its corresponding prediction.
 
@@ -435,8 +503,3 @@ class CalibrationDataset:
             Tuple[pd.Series, List[ScoredSequence]]: The metadata row and its associated predictions.
         """
         return self.metadata.iloc[index], self.predictions[index]
-
-    def __len__(self) -> int:
-        """Returns the number of entries in the dataset."""
-        assert self.metadata.shape[0] == len(self.predictions)
-        return len(self.predictions)

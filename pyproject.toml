@@ -4,8 +4,27 @@ authors = [{name="InstaDeep"}]
 description = "Score calibration and false discovery estimation for de novo peptide sequencing."
 readme = "README.md"
 version = "1.0.0"
-dynamic = ["dependencies", "optional-dependencies"]
 requires-python = "==3.9.*"
+dependencies = [
+    "instanovo>=0.1.7",
+    "ipykernel>=6.29.5",
+    "ipywidgets>=8.1.5",
+    "jax>=0.4.30",
+    "jaxtyping>=0.2.36",
+    "koinapy>=0.0.10",
+    "numpy>=1.23.3",
+    "numpyro>=0.17.0",
+    "pandas>=2.0.3",
+    "polars>=0.19.7",
+    "pre-commit>=4.1.0",
+    "pyteomics>=4.7.5",
+    "scikit-learn>=1.1.2",
+    "scipy>=1.10.1",
+    "seaborn>=0.12.2",
+    "tensorflow-probability>=0.25.0",
+    "tomli>=2.2.1",
+    "typer>=0.15.2",
+]
 
 [build-system]
 requires = ["setuptools"]
@@ -20,3 +39,6 @@ optional-dependencies.dev = {file = ["requirements/requirements-dev.txt"]}
 
 [tool.uv]
 override-dependencies = ["seaborn==0.12.2"]
+
+[project.scripts]
+winnow='winnow.scripts.main:app'
