@@ -394,6 +394,7 @@ networkx==3.4.2
     #   torch
 numba==0.60.0
     # via
+    #   winnow (pyproject.toml)
     #   matchms
     #   sparsestack
     #   spectrum-utils
@@ -740,6 +741,8 @@ tensorflow-probability==0.25.0
     # via winnow (pyproject.toml)
 threadpoolctl==3.5.0
     # via scikit-learn
+tomli==2.2.1
+    # via winnow (pyproject.toml)
 tomlkit==0.13.2
     # via dvc
 torch==2.4.1
@@ -782,7 +785,9 @@ triton==3.0.0
 tritonclient==2.46.0
     # via koinapy
 typer==0.15.2
-    # via gto
+    # via
+    #   winnow (pyproject.toml)
+    #   gto
 types-python-dateutil==2.9.0.20241206
     # via arrow
 typing-extensions==4.12.2
