@@ -269,9 +269,7 @@ def estimate(
     ],
     output_path: Annotated[
         Path,
-        typer.Option(
-            help="The path to the config with the specification of the dataset."
-        ),
+        typer.Option(help="The path to write the output to."),
     ],
 ) -> None:
     """Estimate FDR and filter for a threshold.
@@ -282,7 +280,7 @@ def estimate(
         calibrated_data_source (Annotated[ DataSource, typer.Option, optional): The type of PSM dataset to be calibrated.
         calibrated_dataset_config_path (Annotated[ Path, typer.Option, optional): The path to the config with the specification of the dataset.
         confidence_column (Annotated[ str, typer.Option, optional): Name of the column with confidence scores.
-        output_path (Annotated[ Path, typer.Option, optional): The path to the config with the specification of the dataset.
+        output_path (Annotated[ Path, typer.Option, optional): The path to write the output to.
     """
     # -- Load dataset
     logger.info("Loading datasets.")
