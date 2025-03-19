@@ -14,4 +14,4 @@ jobs:
       - name: Install dependencies
         run: uv sync --only-dev
       - name: Run pre-commit hooks
-        run: uv run pre-commit run --all-files
+        run: uv run --only-dev pre-commit run --all-files
