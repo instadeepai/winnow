@@ -1,0 +1,23 @@
+name: Feature
+description: Make a proposal for a new feature.
+title: "feat: "
+labels: ["feature"]
+
+body:
+  - type: textarea
+    attributes:
+      label: "Summary:"
+      description: >
+        Provide a brief summary of the feature to be added.
+
+  - type: textarea
+    attributes:
+      label: "Description & Purpose:"
+      description: >
+        Describe in more detail the feature and the purpose it will serve.
+
+  - type: textarea
+    attributes:
+      label: "Additional Notes:"
+      description: >
+        Any additional notes.

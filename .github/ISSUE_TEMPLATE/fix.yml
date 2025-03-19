@@ -1,0 +1,41 @@
+name: Bug
+description: Report a bug.
+title: "fix: "
+labels: ["bug"]
+
+body:
+  - type: textarea
+    attributes:
+      label: "Summary:"
+      description: >
+        Provide a brief summary of the observed bug.
+
+  - type: textarea
+    attributes:
+      label: "Steps to reproduce:"
+      description: >
+        Describe the step-by-step process for reproducing the bug.
+
+  - type: textarea
+    attributes:
+      label: "Expected Behaviour:"
+      description: >
+        What is the expected behaviour if the bug was not present.
+
+  - type: textarea
+    attributes:
+      label: "Actual Behaviour:"
+      description: >
+        What is the actual behaviour caused by the bug.
+
+  - type: textarea
+    attributes:
+      label: "Possible Solution:"
+      description: >
+        [OPTIONAL] If known, what is/are the possible solution(s) to fix the bug.
+
+  - type: textarea
+    attributes:
+      label: "Additional Notes:"
+      description: >
+        Any additional notes.

@@ -1,0 +1,23 @@
+name: Continuous Integration
+description: Make a proposal or report an issue related to the CI/CD pipeline.
+title: "ci: "
+labels: ["ci"]
+
+body:
+  - type: textarea
+    attributes:
+      label: "Summary:"
+      description: >
+        Provide a brief summary of the CI change.
+
+  - type: textarea
+    attributes:
+      label: "Description & Purpose:"
+      description: >
+        Describe in more detail the CI change and the purpose it will serve.
+
+  - type: textarea
+    attributes:
+      label: "Additional Notes:"
+      description: >
+        Any additional notes.
