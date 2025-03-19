@@ -10,6 +10,7 @@ from winnow.fdr.base import FDRControl
 
 
 EPS = 1e-7
+FDR_EPS = 1e-8
 
 
 @dataclass
@@ -215,7 +216,7 @@ class EmpiricalBayesFDRControl(FDRControl):
         p_incorrect_given_score = (
             (1 - self.mixture_parameters.proportion)
             * p_score_given_incorrect
-            / p_mixture_tail
+            / (p_mixture_tail + FDR_EPS)
         )
 
         return p_incorrect_given_score.item()
