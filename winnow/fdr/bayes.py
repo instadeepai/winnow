@@ -56,31 +56,31 @@ class EmpiricalBayesFDRControl(FDRControl):
         )
         correct_alpha = numpyro.param(
             "correct_alpha",
-            init_value=0.7,
+            init_value=10.0,
             constraints=numpyro.distributions.constraints.open_interval(0.0, 1.0),
         )
         correct_beta = numpyro.param(
             "correct_beta",
-            init_value=0.5,
+            init_value=1.0,
             constraints=numpyro.distributions.constraints.open_interval(0.0, 1.0),
         )
         incorrect_alpha = numpyro.param(
             "incorrect_alpha",
-            init_value=0.4,
+            init_value=1.0,
             constraints=numpyro.distributions.constraints.open_interval(0.0, 1.0),
         )
         incorrect_beta = numpyro.param(
             "incorrect_beta",
-            init_value=0.6,
+            init_value=10.0,
             constraints=numpyro.distributions.constraints.open_interval(0.0, 1.0),
         )
 
         mixture_distributions = [
             numpyro.distributions.Beta(
-                concentration0=correct_alpha, concentration1=correct_beta
+                concentration0=correct_beta, concentration1=correct_alpha
             ),
             numpyro.distributions.Beta(
-                concentration0=incorrect_alpha, concentration1=incorrect_beta
+                concentration0=incorrect_beta, concentration1=incorrect_alpha
             ),
         ]
 
@@ -210,7 +210,7 @@ class EmpiricalBayesFDRControl(FDRControl):
         P_incorrect_given_score = (  # noqa: N806
             (1 - self.mixture_parameters.proportion)
             * P_score_given_incorrect
-            / P_mixture_tail
+            / (P_mixture_tail + 1e-8)
         )
 
         return P_incorrect_given_score.item()
