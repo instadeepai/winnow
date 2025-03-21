@@ -90,7 +90,7 @@ class DatabaseGroundedFDRControl(FDRControl):
         """
         return self.confidence_scores[
             bisect.bisect_left(self.fdr_thresholds, threshold)
-        ]
+        ].item()  # type: ignore
 
     def compute_fdr(self, score: float) -> float:
         """Compute FDR estimate at a given confidence cutoff.

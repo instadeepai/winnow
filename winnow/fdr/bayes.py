@@ -5,6 +5,7 @@ from scipy import optimize
 import jax
 import jax.numpy as jnp
 import numpyro
+import pandas as pd
 from jaxtyping import Float
 from winnow.fdr.base import FDRControl
 
@@ -283,3 +284,23 @@ class EmpiricalBayesFDRControl(FDRControl):
         """
         p_value = self.compute_p_value(score)
         return total_matches * p_value
+
+    def add_psm_pep(
+        self, dataset_metadata: pd.DataFrame, confidence_col: str
+    ) -> pd.DataFrame:
+        """Add PSM-specific FDR values as a new column to the dataset."""
+        dataset_metadata = dataset_metadata.copy()
+        dataset_metadata["psm_pep"] = dataset_metadata[confidence_col].apply(
+            self.compute_posterior_probability
+        )
+        return dataset_metadata
+
+    def add_psm_p_value(
+        self, dataset_metadata: pd.DataFrame, confidence_col: str
+    ) -> pd.DataFrame:
+        """Add PSM-specific FDR values as a new column to the dataset."""
+        dataset_metadata = dataset_metadata.copy()
+        dataset_metadata["psm_p_value"] = dataset_metadata[confidence_col].apply(
+            self.compute_p_value
+        )
+        return dataset_metadata
