@@ -5,6 +5,7 @@ from abc import abstractmethod
 from typing import Iterable, Tuple, TypeVar
 
 import numpy as np
+import pandas as pd
 
 from jaxtyping import Float
 
@@ -67,6 +68,16 @@ class FDRControl(metaclass=ABCMeta):
     def compute_fdr(self, score: float) -> float:
         """Compute FDR for a given confidence score."""
         pass
+
+    def add_psm_fdr(
+        self, dataset_metadata: pd.DataFrame, confidence_col: str
+    ) -> pd.DataFrame:
+        """Add PSM-specific FDR values as a new column to the dataset."""
+        dataset_metadata = dataset_metadata.copy()
+        dataset_metadata["psm_fdr"] = dataset_metadata[confidence_col].apply(
+            self.compute_fdr
+        )
+        return dataset_metadata
 
     def get_confidence_curve(
         self, resolution: float, min_confidence: float, max_confidence: float
