@@ -173,7 +173,7 @@ def main():
     logger.info("Applying FDR control to de novo dataset.")
     annotated_dataset = apply_fdr_control(annotated_dataset)
     output_path = f"{OUTPUTS_BASE_DIR}/de_novo/{SPECIES}_de_novo_preds.csv"
-    annotated_dataset.to_csv(output_path)
+    annotated_dataset.to_parquet(output_path)
     logger.info(f"de novo dataset predictions saved: {output_path}")
 
 
