@@ -14,7 +14,6 @@ import logging
 from rich.logging import RichHandler
 from pathlib import Path
 import pandas as pd
-import ast
 import pickle
 from sklearn.model_selection import train_test_split
 
@@ -41,21 +40,6 @@ logger.addHandler(RichHandler())
 
 
 # --- Utility Functions ---
-def try_convert(value: str):
-    """Safely convert string representations of lists."""
-    try:
-        return ast.literal_eval(value)
-    except (ValueError, SyntaxError):
-        return value
-
-
-def check_uniqueness(df: pd.DataFrame, name: str):
-    """Ensure spectrum_id is unique."""
-    if df["spectrum_id"].nunique() != len(df):
-        raise ValueError(f"Dataset {name} does not have unique spectrum_id.")
-    logger.info(f"{name}: spectrum_id can uniquely identify rows.")
-
-
 def filter_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
     """Apply dataset filtering."""
     return (
