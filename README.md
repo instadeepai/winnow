@@ -112,8 +112,8 @@ uv pip install https://github.com/instadeepai/winnow
 
 Installing `winnow` provides the `winnow` command with two sub-commands:
 
-1. `winnow calibrate` – Performs confidence calibration on a dataset of PSMs.
-2. `winnow estimate` – Estimates and controls FDR using calibrated confidence scores.
+1. `winnow train` – Performs confidence calibration on a dataset of annotated PSMs, outputting the fitted model checkpoint.
+2. `winnow predict` – Performs confidence calibration using a fitted model checkpoint, estimates and controls FDR using the calibrated confidence scores.
 
 Refer to the documentation for details on command-line arguments and usage examples.
 
