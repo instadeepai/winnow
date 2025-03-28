@@ -514,7 +514,7 @@ class BeamFeatures(CalibrationFeatures):
         Returns:
             List[str]: A list of column names: ["margin", "median_margin", "entropy"].
         """
-        return ["margin", "median_margin", "entropy"]
+        return ["margin", "median_margin", "entropy", "z-score"]
 
     def prepare(self, dataset: CalibrationDataset) -> None:
         """Prepares the dataset before feature computation.
@@ -532,6 +532,7 @@ class BeamFeatures(CalibrationFeatures):
         - Margin: Difference between the highest probability sequence and the second-best sequence.
         - Median Margin: Difference between the highest probability sequence and the median probability of the runner-ups.
         - Entropy: Shannon entropy of the normalised probabilities of the runner-up sequences.
+        - Z-score: Distance between the top beam score and the population mean over all beam results for that spectra in units of the standard deviation.
 
         These metrics help assess the confidence of the top prediction relative to lower-ranked candidates.
 
@@ -581,10 +582,23 @@ class BeamFeatures(CalibrationFeatures):
             top_prob - median_prob
             for top_prob, median_prob in zip(top_probs, runner_up_median)
         ]
+
+        # Function to compute mean, std, and z-score over a row's beam results
+        def row_beam_z_score(row):
+            probabilities = [exp(beam.sequence_log_probability) for beam in row]
+            mean_prob = np.mean(probabilities)
+            std_prob = np.std(probabilities)
+            if std_prob == 0:  # Avoid division by zero
+                return 0  # Assign zero if all values are the same
+            return (probabilities[0] - mean_prob) / std_prob
+
+        z_score = [row_beam_z_score(prediction) for prediction in dataset.predictions]
+
         # dataset.metadata['confidence'] = top_probs
         dataset.metadata["margin"] = second_margin
         dataset.metadata["median_margin"] = median_margin
         dataset.metadata["entropy"] = runner_up_entropy
+        dataset.metadata["z-score"] = z_score
 
 
 class RetentionTimeFeature(CalibrationFeatures):
