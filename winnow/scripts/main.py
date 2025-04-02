@@ -165,6 +165,9 @@ def filter_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
         .filter_entries(
             metadata_predicate=lambda row: row["precursor_charge"] > 6
         )  # Prosit-specific filtering, see https://github.com/Nesvilab/FragPipe/issues/1775
+        .filter_entries(
+            predictions_predicate=lambda row: len(row[1].sequence) > 30
+        )  # Prosit-specific filtering
     )
     return filtered_dataset
 
