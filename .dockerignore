@@ -1,0 +1,30 @@
+# # Ignore all by default to reduce build context as much as possible
+*
+
+# Python requirements installed in the docker
+!requirements.txt
+
+# To use the repository as a package
+!README.md
+
+# To run the linters in the CI job
+!.pre-commit-config.yaml
+
+# To run the tests
+!tests
+!winnow
+
+# To run scripts
+!scripts
+
+# To run Make commands
+!Makefile
+
+# To parse the number of GPUs
+!manifest.yaml
+
+# To read the config files
+!configs
+
+# To install winnow
+!pyproject.toml
