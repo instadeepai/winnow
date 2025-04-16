@@ -232,10 +232,10 @@ def check_if_labelled(dataset: CalibrationDataset) -> None:
 
 @app.command(name="train", help="Fit a calibration model.")
 def train(
-    calibration_data_source: Annotated[
+    data_source: Annotated[
         DataSource, typer.Option(help="The type of PSM dataset to be calibrated.")
     ],
-    calibration_dataset_config_path: Annotated[
+    dataset_config_path: Annotated[
         Path,
         typer.Option(
             help="The path to the config with the specification of the calibration dataset."
@@ -244,23 +244,23 @@ def train(
     model_output_folder: Annotated[
         Path, typer.Option(help="The path to write the fitted model checkpoints to.")
     ],
-    data_output_path: Annotated[
+    dataset_output_path: Annotated[
         Path, typer.Option(help="The path to write the output to.")
     ],
 ):
     """Fit the calibration model.
 
     Args:
-        calibration_data_source (Annotated[ DataSource, typer.Option, optional): The type of PSM dataset to be calibrated.
-        calibration_dataset_config_path (Annotated[ Path, typer.Option, optional): The path to the config with the specification of the calibration dataset.
+        data_source (Annotated[ DataSource, typer.Option, optional): The type of PSM dataset to be calibrated.
+        dataset_config_path (Annotated[ Path, typer.Option, optional): The path to the config with the specification of the calibration dataset.
         model_output_folder (Annotated[Path, typer.Option, optional]): The path to write the fitted model checkpoints to.
-        output_path (Annotated[Path, typer.Option, optional): The path to write the output to.
+        dataset_output_path (Annotated[Path, typer.Option, optional): The path to write the output to.
     """
     # -- Load dataset
     logger.info("Loading datasets.")
     annotated_dataset = load_dataset(
-        data_source=calibration_data_source,
-        dataset_config_path=calibration_dataset_config_path,
+        data_source=data_source,
+        dataset_config_path=dataset_config_path,
     )
 
     annotated_dataset = filter_dataset(annotated_dataset)
@@ -285,8 +285,8 @@ def train(
 
     # -- Write output
     logger.info("Writing output.")
-    annotated_dataset.to_csv(data_output_path)
-    logger.info(f"Training dataset results saved: {data_output_path}")
+    annotated_dataset.to_csv(dataset_output_path)
+    logger.info(f"Training dataset results saved: {dataset_output_path}")
 
 
 @app.command(
@@ -294,10 +294,10 @@ def train(
     help="Calibrate scores and optionally filter results to a target FDR.",
 )
 def predict(
-    calibration_data_source: Annotated[
+    data_source: Annotated[
         DataSource, typer.Option(help="The type of PSM dataset to be calibrated.")
     ],
-    calibration_dataset_config_path: Annotated[
+    dataset_config_path: Annotated[
         Path,
         typer.Option(
             help="The path to the config with the specification of the calibration dataset."
@@ -323,9 +323,9 @@ def predict(
     """Calibrate model scores, estimate FDR and filter for a threshold.
 
     Args:
-        calibrated_data_source (Annotated[ DataSource, typer.Option, optional): The type of PSM dataset to be calibrated.
-        calibrated_dataset_config_path (Annotated[ Path, typer.Option, optional): The path to the config with the specification of the dataset.
-        model_path (Annotated[ Path, typer.Option, optional): The path to calibrator checkpoint.s
+        data_source (Annotated[ DataSource, typer.Option, optional): The type of PSM dataset to be calibrated.
+        dataset_config_path (Annotated[ Path, typer.Option, optional): The path to the config with the specification of the dataset.
+        model_folder (Annotated[ Path, typer.Option, optional): The path to calibrator checkpoints.
         method (Annotated[ FDRMethod, typer.Option, optional): Method to use for FDR estimation.
         fdr_threshold (Annotated[ float, typer.Option, optional): The target FDR threshold (e.g. 0.01 for 1%, 0.05 for 5% etc.).
         confidence_column (Annotated[ str, typer.Option, optional): Name of the column with confidence scores.
@@ -334,8 +334,8 @@ def predict(
     # -- Load dataset
     logger.info("Loading datasets.")
     dataset = load_dataset(
-        data_source=calibration_data_source,
-        dataset_config_path=calibration_dataset_config_path,
+        data_source=data_source,
+        dataset_config_path=dataset_config_path,
     )
 
     dataset = filter_dataset(dataset)
