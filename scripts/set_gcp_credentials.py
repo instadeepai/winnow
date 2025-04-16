@@ -53,7 +53,7 @@ def set_credentials() -> None:
         raise OSError(msg) from None
 
     credentials = json.loads(base64.b64decode(gcp_credentials_encoded).decode())
-    gcp_credentials_path = Path("gcp_credentials.json")
+    gcp_credentials_path = Path("ext-dtu-denovo-sequencing-gcp.json")
     with open(gcp_credentials_path, "w") as f:
         json.dump(credentials, f)
     print(f"Created {gcp_credentials_path}")
