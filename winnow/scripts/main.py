@@ -20,7 +20,6 @@ import logging
 from rich.logging import RichHandler
 from pathlib import Path
 import yaml
-import pickle
 import pandas as pd
 
 
@@ -268,17 +267,8 @@ def train(
     calibrator.fit(annotated_dataset)
 
     # -- Write model checkpoints
-    model_output_folder.mkdir(parents=True, exist_ok=True)
-    calibrator_classifier_path = model_output_folder / "calibrator.pkl"
-    irt_predictor_path = model_output_folder / "irt_predictor.pkl"
-
-    with calibrator_classifier_path.open(mode="wb") as f:
-        pickle.dump(calibrator.classifier, f)
-
-    with irt_predictor_path.open(mode="wb") as f:
-        pickle.dump(calibrator.feature_dict["Prosit iRT Features"].irt_predictor, f)  # type: ignore
-
-    logger.info(f"Model checkpoints saved: {model_output_folder}")
+    logger.info(f"Saving model to {model_output_folder}")
+    ProbabilityCalibrator.save(calibrator, model_output_folder)
 
     # -- Write output
     logger.info("Writing output.")
@@ -339,15 +329,7 @@ def predict(
 
     # Predict
     logger.info("Loading calibrator.")
-    calibrator = initialise_calibrator()
-    calibrator_classifier_path = model_folder / "/calibrator.pkl"
-    irt_predictor_path = model_folder / "/irt_predictor.pkl"
-
-    with open(calibrator_classifier_path, "rb") as file:
-        calibrator.classifier = pickle.load(file)
-
-    with open(irt_predictor_path, "rb") as file:
-        calibrator.feature_dict["Prosit iRT Features"].irt_predictor = pickle.load(file)  # type: ignore
+    calibrator = ProbabilityCalibrator.load(model_folder)
 
     logger.info("Calibrating scores.")
     calibrator.predict(dataset)

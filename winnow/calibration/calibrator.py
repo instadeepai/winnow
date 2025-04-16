@@ -1,8 +1,8 @@
 """Contains classes and functions for probability recalibration."""
 
 from typing import Dict, List, Tuple, Union
-
-
+from pathlib import Path
+import pickle
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 from jaxtyping import Float
@@ -47,6 +47,57 @@ class ProbabilityCalibrator:
             List[str]: The list of feature names
         """
         return list(self.feature_dict.keys())
+
+    @classmethod
+    def save(cls, calibrator: "ProbabilityCalibrator", path: Path) -> None:
+        """Save the calibrator to a file.
+
+        Args:
+            calibrator (ProbabilityCalibrator): The calibrator to save.
+            path (Path): The path to save the calibrator to.
+        """
+        path.mkdir(parents=True)
+        calibrator_classifier_path = path / "calibrator.pkl"
+        irt_predictor_path = path / "irt_predictor.pkl"
+
+        with calibrator_classifier_path.open(mode="wb") as f:
+            pickle.dump(calibrator.classifier, f)
+
+        with irt_predictor_path.open(mode="wb") as f:
+            pickle.dump(calibrator.feature_dict["Prosit iRT Features"].irt_predictor, f)  # type: ignore
+
+    @classmethod
+    def load(cls, path: Path) -> "ProbabilityCalibrator":
+        """Load the calibrator from a file.
+
+        Args:
+            path (Path): The path to load the calibrator from.
+
+        Returns:
+            ProbabilityCalibrator: A new instance of the calibrator loaded from the file.
+        """
+        calibrator = cls()
+        calibrator.load_classifier(path / "calibrator.pkl")
+        calibrator.load_irt_predictor(path / "irt_predictor.pkl")
+        return calibrator
+
+    def load_classifier(self, path: Path) -> None:
+        """Load the classifier from a file.
+
+        Args:
+            path (Path): The path to load the classifier from.
+        """
+        with path.open(mode="rb") as f:
+            self.classifier = pickle.load(f)
+
+    def load_irt_predictor(self, path: Path) -> None:
+        """Load the iRT predictor from a file.
+
+        Args:
+            path (Path): The path to load the iRT predictor from.
+        """
+        with path.open(mode="rb") as f:
+            self.feature_dict["Prosit iRT Features"].irt_predictor = pickle.load(f)  # type: ignore
 
     def add_feature(self, feature: CalibrationFeatures) -> None:
         """Add a feature for the classifier used for calibration.
