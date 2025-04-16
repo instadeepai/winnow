@@ -744,7 +744,7 @@ class CalibrationDataset:
 
         return CalibrationDataset(predictions=predictions, metadata=metadata)
 
-    def to_csv(self, path: str) -> None:
+    def to_csv(self, path: Path) -> None:
         """Saves the dataset metadata to a CSV file.
 
         Args:

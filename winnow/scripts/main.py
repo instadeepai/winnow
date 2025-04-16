@@ -1,16 +1,4 @@
-from dataclasses import dataclass
-from enum import Enum
-import logging
-from pathlib import Path
-
-import yaml
-
-from rich.logging import RichHandler
-import typer
-from typing_extensions import Annotated
-
-from winnow.datasets.calibration_dataset import RESIDUE_MASSES, CalibrationDataset
-from winnow.calibration.calibrator import ProbabilityCalibrator
+# -- Import
 from winnow.calibration.calibration_features import (
     PrositFeatures,
     MassErrorFeature,
@@ -18,13 +6,31 @@ from winnow.calibration.calibration_features import (
     ChimericFeatures,
     BeamFeatures,
 )
+from winnow.calibration.calibrator import ProbabilityCalibrator
+from winnow.datasets.calibration_dataset import RESIDUE_MASSES, CalibrationDataset
 from winnow.fdr.bayes import EmpiricalBayesFDRControl
 from winnow.fdr.database_grounded import DatabaseGroundedFDRControl
 
+from dataclasses import dataclass
+from enum import Enum
+import typer
+from typing_extensions import Annotated
+from typing import Union
+import logging
+from rich.logging import RichHandler
+from pathlib import Path
+import yaml
+import pickle
+import pandas as pd
+
+
+# --- Configuration ---
 SEED = 42
 MZ_TOLERANCE = 0.02
 HIDDEN_DIM = 10
 TRAIN_FRACTION = 0.1
+FDR_LR = 0.005
+FDR_NSTEPS = 5000
 
 
 class DataSource(Enum):
@@ -75,6 +81,7 @@ class FDRMethod(Enum):
     winnow = "winnow"
 
 
+# --- Logging Setup ---
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 logger.addHandler(logging.StreamHandler())
@@ -159,7 +166,7 @@ def filter_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
     logger.info("Filtering dataset.")
     filtered_dataset = (
         dataset.filter_entries(
-            metadata_predicate=lambda row: not isinstance(row["prediction"], list),
+            metadata_predicate=lambda row: not isinstance(row["prediction"], list)
         )
         .filter_entries(metadata_predicate=lambda row: not row["prediction"])
         .filter_entries(
@@ -175,10 +182,56 @@ def filter_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
     return filtered_dataset
 
 
-@app.command(
-    name="calibrate", help="Fit a calibration model and perform predictions on file."
-)
-def calibrate(
+def initialise_calibrator() -> ProbabilityCalibrator:
+    """Set up the probability calibrator with features."""
+    calibrator = ProbabilityCalibrator(SEED)
+    calibrator.add_feature(MassErrorFeature(residue_masses=RESIDUE_MASSES))
+    calibrator.add_feature(PrositFeatures(mz_tolerance=MZ_TOLERANCE))
+    calibrator.add_feature(
+        RetentionTimeFeature(hidden_dim=HIDDEN_DIM, train_fraction=TRAIN_FRACTION)
+    )
+    calibrator.add_feature(ChimericFeatures(mz_tolerance=MZ_TOLERANCE))
+    calibrator.add_feature(BeamFeatures())
+    return calibrator
+
+
+def apply_fdr_control(
+    fdr_control: Union[EmpiricalBayesFDRControl, DatabaseGroundedFDRControl],
+    dataset: CalibrationDataset,
+    fdr_threshold: float,
+    confidence_column: str,
+) -> pd.DataFrame:
+    """Apply empirical Bayes FDR control."""
+    if isinstance(fdr_control, EmpiricalBayesFDRControl):
+        fdr_control.fit(
+            dataset=dataset.metadata[confidence_column], lr=FDR_LR, n_steps=FDR_NSTEPS
+        )
+        dataset.metadata = fdr_control.add_psm_pep(dataset.metadata, confidence_column)
+        dataset.metadata = fdr_control.add_psm_p_value(
+            dataset.metadata, confidence_column
+        )
+    else:
+        fdr_control.fit(
+            dataset=dataset.metadata[confidence_column],
+            residue_masses=RESIDUE_MASSES,
+        )
+    dataset.metadata = fdr_control.add_psm_fdr(dataset.metadata, confidence_column)
+    confidence_cutoff = fdr_control.get_confidence_cutoff(threshold=fdr_threshold)
+    output_data = dataset.metadata
+    output_data = output_data[output_data[confidence_column] >= confidence_cutoff]
+    return output_data
+
+
+def check_if_labelled(dataset: CalibrationDataset) -> None:
+    """Check if the dataset contains a ground-truth column."""
+    if "sequence" not in dataset.metadata.columns:
+        raise ValueError(
+            "Database-grounded FDR control can only be performed on annotated data."
+        )
+
+
+@app.command(name="train", help="Fit a calibration model.")
+def train(
     calibration_data_source: Annotated[
         DataSource, typer.Option(help="The type of PSM dataset to be calibrated.")
     ],
@@ -188,70 +241,71 @@ def calibrate(
             help="The path to the config with the specification of the calibration dataset."
         ),
     ],
-    prediction_data_source: Annotated[
-        DataSource, typer.Option(help="The type of PSM dataset to be predicted on.")
+    model_output_folder: Annotated[
+        Path, typer.Option(help="The path to write the fitted model checkpoints to.")
     ],
-    prediction_dataset_config_path: Annotated[
-        Path,
-        typer.Option(
-            help="The path to the config with the specification of the dataset to be predicted on."
-        ),
+    data_output_path: Annotated[
+        Path, typer.Option(help="The path to write the output to.")
     ],
-    output_path: Annotated[Path, typer.Option(help="The path to write the output to.")],
-) -> None:
-    """Fit the calibration model and predict on a new dataset.
+):
+    """Fit the calibration model.
 
     Args:
         calibration_data_source (Annotated[ DataSource, typer.Option, optional): The type of PSM dataset to be calibrated.
         calibration_dataset_config_path (Annotated[ Path, typer.Option, optional): The path to the config with the specification of the calibration dataset.
-        prediction_data_source (Annotated[ DataSource, typer.Option, optional): The type of PSM dataset to be predicted on.
-        prediction_dataset_config_path (Annotated[ Path, typer.Option, optional): The path to the config with the specification of the dataset to be predicted on.
+        model_output_folder (Annotated[Path, typer.Option, optional]): The path to write the fitted model checkpoints to.
         output_path (Annotated[Path, typer.Option, optional): The path to write the output to.
     """
     # -- Load dataset
     logger.info("Loading datasets.")
-    calibration_dataset = load_dataset(
+    annotated_dataset = load_dataset(
         data_source=calibration_data_source,
         dataset_config_path=calibration_dataset_config_path,
     )
-    filtered_calibration_dataset = filter_dataset(dataset=calibration_dataset)
 
-    prediction_dataset = load_dataset(
-        data_source=prediction_data_source,
-        dataset_config_path=prediction_dataset_config_path,
-    )
-    filtered_prediction_dataset = filter_dataset(dataset=prediction_dataset)
+    annotated_dataset = filter_dataset(annotated_dataset)
 
-    # -- Initialize calibrator
-    logger.info("Initializing calibrator.")
-    calibrator = ProbabilityCalibrator(SEED)
+    # Train
+    logger.info("Training calibrator.")
+    calibrator = initialise_calibrator()
+    calibrator.fit(annotated_dataset)
 
-    logger.info("Adding features to calibrator.")
-    calibrator.add_feature(MassErrorFeature(residue_masses=RESIDUE_MASSES))
-    calibrator.add_feature(PrositFeatures(mz_tolerance=MZ_TOLERANCE))
-    calibrator.add_feature(
-        RetentionTimeFeature(hidden_dim=HIDDEN_DIM, train_fraction=TRAIN_FRACTION)
-    )
-    calibrator.add_feature(ChimericFeatures(mz_tolerance=MZ_TOLERANCE))
-    calibrator.add_feature(BeamFeatures())
+    # -- Write model checkpoints
+    model_output_folder.mkdir(parents=True, exist_ok=True)
+    calibrator_classifier_path = model_output_folder / "calibrator.pkl"
+    irt_predictor_path = model_output_folder / "irt_predictor.pkl"
 
-    # -- Fit calibrator
-    logger.info("Calibrating scores.")
-    calibrator.fit(filtered_calibration_dataset)
+    with calibrator_classifier_path.open(mode="wb") as f:
+        pickle.dump(calibrator.classifier, f)
 
-    # -- Predict
-    logger.info("Calibrate inputs")
-    calibrator.predict(filtered_prediction_dataset)
+    with irt_predictor_path.open(mode="wb") as f:
+        pickle.dump(calibrator.feature_dict["Prosit iRT Features"].irt_predictor, f)  # type: ignore
+
+    logger.info(f"Model checkpoints saved: {model_output_folder}")
 
     # -- Write output
     logger.info("Writing output.")
-    filtered_prediction_dataset.save(data_dir=output_path)
+    annotated_dataset.to_csv(data_output_path)
+    logger.info(f"Training dataset results saved: {data_output_path}")
 
 
 @app.command(
-    name="estimate", help="Fit FDR estimator and filter results to target FDR."
+    name="predict",
+    help="Calibrate scores and optionally filter results to a target FDR.",
 )
-def estimate(
+def predict(
+    calibration_data_source: Annotated[
+        DataSource, typer.Option(help="The type of PSM dataset to be calibrated.")
+    ],
+    calibration_dataset_config_path: Annotated[
+        Path,
+        typer.Option(
+            help="The path to the config with the specification of the calibration dataset."
+        ),
+    ],
+    model_folder: Annotated[
+        Path, typer.Option(help="The path to calibrator checkpoints.")
+    ],
     method: Annotated[
         FDRMethod, typer.Option(help="Method to use for FDR estimation.")
     ],
@@ -261,70 +315,62 @@ def estimate(
             help="The target FDR threshold (e.g. 0.01 for 1%, 0.05 for 5% etc.)"
         ),
     ],
-    calibrated_data_source: Annotated[
-        DataSource, typer.Option(help="The type of PSM dataset to be calibrated.")
-    ],
-    calibrated_dataset_config_path: Annotated[
-        Path,
-        typer.Option(
-            help="The path to the config with the specification of the dataset."
-        ),
-    ],
     confidence_column: Annotated[
         str, typer.Option(help="Name of the column with confidence scores.")
     ],
-    output_path: Annotated[
-        Path,
-        typer.Option(help="The path to write the output to."),
-    ],
-) -> None:
-    """Estimate FDR and filter for a threshold.
+    output_path: Annotated[Path, typer.Option(help="The path to write the output to.")],
+):
+    """Calibrate model scores, estimate FDR and filter for a threshold.
 
     Args:
-        method (Annotated[ FDRMethod, typer.Option, optional): Method to use for FDR estimation.
-        fdr_threshold (Annotated[ float, typer.Option, optional): The target FDR threshold (e.g. 0.01 for 1%, 0.05 for 5% etc.).
         calibrated_data_source (Annotated[ DataSource, typer.Option, optional): The type of PSM dataset to be calibrated.
         calibrated_dataset_config_path (Annotated[ Path, typer.Option, optional): The path to the config with the specification of the dataset.
+        model_path (Annotated[ Path, typer.Option, optional): The path to calibrator checkpoint.s
+        method (Annotated[ FDRMethod, typer.Option, optional): Method to use for FDR estimation.
+        fdr_threshold (Annotated[ float, typer.Option, optional): The target FDR threshold (e.g. 0.01 for 1%, 0.05 for 5% etc.).
         confidence_column (Annotated[ str, typer.Option, optional): Name of the column with confidence scores.
         output_path (Annotated[ Path, typer.Option, optional): The path to write the output to.
     """
     # -- Load dataset
     logger.info("Loading datasets.")
-    calibrated_dataset = load_dataset(
-        data_source=calibrated_data_source,
-        dataset_config_path=calibrated_dataset_config_path,
+    dataset = load_dataset(
+        data_source=calibration_data_source,
+        dataset_config_path=calibration_dataset_config_path,
     )
 
-    # -- Initialize estimator
-    if method is FDRMethod.database:
-        logger.info("Initializing database-grounded FDR estimator.")
-        database_fdr_control = DatabaseGroundedFDRControl(
-            confidence_feature=confidence_column
-        )
-        logger.info("Fitting database-grounded FDR estimator.")
-        database_fdr_control.fit(
-            dataset=calibrated_dataset.metadata,
-            residue_masses=RESIDUE_MASSES,
-        )
-        logger.info("Estimating FDR threshold.")
-        confidence_cutoff = database_fdr_control.get_confidence_cutoff(
-            threshold=fdr_threshold
-        )
-    elif method is FDRMethod.winnow:
-        logger.info("Initializing Winnow FDR estimator.")
-        mixture_fdr_control = EmpiricalBayesFDRControl()
-        logger.info("Fitting Winnow FDR estimator.")
-        mixture_fdr_control.fit(dataset=calibrated_dataset.metadata[confidence_column])
-        logger.info("Estimating FDR threshold.")
-        confidence_cutoff = mixture_fdr_control.get_confidence_cutoff(
-            threshold=fdr_threshold
-        )
+    dataset = filter_dataset(dataset)
 
-    # -- Filter data
-    logger.info("Filtering data.")
-    output_data = calibrated_dataset.metadata
-    output_data = output_data[output_data[confidence_column] >= confidence_cutoff]
+    # Predict
+    logger.info("Loading calibrator.")
+    calibrator = initialise_calibrator()
+    calibrator_classifier_path = model_folder / "/calibrator.pkl"
+    irt_predictor_path = model_folder / "/irt_predictor.pkl"
+
+    with open(calibrator_classifier_path, "rb") as file:
+        calibrator.classifier = pickle.load(file)
+
+    with open(irt_predictor_path, "rb") as file:
+        calibrator.feature_dict["Prosit iRT Features"].irt_predictor = pickle.load(file)  # type: ignore
+
+    logger.info("Calibrating scores.")
+    calibrator.predict(dataset)
+
+    if method is FDRMethod.winnow:
+        logger.info("Applying FDR control.")
+        dataset_metadata = apply_fdr_control(
+            EmpiricalBayesFDRControl(), dataset, fdr_threshold, confidence_column
+        )
+    elif method is FDRMethod.database:
+        logger.info("Applying FDR control.")
+        check_if_labelled(dataset)
+        dataset_metadata = apply_fdr_control(
+            DatabaseGroundedFDRControl(confidence_feature=confidence_column),
+            dataset,
+            fdr_threshold,
+            confidence_column,
+        )
 
     # -- Write output
     logger.info("Writing output.")
-    output_data.to_csv(output_path)
+    dataset_metadata.to_csv(output_path)
+    logger.info(f"Outputs saved: {output_path}")
