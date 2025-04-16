@@ -10,8 +10,13 @@ from jaxtyping import Float
 from winnow.calibration.calibration_features import (
     CalibrationFeatures,
     FeatureDependency,
+    PrositFeatures,
+    MassErrorFeature,
+    RetentionTimeFeature,
+    ChimericFeatures,
+    BeamFeatures,
 )
-from winnow.datasets.calibration_dataset import CalibrationDataset
+from winnow.datasets.calibration_dataset import CalibrationDataset, RESIDUE_MASSES
 
 
 class ProbabilityCalibrator:
@@ -77,6 +82,19 @@ class ProbabilityCalibrator:
             ProbabilityCalibrator: A new instance of the calibrator loaded from the file.
         """
         calibrator = cls()
+
+        # Initialise the features that were used when saving
+        calibrator.add_feature(MassErrorFeature(residue_masses=RESIDUE_MASSES))
+        calibrator.add_feature(
+            PrositFeatures(mz_tolerance=0.02)
+        )  # Default value, should match training
+        calibrator.add_feature(
+            RetentionTimeFeature(hidden_dim=10, train_fraction=0.1)
+        )  # Default values
+        calibrator.add_feature(ChimericFeatures(mz_tolerance=0.02))  # Default value
+        calibrator.add_feature(BeamFeatures())
+
+        # Now load the saved data
         calibrator.load_classifier(path / "calibrator.pkl")
         calibrator.load_irt_predictor(path / "irt_predictor.pkl")
         return calibrator
