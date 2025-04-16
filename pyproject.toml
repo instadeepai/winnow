@@ -24,9 +24,6 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 packages = ["winnow"]
 
-[tool.uv.sources]
-instanovo = { git = "ssh://git@gitlab.com/instadeep/dtu-denovo-sequencing.git" }
-
 [dependency-groups]
 dev = [
     "pre-commit>=4.1.0",
