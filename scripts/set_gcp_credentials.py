@@ -31,17 +31,17 @@ def set_credentials() -> None:
                  is not set
 
     """
-    try:
-        gcp_crendentials_path = Path(os.environ["GOOGLE_APPLICATION_CREDENTIALS"])
-    except KeyError:
-        msg = (
-            "To use GCP buckets you should set 'GOOGLE_APPLICATION_CREDENTIALS' env variable. "
-            "It corresponds to the path to the json file with the credentials."
-        )
-        raise OSError(msg) from None
+    # try:
+    #     gcp_crendentials_path = Path(os.environ["GOOGLE_APPLICATION_CREDENTIALS"])
+    # except KeyError:
+    #     msg = (
+    #         "To use GCP buckets you should set 'GOOGLE_APPLICATION_CREDENTIALS' env variable. "
+    #         "It corresponds to the path to the json file with the credentials."
+    #     )
+    #     raise OSError(msg) from None
 
-    if gcp_crendentials_path.exists():
-        return
+    # if gcp_crendentials_path.exists():
+    #     return
 
     try:
         gcp_credentials_encoded = os.environ["GS_CREDENTIALS_ENCODED"]
@@ -53,9 +53,10 @@ def set_credentials() -> None:
         raise OSError(msg) from None
 
     credentials = json.loads(base64.b64decode(gcp_credentials_encoded).decode())
-    with open(gcp_crendentials_path, "w") as f:
+    gcp_credentials_path = Path("gcp_credentials.json")
+    with open(gcp_credentials_path, "w") as f:
         json.dump(credentials, f)
-    print(f"Created {gcp_crendentials_path}")
+    print(f"Created {gcp_credentials_path}")
 
 
 if __name__ == "__main__":
