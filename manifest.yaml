@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=https://instadeep.aichor.ai/schema/latest/manifest.schema.json
+kind: AIchorManifest
+apiVersion: 0.2.1
+builder:
+  image: winnow
+  dockerfile: ./Dockerfile
+  context: .
+  buildArgs:
+    USE_CUDA: "true"
+
+spec:
+  debug:
+      vscode:
+        enabled: false # required
+        path: "/aichor/code" # Optional, defaults to "code". Refer the absolute path of the binary if not findable in $PATH
+        provider: "github" # Optional, vscode tunnel provider. Options are "github" or "microsoft", defaults to "github"
+  operator: tf
+  image: instanovo
+  command: make set-gcp-credentials && make test
+
+  tensorboard: # optional, disabled by default
+    enabled: true
+
+  types:
+    Worker:
+      count: 1
+      resources:
+        cpus: 16
+        ramRatio: 8 # >= 2
+
+        accelerators:
+          gpu:
+            count: 0
+            type: gpu
+            product: NVIDIA-H100-80GB-HBM3
