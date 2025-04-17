@@ -26,23 +26,8 @@ def set_credentials() -> None:
     - For runs on AIchor we only have access to the encoded string which should be decoded and saved
 
     Raises:
-        OSError: if 'GOOGLE_APPLICATION_CREDENTIALS' is not set OR
-                 if 'GOOGLE_APPLICATION_CREDENTIALS' file does not exist and 'GS_CREDENTIALS_ENCODED'
-                 is not set
-
+        OSError: if 'GS_CREDENTIALS_ENCODED' is not set.
     """
-    # try:
-    #     gcp_crendentials_path = Path(os.environ["GOOGLE_APPLICATION_CREDENTIALS"])
-    # except KeyError:
-    #     msg = (
-    #         "To use GCP buckets you should set 'GOOGLE_APPLICATION_CREDENTIALS' env variable. "
-    #         "It corresponds to the path to the json file with the credentials."
-    #     )
-    #     raise OSError(msg) from None
-
-    # if gcp_crendentials_path.exists():
-    #     return
-
     try:
         gcp_credentials_encoded = os.environ["GS_CREDENTIALS_ENCODED"]
     except KeyError:
