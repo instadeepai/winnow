@@ -1,0 +1,3 @@
+# instanovo
+beam_predictions_path: data/${DATASET}_raw_beam_preds_filtered.csv
+spectrum_path: data/${DATASET}_raw_filtered.parquet

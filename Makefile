@@ -206,17 +206,109 @@ set-gcp-credentials:
 	gcloud auth activate-service-account dtu-denovo-sa@ext-dtu-denovo-sequencing-gcp.iam.gserviceaccount.com --key-file=ext-dtu-denovo-sequencing-gcp.json --project=ext-dtu-denovo-sequencing-gcp
 
 #################################################################################
-## Train commands																#
+## Dataset variables																#
 #################################################################################
 
-.PHONY: test
+# List of all datasets to process
+DATASETS := helaqc sbrodae herceptin immuno
 
-test:
-	mkdir data
-	gsutil cp gs://winnow-fdr/validation_datasets_corrected/beam_preds/labelled/helaqc-annotated_beam_preds.csv data/
-	gsutil cp gs://winnow-fdr/validation_datasets_corrected/spectrum_data/labelled/dataset-helaqc-annotated-0000-0001.parquet data/
-	gsutil cp gs://winnow-fdr/validation_datasets_corrected/beam_preds/de_novo/helaqc_raw_beam_preds_filtered.csv data/
-	gsutil cp gs://winnow-fdr/validation_datasets_corrected/spectrum_data/de_novo/helaqc_raw_filtered.parquet data/
+# Base directories
+DATA_DIR := data
+MODEL_DIR := runs
+
+# Default parameters
+TEST_FRACTION := 0.2
+RANDOM_STATE := 42
+
+# GCS paths
+GCS_BASE := gs://winnow-fdr/validation_datasets_corrected
+GCS_BEAM_PREDS_LABELLED := $(GCS_BASE)/beam_preds/labelled/%-annotated_beam_preds.csv
+GCS_SPECTRUM_LABELLED := $(GCS_BASE)/spectrum_data/labelled/dataset-%-annotated-0000-0001.parquet
+GCS_BEAM_PREDS_DE_NOVO := $(GCS_BASE)/beam_preds/de_novo/%-raw_beam_preds_filtered.csv
+GCS_SPECTRUM_DE_NOVO := $(GCS_BASE)/spectrum_data/de_novo/%-raw_filtered.parquet
+
+# GCS paths for results
+GCS_METADATA_LABELLED := gs://winnow-fdr/validation_datasets_corrected/winnow_metadata/labelled
+GCS_METADATA_DE_NOVO := gs://winnow-fdr/validation_datasets_corrected/winnow_metadata/de_novo
+GCS_CALIBRATOR_MODELS := gs://winnow-fdr/validation_datasets_corrected/calibrator_models
+
+# Config generation
+CONFIG_DIR := configs
+CONFIG_TEMPLATES := $(wildcard $(CONFIG_DIR)/*.yaml.template)
+
+# Pattern rule to generate configs for each dataset
+$(CONFIG_DIR)/%-$(DATASET).yaml: $(CONFIG_DIR)/%.yaml.template
+	sed 's/\$${DATASET}/$(DATASET)/g' $< > $@
+
+# Function to generate all configs for a dataset
+define generate-configs
+$(foreach template,$(CONFIG_TEMPLATES),\
+	$(eval CONFIG_NAME=$(basename $(notdir $(template)))-$(1).yaml)\
+	$(CONFIG_DIR)/$(CONFIG_NAME))
+endef
+
+#################################################################################
+## Dataset preparation and training targets										#
+#################################################################################
+
+.PHONY: prepare-all train-all clean-all $(addprefix prepare-,$(DATASETS)) $(addprefix train-,$(DATASETS))
+
+# Create necessary directories
+$(DATA_DIR) $(MODEL_DIR):
+	mkdir -p $@
+
+# Target to prepare all datasets
+prepare-all: $(addprefix prepare-,$(DATASETS))
+
+# Target to train on all datasets
+train-all: $(addprefix train-,$(DATASETS))
+
+# Pattern rule for preparing each dataset
+prepare-%: $(DATA_DIR)
+	# Download labelled data
+	gsutil cp $(GCS_BEAM_PREDS_LABELLED) $(DATA_DIR)/
+	gsutil cp $(GCS_SPECTRUM_LABELLED) $(DATA_DIR)/
+	# Download de novo data
+	gsutil cp $(GCS_BEAM_PREDS_DE_NOVO) $(DATA_DIR)/
+	gsutil cp $(GCS_SPECTRUM_DE_NOVO) $(DATA_DIR)/
+	# Create train/test split
+	python scripts/create_train_test_split.py \
+		--spectrum_path $(DATA_DIR)/dataset-$*-annotated-0000-0001.parquet \
+		--beam_predictions_path $(DATA_DIR)/$*-annotated_beam_preds.csv \
+		--output_dir $(DATA_DIR)/splits/$* \
+		--test_fraction $(TEST_FRACTION) \
+		--random_state $(RANDOM_STATE)
+	# Generate configs for this dataset
+	$(MAKE) $(call generate-configs,$*)
+
+# Pattern rule for copying results to GCP
+copy-results-%:
+	@echo "Copying results for $* to GCP..."
+	# Copy labelled data results
+	gsutil cp $(DATA_DIR)/splits/$*/labelled_winnow_predict_output.csv $(GCS_METADATA_LABELLED)/$*_test_labelled.csv
+	gsutil cp $(DATA_DIR)/splits/$*/train_output.csv $(GCS_METADATA_LABELLED)/$*_train_labelled.csv
+	# Copy de novo results
+	gsutil cp $(DATA_DIR)/splits/$*/de_novo_winnow_predict_output.csv $(GCS_METADATA_DE_NOVO)/$*_de_novo_preds.csv
+	# Copy model to GCP
+	gsutil -m cp -r $(MODEL_DIR)/$*/* $(GCS_CALIBRATOR_MODELS)/$*/
+	@echo "Results copied successfully!"
+
+# Pattern rule for training on each dataset
+train-%: $(MODEL_DIR) prepare-%
 	chmod +x run.sh
-	./run.sh
-	echo "done"
+	./run.sh $(MODEL_DIR)/$* $(DATA_DIR)/splits/$* $(CONFIG_DIR)/train-$*.yaml $(CONFIG_DIR)/predict_labelled-$*.yaml $(CONFIG_DIR)/predict_de_novo-$*.yaml
+	$(MAKE) copy-results-$*
+
+# Clean configs
+clean-configs:
+	rm -f $(CONFIG_DIR)/*-$(DATASET).yaml
+
+# Update clean-all to include configs
+clean-all: clean-configs
+	rm -rf $(DATA_DIR) $(MODEL_DIR)
+
+# Individual dataset targets
+evaluate-helaqc: train-helaqc
+evaluate-sbrodae: train-sbrodae
+evaluate-herceptin: train-herceptin
+evaluate-immuno: train-immuno

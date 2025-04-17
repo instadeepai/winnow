@@ -1,0 +1,2 @@
+# winnow
+data_dir: data/splits/${DATASET}/train

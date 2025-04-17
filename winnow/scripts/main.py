@@ -215,8 +215,9 @@ def apply_fdr_control(
         )
     dataset.metadata = fdr_control.add_psm_fdr(dataset.metadata, confidence_column)
     confidence_cutoff = fdr_control.get_confidence_cutoff(threshold=fdr_threshold)
+    logger.info(f"Confidence cutoff: {confidence_cutoff}")
     output_data = dataset.metadata
-    output_data = output_data[output_data[confidence_column] >= confidence_cutoff]
+    # output_data = output_data[output_data[confidence_column] >= confidence_cutoff]
     return output_data
 
 
