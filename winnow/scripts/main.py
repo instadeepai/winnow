@@ -81,10 +81,9 @@ class FDRMethod(Enum):
 
 
 # --- Logging Setup ---
+logging.basicConfig(level=logging.INFO, format="%(message)s", handlers=[RichHandler()])
+logging.getLogger("jax._src.path").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-logger.addHandler(logging.StreamHandler())
-logger.addHandler(RichHandler())
 
 app = typer.Typer(
     name="winnow",
@@ -250,10 +249,10 @@ def train(
     """Fit the calibration model.
 
     Args:
-        data_source (Annotated[ DataSource, typer.Option, optional): The type of PSM dataset to be calibrated.
-        dataset_config_path (Annotated[ Path, typer.Option, optional): The path to the config with the specification of the calibration dataset.
+        data_source (Annotated[DataSource, typer.Option, optional]): The type of PSM dataset to be calibrated.
+        dataset_config_path (Annotated[Path, typer.Option, optional]): The path to the config with the specification of the calibration dataset.
         model_output_folder (Annotated[Path, typer.Option, optional]): The path to write the fitted model checkpoints to.
-        dataset_output_path (Annotated[Path, typer.Option, optional): The path to write the output to.
+        dataset_output_path (Annotated[Path, typer.Option, optional]): The path to write the output to.
     """
     # -- Load dataset
     logger.info("Loading datasets.")
@@ -313,13 +312,13 @@ def predict(
     """Calibrate model scores, estimate FDR and filter for a threshold.
 
     Args:
-        data_source (Annotated[ DataSource, typer.Option, optional): The type of PSM dataset to be calibrated.
-        dataset_config_path (Annotated[ Path, typer.Option, optional): The path to the config with the specification of the dataset.
-        model_folder (Annotated[ Path, typer.Option, optional): The path to calibrator checkpoints.
-        method (Annotated[ FDRMethod, typer.Option, optional): Method to use for FDR estimation.
-        fdr_threshold (Annotated[ float, typer.Option, optional): The target FDR threshold (e.g. 0.01 for 1%, 0.05 for 5% etc.).
-        confidence_column (Annotated[ str, typer.Option, optional): Name of the column with confidence scores.
-        output_path (Annotated[ Path, typer.Option, optional): The path to write the output to.
+        data_source (Annotated[DataSource, typer.Option, optional]): The type of PSM dataset to be calibrated.
+        dataset_config_path (Annotated[Path, typer.Option, optional]): The path to the config with the specification of the dataset.
+        model_folder (Annotated[Path, typer.Option, optional]): The path to calibrator checkpoints.
+        method (Annotated[FDRMethod, typer.Option, optional]): Method to use for FDR estimation.
+        fdr_threshold (Annotated[float, typer.Option, optional]): The target FDR threshold (e.g. 0.01 for 1%, 0.05 for 5% etc.).
+        confidence_column (Annotated[str, typer.Option, optional]): Name of the column with confidence scores.
+        output_path (Annotated[Path, typer.Option, optional]): The path to write the output to.
     """
     # -- Load dataset
     logger.info("Loading datasets.")
