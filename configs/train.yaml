@@ -1,0 +1,6 @@
+# instanovo
+beam_predictions_path: data/helaqc-annotated_beam_preds.csv
+spectrum_path: data/dataset-helaqc-annotated-0000-0001.parquet
+
+# winnow
+# data_dir: /home/j-daniel/Repos/winnow/test_splitting

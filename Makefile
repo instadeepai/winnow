@@ -212,9 +212,11 @@ set-gcp-credentials:
 .PHONY: test
 
 test:
-	echo "test"
-	mkdir test_data
-	gsutil cp gs://winnow-fdr/validation_datasets_corrected/spectrum_data/de_novo/herceptin_raw_filtered.parquet test_data/
+	mkdir data
+	gsutil cp gs://winnow-fdr/validation_datasets_corrected/beam_preds/labelled/helaqc-annotated_beam_preds.csv data/
+	gsutil cp gs://winnow-fdr/validation_datasets_corrected/spectrum_data/labelled/dataset-helaqc-annotated-0000-0001.parquet data/
+	gsutil cp gs://winnow-fdr/validation_datasets_corrected/beam_preds/de_novo/helaqc_raw_beam_preds_filtered.csv data/
+	gsutil cp gs://winnow-fdr/validation_datasets_corrected/spectrum_data/de_novo/helaqc_raw_filtered.parquet data/
+	chmod +x run.sh
+	./run.sh
 	echo "done"
-
-# TODO: need to sort out a way to pass in the config files

@@ -15,11 +15,11 @@ spec:
         path: "/aichor/code" # Optional, defaults to "code". Refer the absolute path of the binary if not findable in $PATH
         provider: "github" # Optional, vscode tunnel provider. Options are "github" or "microsoft", defaults to "github"
   operator: tf
-  image: instanovo
+  image: winnow
   command: make set-gcp-credentials && make test
 
   tensorboard: # optional, disabled by default
-    enabled: true
+    enabled: false
 
   types:
     Worker:
