@@ -6,6 +6,7 @@ readme = "README.md"
 version = "1.0.0"
 requires-python = ">=3.10"
 dependencies = [
+    "instanovo>=1.1.1",
     "ipywidgets>=8.1.5",
     "jax>=0.5.2",
     "koinapy>=0.0.10",
@@ -14,8 +15,6 @@ dependencies = [
     "numba==0.60.0",
     "tomli>=2.2.1",
     "typer>=0.15.2",
-    "instanovo>=1.1.1",
-    "etils>=1.12.2",
 ]
 
 [build-system]

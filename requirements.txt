@@ -79,8 +79,6 @@ dill==0.3.8
     #   multiprocess
 dm-tree==0.1.9
     # via tensorflow-probability
-etils==1.12.2
-    # via winnow (pyproject.toml)
 exceptiongroup==1.2.2
     # via ipython
 executing==2.2.0
