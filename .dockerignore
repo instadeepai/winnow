@@ -28,3 +28,6 @@
 
 # To install winnow
 !pyproject.toml
+
+# To run winnow commands
+!run.sh
