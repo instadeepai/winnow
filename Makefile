@@ -6,7 +6,6 @@ PACKAGE_NAME = winnow
 # Train variables
 NUM_NODES = 1
 BATCH_SIZE = 12
-NUM_GPUS:= $(shell python -m instanovo.scripts.parse_nr_gpus)
 
 
 # LAST_COMMIT returns the current HEAD commit
@@ -236,73 +235,182 @@ GCS_CALIBRATOR_MODELS := gs://winnow-fdr/validation_datasets_corrected/calibrato
 CONFIG_DIR := configs
 CONFIG_TEMPLATES := $(wildcard $(CONFIG_DIR)/*.yaml.template)
 
-# Pattern rule to generate configs for each dataset
-$(CONFIG_DIR)/%-$(DATASET).yaml: $(CONFIG_DIR)/%.yaml.template
-	sed 's/\$${DATASET}/$(DATASET)/g' $< > $@
-
-# Function to generate all configs for a dataset
+# Function to generate configs for a dataset
 define generate-configs
 $(foreach template,$(CONFIG_TEMPLATES),\
-	$(eval CONFIG_NAME=$(basename $(notdir $(template)))-$(1).yaml)\
-	$(CONFIG_DIR)/$(CONFIG_NAME))
+	$(foreach dataset,$(DATASETS),\
+		$(CONFIG_DIR)/$(basename $(notdir $(template)))-$(dataset).yaml))
 endef
+
+# Rule to generate configs for a specific dataset
+generate-configs-%:
+	@echo "Generating configs for dataset $*"
+	$(foreach template,$(CONFIG_TEMPLATES),\
+		sed 's/\$${DATASET}/$*/g' $(template) > $(CONFIG_DIR)/$(basename $(notdir $(template)))-$*.yaml)
+
+# Individual config generation rules
+generate-configs-helaqc:
+	@echo "Generating configs for dataset helaqc"
+	$(foreach template,$(CONFIG_TEMPLATES),\
+		sed 's/\$${DATASET}/helaqc/g' $(template) > $(CONFIG_DIR)/$(basename $(notdir $(template)))-helaqc.yaml)
+
+generate-configs-sbrodae:
+	@echo "Generating configs for dataset sbrodae"
+	$(foreach template,$(CONFIG_TEMPLATES),\
+		sed 's/\$${DATASET}/sbrodae/g' $(template) > $(CONFIG_DIR)/$(basename $(notdir $(template)))-sbrodae.yaml)
+
+generate-configs-herceptin:
+	@echo "Generating configs for dataset herceptin"
+	$(foreach template,$(CONFIG_TEMPLATES),\
+		sed 's/\$${DATASET}/herceptin/g' $(template) > $(CONFIG_DIR)/$(basename $(notdir $(template)))-herceptin.yaml)
+
+generate-configs-immuno:
+	@echo "Generating configs for dataset immuno"
+	$(foreach template,$(CONFIG_TEMPLATES),\
+		sed 's/\$${DATASET}/immuno/g' $(template) > $(CONFIG_DIR)/$(basename $(notdir $(template)))-immuno.yaml)
+
+# Individual copy results rules
+copy-results-helaqc:
+	@echo "Copying results for helaqc to GCP..."
+	gsutil cp $(DATA_DIR)/splits/helaqc/labelled_winnow_predict_output.csv $(GCS_METADATA_LABELLED)/helaqc_test_labelled.csv
+	gsutil cp $(DATA_DIR)/splits/helaqc/train_output.csv $(GCS_METADATA_LABELLED)/helaqc_train_labelled.csv
+	gsutil cp $(DATA_DIR)/splits/helaqc/de_novo_winnow_predict_output.csv $(GCS_METADATA_DE_NOVO)/helaqc_de_novo_preds.csv
+	gsutil -m cp -r $(MODEL_DIR)/helaqc/* $(GCS_CALIBRATOR_MODELS)/helaqc/
+	@echo "Results copied successfully!"
+
+copy-results-sbrodae:
+	@echo "Copying results for sbrodae to GCP..."
+	gsutil cp $(DATA_DIR)/splits/sbrodae/labelled_winnow_predict_output.csv $(GCS_METADATA_LABELLED)/sbrodae_test_labelled.csv
+	gsutil cp $(DATA_DIR)/splits/sbrodae/train_output.csv $(GCS_METADATA_LABELLED)/sbrodae_train_labelled.csv
+	gsutil cp $(DATA_DIR)/splits/sbrodae/de_novo_winnow_predict_output.csv $(GCS_METADATA_DE_NOVO)/sbrodae_de_novo_preds.csv
+	gsutil -m cp -r $(MODEL_DIR)/sbrodae/* $(GCS_CALIBRATOR_MODELS)/sbrodae/
+	@echo "Results copied successfully!"
+
+copy-results-herceptin:
+	@echo "Copying results for herceptin to GCP..."
+	gsutil cp $(DATA_DIR)/splits/herceptin/labelled_winnow_predict_output.csv $(GCS_METADATA_LABELLED)/herceptin_test_labelled.csv
+	gsutil cp $(DATA_DIR)/splits/herceptin/train_output.csv $(GCS_METADATA_LABELLED)/herceptin_train_labelled.csv
+	gsutil cp $(DATA_DIR)/splits/herceptin/de_novo_winnow_predict_output.csv $(GCS_METADATA_DE_NOVO)/herceptin_de_novo_preds.csv
+	gsutil -m cp -r $(MODEL_DIR)/herceptin/* $(GCS_CALIBRATOR_MODELS)/herceptin/
+	@echo "Results copied successfully!"
+
+copy-results-immuno:
+	@echo "Copying results for immuno to GCP..."
+	gsutil cp $(DATA_DIR)/splits/immuno/labelled_winnow_predict_output.csv $(GCS_METADATA_LABELLED)/immuno_test_labelled.csv
+	gsutil cp $(DATA_DIR)/splits/immuno/train_output.csv $(GCS_METADATA_LABELLED)/immuno_train_labelled.csv
+	gsutil cp $(DATA_DIR)/splits/immuno/de_novo_winnow_predict_output.csv $(GCS_METADATA_DE_NOVO)/immuno_de_novo_preds.csv
+	gsutil -m cp -r $(MODEL_DIR)/immuno/* $(GCS_CALIBRATOR_MODELS)/immuno/
+	@echo "Results copied successfully!"
 
 #################################################################################
 ## Dataset preparation and training targets										#
 #################################################################################
 
-.PHONY: prepare-all train-all clean-all $(addprefix prepare-,$(DATASETS)) $(addprefix train-,$(DATASETS)) $(addprefix copy-results-,$(DATASETS))
+.PHONY: prepare-all train-all clean-all prepare-helaqc prepare-sbrodae prepare-herceptin prepare-immuno train-helaqc train-sbrodae train-herceptin train-immuno copy-results-helaqc copy-results-sbrodae copy-results-herceptin copy-results-immuno generate-configs-helaqc generate-configs-sbrodae generate-configs-herceptin generate-configs-immuno
 
 # Target to prepare all datasets
-prepare-all: $(addprefix prepare-,$(DATASETS))
+prepare-all: prepare-helaqc prepare-sbrodae prepare-herceptin prepare-immuno
 
 # Target to train on all datasets
-train-all: $(addprefix train-,$(DATASETS))
+train-all: train-helaqc train-sbrodae train-herceptin train-immuno
 
-# Pattern rule for preparing each dataset
-prepare-%:
-	@echo "Preparing dataset $*"
-	# Create necessary directories
-	mkdir -p $(DATA_DIR)/splits/$*
-	mkdir -p $(MODEL_DIR)/$*
-	# Download labelled data
+# Individual prepare rules
+prepare-helaqc:
+	@echo "Preparing dataset helaqc"
+	mkdir -p $(DATA_DIR)/splits/helaqc
+	mkdir -p $(MODEL_DIR)/helaqc
 	gsutil cp $(GCS_BEAM_PREDS_LABELLED) $(DATA_DIR)/
 	gsutil cp $(GCS_SPECTRUM_LABELLED) $(DATA_DIR)/
-	# Download de novo data
 	gsutil cp $(GCS_BEAM_PREDS_DE_NOVO) $(DATA_DIR)/
 	gsutil cp $(GCS_SPECTRUM_DE_NOVO) $(DATA_DIR)/
-	# Create train/test split
 	python scripts/create_train_test_split.py \
-		--spectrum_path $(DATA_DIR)/dataset-$*-annotated-0000-0001.parquet \
-		--beam_predictions_path $(DATA_DIR)/$*-annotated_beam_preds.csv \
-		--output_dir $(DATA_DIR)/splits/$* \
+		--spectrum_path $(DATA_DIR)/dataset-helaqc-annotated-0000-0001.parquet \
+		--beam_predictions_path $(DATA_DIR)/helaqc-annotated_beam_preds.csv \
+		--output_dir $(DATA_DIR)/splits/helaqc \
 		--test_fraction $(TEST_FRACTION) \
 		--random_state $(RANDOM_STATE)
-	# Generate configs for this dataset
-	$(MAKE) generate-configs-$*
+	$(MAKE) generate-configs-helaqc
 
-# Pattern rule for copying results to GCP
-copy-results-%:
-	@echo "Copying results for $* to GCP..."
-	# Copy labelled data results
-	gsutil cp $(DATA_DIR)/splits/$*/labelled_winnow_predict_output.csv $(GCS_METADATA_LABELLED)/$*_test_labelled.csv
-	gsutil cp $(DATA_DIR)/splits/$*/train_output.csv $(GCS_METADATA_LABELLED)/$*_train_labelled.csv
-	# Copy de novo results
-	gsutil cp $(DATA_DIR)/splits/$*/de_novo_winnow_predict_output.csv $(GCS_METADATA_DE_NOVO)/$*_de_novo_preds.csv
-	# Copy model to GCP
-	gsutil -m cp -r $(MODEL_DIR)/$*/* $(GCS_CALIBRATOR_MODELS)/$*/
-	@echo "Results copied successfully!"
+prepare-sbrodae:
+	@echo "Preparing dataset sbrodae"
+	mkdir -p $(DATA_DIR)/splits/sbrodae
+	mkdir -p $(MODEL_DIR)/sbrodae
+	gsutil cp $(GCS_BEAM_PREDS_LABELLED) $(DATA_DIR)/
+	gsutil cp $(GCS_SPECTRUM_LABELLED) $(DATA_DIR)/
+	gsutil cp $(GCS_BEAM_PREDS_DE_NOVO) $(DATA_DIR)/
+	gsutil cp $(GCS_SPECTRUM_DE_NOVO) $(DATA_DIR)/
+	python scripts/create_train_test_split.py \
+		--spectrum_path $(DATA_DIR)/dataset-sbrodae-annotated-0000-0001.parquet \
+		--beam_predictions_path $(DATA_DIR)/sbrodae-annotated_beam_preds.csv \
+		--output_dir $(DATA_DIR)/splits/sbrodae \
+		--test_fraction $(TEST_FRACTION) \
+		--random_state $(RANDOM_STATE)
+	$(MAKE) generate-configs-sbrodae
 
-# Pattern rule for training on each dataset
-train-%: prepare-%
-	mkdir -p $(MODEL_DIR)/$*
+prepare-herceptin:
+	@echo "Preparing dataset herceptin"
+	mkdir -p $(DATA_DIR)/splits/herceptin
+	mkdir -p $(MODEL_DIR)/herceptin
+	gsutil cp $(GCS_BEAM_PREDS_LABELLED) $(DATA_DIR)/
+	gsutil cp $(GCS_SPECTRUM_LABELLED) $(DATA_DIR)/
+	gsutil cp $(GCS_BEAM_PREDS_DE_NOVO) $(DATA_DIR)/
+	gsutil cp $(GCS_SPECTRUM_DE_NOVO) $(DATA_DIR)/
+	python scripts/create_train_test_split.py \
+		--spectrum_path $(DATA_DIR)/dataset-herceptin-annotated-0000-0001.parquet \
+		--beam_predictions_path $(DATA_DIR)/herceptin-annotated_beam_preds.csv \
+		--output_dir $(DATA_DIR)/splits/herceptin \
+		--test_fraction $(TEST_FRACTION) \
+		--random_state $(RANDOM_STATE)
+	$(MAKE) generate-configs-herceptin
+
+prepare-immuno:
+	@echo "Preparing dataset immuno"
+	mkdir -p $(DATA_DIR)/splits/immuno
+	mkdir -p $(MODEL_DIR)/immuno
+	gsutil cp $(GCS_BEAM_PREDS_LABELLED) $(DATA_DIR)/
+	gsutil cp $(GCS_SPECTRUM_LABELLED) $(DATA_DIR)/
+	gsutil cp $(GCS_BEAM_PREDS_DE_NOVO) $(DATA_DIR)/
+	gsutil cp $(GCS_SPECTRUM_DE_NOVO) $(DATA_DIR)/
+	python scripts/create_train_test_split.py \
+		--spectrum_path $(DATA_DIR)/dataset-immuno-annotated-0000-0001.parquet \
+		--beam_predictions_path $(DATA_DIR)/immuno-annotated_beam_preds.csv \
+		--output_dir $(DATA_DIR)/splits/immuno \
+		--test_fraction $(TEST_FRACTION) \
+		--random_state $(RANDOM_STATE)
+	$(MAKE) generate-configs-immuno
+
+# Individual train rules
+train-helaqc: prepare-helaqc
+	@echo "Training on dataset helaqc"
+	mkdir -p $(MODEL_DIR)/helaqc
 	chmod +x run.sh
-	./run.sh $(MODEL_DIR)/$* $(DATA_DIR)/splits/$* $(CONFIG_DIR)/train-$*.yaml $(CONFIG_DIR)/predict_labelled-$*.yaml $(CONFIG_DIR)/predict_de_novo-$*.yaml
-	$(MAKE) copy-results-$*
+	./run.sh $(MODEL_DIR)/helaqc $(DATA_DIR)/splits/helaqc $(CONFIG_DIR)/train-helaqc.yaml $(CONFIG_DIR)/predict_labelled-helaqc.yaml $(CONFIG_DIR)/predict_de_novo-helaqc.yaml
+	$(MAKE) copy-results-helaqc
+
+train-sbrodae: prepare-sbrodae
+	@echo "Training on dataset sbrodae"
+	mkdir -p $(MODEL_DIR)/sbrodae
+	chmod +x run.sh
+	./run.sh $(MODEL_DIR)/sbrodae $(DATA_DIR)/splits/sbrodae $(CONFIG_DIR)/train-sbrodae.yaml $(CONFIG_DIR)/predict_labelled-sbrodae.yaml $(CONFIG_DIR)/predict_de_novo-sbrodae.yaml
+	$(MAKE) copy-results-sbrodae
+
+train-herceptin: prepare-herceptin
+	@echo "Training on dataset herceptin"
+	mkdir -p $(MODEL_DIR)/herceptin
+	chmod +x run.sh
+	./run.sh $(MODEL_DIR)/herceptin $(DATA_DIR)/splits/herceptin $(CONFIG_DIR)/train-herceptin.yaml $(CONFIG_DIR)/predict_labelled-herceptin.yaml $(CONFIG_DIR)/predict_de_novo-herceptin.yaml
+	$(MAKE) copy-results-herceptin
+
+train-immuno: prepare-immuno
+	@echo "Training on dataset immuno"
+	mkdir -p $(MODEL_DIR)/immuno
+	chmod +x run.sh
+	./run.sh $(MODEL_DIR)/immuno $(DATA_DIR)/splits/immuno $(CONFIG_DIR)/train-immuno.yaml $(CONFIG_DIR)/predict_labelled-immuno.yaml $(CONFIG_DIR)/predict_de_novo-immuno.yaml
+	$(MAKE) copy-results-immuno
 
 # Clean configs
 clean-configs:
-	rm -f $(CONFIG_DIR)/*-$(DATASET).yaml
+	rm -f $(CONFIG_DIR)/*-$(DATASETS).yaml
 
 # Update clean-all to include configs
 clean-all: clean-configs
