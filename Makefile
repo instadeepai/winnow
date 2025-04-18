@@ -253,10 +253,6 @@ endef
 
 .PHONY: prepare-all train-all clean-all $(addprefix prepare-,$(DATASETS)) $(addprefix train-,$(DATASETS))
 
-# Create necessary directories
-$(DATA_DIR) $(MODEL_DIR):
-	mkdir -p $@
-
 # Target to prepare all datasets
 prepare-all: $(addprefix prepare-,$(DATASETS))
 
@@ -264,7 +260,10 @@ prepare-all: $(addprefix prepare-,$(DATASETS))
 train-all: $(addprefix train-,$(DATASETS))
 
 # Pattern rule for preparing each dataset
-prepare-%: $(DATA_DIR)
+prepare-%:
+	# Create necessary directories
+	mkdir -p $(DATA_DIR)/splits/$*
+	mkdir -p $(MODEL_DIR)/$*
 	# Download labelled data
 	gsutil cp $(GCS_BEAM_PREDS_LABELLED) $(DATA_DIR)/
 	gsutil cp $(GCS_SPECTRUM_LABELLED) $(DATA_DIR)/
@@ -294,7 +293,8 @@ copy-results-%:
 	@echo "Results copied successfully!"
 
 # Pattern rule for training on each dataset
-train-%: $(MODEL_DIR) prepare-%
+train-%: prepare-%
+	mkdir -p $(MODEL_DIR)/$*
 	chmod +x run.sh
 	./run.sh $(MODEL_DIR)/$* $(DATA_DIR)/splits/$* $(CONFIG_DIR)/train-$*.yaml $(CONFIG_DIR)/predict_labelled-$*.yaml $(CONFIG_DIR)/predict_de_novo-$*.yaml
 	$(MAKE) copy-results-$*
