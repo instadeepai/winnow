@@ -16,7 +16,7 @@ spec:
         provider: "github" # Optional, vscode tunnel provider. Options are "github" or "microsoft", defaults to "github"
   operator: tf
   image: winnow
-  command: make set-gcp-credentials && make prepare-all && make train-all
+  command: make set-gcp-credentials && make train-all
 
   tensorboard: # optional, disabled by default
     enabled: false

@@ -206,7 +206,7 @@ set-gcp-credentials:
 	gcloud auth activate-service-account dtu-denovo-sa@ext-dtu-denovo-sequencing-gcp.iam.gserviceaccount.com --key-file=ext-dtu-denovo-sequencing-gcp.json --project=ext-dtu-denovo-sequencing-gcp
 
 #################################################################################
-## Dataset variables																#
+## Dataset variables															#
 #################################################################################
 
 # List of all datasets to process
@@ -251,7 +251,7 @@ endef
 ## Dataset preparation and training targets										#
 #################################################################################
 
-.PHONY: prepare-all train-all clean-all $(addprefix prepare-,$(DATASETS)) $(addprefix train-,$(DATASETS))
+.PHONY: prepare-all train-all clean-all $(addprefix prepare-,$(DATASETS)) $(addprefix train-,$(DATASETS)) $(addprefix copy-results-,$(DATASETS))
 
 # Target to prepare all datasets
 prepare-all: $(addprefix prepare-,$(DATASETS))
@@ -261,6 +261,7 @@ train-all: $(addprefix train-,$(DATASETS))
 
 # Pattern rule for preparing each dataset
 prepare-%:
+	@echo "Preparing dataset $*"
 	# Create necessary directories
 	mkdir -p $(DATA_DIR)/splits/$*
 	mkdir -p $(MODEL_DIR)/$*
@@ -278,7 +279,7 @@ prepare-%:
 		--test_fraction $(TEST_FRACTION) \
 		--random_state $(RANDOM_STATE)
 	# Generate configs for this dataset
-	$(MAKE) $(call generate-configs,$*)
+	$(MAKE) generate-configs-$*
 
 # Pattern rule for copying results to GCP
 copy-results-%:
