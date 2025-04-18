@@ -315,8 +315,8 @@ prepare-helaqc:
 	mkdir -p $(MODEL_DIR)/helaqc
 	gsutil cp $(GCS_BASE)/beam_preds/labelled/helaqc-annotated_beam_preds.csv $(DATA_DIR)/
 	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-helaqc-annotated-0000-0001.parquet $(DATA_DIR)/
-	gsutil cp $(GCS_BASE)/beam_preds/de_novo/helaqc-raw_beam_preds_filtered.csv $(DATA_DIR)/
-	gsutil cp $(GCS_BASE)/spectrum_data/de_novo/helaqc-raw_filtered.parquet $(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/beam_preds/de_novo/helaqc_raw_beam_preds_filtered.csv $(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/spectrum_data/de_novo/helaqc_raw_filtered.parquet $(DATA_DIR)/
 	python scripts/create_train_test_split.py \
 		--spectrum_path $(DATA_DIR)/dataset-helaqc-annotated-0000-0001.parquet \
 		--beam_predictions_path $(DATA_DIR)/helaqc-annotated_beam_preds.csv \
@@ -331,8 +331,8 @@ prepare-sbrodae:
 	mkdir -p $(MODEL_DIR)/sbrodae
 	gsutil cp $(GCS_BASE)/beam_preds/labelled/sbrodae-annotated_beam_preds.csv $(DATA_DIR)/
 	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-sbrodae-annotated-0000-0001.parquet $(DATA_DIR)/
-	gsutil cp $(GCS_BASE)/beam_preds/de_novo/sbrodae-raw_beam_preds_filtered.csv $(DATA_DIR)/
-	gsutil cp $(GCS_BASE)/spectrum_data/de_novo/sbrodae-raw_filtered.parquet $(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/beam_preds/de_novo/sbrodae_raw_beam_preds_filtered.csv $(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/spectrum_data/de_novo/sbrodae_raw_filtered.parquet $(DATA_DIR)/
 	python scripts/create_train_test_split.py \
 		--spectrum_path $(DATA_DIR)/dataset-sbrodae-annotated-0000-0001.parquet \
 		--beam_predictions_path $(DATA_DIR)/sbrodae-annotated_beam_preds.csv \
@@ -347,8 +347,8 @@ prepare-herceptin:
 	mkdir -p $(MODEL_DIR)/herceptin
 	gsutil cp $(GCS_BASE)/beam_preds/labelled/herceptin-annotated_beam_preds.csv $(DATA_DIR)/
 	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-herceptin-annotated-0000-0001.parquet$(DATA_DIR)/
-	gsutil cp $(GCS_BASE)/beam_preds/de_novo/herceptin-raw_beam_preds_filtered.csv $(DATA_DIR)/
-	gsutil cp $(GCS_BASE)/spectrum_data/de_novo/herceptin-raw_filtered.parquet $(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/beam_preds/de_novo/herceptin_raw_beam_preds_filtered.csv $(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/spectrum_data/de_novo/herceptin_raw_filtered.parquet $(DATA_DIR)/
 	python scripts/create_train_test_split.py \
 		--spectrum_path $(DATA_DIR)/dataset-herceptin-annotated-0000-0001.parquet \
 		--beam_predictions_path $(DATA_DIR)/herceptin-annotated_beam_preds.csv \
@@ -363,8 +363,8 @@ prepare-immuno:
 	mkdir -p $(MODEL_DIR)/immuno
 	gsutil cp $(GCS_BASE)/beam_preds/labelled/immuno-annotated_beam_preds.csv $(DATA_DIR)/
 	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-immuno-annotated-0000-0001.parquet $(DATA_DIR)/
-	gsutil cp $(GCS_BASE)/beam_preds/de_novo/immuno-raw_beam_preds_filtered.csv $(DATA_DIR)/
-	gsutil cp $(GCS_BASE)/spectrum_data/de_novo/immuno-raw_filtered.parquet $(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/beam_preds/de_novo/immuno_raw_beam_preds_filtered.csv $(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/spectrum_data/de_novo/immuno_raw_filtered.parquet $(DATA_DIR)/
 	python scripts/create_train_test_split.py \
 		--spectrum_path $(DATA_DIR)/dataset-immuno-annotated-0000-0001.parquet \
 		--beam_predictions_path $(DATA_DIR)/immuno-annotated_beam_preds.csv \
