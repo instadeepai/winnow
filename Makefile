@@ -245,23 +245,31 @@ generate-configs-%:
 # Individual config generation rules
 generate-configs-helaqc:
 	@echo "Generating configs for dataset helaqc"
-	$(foreach template,$(CONFIG_TEMPLATES),\
-		sed 's/\$${DATASET}/helaqc/g' $(template) > $(CONFIG_DIR)/$(basename $(notdir $(template)))-helaqc.yaml)
+	@for template in $(CONFIG_TEMPLATES); do \
+		output=$$(basename $$template .yaml.template)-helaqc.yaml; \
+		sed "s/\$${DATASET}/helaqc/g" $$template > $(CONFIG_DIR)/$$output; \
+	done
 
 generate-configs-sbrodae:
 	@echo "Generating configs for dataset sbrodae"
-	$(foreach template,$(CONFIG_TEMPLATES),\
-		sed 's/\$${DATASET}/sbrodae/g' $(template) > $(CONFIG_DIR)/$(basename $(notdir $(template)))-sbrodae.yaml)
+	@for template in $(CONFIG_TEMPLATES); do \
+		output=$$(basename $$template .yaml.template)-sbrodae.yaml; \
+		sed "s/\$${DATASET}/sbrodae/g" $$template > $(CONFIG_DIR)/$$output; \
+	done
 
 generate-configs-herceptin:
 	@echo "Generating configs for dataset herceptin"
-	$(foreach template,$(CONFIG_TEMPLATES),\
-		sed 's/\$${DATASET}/herceptin/g' $(template) > $(CONFIG_DIR)/$(basename $(notdir $(template)))-herceptin.yaml)
+	@for template in $(CONFIG_TEMPLATES); do \
+		output=$$(basename $$template .yaml.template)-herceptin.yaml; \
+		sed "s/\$${DATASET}/herceptin/g" $$template > $(CONFIG_DIR)/$$output; \
+	done
 
 generate-configs-immuno:
 	@echo "Generating configs for dataset immuno"
-	$(foreach template,$(CONFIG_TEMPLATES),\
-		sed 's/\$${DATASET}/immuno/g' $(template) > $(CONFIG_DIR)/$(basename $(notdir $(template)))-immuno.yaml)
+	@for template in $(CONFIG_TEMPLATES); do \
+		output=$$(basename $$template .yaml.template)-immuno.yaml; \
+		sed "s/\$${DATASET}/immuno/g" $$template > $(CONFIG_DIR)/$$output; \
+	done
 
 # Individual copy results rules
 copy-results-helaqc:
