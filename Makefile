@@ -219,17 +219,11 @@ MODEL_DIR := runs
 TEST_FRACTION := 0.2
 RANDOM_STATE := 42
 
-# GCS paths
-GCS_BASE := gs://winnow-fdr/validation_datasets_corrected
-GCS_BEAM_PREDS_LABELLED := $(GCS_BASE)/beam_preds/labelled/%-annotated_beam_preds.csv
-GCS_SPECTRUM_LABELLED := $(GCS_BASE)/spectrum_data/labelled/dataset-%-annotated-0000-0001.parquet
-GCS_BEAM_PREDS_DE_NOVO := $(GCS_BASE)/beam_preds/de_novo/%-raw_beam_preds_filtered.csv
-GCS_SPECTRUM_DE_NOVO := $(GCS_BASE)/spectrum_data/de_novo/%-raw_filtered.parquet
-
 # GCS paths for results
-GCS_METADATA_LABELLED := gs://winnow-fdr/validation_datasets_corrected/winnow_metadata/labelled
-GCS_METADATA_DE_NOVO := gs://winnow-fdr/validation_datasets_corrected/winnow_metadata/de_novo
-GCS_CALIBRATOR_MODELS := gs://winnow-fdr/validation_datasets_corrected/calibrator_models
+GCS_BASE := gs://winnow-fdr/validation_datasets_corrected
+GCS_METADATA_LABELLED := $(GCS_BASE)/winnow_metadata/labelled
+GCS_METADATA_DE_NOVO := $(GCS_BASE)/winnow_metadata/de_novo
+GCS_CALIBRATOR_MODELS := $(GCS_BASE)/calibrator_models
 
 # Config generation
 CONFIG_DIR := configs
@@ -319,10 +313,10 @@ prepare-helaqc:
 	@echo "Preparing dataset helaqc"
 	mkdir -p $(DATA_DIR)/splits/helaqc
 	mkdir -p $(MODEL_DIR)/helaqc
-	gsutil cp $(GCS_BEAM_PREDS_LABELLED) $(DATA_DIR)/
-	gsutil cp $(GCS_SPECTRUM_LABELLED) $(DATA_DIR)/
-	gsutil cp $(GCS_BEAM_PREDS_DE_NOVO) $(DATA_DIR)/
-	gsutil cp $(GCS_SPECTRUM_DE_NOVO) $(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/beam_preds/labelled/helaqc-annotated_beam_preds.csv $(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-helaqc-annotated-0000-0001.parquet $(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/beam_preds/de_novo/helaqc-raw_beam_preds_filtered.csv $(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/spectrum_data/de_novo/helaqc-raw_filtered.parquet $(DATA_DIR)/
 	python scripts/create_train_test_split.py \
 		--spectrum_path $(DATA_DIR)/dataset-helaqc-annotated-0000-0001.parquet \
 		--beam_predictions_path $(DATA_DIR)/helaqc-annotated_beam_preds.csv \
@@ -335,10 +329,10 @@ prepare-sbrodae:
 	@echo "Preparing dataset sbrodae"
 	mkdir -p $(DATA_DIR)/splits/sbrodae
 	mkdir -p $(MODEL_DIR)/sbrodae
-	gsutil cp $(GCS_BEAM_PREDS_LABELLED) $(DATA_DIR)/
-	gsutil cp $(GCS_SPECTRUM_LABELLED) $(DATA_DIR)/
-	gsutil cp $(GCS_BEAM_PREDS_DE_NOVO) $(DATA_DIR)/
-	gsutil cp $(GCS_SPECTRUM_DE_NOVO) $(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/beam_preds/labelled/sbrodae-annotated_beam_preds.csv $(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-sbrodae-annotated-0000-0001.parquet $(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/beam_preds/de_novo/sbrodae-raw_beam_preds_filtered.csv $(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/spectrum_data/de_novo/sbrodae-raw_filtered.parquet $(DATA_DIR)/
 	python scripts/create_train_test_split.py \
 		--spectrum_path $(DATA_DIR)/dataset-sbrodae-annotated-0000-0001.parquet \
 		--beam_predictions_path $(DATA_DIR)/sbrodae-annotated_beam_preds.csv \
@@ -351,10 +345,10 @@ prepare-herceptin:
 	@echo "Preparing dataset herceptin"
 	mkdir -p $(DATA_DIR)/splits/herceptin
 	mkdir -p $(MODEL_DIR)/herceptin
-	gsutil cp $(GCS_BEAM_PREDS_LABELLED) $(DATA_DIR)/
-	gsutil cp $(GCS_SPECTRUM_LABELLED) $(DATA_DIR)/
-	gsutil cp $(GCS_BEAM_PREDS_DE_NOVO) $(DATA_DIR)/
-	gsutil cp $(GCS_SPECTRUM_DE_NOVO) $(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/beam_preds/labelled/herceptin-annotated_beam_preds.csv $(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-herceptin-annotated-0000-0001.parquet$(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/beam_preds/de_novo/herceptin-raw_beam_preds_filtered.csv $(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/spectrum_data/de_novo/herceptin-raw_filtered.parquet $(DATA_DIR)/
 	python scripts/create_train_test_split.py \
 		--spectrum_path $(DATA_DIR)/dataset-herceptin-annotated-0000-0001.parquet \
 		--beam_predictions_path $(DATA_DIR)/herceptin-annotated_beam_preds.csv \
@@ -367,10 +361,10 @@ prepare-immuno:
 	@echo "Preparing dataset immuno"
 	mkdir -p $(DATA_DIR)/splits/immuno
 	mkdir -p $(MODEL_DIR)/immuno
-	gsutil cp $(GCS_BEAM_PREDS_LABELLED) $(DATA_DIR)/
-	gsutil cp $(GCS_SPECTRUM_LABELLED) $(DATA_DIR)/
-	gsutil cp $(GCS_BEAM_PREDS_DE_NOVO) $(DATA_DIR)/
-	gsutil cp $(GCS_SPECTRUM_DE_NOVO) $(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/beam_preds/labelled/immuno-annotated_beam_preds.csv $(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-immuno-annotated-0000-0001.parquet $(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/beam_preds/de_novo/immuno-raw_beam_preds_filtered.csv $(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/spectrum_data/de_novo/immuno-raw_filtered.parquet $(DATA_DIR)/
 	python scripts/create_train_test_split.py \
 		--spectrum_path $(DATA_DIR)/dataset-immuno-annotated-0000-0001.parquet \
 		--beam_predictions_path $(DATA_DIR)/immuno-annotated_beam_preds.csv \
