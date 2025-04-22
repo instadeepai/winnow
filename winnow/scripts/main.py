@@ -1,3 +1,21 @@
+import logging
+from rich.logging import RichHandler
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    handlers=[RichHandler()]
+)
+# Suppress JAX debug messages
+logging.getLogger('jax').setLevel(logging.WARNING)
+logging.getLogger('jax._src').setLevel(logging.WARNING)
+logging.getLogger('jax._src.cache_key').setLevel(logging.WARNING)
+logging.getLogger('jax._src.compilation_cache').setLevel(logging.WARNING)
+logging.getLogger('jax._src.compiler').setLevel(logging.WARNING)
+logging.getLogger('jax._src.dispatch').setLevel(logging.WARNING)
+logging.getLogger('jax._src.xla_bridge').setLevel(logging.WARNING)
+
 # -- Import
 from winnow.calibration.calibration_features import (
     PrositFeatures,
@@ -16,8 +34,6 @@ from enum import Enum
 import typer
 from typing_extensions import Annotated
 from typing import Union
-import logging
-from rich.logging import RichHandler
 from pathlib import Path
 import yaml
 import pandas as pd
@@ -81,8 +97,6 @@ class FDRMethod(Enum):
 
 
 # --- Logging Setup ---
-logging.basicConfig(level=logging.INFO, format="%(message)s", handlers=[RichHandler()])
-logging.getLogger("jax._src.path").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 app = typer.Typer(
@@ -210,12 +224,12 @@ def apply_fdr_control(
         )
     else:
         fdr_control.fit(
-            dataset=dataset.metadata[confidence_column],
+            dataset=dataset.metadata,
             residue_masses=RESIDUE_MASSES,
         )
     dataset.metadata = fdr_control.add_psm_fdr(dataset.metadata, confidence_column)
     confidence_cutoff = fdr_control.get_confidence_cutoff(threshold=fdr_threshold)
-    logger.info(f"Confidence cutoff: {confidence_cutoff}")
+    logger.info(f"Confidence cutoff for FDR {fdr_threshold}: {confidence_cutoff}")
     output_data = dataset.metadata
     # output_data = output_data[output_data[confidence_column] >= confidence_cutoff]
     return output_data
@@ -270,11 +284,11 @@ def train(
     calibrator.fit(annotated_dataset)
 
     # -- Write model checkpoints
-    logger.info(f"Saving model to {model_output_folder}")
+    logger.info("Saving model to %s.", model_output_folder)
     ProbabilityCalibrator.save(calibrator, model_output_folder)
 
     # -- Write output
-    logger.info("Writing output.")
+    logger.info("Writing output to %s.", dataset_output_path)
     annotated_dataset.to_csv(dataset_output_path)
     logger.info(f"Training dataset results saved: {dataset_output_path}")
 
@@ -331,7 +345,7 @@ def predict(
     dataset = filter_dataset(dataset)
 
     # Predict
-    logger.info("Loading calibrator.")
+    logger.info("Loading calibrator from %s.", model_folder)
     calibrator = ProbabilityCalibrator.load(model_folder)
 
     logger.info("Calibrating scores.")
@@ -353,6 +367,6 @@ def predict(
         )
 
     # -- Write output
-    logger.info("Writing output.")
+    logger.info("Writing output to %s.", output_path)
     dataset_metadata.to_csv(output_path)
     logger.info(f"Outputs saved: {output_path}")

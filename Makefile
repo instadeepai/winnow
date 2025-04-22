@@ -213,7 +213,7 @@ DATASETS := helaqc sbrodae herceptin immuno
 
 # Base directories
 DATA_DIR := data
-MODEL_DIR := runs
+MODEL_DIR := models
 
 # Default parameters
 TEST_FRACTION := 0.2
