@@ -354,7 +354,7 @@ prepare-herceptin:
 	mkdir -p $(DATA_DIR)/splits/herceptin
 	mkdir -p $(MODEL_DIR)/herceptin
 	gsutil cp $(GCS_BASE)/beam_preds/labelled/herceptin-annotated_beam_preds.csv $(DATA_DIR)/
-	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-herceptin-annotated-0000-0001.parquet$(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-herceptin-annotated-0000-0001.parquet $(DATA_DIR)/
 	gsutil cp $(GCS_BASE)/beam_preds/de_novo/herceptin_raw_beam_preds_filtered.csv $(DATA_DIR)/
 	gsutil cp $(GCS_BASE)/spectrum_data/de_novo/herceptin_raw_filtered.parquet $(DATA_DIR)/
 	python scripts/create_train_test_split.py \
