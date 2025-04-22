@@ -2,19 +2,15 @@ import logging
 from rich.logging import RichHandler
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",
-    handlers=[RichHandler()]
-)
+logging.basicConfig(level=logging.INFO, format="%(message)s", handlers=[RichHandler()])
 # Suppress JAX debug messages
-logging.getLogger('jax').setLevel(logging.WARNING)
-logging.getLogger('jax._src').setLevel(logging.WARNING)
-logging.getLogger('jax._src.cache_key').setLevel(logging.WARNING)
-logging.getLogger('jax._src.compilation_cache').setLevel(logging.WARNING)
-logging.getLogger('jax._src.compiler').setLevel(logging.WARNING)
-logging.getLogger('jax._src.dispatch').setLevel(logging.WARNING)
-logging.getLogger('jax._src.xla_bridge').setLevel(logging.WARNING)
+logging.getLogger("jax").setLevel(logging.WARNING)
+logging.getLogger("jax._src").setLevel(logging.WARNING)
+logging.getLogger("jax._src.cache_key").setLevel(logging.WARNING)
+logging.getLogger("jax._src.compilation_cache").setLevel(logging.WARNING)
+logging.getLogger("jax._src.compiler").setLevel(logging.WARNING)
+logging.getLogger("jax._src.dispatch").setLevel(logging.WARNING)
+logging.getLogger("jax._src.xla_bridge").setLevel(logging.WARNING)
 
 # -- Import
 from winnow.calibration.calibration_features import (
@@ -368,5 +364,5 @@ def predict(
 
     # -- Write output
     logger.info("Writing output to %s.", output_path)
-    dataset_metadata.to_csv(output_path)
+    dataset_metadata.to_csv(output_path, index=False)
     logger.info(f"Outputs saved: {output_path}")

@@ -9,10 +9,8 @@ import argparse
 
 
 # --- Logging Setup ---
+logging.basicConfig(level=logging.INFO, format="%(message)s", handlers=[RichHandler()])
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-logger.addHandler(logging.StreamHandler())
-logger.addHandler(RichHandler())
 
 
 def parse_args():
