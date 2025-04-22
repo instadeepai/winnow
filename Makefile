@@ -529,7 +529,7 @@ train-sbrodae: prepare-sbrodae
 	mkdir -p $(OUTPUT_DIR)/sbrodae
 	chmod +x run.sh
 	./run.sh $(MODEL_DIR)/sbrodae $(OUTPUT_DIR)/sbrodae $(CONFIG_DIR)/train-sbrodae.yaml $(CONFIG_DIR)/predict_labelled-sbrodae.yaml $(CONFIG_DIR)/predict_de_novo-sbrodae.yaml
-	# $(MAKE) copy-results-sbrodae
+	$(MAKE) copy-results-sbrodae
 
 train-herceptin: prepare-herceptin
 	@echo "Training on dataset herceptin"
