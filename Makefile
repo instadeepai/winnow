@@ -532,14 +532,9 @@ preprocess-woundfluids:
 prepare-helaqc: preprocess-helaqc
 	@echo "Preparing dataset helaqc"
 	mkdir -p $(DATA_DIR)/splits/helaqc
-	mkdir -p $(MODEL_DIR)/helaqc
-	gsutil cp $(GCS_BASE)/beam_preds/labelled/helaqc-annotated_beam_preds.csv $(DATA_DIR)/
-	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-helaqc-annotated-0000-0001.parquet $(DATA_DIR)/
-	gsutil cp $(GCS_BASE)/beam_preds/de_novo/helaqc_raw_beam_preds_filtered.csv $(DATA_DIR)/
-	gsutil cp $(GCS_BASE)/spectrum_data/de_novo/helaqc_raw_filtered.parquet $(DATA_DIR)/
 	python scripts/create_train_test_split.py \
-		--spectrum_path $(DATA_DIR)/dataset-helaqc-annotated-0000-0001.parquet \
-		--beam_predictions_path $(DATA_DIR)/helaqc-annotated_beam_preds.csv \
+		--spectrum_path $(DATA_DIR)/spectrum_data/labelled/dataset-helaqc-annotated-0000-0001.parquet \
+		--beam_predictions_path $(DATA_DIR)/beam_preds/labelled/helaqc-annotated_beam_preds.csv \
 		--output_dir $(DATA_DIR)/splits/helaqc \
 		--test_fraction $(TEST_FRACTION) \
 		--random_state $(RANDOM_STATE)
@@ -559,14 +554,9 @@ prepare-sbrodae: preprocess-sbrodae
 prepare-herceptin: preprocess-herceptin
 	@echo "Preparing dataset herceptin"
 	mkdir -p $(DATA_DIR)/splits/herceptin
-	mkdir -p $(MODEL_DIR)/herceptin
-	gsutil cp $(GCS_BASE)/beam_preds/labelled/herceptin-annotated_beam_preds.csv $(DATA_DIR)/
-	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-herceptin-annotated-0000-0001.parquet $(DATA_DIR)/
-	gsutil cp $(GCS_BASE)/beam_preds/de_novo/herceptin_raw_beam_preds_filtered.csv $(DATA_DIR)/
-	gsutil cp $(GCS_BASE)/spectrum_data/de_novo/herceptin_raw_filtered.parquet $(DATA_DIR)/
 	python scripts/create_train_test_split.py \
-		--spectrum_path $(DATA_DIR)/dataset-herceptin-annotated-0000-0001.parquet \
-		--beam_predictions_path $(DATA_DIR)/herceptin-annotated_beam_preds.csv \
+		--spectrum_path $(DATA_DIR)/spectrum_data/labelled/dataset-herceptin-annotated-0000-0001.parquet \
+		--beam_predictions_path $(DATA_DIR)/beam_preds/labelled/herceptin-annotated_beam_preds.csv \
 		--output_dir $(DATA_DIR)/splits/herceptin \
 		--test_fraction $(TEST_FRACTION) \
 		--random_state $(RANDOM_STATE)
@@ -575,14 +565,9 @@ prepare-herceptin: preprocess-herceptin
 prepare-immuno: preprocess-immuno
 	@echo "Preparing dataset immuno"
 	mkdir -p $(DATA_DIR)/splits/immuno
-	mkdir -p $(MODEL_DIR)/immuno
-	gsutil cp $(GCS_BASE)/beam_preds/labelled/immuno-annotated_beam_preds.csv $(DATA_DIR)/
-	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-immuno-annotated-0000-0001.parquet $(DATA_DIR)/
-	gsutil cp $(GCS_BASE)/beam_preds/de_novo/immuno_raw_beam_preds_filtered.csv $(DATA_DIR)/
-	gsutil cp $(GCS_BASE)/spectrum_data/de_novo/immuno_raw_filtered.parquet $(DATA_DIR)/
 	python scripts/create_train_test_split.py \
-		--spectrum_path $(DATA_DIR)/dataset-immuno-annotated-0000-0001.parquet \
-		--beam_predictions_path $(DATA_DIR)/immuno-annotated_beam_preds.csv \
+		--spectrum_path $(DATA_DIR)/spectrum_data/labelled/dataset-immuno-annotated-0000-0001.parquet \
+		--beam_predictions_path $(DATA_DIR)/beam_preds/labelled/immuno-annotated_beam_preds.csv \
 		--output_dir $(DATA_DIR)/splits/immuno \
 		--test_fraction $(TEST_FRACTION) \
 		--random_state $(RANDOM_STATE)
@@ -591,7 +576,6 @@ prepare-immuno: preprocess-immuno
 prepare-gluc: preprocess-gluc
 	@echo "Preparing dataset gluc"
 	mkdir -p $(DATA_DIR)/splits/gluc
-	mkdir -p $(MODEL_DIR)/gluc
 	python scripts/create_train_test_split.py \
 		--spectrum_path $(DATA_DIR)/spectrum_data/labelled/dataset-gluc-annotated-0000-0001.parquet \
 		--beam_predictions_path $(DATA_DIR)/beam_preds/labelled/gluc-annotated_beam_preds.csv \
@@ -603,7 +587,6 @@ prepare-gluc: preprocess-gluc
 prepare-snakevenoms: preprocess-snakevenoms
 	@echo "Preparing dataset snakevenoms"
 	mkdir -p $(DATA_DIR)/splits/snakevenoms
-	mkdir -p $(MODEL_DIR)/snakevenoms
 	python scripts/create_train_test_split.py \
 		--spectrum_path $(DATA_DIR)/spectrum_data/labelled/dataset-snakevenoms-annotated-0000-0001.parquet \
 		--beam_predictions_path $(DATA_DIR)/beam_preds/labelled/snakevenoms-annotated_beam_preds.csv \
@@ -615,7 +598,6 @@ prepare-snakevenoms: preprocess-snakevenoms
 prepare-tplantibodies: preprocess-tplantibodies
 	@echo "Preparing dataset tplantibodies"
 	mkdir -p $(DATA_DIR)/splits/tplantibodies
-	mkdir -p $(MODEL_DIR)/tplantibodies
 	python scripts/create_train_test_split.py \
 		--spectrum_path $(DATA_DIR)/spectrum_data/labelled/dataset-tplantibodies-annotated-0000-0001.parquet \
 		--beam_predictions_path $(DATA_DIR)/beam_preds/labelled/tplantibodies-annotated_beam_preds.csv \
@@ -627,7 +609,6 @@ prepare-tplantibodies: preprocess-tplantibodies
 prepare-woundfluids: preprocess-woundfluids
 	@echo "Preparing dataset woundfluids"
 	mkdir -p $(DATA_DIR)/splits/woundfluids
-	mkdir -p $(MODEL_DIR)/woundfluids
 	python scripts/create_train_test_split.py \
 		--spectrum_path $(DATA_DIR)/spectrum_data/labelled/dataset-woundfluids-annotated-0000-0001.parquet \
 		--beam_predictions_path $(DATA_DIR)/beam_preds/labelled/woundfluids-annotated_beam_preds.csv \
