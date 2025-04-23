@@ -209,7 +209,7 @@ set-gcp-credentials:
 #################################################################################
 
 # List of all datasets to process
-DATASETS := helaqc sbrodae herceptin immuno gluc snakevenoms tplantibodies woundfluids
+DATASETS := helaqc sbrodae herceptin immuno gluc snakevenoms woundfluids # tplantibodies
 
 # Base directories
 DATA_DIR := input_data
@@ -275,7 +275,7 @@ train-dataset: prepare-dataset
 	@echo "Training and predicting on dataset $(DATASET)"
 	mkdir -p $(MODEL_DIR)/$(DATASET)
 	mkdir -p $(OUTPUT_DIR)/$(DATASET)
-	
+
 	# Train
 	winnow train \
 		--data-source=winnow \
@@ -399,6 +399,8 @@ CONFIG_TEMPLATES := $(wildcard $(CONFIG_DIR)/*.yaml.template)
 #################################################################################
 ## External validation dataset commands						    				#
 #################################################################################
+
+.PHONY: preprocess-external-datasets prepare-external-dataset generate-configs-external-dataset
 
 # Condensed preprocessing command
 preprocess-external-datasets:
