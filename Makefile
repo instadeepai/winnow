@@ -424,7 +424,6 @@ preprocess-helaqc:
 	mkdir -p $(DATA_DIR)/spectrum_data/labelled
 	mkdir -p $(DATA_DIR)/spectrum_data/de_novo
 	mkdir -p $(DATA_DIR)/spectrum_data/raw
-	gsutil cp $(GCS_BASE)/beam_preds/labelled/helaqc-annotated_beam_preds.csv $(DATA_DIR)/beam_preds/labelled/
 	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-helaqc-annotated-0000-0001.parquet $(DATA_DIR)/spectrum_data/labelled/
 	gsutil cp $(GCS_BASE)/beam_preds/raw/helaqc_beam_preds.csv $(DATA_DIR)/beam_preds/raw/
 	gsutil cp $(GCS_BASE)/spectrum_data/raw/dataset-helaqc-raw-0000-0001.parquet $(DATA_DIR)/spectrum_data/raw/
@@ -438,7 +437,6 @@ preprocess-sbrodae:
 	mkdir -p $(DATA_DIR)/spectrum_data/labelled
 	mkdir -p $(DATA_DIR)/spectrum_data/de_novo
 	mkdir -p $(DATA_DIR)/spectrum_data/raw
-	gsutil cp $(GCS_BASE)/beam_preds/labelled/sbrodae-annotated_beam_preds.csv $(DATA_DIR)/beam_preds/labelled/
 	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-sbrodae-annotated-0000-0001.parquet $(DATA_DIR)/spectrum_data/labelled/
 	gsutil cp $(GCS_BASE)/beam_preds/raw/sbrodae_beam_preds.csv $(DATA_DIR)/beam_preds/raw/
 	gsutil cp $(GCS_BASE)/spectrum_data/raw/dataset-sbrodae-raw-0000-0001.parquet $(DATA_DIR)/spectrum_data/raw/
@@ -452,7 +450,6 @@ preprocess-herceptin:
 	mkdir -p $(DATA_DIR)/spectrum_data/labelled
 	mkdir -p $(DATA_DIR)/spectrum_data/de_novo
 	mkdir -p $(DATA_DIR)/spectrum_data/raw
-	gsutil cp $(GCS_BASE)/beam_preds/labelled/herceptin-annotated_beam_preds.csv $(DATA_DIR)/beam_preds/labelled/
 	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-herceptin-annotated-0000-0001.parquet $(DATA_DIR)/spectrum_data/labelled/
 	gsutil cp $(GCS_BASE)/beam_preds/raw/herceptin_beam_preds.csv $(DATA_DIR)/beam_preds/raw/
 	gsutil cp $(GCS_BASE)/spectrum_data/raw/dataset-herceptin-raw-0000-0001.parquet $(DATA_DIR)/spectrum_data/raw/
@@ -466,7 +463,6 @@ preprocess-immuno:
 	mkdir -p $(DATA_DIR)/spectrum_data/labelled
 	mkdir -p $(DATA_DIR)/spectrum_data/de_novo
 	mkdir -p $(DATA_DIR)/spectrum_data/raw
-	gsutil cp $(GCS_BASE)/beam_preds/labelled/immuno-annotated_beam_preds.csv $(DATA_DIR)/beam_preds/labelled/
 	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-immuno-annotated-0000-0001.parquet $(DATA_DIR)/spectrum_data/labelled/
 	gsutil cp $(GCS_BASE)/beam_preds/raw/immuno_beam_preds.csv $(DATA_DIR)/beam_preds/raw/
 	gsutil cp $(GCS_BASE)/spectrum_data/raw/dataset-immuno-raw-0000-0001.parquet $(DATA_DIR)/spectrum_data/raw/
@@ -480,7 +476,6 @@ preprocess-gluc:
 	mkdir -p $(DATA_DIR)/spectrum_data/labelled
 	mkdir -p $(DATA_DIR)/spectrum_data/de_novo
 	mkdir -p $(DATA_DIR)/spectrum_data/raw
-	gsutil cp $(GCS_BASE)/beam_preds/labelled/gluc-annotated_beam_preds.csv $(DATA_DIR)/beam_preds/labelled/
 	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-gluc-annotated-0000-0001.parquet $(DATA_DIR)/spectrum_data/labelled/
 	gsutil cp $(GCS_BASE)/beam_preds/raw/gluc_beam_preds.csv $(DATA_DIR)/beam_preds/raw/
 	gsutil cp $(GCS_BASE)/spectrum_data/raw/dataset-gluc-raw-0000-0001.parquet $(DATA_DIR)/spectrum_data/raw/
@@ -494,7 +489,6 @@ preprocess-snakevenoms:
 	mkdir -p $(DATA_DIR)/spectrum_data/labelled
 	mkdir -p $(DATA_DIR)/spectrum_data/de_novo
 	mkdir -p $(DATA_DIR)/spectrum_data/raw
-	gsutil cp $(GCS_BASE)/beam_preds/labelled/snakevenoms-annotated_beam_preds.csv $(DATA_DIR)/beam_preds/labelled/
 	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-snakevenoms-annotated-0000-0001.parquet $(DATA_DIR)/spectrum_data/labelled/
 	gsutil cp $(GCS_BASE)/beam_preds/raw/snakevenoms_beam_preds.csv $(DATA_DIR)/beam_preds/raw/
 	gsutil cp $(GCS_BASE)/spectrum_data/raw/dataset-snakevenoms-raw-0000-0001.parquet $(DATA_DIR)/spectrum_data/raw/
@@ -508,7 +502,6 @@ preprocess-tplantibodies:
 	mkdir -p $(DATA_DIR)/spectrum_data/labelled
 	mkdir -p $(DATA_DIR)/spectrum_data/de_novo
 	mkdir -p $(DATA_DIR)/spectrum_data/raw
-	gsutil cp $(GCS_BASE)/beam_preds/labelled/tplantibodies-annotated_beam_preds.csv $(DATA_DIR)/beam_preds/labelled/
 	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-tplantibodies-annotated-0000-0001.parquet $(DATA_DIR)/spectrum_data/labelled/
 	gsutil cp $(GCS_BASE)/beam_preds/raw/tplantibodies_beam_preds.csv $(DATA_DIR)/beam_preds/raw/
 	gsutil cp $(GCS_BASE)/spectrum_data/raw/dataset-tplantibodies-raw-0000-0001.parquet $(DATA_DIR)/spectrum_data/raw/
@@ -522,7 +515,6 @@ preprocess-woundfluids:
 	mkdir -p $(DATA_DIR)/spectrum_data/labelled
 	mkdir -p $(DATA_DIR)/spectrum_data/de_novo
 	mkdir -p $(DATA_DIR)/spectrum_data/raw
-	gsutil cp $(GCS_BASE)/beam_preds/labelled/woundfluids-annotated_beam_preds.csv $(DATA_DIR)/beam_preds/labelled/
 	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-woundfluids-annotated-0000-0001.parquet $(DATA_DIR)/spectrum_data/labelled/
 	gsutil cp $(GCS_BASE)/beam_preds/raw/woundfluids_beam_preds.csv $(DATA_DIR)/beam_preds/raw/
 	gsutil cp $(GCS_BASE)/spectrum_data/raw/dataset-woundfluids-raw-0000-0001.parquet $(DATA_DIR)/spectrum_data/raw/
