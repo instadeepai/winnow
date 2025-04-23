@@ -230,449 +230,98 @@ GCS_CALIBRATOR_MODELS := $(GCS_BASE)/calibrator_models
 CONFIG_DIR := configs
 CONFIG_TEMPLATES := $(wildcard $(CONFIG_DIR)/*.yaml.template)
 
-# Function to generate configs for a dataset
-define generate-configs
-$(foreach template,$(CONFIG_TEMPLATES),\
-	$(foreach dataset,$(DATASETS),\
-		$(CONFIG_DIR)/$(basename $(notdir $(template)))-$(dataset).yaml))
-endef
-
-# Rule to generate configs for a specific dataset
-generate-configs-%:
-	@echo "Generating configs for dataset $*"
-	$(foreach template,$(CONFIG_TEMPLATES),\
-		sed 's/\$${DATASET}/$*/g' $(template) > $(CONFIG_DIR)/$(basename $(notdir $(template)))-$*.yaml)
-
-# Individual config generation rules
-generate-configs-helaqc:
-	@echo "Generating configs for dataset helaqc"
-	@bash -c 'for template in $(CONFIG_TEMPLATES); do \
-		output=$$(basename $$template .yaml.template)-helaqc.yaml; \
-		if [[ $$template == *"predict_de_novo"* ]]; then \
-			sed "s/\$${DATASET}/helaqc/g; s|beam_predictions_path:.*|beam_predictions_path: $(DATA_DIR)/beam_preds/de_novo/helaqc_raw_beam_preds_filtered.csv|g; s|spectrum_path:.*|spectrum_path: $(DATA_DIR)/spectrum_data/de_novo/helaqc_raw_filtered.parquet|g" $$template > $(CONFIG_DIR)/$$output; \
-		else \
-			sed "s/\$${DATASET}/helaqc/g; s|data/|$(DATA_DIR)/|g" $$template > $(CONFIG_DIR)/$$output; \
-		fi \
-	done'
-
-generate-configs-sbrodae:
-	@echo "Generating configs for dataset sbrodae"
-	@bash -c 'for template in $(CONFIG_TEMPLATES); do \
-		output=$$(basename $$template .yaml.template)-sbrodae.yaml; \
-		if [[ $$template == *"predict_de_novo"* ]]; then \
-			sed "s/\$${DATASET}/sbrodae/g; s|beam_predictions_path:.*|beam_predictions_path: $(DATA_DIR)/beam_preds/de_novo/sbrodae_raw_beam_preds_filtered.csv|g; s|spectrum_path:.*|spectrum_path: $(DATA_DIR)/spectrum_data/de_novo/sbrodae_raw_filtered.parquet|g" $$template > $(CONFIG_DIR)/$$output; \
-		else \
-			sed "s/\$${DATASET}/sbrodae/g; s|data/|$(DATA_DIR)/|g" $$template > $(CONFIG_DIR)/$$output; \
-		fi \
-	done'
-
-generate-configs-herceptin:
-	@echo "Generating configs for dataset herceptin"
-	@bash -c 'for template in $(CONFIG_TEMPLATES); do \
-		output=$$(basename $$template .yaml.template)-herceptin.yaml; \
-		if [[ $$template == *"predict_de_novo"* ]]; then \
-			sed "s/\$${DATASET}/herceptin/g; s|beam_predictions_path:.*|beam_predictions_path: $(DATA_DIR)/beam_preds/de_novo/herceptin_raw_beam_preds_filtered.csv|g; s|spectrum_path:.*|spectrum_path: $(DATA_DIR)/spectrum_data/de_novo/herceptin_raw_filtered.parquet|g" $$template > $(CONFIG_DIR)/$$output; \
-		else \
-			sed "s/\$${DATASET}/herceptin/g; s|data/|$(DATA_DIR)/|g" $$template > $(CONFIG_DIR)/$$output; \
-		fi \
-	done'
-
-generate-configs-immuno:
-	@echo "Generating configs for dataset immuno"
-	@bash -c 'for template in $(CONFIG_TEMPLATES); do \
-		output=$$(basename $$template .yaml.template)-immuno.yaml; \
-		if [[ $$template == *"predict_de_novo"* ]]; then \
-			sed "s/\$${DATASET}/immuno/g; s|beam_predictions_path:.*|beam_predictions_path: $(DATA_DIR)/beam_preds/de_novo/immuno_raw_beam_preds_filtered.csv|g; s|spectrum_path:.*|spectrum_path: $(DATA_DIR)/spectrum_data/de_novo/immuno_raw_filtered.parquet|g" $$template > $(CONFIG_DIR)/$$output; \
-		else \
-			sed "s/\$${DATASET}/immuno/g; s|data/|$(DATA_DIR)/|g" $$template > $(CONFIG_DIR)/$$output; \
-		fi \
-	done'
-
-generate-configs-gluc:
-	@echo "Generating configs for dataset gluc"
-	@bash -c 'for template in $(CONFIG_TEMPLATES); do \
-		output=$$(basename $$template .yaml.template)-gluc.yaml; \
-		if [[ $$template == *"predict_de_novo"* ]]; then \
-			sed "s/\$${DATASET}/gluc/g; s|beam_predictions_path:.*|beam_predictions_path: $(DATA_DIR)/beam_preds/de_novo/gluc_raw_beam_preds_filtered.csv|g; s|spectrum_path:.*|spectrum_path: $(DATA_DIR)/spectrum_data/de_novo/gluc_raw_filtered.parquet|g" $$template > $(CONFIG_DIR)/$$output; \
-		else \
-			sed "s/\$${DATASET}/gluc/g; s|data/|$(DATA_DIR)/|g" $$template > $(CONFIG_DIR)/$$output; \
-		fi \
-	done'
-
-generate-configs-snakevenoms:
-	@echo "Generating configs for dataset snakevenoms"
-	@bash -c 'for template in $(CONFIG_TEMPLATES); do \
-		output=$$(basename $$template .yaml.template)-snakevenoms.yaml; \
-		if [[ $$template == *"predict_de_novo"* ]]; then \
-			sed "s/\$${DATASET}/snakevenoms/g; s|beam_predictions_path:.*|beam_predictions_path: $(DATA_DIR)/beam_preds/de_novo/snakevenoms_raw_beam_preds_filtered.csv|g; s|spectrum_path:.*|spectrum_path: $(DATA_DIR)/spectrum_data/de_novo/snakevenoms_raw_filtered.parquet|g" $$template > $(CONFIG_DIR)/$$output; \
-		else \
-			sed "s/\$${DATASET}/snakevenoms/g; s|data/|$(DATA_DIR)/|g" $$template > $(CONFIG_DIR)/$$output; \
-		fi \
-	done'
-
-generate-configs-tplantibodies:
-	@echo "Generating configs for dataset tplantibodies"
-	@bash -c 'for template in $(CONFIG_TEMPLATES); do \
-		output=$$(basename $$template .yaml.template)-tplantibodies.yaml; \
-		if [[ $$template == *"predict_de_novo"* ]]; then \
-			sed "s/\$${DATASET}/tplantibodies/g; s|beam_predictions_path:.*|beam_predictions_path: $(DATA_DIR)/beam_preds/de_novo/tplantibodies_raw_beam_preds_filtered.csv|g; s|spectrum_path:.*|spectrum_path: $(DATA_DIR)/spectrum_data/de_novo/tplantibodies_raw_filtered.parquet|g" $$template > $(CONFIG_DIR)/$$output; \
-		else \
-			sed "s/\$${DATASET}/tplantibodies/g; s|data/|$(DATA_DIR)/|g" $$template > $(CONFIG_DIR)/$$output; \
-		fi \
-	done'
-
-generate-configs-woundfluids:
-	@echo "Generating configs for dataset woundfluids"
-	@bash -c 'for template in $(CONFIG_TEMPLATES); do \
-		output=$$(basename $$template .yaml.template)-woundfluids.yaml; \
-		if [[ $$template == *"predict_de_novo"* ]]; then \
-			sed "s/\$${DATASET}/woundfluids/g; s|beam_predictions_path:.*|beam_predictions_path: $(DATA_DIR)/beam_preds/de_novo/woundfluids_raw_beam_preds_filtered.csv|g; s|spectrum_path:.*|spectrum_path: $(DATA_DIR)/spectrum_data/de_novo/woundfluids_raw_filtered.parquet|g" $$template > $(CONFIG_DIR)/$$output; \
-		else \
-			sed "s/\$${DATASET}/woundfluids/g; s|data/|$(DATA_DIR)/|g" $$template > $(CONFIG_DIR)/$$output; \
-		fi \
-	done'
-
-# Individual copy results rules
-copy-results-helaqc:
-	@echo "Copying results for helaqc to GCP..."
-	gsutil cp $(OUTPUT_DIR)/helaqc/labelled_winnow_predict_output.csv $(GCS_METADATA_LABELLED)/helaqc_test_labelled.csv
-	gsutil cp $(OUTPUT_DIR)/helaqc/train_output.csv $(GCS_METADATA_LABELLED)/helaqc_train_labelled.csv
-	gsutil cp $(OUTPUT_DIR)/helaqc/de_novo_winnow_predict_output.csv $(GCS_METADATA_DE_NOVO)/helaqc_de_novo_preds.csv
-	gsutil -m cp -r $(MODEL_DIR)/helaqc/* $(GCS_CALIBRATOR_MODELS)/helaqc/
-	@echo "Results copied successfully!"
-
-copy-results-sbrodae:
-	@echo "Copying results for sbrodae to GCP..."
-	gsutil cp $(OUTPUT_DIR)/sbrodae/labelled_winnow_predict_output.csv $(GCS_METADATA_LABELLED)/sbrodae_test_labelled.csv
-	gsutil cp $(OUTPUT_DIR)/sbrodae/train_output.csv $(GCS_METADATA_LABELLED)/sbrodae_train_labelled.csv
-	gsutil cp $(OUTPUT_DIR)/sbrodae/de_novo_winnow_predict_output.csv $(GCS_METADATA_DE_NOVO)/sbrodae_de_novo_preds.csv
-	gsutil -m cp -r $(MODEL_DIR)/sbrodae/* $(GCS_CALIBRATOR_MODELS)/sbrodae/
-	@echo "Results copied successfully!"
-
-copy-results-herceptin:
-	@echo "Copying results for herceptin to GCP..."
-	gsutil cp $(OUTPUT_DIR)/herceptin/labelled_winnow_predict_output.csv $(GCS_METADATA_LABELLED)/herceptin_test_labelled.csv
-	gsutil cp $(OUTPUT_DIR)/herceptin/train_output.csv $(GCS_METADATA_LABELLED)/herceptin_train_labelled.csv
-	gsutil cp $(OUTPUT_DIR)/herceptin/de_novo_winnow_predict_output.csv $(GCS_METADATA_DE_NOVO)/herceptin_de_novo_preds.csv
-	gsutil -m cp -r $(MODEL_DIR)/herceptin/* $(GCS_CALIBRATOR_MODELS)/herceptin/
-	@echo "Results copied successfully!"
-
-copy-results-immuno:
-	@echo "Copying results for immuno to GCP..."
-	gsutil cp $(OUTPUT_DIR)/immuno/labelled_winnow_predict_output.csv $(GCS_METADATA_LABELLED)/immuno_test_labelled.csv
-	gsutil cp $(OUTPUT_DIR)/immuno/train_output.csv $(GCS_METADATA_LABELLED)/immuno_train_labelled.csv
-	gsutil cp $(OUTPUT_DIR)/immuno/de_novo_winnow_predict_output.csv $(GCS_METADATA_DE_NOVO)/immuno_de_novo_preds.csv
-	gsutil -m cp -r $(MODEL_DIR)/immuno/* $(GCS_CALIBRATOR_MODELS)/immuno/
-	@echo "Results copied successfully!"
-
-copy-results-gluc:
-	@echo "Copying results for gluc to GCP..."
-	gsutil cp $(OUTPUT_DIR)/gluc/labelled_winnow_predict_output.csv $(GCS_METADATA_LABELLED)/gluc_test_labelled.csv
-	gsutil cp $(OUTPUT_DIR)/gluc/train_output.csv $(GCS_METADATA_LABELLED)/gluc_train_labelled.csv
-	gsutil cp $(OUTPUT_DIR)/gluc/de_novo_winnow_predict_output.csv $(GCS_METADATA_DE_NOVO)/gluc_de_novo_preds.csv
-	gsutil -m cp -r $(MODEL_DIR)/gluc/* $(GCS_CALIBRATOR_MODELS)/gluc/
-	@echo "Results copied successfully!"
-
-copy-results-snakevenoms:
-	@echo "Copying results for snakevenoms to GCP..."
-	gsutil cp $(OUTPUT_DIR)/snakevenoms/labelled_winnow_predict_output.csv $(GCS_METADATA_LABELLED)/snakevenoms_test_labelled.csv
-	gsutil cp $(OUTPUT_DIR)/snakevenoms/train_output.csv $(GCS_METADATA_LABELLED)/snakevenoms_train_labelled.csv
-	gsutil cp $(OUTPUT_DIR)/snakevenoms/de_novo_winnow_predict_output.csv $(GCS_METADATA_DE_NOVO)/snakevenoms_de_novo_preds.csv
-	gsutil -m cp -r $(MODEL_DIR)/snakevenoms/* $(GCS_CALIBRATOR_MODELS)/snakevenoms/
-	@echo "Results copied successfully!"
-
-copy-results-tplantibodies:
-	@echo "Copying results for tplantibodies to GCP..."
-	gsutil cp $(OUTPUT_DIR)/tplantibodies/labelled_winnow_predict_output.csv $(GCS_METADATA_LABELLED)/tplantibodies_test_labelled.csv
-	gsutil cp $(OUTPUT_DIR)/tplantibodies/train_output.csv $(GCS_METADATA_LABELLED)/tplantibodies_train_labelled.csv
-	gsutil cp $(OUTPUT_DIR)/tplantibodies/de_novo_winnow_predict_output.csv $(GCS_METADATA_DE_NOVO)/tplantibodies_de_novo_preds.csv
-	gsutil -m cp -r $(MODEL_DIR)/tplantibodies/* $(GCS_CALIBRATOR_MODELS)/tplantibodies/
-	@echo "Results copied successfully!"
-
-copy-results-woundfluids:
-	@echo "Copying results for woundfluids to GCP..."
-	gsutil cp $(OUTPUT_DIR)/woundfluids/labelled_winnow_predict_output.csv $(GCS_METADATA_LABELLED)/woundfluids_test_labelled.csv
-	gsutil cp $(OUTPUT_DIR)/woundfluids/train_output.csv $(GCS_METADATA_LABELLED)/woundfluids_train_labelled.csv
-	gsutil cp $(OUTPUT_DIR)/woundfluids/de_novo_winnow_predict_output.csv $(GCS_METADATA_DE_NOVO)/woundfluids_de_novo_preds.csv
-	gsutil -m cp -r $(MODEL_DIR)/woundfluids/* $(GCS_CALIBRATOR_MODELS)/woundfluids/
-	@echo "Results copied successfully!"
-
 #################################################################################
-## Dataset preparation and training targets										#
+## Condensed dataset commands													#
 #################################################################################
 
-.PHONY: prepare-all train-all clean-all prepare-helaqc prepare-sbrodae prepare-herceptin prepare-immuno train-helaqc train-sbrodae train-herceptin train-immuno copy-results-helaqc copy-results-sbrodae copy-results-herceptin copy-results-immuno generate-configs-helaqc generate-configs-sbrodae generate-configs-herceptin generate-configs-immuno preprocess-all $(addprefix preprocess-,$(DATASETS))
+# Variable to specify which dataset to process
+DATASET ?= helaqc
 
-# Target to prepare all datasets
-prepare-all: prepare-helaqc prepare-sbrodae prepare-herceptin prepare-immuno prepare-gluc prepare-snakevenoms prepare-tplantibodies prepare-woundfluids
+# Validate that the specified dataset is in our list
+validate-dataset:
+	@if ! echo "$(DATASETS)" | grep -q "$(DATASET)"; then \
+		echo "Error: Invalid dataset '$(DATASET)'. Must be one of: $(DATASETS)"; \
+		exit 1; \
+	fi
 
-# Target to train on all datasets
-train-all: train-helaqc train-sbrodae train-herceptin train-immuno train-gluc train-snakevenoms train-tplantibodies train-woundfluids
-
-# Preprocessing targets
-.PHONY: preprocess-all $(addprefix preprocess-,$(DATASETS))
-
-# Target to preprocess all datasets
-preprocess-all: $(addprefix preprocess-,$(DATASETS))
-
-# Individual preprocessing rules
-preprocess-helaqc:
-	@echo "Preprocessing dataset helaqc"
+# Condensed preprocessing command
+preprocess-dataset: validate-dataset
+	@echo "Preprocessing dataset $(DATASET)"
 	mkdir -p $(DATA_DIR)/beam_preds/labelled
 	mkdir -p $(DATA_DIR)/beam_preds/de_novo
 	mkdir -p $(DATA_DIR)/beam_preds/raw
 	mkdir -p $(DATA_DIR)/spectrum_data/labelled
 	mkdir -p $(DATA_DIR)/spectrum_data/de_novo
 	mkdir -p $(DATA_DIR)/spectrum_data/raw
-	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-helaqc-annotated-0000-0001.parquet $(DATA_DIR)/spectrum_data/labelled/
-	gsutil cp $(GCS_BASE)/beam_preds/raw/helaqc_beam_preds.csv $(DATA_DIR)/beam_preds/raw/
-	gsutil cp $(GCS_BASE)/spectrum_data/raw/dataset-helaqc-raw-0000-0001.parquet $(DATA_DIR)/spectrum_data/raw/
-	python scripts/preprocess_validation_data.py --species helaqc --input_dir $(DATA_DIR)
+	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-$(DATASET)-annotated-0000-0001.parquet $(DATA_DIR)/spectrum_data/labelled/
+	gsutil cp $(GCS_BASE)/beam_preds/raw/$(DATASET)_beam_preds.csv $(DATA_DIR)/beam_preds/raw/
+	gsutil cp $(GCS_BASE)/spectrum_data/raw/dataset-$(DATASET)-raw-0000-0001.parquet $(DATA_DIR)/spectrum_data/raw/
+	python scripts/preprocess_validation_data.py --species $(DATASET) --input_dir $(DATA_DIR)
 
-preprocess-sbrodae:
-	@echo "Preprocessing dataset sbrodae"
-	mkdir -p $(DATA_DIR)/beam_preds/labelled
-	mkdir -p $(DATA_DIR)/beam_preds/de_novo
-	mkdir -p $(DATA_DIR)/beam_preds/raw
-	mkdir -p $(DATA_DIR)/spectrum_data/labelled
-	mkdir -p $(DATA_DIR)/spectrum_data/de_novo
-	mkdir -p $(DATA_DIR)/spectrum_data/raw
-	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-sbrodae-annotated-0000-0001.parquet $(DATA_DIR)/spectrum_data/labelled/
-	gsutil cp $(GCS_BASE)/beam_preds/raw/sbrodae_beam_preds.csv $(DATA_DIR)/beam_preds/raw/
-	gsutil cp $(GCS_BASE)/spectrum_data/raw/dataset-sbrodae-raw-0000-0001.parquet $(DATA_DIR)/spectrum_data/raw/
-	python scripts/preprocess_validation_data.py --species sbrodae --input_dir $(DATA_DIR)
-
-preprocess-herceptin:
-	@echo "Preprocessing dataset herceptin"
-	mkdir -p $(DATA_DIR)/beam_preds/labelled
-	mkdir -p $(DATA_DIR)/beam_preds/de_novo
-	mkdir -p $(DATA_DIR)/beam_preds/raw
-	mkdir -p $(DATA_DIR)/spectrum_data/labelled
-	mkdir -p $(DATA_DIR)/spectrum_data/de_novo
-	mkdir -p $(DATA_DIR)/spectrum_data/raw
-	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-herceptin-annotated-0000-0001.parquet $(DATA_DIR)/spectrum_data/labelled/
-	gsutil cp $(GCS_BASE)/beam_preds/raw/herceptin_beam_preds.csv $(DATA_DIR)/beam_preds/raw/
-	gsutil cp $(GCS_BASE)/spectrum_data/raw/dataset-herceptin-raw-0000-0001.parquet $(DATA_DIR)/spectrum_data/raw/
-	python scripts/preprocess_validation_data.py --species herceptin --input_dir $(DATA_DIR)
-
-preprocess-immuno:
-	@echo "Preprocessing dataset immuno"
-	mkdir -p $(DATA_DIR)/beam_preds/labelled
-	mkdir -p $(DATA_DIR)/beam_preds/de_novo
-	mkdir -p $(DATA_DIR)/beam_preds/raw
-	mkdir -p $(DATA_DIR)/spectrum_data/labelled
-	mkdir -p $(DATA_DIR)/spectrum_data/de_novo
-	mkdir -p $(DATA_DIR)/spectrum_data/raw
-	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-immuno-annotated-0000-0001.parquet $(DATA_DIR)/spectrum_data/labelled/
-	gsutil cp $(GCS_BASE)/beam_preds/raw/immuno_beam_preds.csv $(DATA_DIR)/beam_preds/raw/
-	gsutil cp $(GCS_BASE)/spectrum_data/raw/dataset-immuno-raw-0000-0001.parquet $(DATA_DIR)/spectrum_data/raw/
-	python scripts/preprocess_validation_data.py --species immuno --input_dir $(DATA_DIR)
-
-preprocess-gluc:
-	@echo "Preprocessing dataset gluc"
-	mkdir -p $(DATA_DIR)/beam_preds/labelled
-	mkdir -p $(DATA_DIR)/beam_preds/de_novo
-	mkdir -p $(DATA_DIR)/beam_preds/raw
-	mkdir -p $(DATA_DIR)/spectrum_data/labelled
-	mkdir -p $(DATA_DIR)/spectrum_data/de_novo
-	mkdir -p $(DATA_DIR)/spectrum_data/raw
-	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-gluc-annotated-0000-0001.parquet $(DATA_DIR)/spectrum_data/labelled/
-	gsutil cp $(GCS_BASE)/beam_preds/raw/gluc_beam_preds.csv $(DATA_DIR)/beam_preds/raw/
-	gsutil cp $(GCS_BASE)/spectrum_data/raw/dataset-gluc-raw-0000-0001.parquet $(DATA_DIR)/spectrum_data/raw/
-	python scripts/preprocess_validation_data.py --species gluc --input_dir $(DATA_DIR)
-
-preprocess-snakevenoms:
-	@echo "Preprocessing dataset snakevenoms"
-	mkdir -p $(DATA_DIR)/beam_preds/labelled
-	mkdir -p $(DATA_DIR)/beam_preds/de_novo
-	mkdir -p $(DATA_DIR)/beam_preds/raw
-	mkdir -p $(DATA_DIR)/spectrum_data/labelled
-	mkdir -p $(DATA_DIR)/spectrum_data/de_novo
-	mkdir -p $(DATA_DIR)/spectrum_data/raw
-	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-snakevenoms-annotated-0000-0001.parquet $(DATA_DIR)/spectrum_data/labelled/
-	gsutil cp $(GCS_BASE)/beam_preds/raw/snakevenoms_beam_preds.csv $(DATA_DIR)/beam_preds/raw/
-	gsutil cp $(GCS_BASE)/spectrum_data/raw/dataset-snakevenoms-raw-0000-0001.parquet $(DATA_DIR)/spectrum_data/raw/
-	python scripts/preprocess_validation_data.py --species snakevenoms --input_dir $(DATA_DIR)
-
-preprocess-tplantibodies:
-	@echo "Preprocessing dataset tplantibodies"
-	mkdir -p $(DATA_DIR)/beam_preds/labelled
-	mkdir -p $(DATA_DIR)/beam_preds/de_novo
-	mkdir -p $(DATA_DIR)/beam_preds/raw
-	mkdir -p $(DATA_DIR)/spectrum_data/labelled
-	mkdir -p $(DATA_DIR)/spectrum_data/de_novo
-	mkdir -p $(DATA_DIR)/spectrum_data/raw
-	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-tplantibodies-annotated-0000-0001.parquet $(DATA_DIR)/spectrum_data/labelled/
-	gsutil cp $(GCS_BASE)/beam_preds/raw/tplantibodies_beam_preds.csv $(DATA_DIR)/beam_preds/raw/
-	gsutil cp $(GCS_BASE)/spectrum_data/raw/dataset-tplantibodies-raw-0000-0001.parquet $(DATA_DIR)/spectrum_data/raw/
-	python scripts/preprocess_validation_data.py --species tplantibodies --input_dir $(DATA_DIR)
-
-preprocess-woundfluids:
-	@echo "Preprocessing dataset woundfluids"
-	mkdir -p $(DATA_DIR)/beam_preds/labelled
-	mkdir -p $(DATA_DIR)/beam_preds/de_novo
-	mkdir -p $(DATA_DIR)/beam_preds/raw
-	mkdir -p $(DATA_DIR)/spectrum_data/labelled
-	mkdir -p $(DATA_DIR)/spectrum_data/de_novo
-	mkdir -p $(DATA_DIR)/spectrum_data/raw
-	gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-woundfluids-annotated-0000-0001.parquet $(DATA_DIR)/spectrum_data/labelled/
-	gsutil cp $(GCS_BASE)/beam_preds/raw/woundfluids_beam_preds.csv $(DATA_DIR)/beam_preds/raw/
-	gsutil cp $(GCS_BASE)/spectrum_data/raw/dataset-woundfluids-raw-0000-0001.parquet $(DATA_DIR)/spectrum_data/raw/
-	python scripts/preprocess_validation_data.py --species woundfluids --input_dir $(DATA_DIR)
-
-# Modify prepare targets to depend on preprocessing
-prepare-helaqc: preprocess-helaqc
-	@echo "Preparing dataset helaqc"
-	mkdir -p $(DATA_DIR)/splits/helaqc
+# Condensed prepare command
+prepare-dataset: preprocess-dataset
+	@echo "Preparing dataset $(DATASET)"
+	mkdir -p $(DATA_DIR)/splits/$(DATASET)
 	python scripts/create_train_test_split.py \
-		--spectrum_path $(DATA_DIR)/spectrum_data/labelled/dataset-helaqc-annotated-0000-0001.parquet \
-		--beam_predictions_path $(DATA_DIR)/beam_preds/labelled/helaqc-annotated_beam_preds.csv \
-		--output_dir $(DATA_DIR)/splits/helaqc \
+		--spectrum_path $(DATA_DIR)/spectrum_data/labelled/dataset-$(DATASET)-annotated-0000-0001.parquet \
+		--beam_predictions_path $(DATA_DIR)/beam_preds/labelled/$(DATASET)-annotated_beam_preds.csv \
+		--output_dir $(DATA_DIR)/splits/$(DATASET) \
 		--test_fraction $(TEST_FRACTION) \
 		--random_state $(RANDOM_STATE)
-	$(MAKE) generate-configs-helaqc
+	$(MAKE) generate-configs-dataset
 
-prepare-sbrodae: preprocess-sbrodae
-	@echo "Preparing dataset sbrodae"
-	mkdir -p $(DATA_DIR)/splits/sbrodae
-	python scripts/create_train_test_split.py \
-		--spectrum_path $(DATA_DIR)/spectrum_data/labelled/dataset-sbrodae-annotated-0000-0001.parquet \
-		--beam_predictions_path $(DATA_DIR)/beam_preds/labelled/sbrodae-annotated_beam_preds.csv \
-		--output_dir $(DATA_DIR)/splits/sbrodae \
-		--test_fraction $(TEST_FRACTION) \
-		--random_state $(RANDOM_STATE)
-	$(MAKE) generate-configs-sbrodae
-
-prepare-herceptin: preprocess-herceptin
-	@echo "Preparing dataset herceptin"
-	mkdir -p $(DATA_DIR)/splits/herceptin
-	python scripts/create_train_test_split.py \
-		--spectrum_path $(DATA_DIR)/spectrum_data/labelled/dataset-herceptin-annotated-0000-0001.parquet \
-		--beam_predictions_path $(DATA_DIR)/beam_preds/labelled/herceptin-annotated_beam_preds.csv \
-		--output_dir $(DATA_DIR)/splits/herceptin \
-		--test_fraction $(TEST_FRACTION) \
-		--random_state $(RANDOM_STATE)
-	$(MAKE) generate-configs-herceptin
-
-prepare-immuno: preprocess-immuno
-	@echo "Preparing dataset immuno"
-	mkdir -p $(DATA_DIR)/splits/immuno
-	python scripts/create_train_test_split.py \
-		--spectrum_path $(DATA_DIR)/spectrum_data/labelled/dataset-immuno-annotated-0000-0001.parquet \
-		--beam_predictions_path $(DATA_DIR)/beam_preds/labelled/immuno-annotated_beam_preds.csv \
-		--output_dir $(DATA_DIR)/splits/immuno \
-		--test_fraction $(TEST_FRACTION) \
-		--random_state $(RANDOM_STATE)
-	$(MAKE) generate-configs-immuno
-
-prepare-gluc: preprocess-gluc
-	@echo "Preparing dataset gluc"
-	mkdir -p $(DATA_DIR)/splits/gluc
-	python scripts/create_train_test_split.py \
-		--spectrum_path $(DATA_DIR)/spectrum_data/labelled/dataset-gluc-annotated-0000-0001.parquet \
-		--beam_predictions_path $(DATA_DIR)/beam_preds/labelled/gluc-annotated_beam_preds.csv \
-		--output_dir $(DATA_DIR)/splits/gluc \
-		--test_fraction $(TEST_FRACTION) \
-		--random_state $(RANDOM_STATE)
-	$(MAKE) generate-configs-gluc
-
-prepare-snakevenoms: preprocess-snakevenoms
-	@echo "Preparing dataset snakevenoms"
-	mkdir -p $(DATA_DIR)/splits/snakevenoms
-	python scripts/create_train_test_split.py \
-		--spectrum_path $(DATA_DIR)/spectrum_data/labelled/dataset-snakevenoms-annotated-0000-0001.parquet \
-		--beam_predictions_path $(DATA_DIR)/beam_preds/labelled/snakevenoms-annotated_beam_preds.csv \
-		--output_dir $(DATA_DIR)/splits/snakevenoms \
-		--test_fraction $(TEST_FRACTION) \
-		--random_state $(RANDOM_STATE)
-	$(MAKE) generate-configs-snakevenoms
-
-prepare-tplantibodies: preprocess-tplantibodies
-	@echo "Preparing dataset tplantibodies"
-	mkdir -p $(DATA_DIR)/splits/tplantibodies
-	python scripts/create_train_test_split.py \
-		--spectrum_path $(DATA_DIR)/spectrum_data/labelled/dataset-tplantibodies-annotated-0000-0001.parquet \
-		--beam_predictions_path $(DATA_DIR)/beam_preds/labelled/tplantibodies-annotated_beam_preds.csv \
-		--output_dir $(DATA_DIR)/splits/tplantibodies \
-		--test_fraction $(TEST_FRACTION) \
-		--random_state $(RANDOM_STATE)
-	$(MAKE) generate-configs-tplantibodies
-
-prepare-woundfluids: preprocess-woundfluids
-	@echo "Preparing dataset woundfluids"
-	mkdir -p $(DATA_DIR)/splits/woundfluids
-	python scripts/create_train_test_split.py \
-		--spectrum_path $(DATA_DIR)/spectrum_data/labelled/dataset-woundfluids-annotated-0000-0001.parquet \
-		--beam_predictions_path $(DATA_DIR)/beam_preds/labelled/woundfluids-annotated_beam_preds.csv \
-		--output_dir $(DATA_DIR)/splits/woundfluids \
-		--test_fraction $(TEST_FRACTION) \
-		--random_state $(RANDOM_STATE)
-	$(MAKE) generate-configs-woundfluids
-
-# Individual train rules
-train-helaqc: prepare-helaqc
-	@echo "Training on dataset helaqc"
-	mkdir -p $(MODEL_DIR)/helaqc
-	mkdir -p $(OUTPUT_DIR)/helaqc
+# Condensed train command
+train-dataset: prepare-dataset
+	@echo "Training on dataset $(DATASET)"
+	mkdir -p $(MODEL_DIR)/$(DATASET)
+	mkdir -p $(OUTPUT_DIR)/$(DATASET)
 	chmod +x run.sh
-	./run.sh $(MODEL_DIR)/helaqc $(OUTPUT_DIR)/helaqc $(CONFIG_DIR)/train-helaqc.yaml $(CONFIG_DIR)/predict_labelled-helaqc.yaml $(CONFIG_DIR)/predict_de_novo-helaqc.yaml
-	$(MAKE) copy-results-helaqc
+	./run.sh $(MODEL_DIR)/$(DATASET) $(OUTPUT_DIR)/$(DATASET) $(CONFIG_DIR)/train-$(DATASET).yaml $(CONFIG_DIR)/predict_labelled-$(DATASET).yaml $(CONFIG_DIR)/predict_de_novo-$(DATASET).yaml
+	$(MAKE) copy-results-dataset
 
-train-sbrodae: prepare-sbrodae
-	@echo "Training on dataset sbrodae"
-	mkdir -p $(MODEL_DIR)/sbrodae
-	mkdir -p $(OUTPUT_DIR)/sbrodae
-	chmod +x run.sh
-	./run.sh $(MODEL_DIR)/sbrodae $(OUTPUT_DIR)/sbrodae $(CONFIG_DIR)/train-sbrodae.yaml $(CONFIG_DIR)/predict_labelled-sbrodae.yaml $(CONFIG_DIR)/predict_de_novo-sbrodae.yaml
-	$(MAKE) copy-results-sbrodae
+# Generic config generation command
+generate-configs-dataset: validate-dataset
+	@echo "Generating configs for dataset $(DATASET)"
+	@bash -c 'for template in $(CONFIG_TEMPLATES); do \
+		output=$$(basename $$template .yaml.template)-$(DATASET).yaml; \
+		if [[ $$template == *"predict_de_novo"* ]]; then \
+			sed "s/\$${DATASET}/$(DATASET)/g; s|beam_predictions_path:.*|beam_predictions_path: $(DATA_DIR)/beam_preds/de_novo/$(DATASET)_raw_beam_preds_filtered.csv|g; s|spectrum_path:.*|spectrum_path: $(DATA_DIR)/spectrum_data/de_novo/$(DATASET)_raw_filtered.parquet|g" $$template > $(CONFIG_DIR)/$$output; \
+		else \
+			sed "s/\$${DATASET}/$(DATASET)/g; s|data/|$(DATA_DIR)/|g" $$template > $(CONFIG_DIR)/$$output; \
+		fi \
+	done'
 
-train-herceptin: prepare-herceptin
-	@echo "Training on dataset herceptin"
-	mkdir -p $(MODEL_DIR)/herceptin
-	mkdir -p $(OUTPUT_DIR)/herceptin
-	chmod +x run.sh
-	./run.sh $(MODEL_DIR)/herceptin $(OUTPUT_DIR)/herceptin $(CONFIG_DIR)/train-herceptin.yaml $(CONFIG_DIR)/predict_labelled-herceptin.yaml $(CONFIG_DIR)/predict_de_novo-herceptin.yaml
-	$(MAKE) copy-results-herceptin
+# Generic copy results command
+copy-results-dataset: validate-dataset
+	@echo "Copying results for $(DATASET) to GCP..."
+	gsutil cp $(OUTPUT_DIR)/$(DATASET)/labelled_winnow_predict_output.csv $(GCS_METADATA_LABELLED)/$(DATASET)_test_labelled_winnow.csv
+	gsutil cp $(OUTPUT_DIR)/$(DATASET)/labelled_database_ground_predict_output.csv $(GCS_METADATA_LABELLED)/$(DATASET)_test_labelled_database_ground.csv
+	gsutil cp $(OUTPUT_DIR)/$(DATASET)/train_output.csv $(GCS_METADATA_LABELLED)/$(DATASET)_train_labelled.csv
+	gsutil cp $(OUTPUT_DIR)/$(DATASET)/de_novo_winnow_predict_output.csv $(GCS_METADATA_DE_NOVO)/$(DATASET)_de_novo_preds.csv
+	gsutil -m cp -r $(MODEL_DIR)/$(DATASET)/* $(GCS_CALIBRATOR_MODELS)/$(DATASET)/
+	@echo "Results copied successfully!"
 
-train-immuno: prepare-immuno
-	@echo "Training on dataset immuno"
-	mkdir -p $(MODEL_DIR)/immuno
-	mkdir -p $(OUTPUT_DIR)/immuno
-	chmod +x run.sh
-	./run.sh $(MODEL_DIR)/immuno $(OUTPUT_DIR)/immuno $(CONFIG_DIR)/train-immuno.yaml $(CONFIG_DIR)/predict_labelled-immuno.yaml $(CONFIG_DIR)/predict_de_novo-immuno.yaml
-	$(MAKE) copy-results-immuno
+# Example usage:
+# make preprocess-dataset DATASET=helaqc
+# make prepare-dataset DATASET=helaqc
+# make train-dataset DATASET=helaqc
+# make generate-configs-dataset DATASET=helaqc
+# make copy-results-dataset DATASET=helaqc
 
-train-gluc: prepare-gluc
-	@echo "Training on dataset gluc"
-	mkdir -p $(MODEL_DIR)/gluc
-	mkdir -p $(OUTPUT_DIR)/gluc
-	chmod +x run.sh
-	./run.sh $(MODEL_DIR)/gluc $(OUTPUT_DIR)/gluc $(CONFIG_DIR)/train-gluc.yaml $(CONFIG_DIR)/predict_labelled-gluc.yaml $(CONFIG_DIR)/predict_de_novo-gluc.yaml
-	$(MAKE) copy-results-gluc
+#################################################################################
+## Batch processing commands													#
+#################################################################################
 
-train-snakevenoms: prepare-snakevenoms
-	@echo "Training on dataset snakevenoms"
-	mkdir -p $(MODEL_DIR)/snakevenoms
-	mkdir -p $(OUTPUT_DIR)/snakevenoms
-	chmod +x run.sh
-	./run.sh $(MODEL_DIR)/snakevenoms $(OUTPUT_DIR)/snakevenoms $(CONFIG_DIR)/train-snakevenoms.yaml $(CONFIG_DIR)/predict_labelled-snakevenoms.yaml $(CONFIG_DIR)/predict_de_novo-snakevenoms.yaml
-	$(MAKE) copy-results-snakevenoms
+.PHONY: clean-all clean-configs process-all-datasets
 
-train-tplantibodies: prepare-tplantibodies
-	@echo "Training on dataset tplantibodies"
-	mkdir -p $(MODEL_DIR)/tplantibodies
-	mkdir -p $(OUTPUT_DIR)/tplantibodies
-	chmod +x run.sh
-	./run.sh $(MODEL_DIR)/tplantibodies $(OUTPUT_DIR)/tplantibodies $(CONFIG_DIR)/train-tplantibodies.yaml $(CONFIG_DIR)/predict_labelled-tplantibodies.yaml $(CONFIG_DIR)/predict_de_novo-tplantibodies.yaml
-	$(MAKE) copy-results-tplantibodies
-
-train-woundfluids: prepare-woundfluids
-	@echo "Training on dataset woundfluids"
-	mkdir -p $(MODEL_DIR)/woundfluids
-	mkdir -p $(OUTPUT_DIR)/woundfluids
-	chmod +x run.sh
-	./run.sh $(MODEL_DIR)/woundfluids $(OUTPUT_DIR)/woundfluids $(CONFIG_DIR)/train-woundfluids.yaml $(CONFIG_DIR)/predict_labelled-woundfluids.yaml $(CONFIG_DIR)/predict_de_novo-woundfluids.yaml
-	$(MAKE) copy-results-woundfluids
+# Process all datasets in sequence
+process-all-datasets:
+	@for dataset in $(DATASETS); do \
+		echo "Processing dataset: $$dataset"; \
+		$(MAKE) preprocess-dataset DATASET=$$dataset; \
+		$(MAKE) prepare-dataset DATASET=$$dataset; \
+		$(MAKE) train-dataset DATASET=$$dataset; \
+	done
 
 # Clean configs
 clean-configs:
@@ -680,6 +329,6 @@ clean-configs:
 		rm -f $(CONFIG_DIR)/*-$$dataset.yaml; \
 	done
 
-# Update clean-all to include configs
+# Clean all
 clean-all: clean-configs
 	rm -rf $(DATA_DIR) $(MODEL_DIR) $(OUTPUT_DIR)
