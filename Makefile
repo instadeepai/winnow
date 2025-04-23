@@ -205,7 +205,7 @@ set-gcp-credentials:
 	gcloud auth activate-service-account dtu-denovo-sa@ext-dtu-denovo-sequencing-gcp.iam.gserviceaccount.com --key-file=ext-dtu-denovo-sequencing-gcp.json --project=ext-dtu-denovo-sequencing-gcp
 
 #################################################################################
-## Dataset variables															#
+## Validation dataset variables													#
 #################################################################################
 
 # List of all datasets to process
@@ -231,7 +231,7 @@ CONFIG_DIR := configs
 CONFIG_TEMPLATES := $(wildcard $(CONFIG_DIR)/*.yaml.template)
 
 #################################################################################
-## Condensed dataset commands													#
+## Condensed validation dataset commands										#
 #################################################################################
 
 # Variable to specify which dataset to process
@@ -270,14 +270,50 @@ prepare-dataset: preprocess-dataset
 		--random_state $(RANDOM_STATE)
 	$(MAKE) generate-configs-dataset
 
-# Condensed train command
+# Condensed train and predict command
 train-dataset: prepare-dataset
-	@echo "Training on dataset $(DATASET)"
+	@echo "Training and predicting on dataset $(DATASET)"
 	mkdir -p $(MODEL_DIR)/$(DATASET)
 	mkdir -p $(OUTPUT_DIR)/$(DATASET)
-	chmod +x run.sh
-	./run.sh $(MODEL_DIR)/$(DATASET) $(OUTPUT_DIR)/$(DATASET) $(CONFIG_DIR)/train-$(DATASET).yaml $(CONFIG_DIR)/predict_labelled-$(DATASET).yaml $(CONFIG_DIR)/predict_de_novo-$(DATASET).yaml
-	$(MAKE) copy-results-dataset
+
+	# Train
+	winnow train \
+		--data-source=winnow \
+		--dataset-config-path=$(CONFIG_DIR)/train-$(DATASET).yaml \
+		--model-output-folder=$(MODEL_DIR)/$(DATASET) \
+		--dataset-output-path=$(OUTPUT_DIR)/$(DATASET)/train_output.csv
+
+	# Evaluate on labelled data using winnow method
+	winnow predict \
+		--data-source=winnow \
+		--dataset-config-path=$(CONFIG_DIR)/predict_labelled-$(DATASET).yaml \
+		--model-folder=$(MODEL_DIR)/$(DATASET) \
+		--method=winnow \
+		--fdr-threshold=0.05 \
+		--confidence-column="calibrated_confidence" \
+		--output-path=$(OUTPUT_DIR)/$(DATASET)/labelled_winnow_predict_output.csv
+
+	# Evaluate on labelled data using database-ground method
+	winnow predict \
+		--data-source=winnow \
+		--dataset-config-path=$(CONFIG_DIR)/predict_labelled-$(DATASET).yaml \
+		--model-folder=$(MODEL_DIR)/$(DATASET) \
+		--method=database-ground \
+		--fdr-threshold=0.05 \
+		--confidence-column="calibrated_confidence" \
+		--output-path=$(OUTPUT_DIR)/$(DATASET)/labelled_database_ground_predict_output.csv
+
+	# Evaluate on de novo data using winnow method
+	winnow predict \
+		--data-source=instanovo \
+		--dataset-config-path=$(CONFIG_DIR)/predict_de_novo-$(DATASET).yaml \
+		--model-folder=$(MODEL_DIR)/$(DATASET) \
+		--method=winnow \
+		--fdr-threshold=0.05 \
+		--confidence-column="calibrated_confidence" \
+		--output-path=$(OUTPUT_DIR)/$(DATASET)/de_novo_winnow_predict_output.csv
+
+	# $(MAKE) copy-results-dataset
 
 # Generic config generation command
 generate-configs-dataset: validate-dataset
@@ -309,7 +345,7 @@ copy-results-dataset: validate-dataset
 # make copy-results-dataset DATASET=helaqc
 
 #################################################################################
-## Batch processing commands													#
+## Validation dataset batch processing commands									#
 #################################################################################
 
 .PHONY: clean-all clean-configs process-all-datasets
@@ -332,3 +368,7 @@ clean-configs:
 # Clean all
 clean-all: clean-configs
 	rm -rf $(DATA_DIR) $(MODEL_DIR) $(OUTPUT_DIR)
+
+# Example usage:
+# make process-all-datasets
+# make clean-all
