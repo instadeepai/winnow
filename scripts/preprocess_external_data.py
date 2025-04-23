@@ -2,8 +2,10 @@
 import logging
 from rich.logging import RichHandler
 import pandas as pd
+import polars as pl
 import ast
 import argparse
+import glob
 
 
 # --- Logging Setup ---
@@ -46,8 +48,21 @@ def get_annotated_beam_preds(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Load and merge annotated data with raw beam predictions to create annotated beam predictions."""
     logger.info("Loading datasets.")
-    annotated_data = pd.read_parquet(annotated_data_path)
-    raw_beam_preds = pd.read_csv(raw_beam_preds_path)
+
+    # Read in annotated data
+    files = glob.glob(annotated_data_path)
+    dfs = []
+    for file in files:
+        df = pl.read_parquet(file)
+        if "retention" in df.columns:
+            df = df.drop("retention")
+        dfs.append(df)
+    # Concatenate all files into one
+    annotated_data = pl.concat(dfs, how="vertical_relaxed").to_pandas()
+    del dfs
+
+    # Read in raw beam preds
+    raw_beam_preds = pl.read_csv(raw_beam_preds_path).to_pandas()
 
     # Apply conversion to object (string) columns
     for col in raw_beam_preds.select_dtypes(include=["object"]).columns:
@@ -103,7 +118,7 @@ def get_unseen_de_novo_data(
 ):
     """Separate out unseen de novo data from seen labelled data in the raw dataset."""
     logger.info("Loading datasets.")
-    raw_data = pd.read_parquet(raw_data_path)
+    raw_data = pl.read_parquet(raw_data_path).to_pandas()
     merge_cols = ["scan", "header", "precursor_mz", "precursor_charge", "experiment_name"]
 
     # Exclude rows that match any row in annotated_data
