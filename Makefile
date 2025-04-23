@@ -404,7 +404,7 @@ copy-results-woundfluids:
 .PHONY: prepare-all train-all clean-all prepare-helaqc prepare-sbrodae prepare-herceptin prepare-immuno train-helaqc train-sbrodae train-herceptin train-immuno copy-results-helaqc copy-results-sbrodae copy-results-herceptin copy-results-immuno generate-configs-helaqc generate-configs-sbrodae generate-configs-herceptin generate-configs-immuno preprocess-all $(addprefix preprocess-,$(DATASETS))
 
 # Target to prepare all datasets
-prepare-all: prepare-helaqc prepare-sbrodae prepare-herceptin prepare-immuno
+prepare-all: prepare-helaqc prepare-sbrodae prepare-herceptin prepare-immuno prepare-gluc prepare-snakevenoms prepare-tplantibodies prepare-woundfluids
 
 # Target to train on all datasets
 train-all: train-helaqc train-sbrodae train-herceptin train-immuno train-gluc train-snakevenoms train-tplantibodies train-woundfluids

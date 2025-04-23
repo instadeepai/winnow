@@ -18,7 +18,7 @@ def parse_args():
         "--species",
         type=str,
         required=True,
-        choices=["helaqc", "sbrodae", "herceptin", "immuno"],
+        choices=["helaqc", "sbrodae", "herceptin", "immuno", "gluc", "snakevenoms", "tplantibodies", "woundfluids"],
         help="Species to preprocess",
     )
     parser.add_argument(
