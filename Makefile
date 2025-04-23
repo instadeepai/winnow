@@ -377,61 +377,61 @@ clean-all: clean-configs
 ## External dataset variables													#
 #################################################################################
 
-# Base directories
-DATA_DIR := input_data
-OUTPUT_DIR := output_data
-MODEL_DIR := models
+# # Base directories
+# DATA_DIR := input_data
+# OUTPUT_DIR := output_data
+# MODEL_DIR := models
 
-# Default parameters
-TEST_FRACTION := 0.2
-RANDOM_STATE := 42
+# # Default parameters
+# TEST_FRACTION := 0.2
+# RANDOM_STATE := 42
 
-# GCS paths for results
-GCS_BASE := gs://winnow-fdr/external_datasets
-GCS_METADATA_LABELLED := $(GCS_BASE)/winnow_metadata/labelled
-GCS_METADATA_DE_NOVO := $(GCS_BASE)/winnow_metadata/de_novo
-GCS_CALIBRATOR_MODELS := $(GCS_BASE)/calibrator_models
+# # GCS paths for results
+# GCS_BASE := gs://winnow-fdr/external_datasets
+# GCS_METADATA_LABELLED := $(GCS_BASE)/winnow_metadata/labelled
+# GCS_METADATA_DE_NOVO := $(GCS_BASE)/winnow_metadata/de_novo
+# GCS_CALIBRATOR_MODELS := $(GCS_BASE)/calibrator_models
 
-# Config generation
-CONFIG_DIR := configs
-CONFIG_TEMPLATES := $(wildcard $(CONFIG_DIR)/*.yaml.template)
+# # Config generation
+# CONFIG_DIR := configs
+# CONFIG_TEMPLATES := $(wildcard $(CONFIG_DIR)/*.yaml.template)
 
-#################################################################################
-## External validation dataset commands						    				#
-#################################################################################
+# #################################################################################
+# ## External validation dataset commands						    				#
+# #################################################################################
 
-.PHONY: preprocess-external-datasets prepare-external-dataset generate-configs-external-dataset
+# .PHONY: preprocess-external-datasets prepare-external-dataset generate-configs-external-dataset
 
-# Condensed preprocessing command
-preprocess-external-datasets:
-	@echo "Preprocessing external datasets"
-	mkdir -p $(DATA_DIR)/beam_preds/labelled
-	mkdir -p $(DATA_DIR)/beam_preds/de_novo
-	mkdir -p $(DATA_DIR)/beam_preds/raw
-	mkdir -p $(DATA_DIR)/spectrum_data/labelled
-	mkdir -p $(DATA_DIR)/spectrum_data/de_novo
-	mkdir -p $(DATA_DIR)/spectrum_data/raw
-	gsutil cp $(GCS_BASE)/spectrum_data/lcfm/*.parquet $(DATA_DIR)/spectrum_data/labelled/
-	gsutil cp $(GCS_BASE)/beam_preds/acfm/*.csv $(DATA_DIR)/beam_preds/raw/
-	gsutil cp $(GCS_BASE)/spectrum_data/acfm/*.parquet $(DATA_DIR)/spectrum_data/raw/
-	python scripts/preprocess_external_data.py --input_dir $(DATA_DIR)
+# # Condensed preprocessing command
+# preprocess-external-datasets:
+# 	@echo "Preprocessing external datasets"
+# 	mkdir -p $(DATA_DIR)/beam_preds/labelled
+# 	mkdir -p $(DATA_DIR)/beam_preds/de_novo
+# 	mkdir -p $(DATA_DIR)/beam_preds/raw
+# 	mkdir -p $(DATA_DIR)/spectrum_data/labelled
+# 	mkdir -p $(DATA_DIR)/spectrum_data/de_novo
+# 	mkdir -p $(DATA_DIR)/spectrum_data/raw
+# 	gsutil cp $(GCS_BASE)/spectrum_data/lcfm/*.parquet $(DATA_DIR)/spectrum_data/labelled/
+# 	gsutil cp $(GCS_BASE)/beam_preds/acfm/*.csv $(DATA_DIR)/beam_preds/raw/
+# 	gsutil cp $(GCS_BASE)/spectrum_data/acfm/*.parquet $(DATA_DIR)/spectrum_data/raw/
+# 	python scripts/preprocess_external_data.py --input_dir $(DATA_DIR)
 
-# Condensed prepare command
-prepare-external-dataset: preprocess-external-dataset
-	@echo "Preparing external datasets"
-	mkdir -p $(DATA_DIR)/splits
-	python scripts/create_train_test_split.py \
-		--spectrum_path $(DATA_DIR)/spectrum_data/labelled/*.parquet \
-		--beam_predictions_path $(DATA_DIR)/beam_preds/labelled/annotated_beam_preds.csv \
-		--output_dir $(DATA_DIR)/splits \
-		--test_fraction $(TEST_FRACTION) \
-		--random_state $(RANDOM_STATE)
-	$(MAKE) generate-configs-external-dataset
+# # Condensed prepare command
+# prepare-external-dataset: preprocess-external-dataset
+# 	@echo "Preparing external datasets"
+# 	mkdir -p $(DATA_DIR)/splits
+# 	python scripts/create_train_test_split.py \
+# 		--spectrum_path $(DATA_DIR)/spectrum_data/labelled/*.parquet \
+# 		--beam_predictions_path $(DATA_DIR)/beam_preds/labelled/annotated_beam_preds.csv \
+# 		--output_dir $(DATA_DIR)/splits \
+# 		--test_fraction $(TEST_FRACTION) \
+# 		--random_state $(RANDOM_STATE)
+# 	$(MAKE) generate-configs-external-dataset
 
-# Generic config generation command
-generate-configs-external-dataset: validate-external-dataset
-	@echo "Generating configs for external datasets"
-	@bash -c 'for template in $(CONFIG_TEMPLATES); do \
-		output=$$(basename $$template .yaml.template)-acfm.yaml; \
-		sed "s/\$${DATASET}/acfm/g; s|data/|$(DATA_DIR)/|g" $$template > $(CONFIG_DIR)/$$output; \
-	done'
+# # Generic config generation command
+# generate-configs-external-dataset: validate-external-dataset
+# 	@echo "Generating configs for external datasets"
+# 	@bash -c 'for template in $(CONFIG_TEMPLATES); do \
+# 		output=$$(basename $$template .yaml.template)-acfm.yaml; \
+# 		sed "s/\$${DATASET}/acfm/g; s|data/|$(DATA_DIR)/|g" $$template > $(CONFIG_DIR)/$$output; \
+# 	done'
