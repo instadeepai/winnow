@@ -209,7 +209,7 @@ set-gcp-credentials:
 #################################################################################
 
 # List of all datasets to process
-DATASETS := helaqc sbrodae herceptin immuno gluc snakevenoms woundfluids # tplantibodies
+DATASETS := helaqc sbrodae herceptin immuno gluc snakevenoms woundfluids tplantibodies
 
 # Base directories
 DATA_DIR := input_data
@@ -257,6 +257,9 @@ preprocess-dataset: validate-dataset
 	gsutil cp $(GCS_BASE)/beam_preds/raw/$(DATASET)_beam_preds.csv $(DATA_DIR)/beam_preds/raw/
 	gsutil cp $(GCS_BASE)/spectrum_data/raw/dataset-$(DATASET)-raw-0000-0001.parquet $(DATA_DIR)/spectrum_data/raw/
 	python scripts/preprocess_validation_data.py --species $(DATASET) --input_dir $(DATA_DIR)
+	gsutil cp $(DATA_DIR)/beam_preds/labelled/*.csv $(GCS_BASE)/beam_preds/labelled/
+	gsutil cp $(DATA_DIR)/spectrum_data/de_novo/*.parquet $(GCS_BASE)/spectrum_data/de_novo/
+	gsutil cp $(DATA_DIR)/beam_preds/de_novo/*.csv $(GCS_BASE)/beam_preds/de_novo/
 
 # Condensed prepare command
 prepare-dataset: preprocess-dataset
@@ -348,7 +351,13 @@ copy-results-dataset: validate-dataset
 ## Validation dataset batch processing commands									#
 #################################################################################
 
-.PHONY: clean-all clean-configs process-all-datasets
+.PHONY: clean-all clean-configs process-all-datasets preprocess-all-datasets
+
+# Preprocess all datasets
+preprocess-all-datasets:
+	@for dataset in $(DATASETS); do \
+		$(MAKE) preprocess-dataset DATASET=$$dataset; \
+	done
 
 # Process all datasets in sequence
 process-all-datasets:
@@ -364,6 +373,9 @@ clean-configs:
 	@for dataset in $(DATASETS); do \
 		rm -f $(CONFIG_DIR)/*-$$dataset.yaml; \
 	done
+	rm -f $(CONFIG_DIR)/predict_de_novo.yaml
+	rm -f $(CONFIG_DIR)/train.yaml
+	rm -f $(CONFIG_DIR)/predict_labelled.yaml
 
 # Clean all
 clean-all: clean-configs
@@ -396,11 +408,11 @@ clean-all: clean-configs
 # CONFIG_DIR := configs
 # CONFIG_TEMPLATES := $(wildcard $(CONFIG_DIR)/*.yaml.template)
 
-# #################################################################################
-# ## External validation dataset commands						    				#
-# #################################################################################
+#################################################################################
+## External validation dataset commands						    				#
+#################################################################################
 
-# .PHONY: preprocess-external-datasets prepare-external-dataset generate-configs-external-dataset
+# .PHONY: preprocess-external-datasets prepare-external-dataset generate-configs-external-datasets
 
 # # Condensed preprocessing command
 # preprocess-external-datasets:
@@ -417,21 +429,51 @@ clean-all: clean-configs
 # 	python scripts/preprocess_external_data.py --input_dir $(DATA_DIR)
 
 # # Condensed prepare command
-# prepare-external-dataset: preprocess-external-dataset
+# prepare-external-datasets: preprocess-external-datasets
 # 	@echo "Preparing external datasets"
 # 	mkdir -p $(DATA_DIR)/splits
 # 	python scripts/create_train_test_split.py \
-# 		--spectrum_path $(DATA_DIR)/spectrum_data/labelled/*.parquet \
+# 		--spectrum_path $(DATA_DIR)/spectrum_data/labelled/annotated_data.parquet \
 # 		--beam_predictions_path $(DATA_DIR)/beam_preds/labelled/annotated_beam_preds.csv \
 # 		--output_dir $(DATA_DIR)/splits \
 # 		--test_fraction $(TEST_FRACTION) \
 # 		--random_state $(RANDOM_STATE)
-# 	$(MAKE) generate-configs-external-dataset
+# 	$(MAKE) generate-configs-external-datasets
 
 # # Generic config generation command
-# generate-configs-external-dataset: validate-external-dataset
+# generate-configs-external-datasets: # validate-external-datasets
 # 	@echo "Generating configs for external datasets"
 # 	@bash -c 'for template in $(CONFIG_TEMPLATES); do \
-# 		output=$$(basename $$template .yaml.template)-acfm.yaml; \
-# 		sed "s/\$${DATASET}/acfm/g; s|data/|$(DATA_DIR)/|g" $$template > $(CONFIG_DIR)/$$output; \
+# 		if [[ $$template == *"predict_de_novo_external"* ]]; then \
+# 			sed "s|data/|$(DATA_DIR)/|g" $$template > $(CONFIG_DIR)/predict_de_novo.yaml; \
+# 		elif [[ $$template != *"predict_de_novo"* ]]; then \
+# 			output=$$(basename $$template .yaml.template).yaml; \
+# 			sed "s/\$${DATASET}//g; s|data/|$(DATA_DIR)/|g; s|acfm/||g; s|//|/|g" $$template > $(CONFIG_DIR)/$$output; \
+# 		fi \
 # 	done'
+
+#################################################################################
+## General model variables														#
+#################################################################################
+
+.PHONY: preprocess-general-model copy-general-model-datasets
+
+# Copy all validation datasets from GCS for general model preprocessing
+copy-general-model-datasets:
+	@echo "Copying validation datasets from GCS..."
+	mkdir -p $(DATA_DIR)/spectrum_data/labelled
+	mkdir -p $(DATA_DIR)/beam_preds/labelled
+	@for dataset in $(DATASETS); do \
+		echo "Copying $$dataset dataset..."; \
+		gsutil cp $(GCS_BASE)/spectrum_data/labelled/dataset-$$dataset-annotated-0000-0001.parquet $(DATA_DIR)/spectrum_data/labelled/; \
+		gsutil cp $(GCS_BASE)/beam_preds/labelled/$$dataset-annotated_beam_preds.csv $(DATA_DIR)/beam_preds/labelled/; \
+	done
+	@echo "All datasets copied successfully!"
+
+# Preprocess data for general model
+preprocess-general-model: # copy-general-model-datasets
+	python scripts/preprocess_data_for_general_model.py --input_dir $(DATA_DIR) --output_dir $(OUTPUT_DIR) --random_state $(RANDOM_STATE)
+
+# Example usage:
+# make copy-general-model-datasets
+# make preprocess-general-model
