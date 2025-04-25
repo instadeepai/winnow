@@ -25,7 +25,7 @@ spec:
     Worker:
       count: 1
       resources:
-        cpus: 4
+        cpus: 8
         ramRatio: 8 # >= 2
 
         accelerators:
