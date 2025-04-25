@@ -38,6 +38,72 @@ def parse_args():
     return parser.parse_args()
 
 
+def load_spectrum_data(input_dir: str, dataset: str) -> pl.DataFrame:
+    """Load and process spectrum data for a single dataset.
+
+    Args:
+        input_dir: Base directory containing the validation datasets
+        dataset: Name of the dataset to load
+
+    Returns:
+        Processed spectrum dataframe
+    """
+    spectrum_df = pl.read_parquet(
+        f"{input_dir}/spectrum_data/labelled/dataset-{dataset}-annotated-0000-0001.parquet"
+    )
+    spectrum_df = spectrum_df.with_columns(
+        [
+            pl.col("sequence").str.replace_all("L", "I"),
+            pl.lit(dataset).alias("source_dataset"),
+        ]
+    )
+    return spectrum_df.drop("local_index").with_row_index("local_index")
+
+
+def load_beam_data(input_dir: str, dataset: str) -> pl.DataFrame:
+    """Load and process beam predictions for a single dataset.
+
+    Args:
+        input_dir: Base directory containing the validation datasets
+        dataset: Name of the dataset to load
+
+    Returns:
+        Processed beam predictions dataframe
+    """
+    beam_df = pl.read_csv(
+        f"{input_dir}/beam_preds/labelled/{dataset}-annotated_beam_preds.csv"
+    )
+    # Drop file and index columns if they exist
+    if "file" in beam_df.columns:
+        beam_df = beam_df.drop("file")
+    if "index" in beam_df.columns:
+        beam_df = beam_df.drop("index")
+    beam_df = beam_df.with_columns([pl.lit(dataset).alias("source_dataset")])
+    return beam_df.drop("local_index").with_row_index("local_index")
+
+
+def add_missing_columns(dfs: list[pl.DataFrame]) -> list[pl.DataFrame]:
+    """Add missing columns with null values to each dataframe.
+
+    Args:
+        dfs: List of dataframes to process
+
+    Returns:
+        List of dataframes with all columns present
+    """
+    all_columns = set()
+    for df in dfs:
+        all_columns.update(df.columns)
+
+    for i in range(len(dfs)):
+        missing_columns = all_columns - set(dfs[i].columns)
+        if missing_columns:
+            dfs[i] = dfs[i].with_columns(
+                [pl.lit(None).alias(col) for col in missing_columns]
+            )
+    return dfs
+
+
 def load_and_process_datasets(input_dir: str) -> Tuple[pl.DataFrame, pl.DataFrame]:
     """Load all validation datasets and process them.
 
@@ -65,30 +131,10 @@ def load_and_process_datasets(input_dir: str) -> Tuple[pl.DataFrame, pl.DataFram
     beam_dfs = []
     for dataset in datasets:
         try:
-            # Load spectrum data
-            spectrum_df = pl.read_parquet(
-                f"{input_dir}/spectrum_data/labelled/dataset-{dataset}-annotated-0000-0001.parquet"
-            )
-            spectrum_df = spectrum_df.with_columns(
-                [
-                    pl.col("sequence").str.replace_all("L", "I"),
-                    pl.lit(dataset).alias("source_dataset"),
-                ]
-            )
-            spectrum_df = spectrum_df.drop("local_index").with_row_index("local_index")
-            spectrum_dfs.append(spectrum_df)
+            spectrum_df = load_spectrum_data(input_dir, dataset)
+            beam_df = load_beam_data(input_dir, dataset)
 
-            # Load beam predictions
-            beam_df = pl.read_csv(
-                f"{input_dir}/beam_preds/labelled/{dataset}-annotated_beam_preds.csv"
-            )
-            # Drop file and index columns if they exist
-            if "file" in beam_df.columns:
-                beam_df = beam_df.drop("file")
-            if "index" in beam_df.columns:
-                beam_df = beam_df.drop("index")
-            beam_df = beam_df.with_columns([pl.lit(dataset).alias("source_dataset")])
-            beam_df = beam_df.drop("local_index").with_row_index("local_index")
+            spectrum_dfs.append(spectrum_df)
             beam_dfs.append(beam_df)
 
             logger.info(f"Loaded {dataset} dataset with {len(spectrum_df)} rows")
@@ -97,6 +143,10 @@ def load_and_process_datasets(input_dir: str) -> Tuple[pl.DataFrame, pl.DataFram
 
     if not spectrum_dfs or not beam_dfs:
         raise ValueError("No datasets were successfully loaded")
+
+    # Add missing columns to ensure consistent schema
+    spectrum_dfs = add_missing_columns(spectrum_dfs)
+    beam_dfs = add_missing_columns(beam_dfs)
 
     # Combine all datasets
     combined_spectrum_df = pl.concat(spectrum_dfs, how="vertical_relaxed")
