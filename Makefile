@@ -209,7 +209,7 @@ set-gcp-credentials:
 #################################################################################
 
 # List of all datasets to process
-DATASETS := helaqc sbrodae herceptin immuno gluc snakevenoms woundfluids tplantibodies
+DATASETS := helaqc sbrodae herceptin immuno gluc snakevenoms woundfluids # tplantibodies
 
 # Base directories
 DATA_DIR := input_data
@@ -471,8 +471,16 @@ copy-general-model-datasets:
 	@echo "All datasets copied successfully!"
 
 # Preprocess data for general model
-preprocess-general-model: # copy-general-model-datasets
+preprocess-general-model: copy-general-model-datasets
+	@echo "Preprocessing data for general model..."
 	python scripts/preprocess_data_for_general_model.py --input_dir $(DATA_DIR) --output_dir $(OUTPUT_DIR) --random_state $(RANDOM_STATE)
+	@echo "Copying processed data to GCS..."
+	gsutil cp $(OUTPUT_DIR)/train_spectrum.parquet $(GCS_BASE)/spectrum_data/labelled/train_spectrum_all_datasets.parquet
+	gsutil cp $(OUTPUT_DIR)/train_beam.parquet $(GCS_BASE)/beam_preds/labelled/train_beam_all_datasets.parquet
+	gsutil cp $(OUTPUT_DIR)/test_spectrum.parquet $(GCS_BASE)/spectrum_data/labelled/test_spectrum_all_datasets.parquet
+	gsutil cp $(OUTPUT_DIR)/test_beam.parquet $(GCS_BASE)/beam_preds/labelled/test_beam_all_datasets.parquet
+	gsutil cp $(OUTPUT_DIR)/val_spectrum.parquet $(GCS_BASE)/spectrum_data/labelled/val_spectrum_all_datasets.parquet
+	gsutil cp $(OUTPUT_DIR)/val_beam.parquet $(GCS_BASE)/beam_preds/labelled/val_beam_all_datasets.parquet
 
 # Example usage:
 # make copy-general-model-datasets
