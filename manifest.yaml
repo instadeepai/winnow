@@ -11,7 +11,7 @@ builder:
 spec:
   debug:
       vscode:
-        enabled: false # required
+        enabled: true # required
         path: "/aichor/code" # Optional, defaults to "code". Refer the absolute path of the binary if not findable in $PATH
         provider: "github" # Optional, vscode tunnel provider. Options are "github" or "microsoft", defaults to "github"
   operator: tf
