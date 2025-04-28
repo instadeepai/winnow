@@ -144,9 +144,13 @@ def load_and_process_datasets(input_dir: str) -> Tuple[pl.DataFrame, pl.DataFram
     if not spectrum_dfs or not beam_dfs:
         raise ValueError("No datasets were successfully loaded")
 
-    # Add missing columns to ensure consistent schema
-    spectrum_dfs = add_missing_columns(spectrum_dfs)
-    beam_dfs = add_missing_columns(beam_dfs)
+    # Ensure source_dataset is the last column in all beam dataframes
+    beam_dfs = [
+        df.select(
+            [col for col in df.columns if col != "source_dataset"] + ["source_dataset"]
+        )
+        for df in beam_dfs
+    ]
 
     # Combine all datasets
     combined_spectrum_df = pl.concat(spectrum_dfs, how="vertical_relaxed")
