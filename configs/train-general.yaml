@@ -1,0 +1,3 @@
+# instanovo
+beam_predictions_path: input_data/train_beam_all_datasets.parquet
+spectrum_path: input_data/train_spectrum_all_datasets.parquet

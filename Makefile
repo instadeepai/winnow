@@ -456,10 +456,10 @@ clean-all: clean-configs
 ## General model variables														#
 #################################################################################
 
-.PHONY: preprocess-general-model copy-general-model-datasets
+.PHONY: preprocess-general-model copy-general-model-datasets train-general-model
 
 # Copy all validation datasets from GCS for general model preprocessing
-copy-general-model-datasets:
+copy-general-model-raw-datasets:
 	@echo "Copying validation datasets from GCS..."
 	mkdir -p $(DATA_DIR)/spectrum_data/labelled
 	mkdir -p $(DATA_DIR)/beam_preds/labelled
@@ -471,7 +471,7 @@ copy-general-model-datasets:
 	@echo "All datasets copied successfully!"
 
 # Preprocess data for general model
-preprocess-general-model: copy-general-model-datasets
+preprocess-general-model: copy-general-model-raw-datasets
 	@echo "Preprocessing data for general model..."
 	python scripts/preprocess_data_for_general_model.py --input_dir $(DATA_DIR) --output_dir $(OUTPUT_DIR) --random_state $(RANDOM_STATE)
 	@echo "Copying processed data to GCS..."
@@ -482,6 +482,54 @@ preprocess-general-model: copy-general-model-datasets
 	gsutil cp $(OUTPUT_DIR)/val_spectrum.parquet $(GCS_BASE)/spectrum_data/labelled/val_spectrum_all_datasets.parquet
 	gsutil cp $(OUTPUT_DIR)/val_beam.parquet $(GCS_BASE)/beam_preds/labelled/val_beam_all_datasets.parquet
 
+copy-general-model-datasets:
+	@echo "Copying processed data to GCS..."
+	mkdir -p ./$(DATA_DIR)
+	gsutil cp $(GCS_BASE)/spectrum_data/labelled/train_spectrum_all_datasets.parquet ./$(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/beam_preds/labelled/train_beam_all_datasets.parquet ./$(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/spectrum_data/labelled/val_spectrum_all_datasets.parquet ./$(DATA_DIR)/
+	gsutil cp $(GCS_BASE)/beam_preds/labelled/val_beam_all_datasets.parquet ./$(DATA_DIR)/
+
+train-general-model: copy-general-model-datasets
+	@echo "Training and predicting on general model datasets"
+	mkdir -p $(MODEL_DIR)
+	mkdir -p $(OUTPUT_DIR)
+
+	# Train
+	winnow train \
+		--data-source=instanovo \
+		--dataset-config-path=$(CONFIG_DIR)/train-general.yaml \
+		--model-output-folder=$(MODEL_DIR) \
+		--dataset-output-path=$(OUTPUT_DIR)/train_output.csv
+
+	# Evaluate on validation data using winnow method
+	winnow predict \
+		--data-source=instanovo \
+		--dataset-config-path=$(CONFIG_DIR)/predict_validation-general.yaml \
+		--model-folder=$(MODEL_DIR) \
+		--method=winnow \
+		--fdr-threshold=0.05 \
+		--confidence-column="calibrated_confidence" \
+		--output-path=$(OUTPUT_DIR)/validation_winnow_predict_output.csv
+
+	# Evaluate on validation data using database-ground method
+	winnow predict \
+		--data-source=instanovo \
+		--dataset-config-path=$(CONFIG_DIR)/predict_validation-general.yaml \
+		--model-folder=$(MODEL_DIR) \
+		--method=database-ground \
+		--fdr-threshold=0.05 \
+		--confidence-column="calibrated_confidence" \
+		--output-path=$(OUTPUT_DIR)/validation_database_ground_predict_output.csv
+
+	# Copy results to GCS
+	gsutil cp $(OUTPUT_DIR)/train_output.csv $(GCS_METADATA_LABELLED)/general_train_output.csv
+	gsutil cp $(OUTPUT_DIR)/validation_winnow_predict_output.csv $(GCS_METADATA_LABELLED)/general_validation_winnow_output.csv
+	gsutil cp $(OUTPUT_DIR)/validation_database_ground_predict_output.csv $(GCS_METADATA_LABELLED)/general_validation_database_ground_output.csv
+	gsutil -m cp -r $(MODEL_DIR)/* $(GCS_CALIBRATOR_MODELS)/general/
+	@echo "Results copied successfully!"
+
 # Example usage:
 # make copy-general-model-datasets
 # make preprocess-general-model
+# make train-general-model
