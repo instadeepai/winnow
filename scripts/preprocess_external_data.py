@@ -28,7 +28,9 @@ def parse_args():
 # --- Utility Functions ---
 def check_uniqueness(df: pd.DataFrame, name: str):
     """Check if the dataset has unique scan, header, precursor_mz, precursor_charge, and experiment_name values."""
-    if df[["scan", "header", "precursor_mz", "precursor_charge", "experiment_name"]].drop_duplicates().shape[0] != len(df):
+    if df[
+        ["scan", "header", "precursor_mz", "precursor_charge", "experiment_name"]
+    ].drop_duplicates().shape[0] != len(df):
         raise ValueError(f"Dataset {name} does not have unique scan.")
     logger.info(f"{name}: scan can uniquely identify rows.")
 
@@ -61,8 +63,13 @@ def get_annotated_beam_preds(
     annotated_data = pl.concat(dfs, how="vertical_relaxed").to_pandas()
     del dfs
 
+    annotated_data.to_parquet(
+        "spectrum_data/labelled/annotated_data.parquet", index=False
+    )
+
     # Read in raw beam preds
     raw_beam_preds = pl.read_csv(raw_beam_preds_path).to_pandas()
+    raw_beam_preds.to_csv("beam_preds/raw/raw_beam_preds.csv", index=False)
 
     # Apply conversion to object (string) columns
     for col in raw_beam_preds.select_dtypes(include=["object"]).columns:
@@ -72,13 +79,19 @@ def get_annotated_beam_preds(
     check_uniqueness(annotated_data, "annotated_data")
 
     # Check if all rows in annotated_data are present in raw_beam_preds
-    merge_cols = ["scan", "header", "precursor_mz", "precursor_charge", "experiment_name"]
-    missing_rows = annotated_data[merge_cols].merge(
-        raw_beam_preds[merge_cols],
-        how="left",
-        indicator=True
-    ).query('_merge == "left_only"')
-    
+    merge_cols = [
+        "scan",
+        "header",
+        "precursor_mz",
+        "precursor_charge",
+        "experiment_name",
+    ]
+    missing_rows = (
+        annotated_data[merge_cols]
+        .merge(raw_beam_preds[merge_cols], how="left", indicator=True)
+        .query('_merge == "left_only"')
+    )
+
     if not missing_rows.empty:
         raise ValueError(
             f"{len(missing_rows)} rows in annotated_data are missing from beam_preds."
@@ -119,20 +132,28 @@ def get_unseen_de_novo_data(
     """Separate out unseen de novo data from seen labelled data in the raw dataset."""
     logger.info("Loading datasets.")
     raw_data = pl.read_parquet(raw_data_path).to_pandas()
-    merge_cols = ["scan", "header", "precursor_mz", "precursor_charge", "experiment_name"]
+    raw_data.to_parquet("spectrum_data/raw/raw_data.parquet", index=False)
+
+    merge_cols = [
+        "scan",
+        "header",
+        "precursor_mz",
+        "precursor_charge",
+        "experiment_name",
+    ]
 
     # Exclude rows that match any row in annotated_data
-    raw_data = raw_data.merge(
-        annotated_data[merge_cols],
-        how="left",
-        indicator=True
-    ).query('_merge == "left_only"').drop(columns=["_merge"])
+    raw_data = (
+        raw_data.merge(annotated_data[merge_cols], how="left", indicator=True)
+        .query('_merge == "left_only"')
+        .drop(columns=["_merge"])
+    )
 
-    raw_beam_preds = raw_beam_preds.merge(
-        annotated_data[merge_cols],
-        how="left",
-        indicator=True
-    ).query('_merge == "left_only"').drop(columns=["_merge"])
+    raw_beam_preds = (
+        raw_beam_preds.merge(annotated_data[merge_cols], how="left", indicator=True)
+        .query('_merge == "left_only"')
+        .drop(columns=["_merge"])
+    )
 
     raw_data.to_parquet(de_novo_data_path, index=False)
     raw_beam_preds.to_csv(de_novo_beam_preds_path, index=False)
@@ -147,9 +168,7 @@ def main():
     input_dir = args.input_dir
 
     annotated_data_input_path = f"{input_dir}/spectrum_data/labelled/*.parquet"
-    raw_data_input_path = (
-        f"{input_dir}/spectrum_data/raw/*.parquet"
-    )
+    raw_data_input_path = f"{input_dir}/spectrum_data/raw/*.parquet"
     raw_beam_preds_input_path = f"{input_dir}/beam_preds/raw/*.csv"
 
     # TODO: Might need to save the conglomerated inputs to a single file, respectively.
@@ -164,9 +183,7 @@ def main():
         annotated_beam_preds_path,
     )
 
-    unseen_de_novo_data_path = (
-        f"{input_dir}/spectrum_data/de_novo/raw_filtered.parquet"
-    )
+    unseen_de_novo_data_path = f"{input_dir}/spectrum_data/de_novo/raw_filtered.parquet"
     unseen_de_novo_beam_preds_path = (
         f"{input_dir}/beam_preds/de_novo/raw_beam_preds_filtered.csv"
     )
