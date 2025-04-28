@@ -9,6 +9,9 @@ __pycache__
 *.txt
 *.csv
 *.parquet
+*.mzML
 *.ipc
 *.pkl
 *.json
+*.zip
+*.ckpt
