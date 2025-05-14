@@ -1,17 +1,21 @@
 """Contains classes and functions for probability recalibration."""
 
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Tuple, Union, TypeVar
 
 
 import numpy as np
 from sklearn.linear_model import LogisticRegression
-from jaxtyping import Float
+from jaxtyping import Float, Array
 
 from winnow.calibration.calibration_features import (
     CalibrationFeatures,
     FeatureDependency,
 )
 from winnow.datasets.calibration_dataset import CalibrationDataset
+
+# Define dimension names as type variables
+N = TypeVar("N", bound=int)  # number of samples
+M = TypeVar("M", bound=int)  # number of features
 
 
 class ProbabilityCalibrator:
@@ -94,23 +98,36 @@ class ProbabilityCalibrator:
     def fit(self, dataset: CalibrationDataset) -> None:
         """Fit the logistic regression model using the given calibration dataset.
 
-        This method computes the features from the dataset, prepares the labels, and trains a logistic regression model for recalibrating probabilities.
+        This method computes the features from the dataset, applies log-odds transformation to the confidence scores,
+        and trains a logistic regression model for recalibrating probabilities.
 
         Args:
             dataset (CalibrationDataset): The dataset used for training the classifier.
         """
-        features, labels = self.compute_features(dataset=dataset, labelled=True)
-        self.classifier.fit(features, labels)
+        result = self.compute_features(dataset=dataset, labelled=True)
+        if len(result) != 3:
+            raise ValueError("Expected 3 values from compute_features in fit mode")
+        confidences, other_features, labels = result
+
+        # Apply log-odds transformation to confidence scores
+        log_s = np.log(confidences)
+        log_1_minus_s = np.log(1 - confidences)
+
+        # Combine transformed confidence scores with other features
+        z = np.column_stack([log_s, log_1_minus_s, other_features])
+
+        self.classifier.fit(z, labels)
 
     def compute_features(
         self, dataset: CalibrationDataset, labelled: bool
     ) -> Union[
-        Float[np.ndarray, "batch feature"],
-        Tuple[Float[np.ndarray, "batch feature"], Float[np.ndarray, "batch"]],  # noqa: F821
+        Tuple[Float[Array, "N"], Float[Array, "N M"]],
+        Tuple[Float[Array, "N"], Float[Array, "N M"], Float[Array, "N"]],
     ]:
         """Compute the features for the dataset, including any dependencies and feature calculations.
 
         This method handles both labelled and unlabelled datasets. It computes the necessary features and returns them for model training or prediction.
+        The confidence scores are returned separately from other features to allow for log-odds transformation.
 
         Args:
             dataset (CalibrationDataset): The dataset from which features are computed.
@@ -118,11 +135,11 @@ class ProbabilityCalibrator:
 
         Returns:
             Union[
-                Float[np.ndarray, "batch feature"],
-                Tuple[Float[np.ndarray, "batch feature"], Float[np.ndarray, "batch"]]
+                Tuple[Float[Array, "N"], Float[Array, "N M"]],
+                Tuple[Float[Array, "N"], Float[Array, "N M"], Float[Array, "N"]]
             ]:
-                - If `labelled` is True: A tuple containing the computed feature matrix and the corresponding labels.
-                - If `labelled` is False: Only the computed feature matrix.
+                - If `labelled` is True: A tuple containing (confidence scores, other features, labels)
+                - If `labelled` is False: A tuple containing (confidence scores, other features)
         """
         for dependency in self.dependencies.values():
             dependency.compute(dataset=dataset)
@@ -132,24 +149,42 @@ class ProbabilityCalibrator:
                 feature.prepare(dataset=dataset)
             feature.compute(dataset=dataset)
 
-        feature_columns = [dataset.confidence_column]
-        feature_columns.extend(self.columns)
-        features = dataset.metadata[feature_columns]
+        # Get confidence scores separately
+        confidences = dataset.metadata[dataset.confidence_column].values
+
+        # Get other features
+        if self.columns:
+            other_features = dataset.metadata[self.columns].values
+        else:
+            other_features = np.zeros((len(dataset.metadata), 0))
 
         if labelled:
-            labels = dataset.metadata["correct"]
-            return features.values, labels.values
+            labels = dataset.metadata["correct"].values
+            return confidences, other_features, labels
         else:
-            return features.values
+            return confidences, other_features
 
     def predict(self, dataset: CalibrationDataset) -> None:
         """Predict the calibrated probabilities for a given dataset.
 
-        This method computes the features and uses the trained classifier to predict the calibrated probabilities for the dataset. The calibrated probabilities are stored in the dataset under the "calibrated_confidence" column.
+        This method computes the features, applies log-odds transformation to the confidence scores,
+        and uses the trained classifier to predict the calibrated probabilities for the dataset.
+        The calibrated probabilities are stored in the dataset under the "calibrated_confidence" column.
 
         Args:
             dataset (CalibrationDataset): The dataset for which predictions are made.
         """
-        features = self.compute_features(dataset=dataset, labelled=False)
-        correct_probs = self.classifier.predict_proba(features)
+        result = self.compute_features(dataset=dataset, labelled=False)
+        if len(result) != 2:
+            raise ValueError("Expected 2 values from compute_features in predict mode")
+        confidences, other_features = result
+
+        # Apply log-odds transformation to confidence scores
+        log_s = np.log(confidences)
+        log_1_minus_s = np.log(1 - confidences)
+
+        # Combine transformed confidence scores with other features
+        z = np.column_stack([log_s, log_1_minus_s, other_features])
+
+        correct_probs = self.classifier.predict_proba(z)
         dataset.metadata["calibrated_confidence"] = correct_probs[:, 1].tolist()
