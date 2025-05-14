@@ -6,6 +6,7 @@ from instanovo.utils.metrics import Metrics
 from winnow.fdr.base import FDRControl
 from winnow.datasets.calibration_dataset import residue_set
 
+
 class DatabaseGroundedFDRControl(FDRControl):
     """Performs False Discovery Rate (FDR) control by grounding predictions against a reference database.
 
@@ -88,7 +89,7 @@ class DatabaseGroundedFDRControl(FDRControl):
         idx = bisect.bisect_right(self.fdr_thresholds, threshold) - 1
 
         if idx < 0:
-            return None
+            return np.nan
 
         return self.confidence_scores[idx].item()  # type: ignore
 
