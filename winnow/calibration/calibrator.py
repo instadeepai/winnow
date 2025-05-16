@@ -4,7 +4,7 @@ from typing import Dict, List, Tuple, Union
 from pathlib import Path
 import pickle
 import numpy as np
-from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import HistGradientBoostingClassifier
 from jaxtyping import Float
 
 from winnow.calibration.calibration_features import (
@@ -29,7 +29,9 @@ class ProbabilityCalibrator:
         self.feature_dict: Dict[str, CalibrationFeatures] = {}
         self.dependencies: Dict[str, FeatureDependency] = {}
         self.dependency_reference_counter: Dict[str, int] = {}
-        self.classifier = LogisticRegression(random_state=seed)
+        self.classifier = HistGradientBoostingClassifier(
+            learning_rate=0.1, max_depth=3, random_state=seed
+        )
 
     @property
     def columns(self) -> List[str]:
