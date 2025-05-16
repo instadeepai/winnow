@@ -1,6 +1,7 @@
 import bisect
 from typing import Tuple
 import pandas as pd
+import warnings
 import numpy as np
 from instanovo.utils.metrics import Metrics
 from winnow.fdr.base import FDRControl
@@ -72,6 +73,9 @@ class DatabaseGroundedFDRControl(FDRControl):
         self.fdr_thresholds = list(1.0 - precision[drop:])
         self.confidence_scores = list(confidence[drop:])
 
+        self.reversed_fdr_thresholds = list(reversed(self.fdr_thresholds))
+        self.reversed_confidence_scores = list(reversed(self.confidence_scores))
+
     def get_confidence_cutoff(self, threshold: float) -> float:
         """Compute the confidence score cutoff for a given FDR threshold.
 
@@ -102,8 +106,20 @@ class DatabaseGroundedFDRControl(FDRControl):
         Returns:
             float: The FDR estimate
         """
-        # FDR = [no. false positives >= score s] / [no. total matches >= score s]
-        preds_ge_score = self.preds[self.preds[self.confidence_feature] >= score]
-        return (len(preds_ge_score["correct"]) - sum(preds_ge_score["correct"])) / len(
-            preds_ge_score["correct"]
-        )
+        # Find the index where this score would be inserted in the sorted confidence scores
+        idx = bisect.bisect_right(self.reversed_confidence_scores, score)
+
+        if (
+            idx >= len(self.reversed_confidence_scores)
+            and self.reversed_fdr_thresholds[-1] == 0
+        ):
+            return 0
+
+        elif idx >= len(self.reversed_fdr_thresholds):
+            warnings.warn(
+                f"Score {score} is too high for FDR control. Decreasing the drop parameter during fitting may improve results."
+            )
+            return np.nan
+
+        # Return the FDR threshold at this index
+        return self.reversed_fdr_thresholds[idx]
