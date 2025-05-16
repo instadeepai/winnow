@@ -3,7 +3,6 @@ from typing import Tuple
 import pandas as pd
 import warnings
 import numpy as np
-
 from instanovo.utils.metrics import Metrics
 from winnow.fdr.base import FDRControl
 from winnow.datasets.calibration_dataset import residue_set
@@ -91,9 +90,12 @@ class DatabaseGroundedFDRControl(FDRControl):
             float:
                 The confidence score cutoff corresponding to the specified FDR level.
         """
-        return self.confidence_scores[
-            bisect.bisect_left(self.fdr_thresholds, threshold)
-        ].item()  # type: ignore
+        idx = bisect.bisect_right(self.fdr_thresholds, threshold) - 1
+
+        if idx < 0:
+            return np.nan
+
+        return self.confidence_scores[idx].item()  # type: ignore
 
     def compute_fdr(self, score: float) -> float:
         """Compute FDR estimate at a given confidence cutoff.
