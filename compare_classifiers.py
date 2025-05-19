@@ -1,7 +1,7 @@
 """Script to compare different classifiers for probability rescoring."""
 
 from pathlib import Path
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -91,10 +91,18 @@ CLASSIFIERS = {
     "KNeighbors": KNeighborsClassifier(n_neighbors=5, weights="distance"),
     "MLP": MLPClassifier(hidden_layer_sizes=(100,), max_iter=1000, random_state=SEED),
     "HardSigmoidNet": HardSigmoidClassifier(
-        hidden_size=100, learning_rate=0.001, batch_size=128, n_epochs=100
+        hidden_size=100,
+        learning_rate=0.001,
+        batch_size=128,
+        n_epochs=100,
+        random_state=SEED,
     ),
     "HingeNet": HingeClassifier(
-        hidden_size=100, learning_rate=0.001, batch_size=128, n_epochs=100
+        hidden_size=100,
+        learning_rate=0.001,
+        batch_size=128,
+        n_epochs=100,
+        random_state=SEED,
     ),
 }
 
@@ -182,25 +190,34 @@ def plot_probability_distributions(
 
 
 def evaluate_classifier(
-    classifier: BaseEstimator, features: np.ndarray, labels: np.ndarray
+    classifier: BaseEstimator,
+    x_train: np.ndarray,
+    y_train: np.ndarray,
+    x_test: np.ndarray,
+    y_test: np.ndarray,
+    x_val: Optional[np.ndarray] = None,
+    y_val: Optional[np.ndarray] = None,
 ) -> Dict[str, Any]:
-    """Evaluate a classifier using a single train/test split.
+    """Evaluate a classifier using pre-split train/val/test data.
 
     Args:
         classifier: The classifier to evaluate
-        features: The feature matrix
-        labels: The target labels
+        x_train: Training features
+        y_train: Training labels
+        x_test: Test features
+        y_test: Test labels
+        x_val: Optional validation features to use for calibration
+        y_val: Optional validation labels to use for calibration
 
     Returns:
         Dictionary containing evaluation metrics
     """
-    # Split data into train/test
-    x_train, x_test, y_train, y_test = train_test_split(
-        features, labels, test_size=0.2, random_state=SEED, stratify=labels
-    )
-
-    # Fit classifier on training data
-    classifier.fit(x_train, y_train)
+    # Set validation data if classifier accepts it
+    if hasattr(classifier, "calibrate_probs") and classifier.calibrate_probs:
+        classifier.fit(x_train, y_train, x_val, y_val)
+    else:
+        # For other classifiers, do not calibrate probabilities
+        classifier.fit(x_train, y_train)
 
     # Get probabilities on test set
     probas = classifier.predict_proba(x_test)
@@ -225,10 +242,6 @@ def evaluate_classifier(
         "probabilities": probas,
         "test_labels": y_test,
     }
-
-    # Add training history for neural networks
-    if hasattr(classifier, "get_training_history"):
-        result["training_history"] = classifier.get_training_history()
 
     return result
 
@@ -280,6 +293,90 @@ def load_features(output_dir: Path) -> Tuple[np.ndarray, np.ndarray]:
     return features, labels
 
 
+def split_data(
+    features: np.ndarray,
+    labels: np.ndarray,
+    test_size: float = 0.2,
+    val_size: float = 0.2,
+    random_state: Optional[int] = None,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Split data into train, validation, and test sets.
+
+    Args:
+        features: Feature matrix
+        labels: Target labels
+        test_size: Proportion of data to use for testing
+        val_size: Proportion of training data to use for validation
+        random_state: Random state for reproducibility
+
+    Returns:
+        Tuple of (x_train, y_train, x_val, y_val, x_test, y_test)
+    """
+    # First split off test set
+    x_train_val, x_test, y_train_val, y_test = train_test_split(
+        features,
+        labels,
+        test_size=test_size,
+        random_state=random_state,
+        stratify=labels,
+    )
+    # Then split remaining data into train and validation
+    x_train, x_val, y_train, y_val = train_test_split(
+        x_train_val,
+        y_train_val,
+        test_size=val_size,
+        random_state=random_state,
+        stratify=y_train_val,
+    )
+    return x_train, y_train, x_val, y_val, x_test, y_test
+
+
+def initialize_calibrator(
+    dataset: CalibrationDataset,
+    output_dir: Path,
+    seed: int,
+    force_recompute: bool = False,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Initialize calibrator, compute features, and handle caching.
+
+    Args:
+        dataset: The calibration dataset
+        output_dir: Directory to save cached features
+        seed: Random seed for reproducibility
+        force_recompute: Whether to force recomputation of features
+
+    Returns:
+        Tuple of (features, labels)
+    """
+    # Check for cached features
+    features_path = output_dir / "cached_features.npy"
+    labels_path = output_dir / "cached_labels.npy"
+
+    if not force_recompute and features_path.exists() and labels_path.exists():
+        logger.info("Found cached features, loading...")
+        return load_features(output_dir)
+
+    # Initialize calibrator with features
+    logger.info("Initializing calibrator.")
+    calibrator = ProbabilityCalibrator(seed=seed)
+    calibrator.add_feature(MassErrorFeature(residue_masses=RESIDUE_MASSES))
+    calibrator.add_feature(PrositFeatures(mz_tolerance=0.02))
+    calibrator.add_feature(RetentionTimeFeature(hidden_dim=10, train_fraction=0.1))
+    calibrator.add_feature(ChimericFeatures(mz_tolerance=0.02))
+    calibrator.add_feature(BeamFeatures())
+
+    # Fit calibrator and compute features
+    logger.info("Computing features.")
+    calibrator.fit(dataset)
+    features, labels = calibrator.compute_features(dataset=dataset, labelled=True)  # type: ignore[misc]
+
+    # Save computed features
+    logger.info("Saving computed features for future use.")
+    save_features(features, labels, output_dir)
+
+    return features, labels
+
+
 def main(
     spectrum_path: Annotated[
         Path, typer.Option(help="Path to the spectrum data file.")
@@ -301,44 +398,43 @@ def main(
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Check for cached features
-    features_path = output_dir / "cached_features.npy"
-    labels_path = output_dir / "cached_labels.npy"
+    # Load and filter dataset
+    logger.info("Loading and filtering dataset.")
+    dataset = CalibrationDataset.from_predictions_csv(
+        spectrum_path=spectrum_path, beam_predictions_path=beam_predictions_path
+    )
+    dataset = filter_dataset(dataset)
 
-    if not force_recompute and features_path.exists() and labels_path.exists():
-        logger.info("Found cached features, loading...")
-        features, labels = load_features(output_dir)
-    else:
-        # Load and filter dataset
-        logger.info("Loading and filtering dataset.")
-        dataset = CalibrationDataset.from_predictions_csv(
-            spectrum_path=spectrum_path, beam_predictions_path=beam_predictions_path
-        )
-        dataset = filter_dataset(dataset)
+    # Initialize calibrator and get features
+    features, labels = initialize_calibrator(
+        dataset=dataset,
+        output_dir=output_dir,
+        seed=SEED,
+        force_recompute=force_recompute,
+    )
 
-        # Initialize calibrator with features
-        logger.info("Initializing calibrator.")
-        calibrator = ProbabilityCalibrator(seed=SEED)
-        calibrator.add_feature(MassErrorFeature(residue_masses=RESIDUE_MASSES))
-        calibrator.add_feature(PrositFeatures(mz_tolerance=0.02))
-        calibrator.add_feature(RetentionTimeFeature(hidden_dim=10, train_fraction=0.1))
-        calibrator.add_feature(ChimericFeatures(mz_tolerance=0.02))
-        calibrator.add_feature(BeamFeatures())
-
-        # Fit calibrator and compute features
-        logger.info("Computing features.")
-        calibrator.fit(dataset)
-        features, labels = calibrator.compute_features(dataset=dataset, labelled=True)  # type: ignore[misc]
-
-        # Save computed features
-        logger.info("Saving computed features for future use.")
-        save_features(features, labels, output_dir)
+    # Split data into train/val/test once
+    logger.info("Splitting data into train/val/test sets...")
+    x_train, y_train, x_val, y_val, x_test, y_test = split_data(
+        features, labels, test_size=0.2, val_size=0.2, random_state=SEED
+    )
+    logger.info(
+        f"Data split sizes - Train: {len(x_train)}, Val: {len(x_val)}, Test: {len(x_test)}"
+    )
 
     # Evaluate each classifier
     results = {}
     for name, classifier in CLASSIFIERS.items():
         logger.info(f"Evaluating {name}...")
-        results[name] = evaluate_classifier(classifier, features, labels)
+        results[name] = evaluate_classifier(
+            classifier,
+            x_train=x_train,
+            y_train=y_train,
+            x_val=x_val,
+            y_val=y_val,
+            x_test=x_test,
+            y_test=y_test,
+        )
         logger.info(f"{name} - AUC: {results[name]['auc']:.3f}")
 
     # Print top three classifiers
