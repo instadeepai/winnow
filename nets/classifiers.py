@@ -54,7 +54,8 @@ class BaseNeuralClassifier(BaseEstimator, ClassifierMixin):
     """Base class for neural network classifiers.
 
     This class provides common functionality for neural network classifiers
-    that are compatible with scikit-learn's API.
+    that are compatible with scikit-learn's API. The classifiers predict the
+    probability that a given prediction is correct (1) or incorrect (0).
     """
 
     def __init__(
@@ -75,6 +76,7 @@ class BaseNeuralClassifier(BaseEstimator, ClassifierMixin):
             n_epochs: Number of training epochs
             device: Device to use for training ('cuda' or 'cpu')
             random_state: Random state for reproducibility
+            calibrate_probs: Whether to calibrate probabilities
         """
         self.hidden_size = hidden_size
         self.learning_rate = learning_rate
@@ -131,13 +133,8 @@ class BaseNeuralClassifier(BaseEstimator, ClassifierMixin):
             return DataLoader(dataset, batch_size=self.batch_size, shuffle=False)
 
 
-class HardSigmoidClassifier(BaseEstimator, ClassifierMixin):
-    """Neural network classifier using hard sigmoid activation.
-
-    This classifier uses BCEWithLogitsLoss during training and
-    applies hard sigmoid at inference time to convert logits to probabilities.
-    Matches sklearn's MLPClassifier architecture with a single hidden layer.
-    """
+class SteepSigmoidClassifier(BaseNeuralClassifier):
+    """Neural network classifier using a custom steep sigmoid activation."""
 
     def __init__(
         self,
@@ -146,7 +143,9 @@ class HardSigmoidClassifier(BaseEstimator, ClassifierMixin):
         batch_size: int = 200,
         n_epochs: int = 200,
         device: str = DEFAULT_DEVICE,
+        alpha: float = 1.0,
         random_state: Optional[int] = None,  # Random state for reproducibility
+        calibrate_probs: bool = True,  # Whether to calibrate probabilities
     ) -> None:
         """Initialize the classifier.
 
@@ -156,7 +155,9 @@ class HardSigmoidClassifier(BaseEstimator, ClassifierMixin):
             batch_size: Batch size for training
             n_epochs: Number of training epochs
             device: Device to use for training ('cuda' or 'cpu')
+            alpha: Steepness parameter for sigmoid
             random_state: Random state for reproducibility
+            calibrate_probs: Whether to calibrate probabilities
         """
         self.hidden_size = hidden_size
         self.learning_rate = learning_rate
@@ -168,6 +169,8 @@ class HardSigmoidClassifier(BaseEstimator, ClassifierMixin):
         self.optimizer: Optional[optim.Optimizer] = None
         self.scaler = StandardScaler()
         self.calibrator: Optional[LogisticRegression] = None
+        self.alpha: float = alpha
+        self.calibrate_probs: bool = calibrate_probs
 
     def fit(
         self,
@@ -175,7 +178,7 @@ class HardSigmoidClassifier(BaseEstimator, ClassifierMixin):
         y_train: np.ndarray,
         x_val: Optional[np.ndarray] = None,
         y_val: Optional[np.ndarray] = None,
-    ) -> "HardSigmoidClassifier":
+    ) -> "SteepSigmoidClassifier":
         """Fit the model using BCEWithLogitsLoss and calibrate probabilities.
 
         Args:
@@ -215,20 +218,20 @@ class HardSigmoidClassifier(BaseEstimator, ClassifierMixin):
 
                 self.optimizer.zero_grad()
                 logits = self.model(batch_x).squeeze(1)
-                loss = criterion(logits, batch_y)
+                loss = criterion(self.alpha * logits, batch_y)
                 loss.backward()
                 self.optimizer.step()
                 total_loss += loss.item()
 
-        # Calibrate probabilities if validation set is available
-        if x_val is not None and y_val is not None:
+        # Calibrate probabilities if desired
+        if self.calibrate_probs:
             self.model.eval()
             with torch.no_grad():
                 val_loader = self._prepare_data(x_val)
                 raw_probs = []
                 for (batch_x,) in val_loader:
                     logits = self.model(batch_x).squeeze(1)
-                    probs = f.hardsigmoid(logits)
+                    probs = self._steep_sigmoid(logits)
                     raw_probs.append(probs.cpu().numpy())
             raw_probs = np.concatenate(raw_probs).reshape(-1, 1)
 
@@ -250,20 +253,33 @@ class HardSigmoidClassifier(BaseEstimator, ClassifierMixin):
         if self.model is None:
             raise RuntimeError("Model not initialized. Call fit() first.")
 
-        if self.calibrator is not None:
-            # Use calibrated probabilities
-            return self.calibrator.predict_proba(x)
+        # Get raw probabilities
+        self.model.eval()
+        with torch.no_grad():
+            test_loader = self._prepare_data(x)
+            raw_probs = []
+            for (batch_x,) in test_loader:
+                logits = self.model(batch_x).squeeze(1)
+                probs = self._steep_sigmoid(logits)
+                raw_probs.append(probs.cpu().numpy())
+
+        if self.calibrate_probs and self.calibrator is not None:
+            return self.calibrator.predict_proba(
+                np.concatenate(raw_probs).reshape(-1, 1)
+            )
         else:
-            # Fall back to uncalibrated probabilities
-            self.model.eval()
-            with torch.no_grad():
-                test_loader = self._prepare_data(x)
-                probas = []
-                for (batch_x,) in test_loader:
-                    logits = self.model(batch_x).squeeze(1)
-                    probs = f.hardsigmoid(logits)
-                    probas.append(probs.cpu().numpy())
-            return np.concatenate(probas).reshape(-1, 1)
+            return np.concatenate(raw_probs).reshape(-1, 1)
+
+    def _steep_sigmoid(self, z: torch.Tensor) -> torch.Tensor:
+        """Steep sigmoid activation.
+
+        Args:
+            z: Input tensor
+
+        Returns:
+            Steep sigmoid output in (0,1)
+        """
+        return nn.Sigmoid()(self.alpha * z)
 
     def _prepare_data(
         self, x: np.ndarray, y: Optional[np.ndarray] = None
@@ -293,11 +309,14 @@ class HardSigmoidClassifier(BaseEstimator, ClassifierMixin):
             return DataLoader(dataset, batch_size=self.batch_size, shuffle=False)
 
 
-class HingeClassifier(BaseEstimator, ClassifierMixin):
+class HingeClassifier(BaseNeuralClassifier):
     """Neural network classifier using hinge loss.
 
     This classifier uses PyTorch's HingeEmbeddingLoss during training and
-    applies hard sigmoid at inference time to convert logits to probabilities.
+    applies a softened hard sigmoid at inference time to convert logits to probabilities.
+    The output probabilities represent the probability that a given prediction
+    is correct (1) or incorrect (0). For hinge loss, positive logits correspond
+    to correct predictions and negative logits to incorrect predictions.
     """
 
     def __init__(
@@ -308,6 +327,8 @@ class HingeClassifier(BaseEstimator, ClassifierMixin):
         n_epochs: int = 200,
         device: str = DEFAULT_DEVICE,
         random_state: Optional[int] = None,  # Random state for reproducibility
+        alpha: float = 1.0,
+        calibrate_probs: bool = True,
     ) -> None:
         """Initialize the classifier.
 
@@ -318,6 +339,8 @@ class HingeClassifier(BaseEstimator, ClassifierMixin):
             n_epochs: Number of training epochs
             device: Device to use for training ('cuda' or 'cpu')
             random_state: Random state for reproducibility
+            alpha: Stretch factor for hard sigmoid
+            calibrate_probs: Whether to calibrate probabilities
         """
         self.hidden_size = hidden_size
         self.learning_rate = learning_rate
@@ -329,6 +352,8 @@ class HingeClassifier(BaseEstimator, ClassifierMixin):
         self.optimizer: Optional[optim.Optimizer] = None
         self.scaler = StandardScaler()
         self.calibrator: Optional[LogisticRegression] = None
+        self.calibrate_probs: bool = True
+        self.alpha: float = alpha
 
     def fit(
         self,
@@ -341,7 +366,7 @@ class HingeClassifier(BaseEstimator, ClassifierMixin):
 
         Args:
             x_train: Training features
-            y_train: Training labels
+            y_train: Training labels (0 for negative class, 1 for positive class)
             x_val: Validation features for calibration
             y_val: Validation labels for calibration
 
@@ -373,22 +398,23 @@ class HingeClassifier(BaseEstimator, ClassifierMixin):
 
                 self.optimizer.zero_grad()
                 logits = self.model(batch_x).squeeze(1)
-                y_signed = batch_y * 2 - 1  # Convert {0,1} to {-1,1}
-                loss = criterion(logits, y_signed)
+                probs = self._hard_sigmoid(logits)
+                # Convert {0,1} to {-1,1} for hinge loss
+                y_signed = batch_y * 2 - 1
+                loss = criterion(probs, y_signed)
                 loss.backward()
                 self.optimizer.step()
                 total_loss += loss.item()
 
-        # Calibrate probabilities if validation set is available
-        if x_val is not None and y_val is not None:
+        # Calibrate probabilities if desired
+        if self.calibrate_probs:
             self.model.eval()
             with torch.no_grad():
                 val_loader = self._prepare_data(x_val)
                 raw_probs = []
                 for (batch_x,) in val_loader:
                     logits = self.model(batch_x).squeeze(1)
-                    probs = f.hardsigmoid(logits)
-                    probs = 1.0 - probs  # Invert for hinge loss
+                    probs = self._hard_sigmoid(logits)
                     raw_probs.append(probs.cpu().numpy())
             raw_probs = np.concatenate(raw_probs).reshape(-1, 1)
 
@@ -399,31 +425,45 @@ class HingeClassifier(BaseEstimator, ClassifierMixin):
         return self
 
     def predict_proba(self, x: np.ndarray) -> np.ndarray:
-        """Predict class probabilities using hard sigmoid and calibration.
+        """Predict class probabilities using softened hard sigmoid and calibration.
 
         Args:
             x: Feature matrix
 
         Returns:
-            Predicted probabilities
+            Predicted probabilities where higher values indicate class 1
         """
         if self.model is None:
             raise RuntimeError("Model not initialized. Call fit() first.")
 
-        if self.calibrator is not None:
-            # Use calibrated probabilities
-            return self.calibrator.predict_proba(x)
+        # Get raw probabilities
+        self.model.eval()
+        with torch.no_grad():
+            test_loader = self._prepare_data(x)
+            raw_probs = []
+            for (batch_x,) in test_loader:
+                logits = self.model(batch_x).squeeze(1)
+                probs = self._hard_sigmoid(logits)
+                raw_probs.append(probs.cpu().numpy())
+
+        if self.calibrate_probs and self.calibrator is not None:
+            return self.calibrator.predict_proba(
+                np.concatenate(raw_probs).reshape(-1, 1)
+            )
         else:
-            # Fall back to uncalibrated probabilities
-            self.model.eval()
-            with torch.no_grad():
-                test_loader = self._prepare_data(x)
-                probas = []
-                for (batch_x,) in test_loader:
-                    logits = self.model(batch_x).squeeze(1)
-                    probs = f.hardsigmoid(logits)
-                    probas.append(probs.cpu().numpy())
-            return np.concatenate(probas).reshape(-1, 1)
+            return np.concatenate(raw_probs).reshape(-1, 1)
+
+    def _hard_sigmoid(self, z: torch.Tensor) -> torch.Tensor:
+        """Hard sigmoid activation, stretched by alpha.
+
+        Args:
+            z: Input tensor
+
+        Returns:
+            Hard sigmoid output in (0,1)
+        """
+        # Apply hard sigmoid to the scaled input
+        return f.hardsigmoid(self.alpha * z)
 
     def _prepare_data(
         self, x: np.ndarray, y: Optional[np.ndarray] = None

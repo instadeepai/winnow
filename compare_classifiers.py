@@ -36,7 +36,7 @@ from winnow.calibration.calibration_features import (
     ChimericFeatures,
     BeamFeatures,
 )
-from nets import HardSigmoidClassifier, HingeClassifier
+from nets import SteepSigmoidClassifier, HingeClassifier
 
 # Set up logging
 logger = logging.getLogger("winnow")
@@ -90,12 +90,14 @@ CLASSIFIERS = {
     ),
     "KNeighbors": KNeighborsClassifier(n_neighbors=5, weights="distance"),
     "MLP": MLPClassifier(hidden_layer_sizes=(100,), max_iter=1000, random_state=SEED),
-    "HardSigmoidNet": HardSigmoidClassifier(
+    "SteepSigmoidNet": SteepSigmoidClassifier(
         hidden_size=100,
         learning_rate=0.001,
         batch_size=128,
         n_epochs=100,
         random_state=SEED,
+        calibrate_probs=False,
+        alpha=2.0,
     ),
     "HingeNet": HingeClassifier(
         hidden_size=100,
@@ -103,6 +105,8 @@ CLASSIFIERS = {
         batch_size=128,
         n_epochs=100,
         random_state=SEED,
+        calibrate_probs=False,
+        alpha=1.0,
     ),
 }
 
@@ -174,19 +178,6 @@ def plot_probability_distributions(
             output_dir / f"probability_distribution_{name.lower()}.png", dpi=300
         )
         plt.close()
-
-    # Also create a combined plot for comparison
-    plt.figure(figsize=(12, 8))
-    sns.histplot(
-        data=df, x="Probability", hue="Classifier", multiple="layer", alpha=0.5, bins=50
-    )
-    plt.title("Probability Distributions Across All Classifiers")
-    plt.xlabel("Predicted Probability")
-    plt.ylabel("Count")
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(output_dir / "probability_distributions_combined.png", dpi=300)
-    plt.close()
 
 
 def evaluate_classifier(

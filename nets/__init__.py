@@ -1,8 +1,8 @@
 """Neural network classifiers for binary classification."""
 
-from nets.classifiers import HardSigmoidClassifier, HingeClassifier
+from nets.classifiers import SteepSigmoidClassifier, HingeClassifier
 
 __all__ = [
-    "HardSigmoidClassifier",
+    "SteepSigmoidClassifier",
     "HingeClassifier",
 ]
