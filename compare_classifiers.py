@@ -341,6 +341,14 @@ def main(
         results[name] = evaluate_classifier(classifier, features, labels)
         logger.info(f"{name} - AUC: {results[name]['auc']:.3f}")
 
+    # Print top three classifiers
+    print("\nTop three classifiers by AUC:")
+    print("-" * 40)
+    sorted_results = sorted(results.items(), key=lambda x: x[1]["auc"], reverse=True)
+    for i, (name, result) in enumerate(sorted_results[:3], 1):
+        print(f"{i}. {name}: AUC = {result['auc']:.3f}")
+    print("-" * 40 + "\n")
+
     # Generate plots
     logger.info("Generating comparison plots...")
     plot_roc_curves(results, output_dir)
