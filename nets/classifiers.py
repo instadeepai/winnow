@@ -2,6 +2,7 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as f
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.base import BaseEstimator, ClassifierMixin
@@ -381,11 +382,7 @@ class HingeClassifier(BaseEstimator, ClassifierMixin):
             probas = []
             for (batch_x,) in test_loader:
                 logits = self.model(batch_x).squeeze(1)
-                # Convert logits to probabilities:
-                # - logits > 1 -> prob ≈ 1
-                # - logits < -1 -> prob ≈ 0
-                # - in between -> linear interpolation
-                probs = torch.clamp((logits + 1) * 0.5, 0.0, 1.0)
+                probs = f.hardsigmoid(logits)
                 # Invert probabilities since hinge loss is inverted
                 probs = 1.0 - probs
                 probas.append(probs.cpu().numpy())
