@@ -218,7 +218,9 @@ class SteepSigmoidClassifier(BaseNeuralClassifier):
 
                 self.optimizer.zero_grad()
                 logits = self.model(batch_x).squeeze(1)
-                loss = criterion(self.alpha * logits, batch_y)
+                loss = criterion(self.alpha * logits, batch_y) - 0.01 * torch.mean(
+                    logits**2
+                )
                 loss.backward()
                 self.optimizer.step()
                 total_loss += loss.item()

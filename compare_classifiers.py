@@ -97,7 +97,7 @@ CLASSIFIERS = {
         n_epochs=100,
         random_state=SEED,
         calibrate_probs=False,
-        alpha=2.0,
+        alpha=1.0,
     ),
     "HingeNet": HingeClassifier(
         hidden_size=100,
