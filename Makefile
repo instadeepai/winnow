@@ -136,3 +136,17 @@ compare-classifiers: set-ceph-credentials set-gcp-credentials
 	# aws s3 cp results/ s3://winnow-g88rh/classifier_comparison/ --recursive --profile winnow
 	# Copy the results back to Google Cloud Storage
 	gsutil -m cp -R results/ gs://winnow-fdr/classifier_comparison/
+
+## Tune the HistGradientBoostingClassifier
+tune-calibrator: set-ceph-credentials set-gcp-credentials
+	# Copy the data from Ceph bucket to the local data directory
+	mkdir -p data
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/labelled/train_spectrum_all_datasets.parquet data/ --profile winnow
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/labelled/train_beam_all_datasets.csv data/ --profile winnow
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/labelled/val_spectrum_all_datasets.parquet data/ --profile winnow
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/labelled/val_beam_all_datasets.csv data/ --profile winnow
+	python scripts/tune_hist_gradient_boosting.py --train-spectrum-path data/train_spectrum_all_datasets.parquet --train-predictions-path data/train_beam_all_datasets.csv --val-spectrum-path data/val_spectrum_all_datasets.parquet --val-predictions-path data/val_beam_all_datasets.csv --output-dir tuning_results/
+	# Copy the results back to Ceph bucket
+	# aws s3 cp results/ s3://winnow-g88rh/classifier_comparison/ --recursive --profile winnow
+	# Copy the results back to Google Cloud Storage
+	gsutil -m cp -R tuning_results/ gs://winnow-fdr/classifier_comparison/
