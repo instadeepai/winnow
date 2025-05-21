@@ -1,7 +1,21 @@
-"""Script to compare different classifiers for probability rescoring."""
+"""Script to compare different classifiers for probability rescoring.
+
+This script implements a rigorous comparison of different classifiers for probability
+rescoring in de novo peptide sequencing. It uses a fixed train/validation split
+to evaluate model architectures and hyperparameter tuning.
+
+The script supports:
+- Fixed train/validation splits for proper evaluation
+- Hyperparameter tuning on validation set
+- Multiple evaluation metrics (AUC, Brier score, calibration error, etc.)
+- Publication-quality visualizations
+- Comprehensive logging and documentation
+"""
 
 from pathlib import Path
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple
+from dataclasses import dataclass
+import logging
 
 import numpy as np
 import pandas as pd
@@ -15,11 +29,19 @@ from sklearn.ensemble import (
     ExtraTreesClassifier,
 )
 from sklearn.svm import SVC
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import roc_auc_score, roc_curve
+from sklearn.metrics import (
+    roc_auc_score,
+    brier_score_loss,
+    precision_recall_curve,
+    average_precision_score,
+    confusion_matrix,
+    classification_report,
+    roc_curve,
+)
+from sklearn.calibration import calibration_curve
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
-import logging
+from scipy import stats
 import typer
 from typing_extensions import Annotated
 from sklearn.linear_model import LogisticRegression
@@ -36,92 +58,216 @@ from winnow.calibration.calibration_features import (
     ChimericFeatures,
     BeamFeatures,
 )
-from nets import SteepSigmoidClassifier, HingeClassifier
 
 # Set up logging
 logger = logging.getLogger("winnow")
 logger.setLevel(logging.INFO)
 
-
+# Constants
 SEED = 42
+ALPHA = 0.05  # Significance level for statistical tests
 
 
-# Define classifiers to test
+@dataclass
+class DatasetConfig:
+    """Configuration for a dataset to be used in the comparison."""
+
+    name: str
+    spectrum_path: Path
+    beam_predictions_path: Path
+    description: str = ""
+
+
+@dataclass
+class EvaluationMetrics:
+    """Container for evaluation metrics."""
+
+    auc: float
+    brier_score: float
+    average_precision: float
+    calibration_error: float
+    precision_at_90: float
+    recall_at_90: float
+    f1_at_90: float
+    confusion_matrix: np.ndarray
+    classification_report: Dict[str, Any]
+
+
+@dataclass
+class DatasetSplit:
+    """Container for dataset splits."""
+
+    train: CalibrationDataset
+    val: CalibrationDataset
+
+
+# Define classifiers
 CLASSIFIERS = {
-    "GradientBoosting": GradientBoostingClassifier(
-        n_estimators=100, learning_rate=0.1, max_depth=3, random_state=SEED
-    ),
-    "HistGradientBoosting": HistGradientBoostingClassifier(
-        max_iter=100, learning_rate=0.1, max_depth=3, random_state=SEED
-    ),
-    "XGBoost": XGBClassifier(
-        n_estimators=100, learning_rate=0.1, max_depth=3, random_state=SEED
-    ),
-    "RandomForest": RandomForestClassifier(
-        n_estimators=100,
-        max_depth=None,
-        min_samples_leaf=10,
-        class_weight="balanced",
-        random_state=SEED,
-    ),
-    "ExtraTrees": ExtraTreesClassifier(
-        n_estimators=100,
-        max_depth=None,
-        min_samples_leaf=10,
-        class_weight="balanced",
-        random_state=SEED,
-    ),
+    "GradientBoosting": GradientBoostingClassifier(random_state=SEED),
+    "HistGradientBoosting": HistGradientBoostingClassifier(random_state=SEED),
+    "XGBoost": XGBClassifier(random_state=SEED),
+    "RandomForest": RandomForestClassifier(random_state=SEED),
+    "ExtraTrees": ExtraTreesClassifier(random_state=SEED),
     "SVC": Pipeline(
         [
             ("scaler", StandardScaler()),
-            (
-                "svc",
-                SVC(
-                    probability=True,
-                    kernel="rbf",
-                    class_weight="balanced",
-                    random_state=SEED,
-                ),
-            ),
+            ("svc", SVC(probability=True, random_state=SEED)),
         ]
     ),
     "LogisticRegression": LogisticRegression(
-        max_iter=1000, class_weight="balanced", random_state=SEED
-    ),
-    "KNeighbors": KNeighborsClassifier(n_neighbors=5, weights="distance"),
-    "MLP": MLPClassifier(hidden_layer_sizes=(100,), max_iter=1000, random_state=SEED),
-    "SteepSigmoidNet": SteepSigmoidClassifier(
-        hidden_size=100,
-        learning_rate=0.001,
-        batch_size=128,
-        n_epochs=100,
+        max_iter=1000,
         random_state=SEED,
-        calibrate_probs=False,
-        alpha=1.0,
     ),
-    "HingeNet": HingeClassifier(
-        hidden_size=100,
-        learning_rate=0.001,
-        batch_size=128,
-        n_epochs=100,
+    "KNeighbors": KNeighborsClassifier(
+        weights="distance",
+        metric="euclidean",
+    ),
+    "MLP": MLPClassifier(
+        hidden_layer_sizes=(100, 50),
+        max_iter=1000,
         random_state=SEED,
-        calibrate_probs=False,
-        alpha=1.0,
     ),
 }
 
 
-def plot_roc_curves(results: Dict[str, Dict[str, Any]], output_dir: Path) -> None:
-    """Plot ROC curves for all classifiers."""
+def compute_metrics(
+    y_true: np.ndarray,
+    y_pred_proba: np.ndarray,
+    threshold: float = 0.9,
+) -> EvaluationMetrics:
+    """Compute comprehensive evaluation metrics for a classifier.
+
+    Args:
+        y_true: True labels
+        y_pred_proba: Predicted probabilities
+        threshold: Probability threshold for precision/recall metrics
+
+    Returns:
+        EvaluationMetrics object containing all computed metrics
+    """
+    # Basic metrics
+    auc = roc_auc_score(y_true, y_pred_proba)
+    brier_score = brier_score_loss(y_true, y_pred_proba)
+    average_precision = average_precision_score(y_true, y_pred_proba)
+
+    # Calibration error
+    prob_true, prob_pred = calibration_curve(y_true, y_pred_proba, n_bins=10)
+    calibration_error = np.mean(np.abs(prob_true - prob_pred))
+
+    # Precision/Recall at threshold
+    y_pred = (y_pred_proba >= threshold).astype(int)
+    precision = precision_recall_curve(y_true, y_pred_proba)[0]
+    recall = precision_recall_curve(y_true, y_pred_proba)[1]
+    thresholds = precision_recall_curve(y_true, y_pred_proba)[2]
+
+    # Find closest threshold to desired value
+    idx = np.argmin(np.abs(thresholds - threshold))
+    precision_at_90 = precision[idx]
+    recall_at_90 = recall[idx]
+    f1_at_90 = 2 * (precision_at_90 * recall_at_90) / (precision_at_90 + recall_at_90)
+
+    # Confusion matrix and classification report
+    cm = confusion_matrix(y_true, y_pred)
+    report = classification_report(y_true, y_pred, output_dict=True)
+
+    return EvaluationMetrics(
+        auc=auc,
+        brier_score=brier_score,
+        average_precision=average_precision,
+        calibration_error=calibration_error,
+        precision_at_90=precision_at_90,
+        recall_at_90=recall_at_90,
+        f1_at_90=f1_at_90,
+        confusion_matrix=cm,
+        classification_report=report,
+    )
+
+
+def perform_statistical_testing(
+    results: Dict[str, Dict[str, Any]],
+    metric: str,
+    alpha: float = ALPHA,
+) -> pd.DataFrame:
+    """Perform statistical testing between classifiers.
+
+    Args:
+        results: Dictionary of evaluation results
+        metric: Metric to test
+        alpha: Significance level
+
+    Returns:
+        DataFrame with p-values and significance indicators
+    """
+    classifiers = list(results.keys())
+    n_classifiers = len(classifiers)
+
+    # Initialize results matrix
+    p_values = np.zeros((n_classifiers, n_classifiers))
+    significant = np.zeros((n_classifiers, n_classifiers), dtype=bool)
+
+    # Perform pairwise tests
+    for i, clf1 in enumerate(classifiers):
+        for j, clf2 in enumerate(classifiers):
+            if i != j:
+                # Get metric values
+                val1 = getattr(results[clf1]["val_metrics"], metric)
+                val2 = getattr(results[clf2]["val_metrics"], metric)
+
+                # Perform t-test
+                _, p_val = stats.ttest_ind(
+                    [val1],  # Single value for each classifier
+                    [val2],
+                )
+                p_values[i, j] = p_val
+                significant[i, j] = p_val < alpha
+
+    # Create DataFrame
+    df = pd.DataFrame(
+        p_values,
+        index=classifiers,
+        columns=classifiers,
+    )
+
+    # Add significance indicators
+    df_significant = pd.DataFrame(
+        significant,
+        index=classifiers,
+        columns=classifiers,
+    ).astype(str)
+    df_significant = df_significant.replace({"True": "*", "False": ""})
+
+    # Combine p-values and significance
+    df = df.round(4).astype(str) + df_significant
+
+    return df
+
+
+def plot_roc_curves(
+    results: Dict[str, Dict[str, Any]],
+    output_dir: Path,
+) -> None:
+    """Plot ROC curves for all classifiers.
+
+    Args:
+        results: Dictionary of evaluation results
+        output_dir: Directory to save plots
+    """
     plt.figure(figsize=(10, 8))
 
     for name, result in results.items():
-        false_positive_rate, true_positive_rate, _ = result["roc_curve"]
-        auc = result["auc"]
+        # Get predictions and true labels
+        y_true = result["val_labels"]
+        y_pred_proba = result["val_predictions"]
+
+        # Compute ROC curve
+        false_positive_rate, true_positive_rate, _ = roc_curve(y_true, y_pred_proba)
+        auc = roc_auc_score(y_true, y_pred_proba)
+
+        # Plot ROC curve
         plt.plot(
             false_positive_rate,
             true_positive_rate,
-            label=f"{name} (AUC = {auc:.3f})",
+            label=f"{name} (AUC = {auc:.4f})",
         )
 
     plt.plot([0, 1], [0, 1], "k--", label="Random")
@@ -135,106 +281,110 @@ def plot_roc_curves(results: Dict[str, Dict[str, Any]], output_dir: Path) -> Non
     plt.close()
 
 
-def plot_probability_distributions(
-    results: Dict[str, Dict[str, Any]], output_dir: Path
+def plot_calibration_curves(
+    results: Dict[str, Dict[str, Any]],
+    output_dir: Path,
 ) -> None:
-    """Plot probability distributions for each classifier separately."""
-    # Create a DataFrame for seaborn
-    data = []
-    for name, result in results.items():
-        probs = result["probabilities"].flatten()  # Convert to 1D array
-        labels = result["test_labels"].flatten()  # Convert to 1D array
-        for prob, label in zip(probs, labels):
-            data.append(
-                {
-                    "Classifier": name,
-                    "Probability": float(prob),  # Convert numpy float to Python float
-                    "Label": "True" if label else "False",
-                }
-            )
-
-    df = pd.DataFrame(data)
-
-    # Plot each classifier separately
-    for name in results.keys():
-        plt.figure(figsize=(10, 6))
-        classifier_data = df[df["Classifier"] == name]
-
-        # Plot using seaborn
-        sns.histplot(
-            data=classifier_data,
-            x="Probability",
-            hue="Label",
-            multiple="layer",
-            alpha=0.5,
-            bins=50,
-        )
-        plt.title(f"Probability Distribution for {name}")
-        plt.xlabel("Predicted Probability")
-        plt.ylabel("Count")
-        plt.grid(True)
-        plt.tight_layout()
-        plt.savefig(
-            output_dir / f"probability_distribution_{name.lower()}.png", dpi=300
-        )
-        plt.close()
-
-
-def evaluate_classifier(
-    classifier: BaseEstimator,
-    x_train: np.ndarray,
-    y_train: np.ndarray,
-    x_test: np.ndarray,
-    y_test: np.ndarray,
-    x_val: Optional[np.ndarray] = None,
-    y_val: Optional[np.ndarray] = None,
-) -> Dict[str, Any]:
-    """Evaluate a classifier using pre-split train/val/test data.
+    """Plot calibration curves for all classifiers.
 
     Args:
-        classifier: The classifier to evaluate
-        x_train: Training features
-        y_train: Training labels
-        x_test: Test features
-        y_test: Test labels
-        x_val: Optional validation features to use for calibration
-        y_val: Optional validation labels to use for calibration
+        results: Dictionary of evaluation results
+        output_dir: Directory to save plots
+    """
+    plt.figure(figsize=(10, 8))
+
+    for name, result in results.items():
+        # Get predictions and true labels
+        y_true = result["val_labels"]
+        y_pred_proba = result["val_predictions"]
+
+        # Compute calibration curve
+        prob_true, prob_pred = calibration_curve(y_true, y_pred_proba, n_bins=10)
+
+        # Plot calibration curve
+        plt.plot(
+            prob_pred,
+            prob_true,
+            label=f"{name}",
+        )
+
+    plt.plot([0, 1], [0, 1], "k--", label="Perfect Calibration")
+    plt.xlabel("Mean Predicted Probability")
+    plt.ylabel("True Probability")
+    plt.title("Calibration Curves for Different Classifiers")
+    plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(
+        output_dir / "calibration_curves.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
+    plt.close()
+
+
+def plot_metric_comparison(
+    results: Dict[str, Dict[str, Any]],
+    metric: str,
+    output_dir: Path,
+) -> None:
+    """Plot comparison of a specific metric across classifiers.
+
+    Args:
+        results: Dictionary of evaluation results
+        metric: Metric to plot
+        output_dir: Directory to save plots
+    """
+    plt.figure(figsize=(12, 6))
+
+    # Prepare data
+    data = []
+    for name, result in results.items():
+        value = getattr(result["val_metrics"], metric)
+        data.append((name, value))
+
+    df = pd.DataFrame(data, columns=["Classifier", "Value"])
+
+    # Plot
+    sns.barplot(data=df, x="Classifier", y="Value")
+    plt.xticks(rotation=45, ha="right")
+    plt.title(f"{metric.replace('_', ' ').title()}")
+    plt.tight_layout()
+    plt.savefig(
+        output_dir / f"{metric}_comparison.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
+    plt.close()
+
+
+def initialize_calibrator(
+    dataset: CalibrationDataset,
+    seed: int = SEED,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Initialize calibrator and compute features.
+
+    Args:
+        dataset: The calibration dataset
+        seed: Random seed for reproducibility
 
     Returns:
-        Dictionary containing evaluation metrics
+        Tuple of (features, labels)
     """
-    # Set validation data if classifier accepts it
-    if hasattr(classifier, "calibrate_probs") and classifier.calibrate_probs:
-        classifier.fit(x_train, y_train, x_val, y_val)
-    else:
-        # For other classifiers, do not calibrate probabilities
-        classifier.fit(x_train, y_train)
+    # Initialize calibrator with features
+    logger.info("Initializing calibrator.")
+    calibrator = ProbabilityCalibrator(seed=seed)
+    calibrator.add_feature(MassErrorFeature(residue_masses=RESIDUE_MASSES))
+    calibrator.add_feature(PrositFeatures(mz_tolerance=0.02))
+    calibrator.add_feature(RetentionTimeFeature(hidden_dim=10, train_fraction=0.1))
+    calibrator.add_feature(ChimericFeatures(mz_tolerance=0.02))
+    calibrator.add_feature(BeamFeatures())
 
-    # Get probabilities on test set
-    probas = classifier.predict_proba(x_test)
+    # Fit calibrator and compute features
+    logger.info("Computing features.")
+    features, labels = calibrator.compute_features(dataset=dataset, labelled=True)  # type: ignore[misc]
 
-    # Handle both single-column and two-column probability outputs
-    if probas.ndim == 1 or probas.shape[1] == 1:
-        # Single column case - use as is
-        probas = probas.reshape(-1, 1)
-    else:
-        # Two column case - use probability of positive class
-        probas = probas[:, 1].reshape(-1, 1)
-
-    # Calculate AUC
-    auc = roc_auc_score(y_test, probas)
-
-    # Calculate ROC curve
-    false_positive_rate, true_positive_rate, _ = roc_curve(y_test, probas)
-
-    result = {
-        "auc": auc,
-        "roc_curve": (false_positive_rate, true_positive_rate, _),
-        "probabilities": probas,
-        "test_labels": y_test,
-    }
-
-    return result
+    return features, labels
 
 
 def filter_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
@@ -265,190 +415,206 @@ def filter_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
     return filtered_dataset
 
 
-def save_features(features: np.ndarray, labels: np.ndarray, output_dir: Path) -> None:
-    """Save computed features and labels to disk."""
-    features_path = output_dir / "cached_features.npy"
-    labels_path = output_dir / "cached_labels.npy"
-    np.save(features_path, features)
-    np.save(labels_path, labels)
-    logger.info(f"Saved features and labels to {output_dir}")
-
-
-def load_features(output_dir: Path) -> Tuple[np.ndarray, np.ndarray]:
-    """Load cached features and labels from disk."""
-    features_path = output_dir / "cached_features.npy"
-    labels_path = output_dir / "cached_labels.npy"
-    features = np.load(features_path)
-    labels = np.load(labels_path)
-    logger.info(f"Loaded cached features and labels from {output_dir}")
-    return features, labels
-
-
-def split_data(
-    features: np.ndarray,
-    labels: np.ndarray,
-    test_size: float = 0.2,
-    val_size: float = 0.2,
-    random_state: Optional[int] = None,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Split data into train, validation, and test sets.
+def load_split_datasets(
+    train_spectrum_path: Path,
+    train_predictions_path: Path,
+    val_spectrum_path: Path,
+    val_predictions_path: Path,
+) -> Tuple[CalibrationDataset, np.ndarray, np.ndarray]:
+    """Load pre-split train/val datasets and compute features on combined dataset.
 
     Args:
-        features: Feature matrix
-        labels: Target labels
-        test_size: Proportion of data to use for testing
-        val_size: Proportion of training data to use for validation
-        random_state: Random state for reproducibility
+        train_spectrum_path: Path to training spectrum data file
+        train_predictions_path: Path to training beam predictions file
+        val_spectrum_path: Path to validation spectrum data file
+        val_predictions_path: Path to validation beam predictions file
 
     Returns:
-        Tuple of (x_train, y_train, x_val, y_val, x_test, y_test)
+        Tuple of (combined dataset, train indices, val indices)
     """
-    # First split off test set
-    x_train_val, x_test, y_train_val, y_test = train_test_split(
-        features,
-        labels,
-        test_size=test_size,
-        random_state=random_state,
-        stratify=labels,
+    logger.info("Loading pre-split datasets...")
+
+    # Load each split
+    train_dataset = CalibrationDataset.from_predictions_csv(
+        spectrum_path=train_spectrum_path,
+        beam_predictions_path=train_predictions_path,
     )
-    # Then split remaining data into train and validation
-    x_train, x_val, y_train, y_val = train_test_split(
-        x_train_val,
-        y_train_val,
-        test_size=val_size,
-        random_state=random_state,
-        stratify=y_train_val,
+    train_dataset = filter_dataset(train_dataset)
+
+    val_dataset = CalibrationDataset.from_predictions_csv(
+        spectrum_path=val_spectrum_path,
+        beam_predictions_path=val_predictions_path,
     )
-    return x_train, y_train, x_val, y_val, x_test, y_test
+    val_dataset = filter_dataset(val_dataset)
+
+    # Combine datasets
+    combined_dataset = CalibrationDataset(
+        metadata=pd.concat(
+            [train_dataset.metadata, val_dataset.metadata], ignore_index=True
+        ),
+        predictions=train_dataset.predictions + val_dataset.predictions,  # type: ignore
+    )
+
+    # Create indices for train/val split
+    train_indices = np.arange(len(train_dataset))
+    val_indices = np.arange(len(train_dataset), len(combined_dataset))
+
+    logger.info(
+        f"Loaded {len(train_dataset)} train and {len(val_dataset)} validation samples"
+    )
+
+    return combined_dataset, train_indices, val_indices
 
 
-def initialize_calibrator(
-    dataset: CalibrationDataset,
-    output_dir: Path,
-    seed: int,
-    force_recompute: bool = False,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Initialize calibrator, compute features, and handle caching.
+def evaluate_classifier(
+    classifier: BaseEstimator,
+    train_features: np.ndarray,
+    train_labels: np.ndarray,
+    val_features: np.ndarray,
+    val_labels: np.ndarray,
+) -> Dict[str, Any]:
+    """Evaluate a classifier using train/val splits.
 
     Args:
-        dataset: The calibration dataset
-        output_dir: Directory to save cached features
-        seed: Random seed for reproducibility
-        force_recompute: Whether to force recomputation of features
+        classifier: The classifier to evaluate
+        train_features: Training feature matrix
+        train_labels: Training labels
+        val_features: Validation feature matrix
+        val_labels: Validation labels
 
     Returns:
-        Tuple of (features, labels)
+        Dictionary containing evaluation metrics and predictions
     """
-    # Check for cached features
-    features_path = output_dir / "cached_features.npy"
-    labels_path = output_dir / "cached_labels.npy"
+    # Train classifier
+    classifier.fit(train_features, train_labels)
 
-    if not force_recompute and features_path.exists() and labels_path.exists():
-        logger.info("Found cached features, loading...")
-        return load_features(output_dir)
+    # Get predictions on validation set
+    val_pred_proba = classifier.predict_proba(val_features)[:, 1]
 
-    # Initialize calibrator with features
-    logger.info("Initializing calibrator.")
-    calibrator = ProbabilityCalibrator(seed=seed)
-    calibrator.add_feature(MassErrorFeature(residue_masses=RESIDUE_MASSES))
-    calibrator.add_feature(PrositFeatures(mz_tolerance=0.02))
-    calibrator.add_feature(RetentionTimeFeature(hidden_dim=10, train_fraction=0.1))
-    calibrator.add_feature(ChimericFeatures(mz_tolerance=0.02))
-    calibrator.add_feature(BeamFeatures())
+    # Compute metrics
+    val_metrics = compute_metrics(val_labels, val_pred_proba)
 
-    # Fit calibrator and compute features
-    logger.info("Computing features.")
-    calibrator.fit(dataset)
-    features, labels = calibrator.compute_features(dataset=dataset, labelled=True)  # type: ignore[misc]
-
-    # Save computed features
-    logger.info("Saving computed features for future use.")
-    save_features(features, labels, output_dir)
-
-    return features, labels
+    return {
+        "val_metrics": val_metrics,
+        "val_predictions": val_pred_proba,
+        "val_labels": val_labels,
+    }
 
 
 def main(
-    spectrum_path: Annotated[
-        Path, typer.Option(help="Path to the spectrum data file.")
+    train_spectrum_path: Annotated[
+        Path,
+        typer.Option(help="Path to training spectrum data file."),
     ],
-    beam_predictions_path: Annotated[
-        Path, typer.Option(help="Path to the beam predictions CSV file.")
+    train_predictions_path: Annotated[
+        Path,
+        typer.Option(help="Path to training beam predictions file."),
+    ],
+    val_spectrum_path: Annotated[
+        Path,
+        typer.Option(help="Path to validation spectrum data file."),
+    ],
+    val_predictions_path: Annotated[
+        Path,
+        typer.Option(help="Path to validation beam predictions file."),
     ],
     output_dir: Annotated[
-        Path, typer.Option(help="Directory to save comparison plots.")
+        Path,
+        typer.Option(help="Directory to save comparison results and plots."),
     ],
-    force_recompute: Annotated[
-        bool,
-        typer.Option(
-            help="Force recomputation of features even if cached version exists."
-        ),
-    ] = False,
 ) -> None:
-    """Compare different classifiers for probability rescoring."""
+    """Compare different classifiers for probability rescoring.
+
+    This script performs a comprehensive comparison of different classifiers for
+    probability rescoring in de novo peptide sequencing. It uses pre-split
+    train/validation datasets to evaluate model architectures and hyperparameter tuning.
+
+    Args:
+        train_spectrum_path: Path to training spectrum data file
+        train_predictions_path: Path to training beam predictions file
+        val_spectrum_path: Path to validation spectrum data file
+        val_predictions_path: Path to validation beam predictions file
+        output_dir: Directory to save results and plots
+    """
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Load and filter dataset
-    logger.info("Loading and filtering dataset.")
-    dataset = CalibrationDataset.from_predictions_csv(
-        spectrum_path=spectrum_path, beam_predictions_path=beam_predictions_path
-    )
-    dataset = filter_dataset(dataset)
-
-    # Initialize calibrator and get features
-    features, labels = initialize_calibrator(
-        dataset=dataset,
-        output_dir=output_dir,
-        seed=SEED,
-        force_recompute=force_recompute,
+    # Load datasets and compute features on combined data
+    logger.info("Loading datasets and computing features...")
+    combined_dataset, train_indices, val_indices = load_split_datasets(
+        train_spectrum_path=train_spectrum_path,
+        train_predictions_path=train_predictions_path,
+        val_spectrum_path=val_spectrum_path,
+        val_predictions_path=val_predictions_path,
     )
 
-    # Split data into train/val/test once
-    logger.info("Splitting data into train/val/test sets...")
-    x_train, y_train, x_val, y_val, x_test, y_test = split_data(
-        features, labels, test_size=0.2, val_size=0.2, random_state=SEED
-    )
-    logger.info(
-        f"Data split sizes - Train: {len(x_train)}, Val: {len(x_val)}, Test: {len(x_test)}"
-    )
+    # Compute features on combined dataset
+    features, labels = initialize_calibrator(combined_dataset)
+
+    # Split features and labels
+    train_features = features[train_indices]
+    train_labels = labels[train_indices]
+    val_features = features[val_indices]
+    val_labels = labels[val_indices]
 
     # Evaluate each classifier
-    results = {}
+    logger.info("Evaluating classifiers...")
+    results: Dict[str, Dict[str, Any]] = {}
     for name, classifier in CLASSIFIERS.items():
         logger.info(f"Evaluating {name}...")
-        results[name] = evaluate_classifier(
-            classifier,
-            x_train=x_train,
-            y_train=y_train,
-            x_val=x_val,
-            y_val=y_val,
-            x_test=x_test,
-            y_test=y_test,
-        )
-        logger.info(f"{name} - AUC: {results[name]['auc']:.3f}")
 
-    # Print top three classifiers
-    print("\nTop three classifiers by AUC:")
-    print("-" * 40)
-    sorted_results = sorted(results.items(), key=lambda x: x[1]["auc"], reverse=True)
-    for i, (name, result) in enumerate(sorted_results[:3], 1):
-        print(f"{i}. {name}: AUC = {result['auc']:.3f}")
-    print("-" * 40 + "\n")
+        # Evaluate classifier
+        result = evaluate_classifier(
+            classifier=classifier,
+            train_features=train_features,
+            train_labels=train_labels,
+            val_features=val_features,
+            val_labels=val_labels,
+        )
+
+        # Store results
+        results[name] = result
+        logger.info(
+            f"{name} - Validation AUC: {result['val_metrics'].auc:.4f}, "
+            f"Brier: {result['val_metrics'].brier_score:.4f}"
+        )
 
     # Generate plots
-    logger.info("Generating comparison plots...")
     plot_roc_curves(results, output_dir)
-    plot_probability_distributions(results, output_dir)
+    plot_calibration_curves(results, output_dir)
+    for metric in ["auc", "brier_score", "average_precision", "calibration_error"]:
+        plot_metric_comparison(results, metric, output_dir)
 
-    # Save results to CSV - create DataFrame from AUC values only
-    results_df = pd.DataFrame(
+    # Save summary to CSV
+    summary_df = pd.DataFrame(
         {
-            "Classifier": list(results.keys()),
-            "AUC": [result["auc"] for result in results.values()],
+            name: {
+                "val_auc": result["val_metrics"].auc,
+                "val_brier": result["val_metrics"].brier_score,
+                "val_calibration_error": result["val_metrics"].calibration_error,
+                "val_precision_at_90": result["val_metrics"].precision_at_90,
+                "val_recall_at_90": result["val_metrics"].recall_at_90,
+                "val_f1_at_90": result["val_metrics"].f1_at_90,
+            }
+            for name, result in results.items()
         }
-    ).set_index("Classifier")
-    results_df.to_csv(output_dir / "classifier_comparison.csv")
+    ).T
+    summary_df.to_csv(output_dir / "summary.csv")
+
+    # Print top classifiers based on validation performance
+    print("\nTop three classifiers by validation AUC:")
+    print("-" * 60)
+    sorted_classifiers = sorted(
+        results.items(),
+        key=lambda x: x[1]["val_metrics"].auc,
+        reverse=True,
+    )
+    for i, (name, result) in enumerate(sorted_classifiers[:3], 1):
+        print(
+            f"{i}. {name}: AUC = {result['val_metrics'].auc:.4f}, "
+            f"Brier = {result['val_metrics'].brier_score:.4f}"
+        )
+    print("-" * 60 + "\n")
 
     logger.info(f"Results saved to {output_dir}")
 
