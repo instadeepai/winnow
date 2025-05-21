@@ -123,7 +123,7 @@ set-ceph-credentials:
 	python scripts/set_ceph_credentials.py
 
 ## Compare classifiers
-compare-classifiers: make set-ceph-credentials
+compare-classifiers: set-ceph-credentials
 	# Copy the data from Ceph bucket to the local data directory
 	mkdir -p data
 	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/labelled/train_spectrum_all_datasets.parquet data/ --profile winnow
