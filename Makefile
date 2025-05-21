@@ -123,7 +123,7 @@ set-ceph-credentials:
 	python scripts/set_ceph_credentials.py
 
 ## Compare classifiers
-compare-classifiers: set-ceph-credentials
+compare-classifiers: set-ceph-credentials set-gcp-credentials
 	# Copy the data from Ceph bucket to the local data directory
 	mkdir -p data
 	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/labelled/train_spectrum_all_datasets.parquet data/ --profile winnow
@@ -133,4 +133,6 @@ compare-classifiers: set-ceph-credentials
 	# Run the evaluation script
 	python scripts/compare_classifiers.py --train-spectrum-path data/train_spectrum_all_datasets.parquet --train-predictions-path data/train_beam_all_datasets.csv --val-spectrum-path data/val_spectrum_all_datasets.parquet --val-predictions-path data/val_beam_all_datasets.csv --output-dir results/
 	# Copy the results back to Ceph bucket
-	aws s3 cp results/ s3://winnow-g88rh/classifier_comparison/ --recursive --profile winnow
+	# aws s3 cp results/ s3://winnow-g88rh/classifier_comparison/ --recursive --profile winnow
+	# Copy the results back to Google Cloud Storage
+	gsutil -m cp -R results/ gs://winnow-fdr/classifier_comparison/
