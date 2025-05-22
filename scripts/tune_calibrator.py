@@ -1,7 +1,7 @@
-"""Script to perform hyperparameter tuning for HistGradientBoostingClassifier.
+"""Script to perform hyperparameter tuning for MLPClassifier.
 
 This script implements a comprehensive hyperparameter tuning experiment for
-HistGradientBoostingClassifier using a fixed train/validation split. It evaluates different
+MLPClassifier using a fixed train/validation split. It evaluates different
 combinations of hyperparameters and generates visualizations of the results.
 
 The script supports:
@@ -31,7 +31,8 @@ from sklearn.metrics import (
     classification_report,
 )
 from sklearn.calibration import calibration_curve
-from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.neural_network import MLPClassifier
+from sklearn.preprocessing import StandardScaler
 import typer
 from typing_extensions import Annotated
 
@@ -379,6 +380,11 @@ def evaluate_parameters(
     """
     results = []
 
+    # Scale features
+    scaler = StandardScaler()
+    train_features_scaled = scaler.fit_transform(train_features)
+    val_features_scaled = scaler.transform(val_features)
+
     # Generate all parameter combinations
     param_combinations = [
         dict(zip(param_grid.keys(), v)) for v in product(*param_grid.values())
@@ -386,11 +392,11 @@ def evaluate_parameters(
 
     for params in param_combinations:
         # Initialize and train classifier
-        clf = HistGradientBoostingClassifier(random_state=SEED, **params)
-        clf.fit(train_features, train_labels)
+        classifier = MLPClassifier(random_state=SEED, **params)
+        classifier.fit(train_features_scaled, train_labels)
 
         # Get predictions on validation set
-        val_pred_proba = clf.predict_proba(val_features)[:, 1]
+        val_pred_proba = classifier.predict_proba(val_features_scaled)[:, 1]
 
         # Compute metrics
         metrics = compute_metrics(val_labels, val_pred_proba)
@@ -436,10 +442,10 @@ def main(
         typer.Option(help="Directory to save tuning results and plots."),
     ],
 ) -> None:
-    """Perform hyperparameter tuning for HistGradientBoostingClassifier.
+    """Perform hyperparameter tuning for MLPClassifier.
 
     This script performs a comprehensive hyperparameter tuning experiment for
-    HistGradientBoostingClassifier using a fixed train/validation split. It evaluates different
+    MLPClassifier using a fixed train/validation split. It evaluates different
     combinations of hyperparameters and generates visualizations of the results.
 
     Args:
@@ -472,12 +478,10 @@ def main(
 
     # Define parameter grid with proper typing
     param_grid: Dict[str, List[Any]] = {
-        "learning_rate": [0.01, 0.05, 0.1, 0.5],
-        "max_iter": [100, 300, 500, 1000],
-        "max_depth": [None, 5, 10, 20, 40],
-        "max_leaf_nodes": [None, 15, 31, 63, 127],
-        "l2_regularization": [0.0, 0.1, 1.0],
-        "min_samples_leaf": [5, 10, 20, 40, 80],
+        "hidden_layer_sizes": [(50,), (100,), (50, 50), (100, 50), (100, 100)],
+        "alpha": [1e-5, 1e-4, 1e-3],  # L2 penalty
+        "learning_rate_init": [0.001, 0.01, 0.1],
+        "max_iter": [200, 500, 1000, 2000, 5000],
     }
 
     # Evaluate parameter combinations
