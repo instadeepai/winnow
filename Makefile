@@ -90,7 +90,7 @@ sync:
 ## Development commands														 	#
 #################################################################################
 
-.PHONY: tests coverage test-docker coverage-docker bash set-gcp-credentials set-ceph-credentials compare-classifiers
+.PHONY: tests coverage test-docker coverage-docker bash set-gcp-credentials set-ceph-credentials compare-classifiers tune-calibrator analyze-features
 
 ## Run all tests
 tests:
@@ -150,3 +150,15 @@ tune-calibrator: set-ceph-credentials set-gcp-credentials
 	# aws s3 cp results/ s3://winnow-g88rh/classifier_comparison/ --recursive --profile winnow
 	# Copy the results back to Google Cloud Storage
 	gsutil -m cp -R tuning_results/ gs://winnow-fdr/classifier_comparison/
+
+## Analyze the feature importance and correlations
+analyze-features: set-ceph-credentials set-gcp-credentials
+	# Copy the data from Ceph bucket to the local data directory
+	mkdir -p data
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/labelled/train_spectrum_all_datasets.parquet data/ --profile winnow
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/labelled/train_beam_all_datasets.csv data/ --profile winnow
+	python scripts/analyze_features.py --train-spectrum-path data/train_spectrum_all_datasets.parquet --train-predictions-path data/train_beam_all_datasets.csv --output-dir results/
+	# Copy the results back to Ceph bucket
+	# aws s3 cp results/ s3://winnow-g88rh/classifier_comparison/ --recursive --profile winnow
+	# Copy the results back to Google Cloud Storage
+	gsutil -m cp -R results/ winnow-fdr/classifier_comparison/dt_feature_importance_results/

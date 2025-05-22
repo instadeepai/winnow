@@ -17,6 +17,7 @@ dependencies = [
     "typer>=0.15.2",
     "xgboost>=3.0.1",
     "seaborn>=0.13.2",
+    "shap>=0.47.2",
 ]
 
 [build-system]
