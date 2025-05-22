@@ -30,7 +30,13 @@ class ProbabilityCalibrator:
         self.dependencies: Dict[str, FeatureDependency] = {}
         self.dependency_reference_counter: Dict[str, int] = {}
         self.classifier = HistGradientBoostingClassifier(
-            learning_rate=0.1, max_depth=3, random_state=seed
+            learning_rate=0.1,
+            max_iter=300,
+            max_leaf_nodes=31,
+            max_depth=5,
+            min_samples_leaf=20,
+            l2_regularization=1.0,
+            random_state=seed,
         )
 
     @property
