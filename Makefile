@@ -161,4 +161,4 @@ analyze-features: set-ceph-credentials set-gcp-credentials
 	# Copy the results back to Ceph bucket
 	# aws s3 cp results/ s3://winnow-g88rh/classifier_comparison/ --recursive --profile winnow
 	# Copy the results back to Google Cloud Storage
-	gsutil -m cp -R results/ winnow-fdr/classifier_comparison/dt_feature_importance_results/
+	gsutil -m cp -R results/ gs://winnow-fdr/classifier_comparison/dt_feature_importance_results/
