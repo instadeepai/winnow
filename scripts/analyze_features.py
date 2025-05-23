@@ -17,7 +17,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.inspection import permutation_importance
-from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.neural_network import MLPClassifier
+from sklearn.preprocessing import StandardScaler
 import shap
 import typer
 
@@ -46,12 +47,11 @@ DEFAULT_OUTPUT_DIR = Path("")
 
 # Example hyperparameters - you can modify these
 HYPERPARAMETERS = {
-    "learning_rate": 0.1,
-    "max_iter": 500,
-    "max_depth": 10,
-    "max_leaf_nodes": 31,
-    "l2_regularization": 0.1,
-    "min_samples_leaf": 20,
+    "hidden_layer_sizes": (50, 50),
+    "learning_rate_init": 0.001,
+    "alpha": 0.0001,
+    "max_iter": 1000,
+    "random_state": SEED,
 }
 
 
@@ -364,16 +364,22 @@ def main(
     ]
     features_df = pd.DataFrame(features, columns=feature_names)
 
+    # Scale features for MLP
+    logger.info("Scaling features...")
+    scaler = StandardScaler()
+    features_scaled = scaler.fit_transform(features)
+    features_scaled_df = pd.DataFrame(features_scaled, columns=feature_names)
+
     # Train classifier
     logger.info("Training classifier...")
-    classifier = HistGradientBoostingClassifier(random_state=SEED, **HYPERPARAMETERS)
-    classifier.fit(features, labels)
+    classifier = MLPClassifier(**HYPERPARAMETERS)
+    classifier.fit(features_scaled, labels)
 
     # 1. Permutation importance
     logger.info("Computing permutation importance...")
     perm_importance = permutation_importance(
         classifier,
-        features,
+        features_scaled,
         labels,
         n_repeats=10,
         random_state=SEED,
@@ -388,30 +394,43 @@ def main(
 
     # 2. SHAP values
     logger.info("Computing SHAP values...")
-    # Select background samples (without replacement) for SHAP computation
-    background = shap.sample(
-        X=features, nsamples=min(n_background_samples, len(features)), random_state=SEED
+    # Use kmeans to summarize background data
+    background = shap.kmeans(
+        features_scaled,
+        min(n_background_samples, len(features_scaled)),
     )
 
-    # Use TreeExplainer with probability outputs and interventional perturbation to handle correlated features
-    explainer = shap.TreeExplainer(
-        model=classifier,
+    # Use KernelExplainer for MLP
+    explainer = shap.KernelExplainer(
+        model=classifier.predict_proba,
         data=background,
-        model_output="probability",
-        feature_perturbation="interventional",
     )
-    shap_values = explainer.shap_values(features)
+
+    # Compute SHAP values in batches to manage memory
+    batch_size = 1000
+    n_samples = len(features_scaled)
+    n_batches = (n_samples + batch_size - 1) // batch_size
+
+    all_shap_values = []
+    for i in range(n_batches):
+        start_idx = i * batch_size
+        end_idx = min((i + 1) * batch_size, n_samples)
+        logger.info(f"Computing SHAP values for batch {i + 1}/{n_batches}")
+        batch_shap = explainer.shap_values(features_scaled[start_idx:end_idx])[1]
+        all_shap_values.append(batch_shap)
+
+    shap_values = np.vstack(all_shap_values)
 
     # Plot SHAP summary
     plot_shap_summary(
-        features_df,
+        features_scaled_df,
         shap_values,
         output_dir / "shap_summary.png",
     )
 
     # Add new SHAP summary plot with feature value coloring
     plot_shap_summary_with_values(
-        features_df,
+        features_scaled_df,
         shap_values,
         output_dir / "shap_summary_with_values.png",
     )
@@ -422,7 +441,7 @@ def main(
     for idx in top_features_idx:
         feature_name = feature_names[idx]
         plot_shap_dependence_with_interactions(
-            features_df,
+            features_scaled_df,
             shap_values,
             feature_name,
             output_dir / f"shap_dependence_{feature_name}_interactions.png",
@@ -430,7 +449,7 @@ def main(
 
     # Plot SHAP dependence plots for all features without interaction coloring
     plot_shap_dependence_no_interaction(
-        features_df,
+        features_scaled_df,
         shap_values,
         feature_names,
         output_dir,
@@ -439,7 +458,7 @@ def main(
     # 3. Feature correlations
     logger.info("Computing feature correlations...")
     plot_feature_correlations(
-        features_df,
+        features_scaled_df,
         output_dir / "feature_correlations.png",
     )
 
