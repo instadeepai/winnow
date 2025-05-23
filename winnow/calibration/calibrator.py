@@ -4,7 +4,7 @@ from typing import Dict, List, Tuple, Union
 from pathlib import Path
 import pickle
 import numpy as np
-from sklearn.linear_model import LogisticRegression
+from sklearn.neural_network import MLPClassifier
 from jaxtyping import Float
 
 from winnow.calibration.calibration_features import (
@@ -29,7 +29,13 @@ class ProbabilityCalibrator:
         self.feature_dict: Dict[str, CalibrationFeatures] = {}
         self.dependencies: Dict[str, FeatureDependency] = {}
         self.dependency_reference_counter: Dict[str, int] = {}
-        self.classifier = LogisticRegression(random_state=seed)
+        self.classifier = MLPClassifier(
+            random_state=seed,
+            hidden_layer_sizes=(50, 50),
+            learning_rate_init=0.001,
+            alpha=0.0001,
+            max_iter=1000,
+        )
 
     @property
     def columns(self) -> List[str]:
