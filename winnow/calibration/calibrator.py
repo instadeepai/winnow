@@ -5,6 +5,7 @@ from pathlib import Path
 import pickle
 import numpy as np
 from sklearn.neural_network import MLPClassifier
+from sklearn.preprocessing import StandardScaler
 from jaxtyping import Float
 
 from winnow.calibration.calibration_features import (
@@ -36,6 +37,7 @@ class ProbabilityCalibrator:
             alpha=0.0001,
             max_iter=1000,
         )
+        self.scaler = StandardScaler()
 
     @property
     def columns(self) -> List[str]:
@@ -70,12 +72,16 @@ class ProbabilityCalibrator:
         path.mkdir(parents=True)
         calibrator_classifier_path = path / "calibrator.pkl"
         irt_predictor_path = path / "irt_predictor.pkl"
+        scaler_path = path / "scaler.pkl"
 
         with calibrator_classifier_path.open(mode="wb") as f:
             pickle.dump(calibrator.classifier, f)
 
         with irt_predictor_path.open(mode="wb") as f:
             pickle.dump(calibrator.feature_dict["Prosit iRT Features"].irt_predictor, f)  # type: ignore
+
+        with scaler_path.open(mode="wb") as f:
+            pickle.dump(calibrator.scaler, f)
 
     @classmethod
     def load(cls, path: Path) -> "ProbabilityCalibrator":
@@ -103,6 +109,7 @@ class ProbabilityCalibrator:
         # Now load the saved data
         calibrator.load_classifier(path / "calibrator.pkl")
         calibrator.load_irt_predictor(path / "irt_predictor.pkl")
+        calibrator.load_scaler(path / "scaler.pkl")
         return calibrator
 
     def load_classifier(self, path: Path) -> None:
@@ -122,6 +129,15 @@ class ProbabilityCalibrator:
         """
         with path.open(mode="rb") as f:
             self.feature_dict["Prosit iRT Features"].irt_predictor = pickle.load(f)  # type: ignore
+
+    def load_scaler(self, path: Path) -> None:
+        """Load the scaler from a file.
+
+        Args:
+            path (Path): The path to load the scaler from.
+        """
+        with path.open(mode="rb") as f:
+            self.scaler = pickle.load(f)
 
     def add_feature(self, feature: CalibrationFeatures) -> None:
         """Add a feature for the classifier used for calibration.
@@ -175,7 +191,9 @@ class ProbabilityCalibrator:
             dataset (CalibrationDataset): The dataset used for training the classifier.
         """
         features, labels = self.compute_features(dataset=dataset, labelled=True)
-        self.classifier.fit(features, labels)
+        # Fit and transform features with scaler
+        features_scaled = self.scaler.fit_transform(features)
+        self.classifier.fit(features_scaled, labels)
 
     def compute_features(
         self, dataset: CalibrationDataset, labelled: bool
@@ -226,5 +244,7 @@ class ProbabilityCalibrator:
             dataset (CalibrationDataset): The dataset for which predictions are made.
         """
         features = self.compute_features(dataset=dataset, labelled=False)
-        correct_probs = self.classifier.predict_proba(features)
+        # Transform features with scaler
+        features_scaled = self.scaler.transform(features)
+        correct_probs = self.classifier.predict_proba(features_scaled)
         dataset.metadata["calibrated_confidence"] = correct_probs[:, 1].tolist()
