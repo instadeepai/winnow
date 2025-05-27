@@ -21,6 +21,9 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 import shap
 import typer
+from typer import Typer
+from rich.console import Console
+from rich.theme import Theme
 
 from winnow.datasets.calibration_dataset import CalibrationDataset, RESIDUE_MASSES
 from winnow.calibration.calibrator import ProbabilityCalibrator
@@ -53,6 +56,41 @@ HYPERPARAMETERS = {
     "max_iter": 1000,
     "random_state": SEED,
 }
+
+# Set up custom error theme
+error_theme = Theme(
+    {
+        "error": "red bold",
+        "error_highlight": "red bold underline",
+    }
+)
+
+# Create console with custom theme
+console = Console(theme=error_theme)
+
+# Create app with custom error handler
+app = Typer(
+    add_completion=False,
+    pretty_exceptions_show_locals=False,  # Don't show local variables in traceback
+)
+
+
+def custom_exception_handler(exc: Exception) -> None:
+    """Custom exception handler for Typer that prints concise error messages."""
+    if isinstance(exc, typer.Exit):
+        # Don't print anything for normal exits
+        return
+    elif isinstance(exc, typer.BadParameter):
+        # For parameter errors, just show the error message
+        console.print(f"[error]Error:[/error] {exc.message}")
+    else:
+        # For other errors, show a concise message
+        console.print(f"[error]Error:[/error] {str(exc)}")
+    raise typer.Exit(1)
+
+
+# Set the custom exception handler
+app.exception_handler = custom_exception_handler
 
 
 def filter_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
@@ -177,128 +215,7 @@ def plot_feature_correlations(
     plt.close()
 
 
-def plot_shap_summary(
-    features: pd.DataFrame,
-    shap_values: np.ndarray,
-    output_path: Path,
-) -> None:
-    """Plot SHAP summary plot showing feature importance and impact.
-
-    Args:
-        features: DataFrame containing feature values
-        shap_values: SHAP values for each feature
-        output_path: Path to save the plot
-    """
-    plt.figure(figsize=(10, 8))
-    shap.summary_plot(
-        shap_values,
-        features,
-        plot_type="bar",
-        show=False,
-    )
-    plt.title("SHAP Feature Importance")
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=300, bbox_inches="tight")
-    plt.close()
-
-
-def plot_shap_dependence_with_interactions(
-    features: pd.DataFrame,
-    shap_values: np.ndarray,
-    feature_name: str,
-    output_path: Path,
-) -> None:
-    """Plot SHAP dependence plot for a specific feature.
-
-    Args:
-        features: DataFrame containing feature values
-        shap_values: SHAP values for each feature
-        feature_name: Name of the feature to plot
-        output_path: Path to save the plot
-    """
-    plt.figure(figsize=(10, 6))
-    shap.dependence_plot(
-        feature_name,
-        shap_values,
-        features,
-        show=False,
-    )
-    plt.title(f"SHAP Dependence Plot for {feature_name}")
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=300, bbox_inches="tight")
-    plt.close()
-
-
-def plot_shap_summary_with_values(
-    features: pd.DataFrame,
-    shap_values: np.ndarray,
-    output_path: Path,
-) -> None:
-    """Plot SHAP summary plot showing feature values and their impact.
-
-    This plot shows:
-    - Each point is a sample
-    - X-axis is the SHAP value (impact on prediction)
-    - Y-axis shows features ordered by importance
-    - Color represents the actual feature value
-    - The width of the distribution shows how many samples have that SHAP value
-
-    Args:
-        features: DataFrame containing feature values
-        shap_values: SHAP values for each feature
-        output_path: Path to save the plot
-    """
-    plt.figure(figsize=(12, 8))
-
-    # Create the summary plot
-    shap.summary_plot(
-        shap_values,
-        features,
-        plot_type="dot",  # Use dots instead of violin plot
-        show=False,
-        plot_size=(12, 8),
-        color_bar_label="Feature value",
-        title="SHAP Feature Impact (colored by feature value)",
-    )
-
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=300, bbox_inches="tight")
-    plt.close()
-
-
-def plot_shap_dependence_no_interaction(
-    features: pd.DataFrame,
-    shap_values: np.ndarray,
-    feature_names: list,
-    output_dir: Path,
-) -> None:
-    """Plot SHAP dependence plots for each feature without interaction coloring.
-
-    Args:
-        features: DataFrame containing feature values
-        shap_values: SHAP values for each feature
-        feature_names: List of feature names
-        output_dir: Path to save the plots
-    """
-    for feature_name in feature_names:
-        plt.figure(figsize=(10, 6))
-        shap.dependence_plot(
-            feature_name,
-            shap_values,
-            features,
-            interaction_index=None,
-            show=False,
-        )
-        plt.title(f"SHAP Dependence Plot for {feature_name}")
-        plt.tight_layout()
-        plt.savefig(
-            output_dir / f"shap_dependence_{feature_name}.png",
-            dpi=300,
-            bbox_inches="tight",
-        )
-        plt.close()
-
-
+@app.command()  # Register main as a command
 def main(
     train_spectrum_path: Annotated[
         Path,
@@ -316,7 +233,7 @@ def main(
         int,
         typer.Option(
             help="Number of background samples to use for SHAP value computation.",
-            min=100,
+            min=1,
             max=10000,
         ),
     ] = 1000,
@@ -375,6 +292,17 @@ def main(
     classifier = MLPClassifier(**HYPERPARAMETERS)
     classifier.fit(features_scaled, labels)
 
+    # Log class mapping
+    logger.info(
+        f"Class mapping: {dict(zip(classifier.classes_, range(len(classifier.classes_))))}"
+    )
+    correct_class_idx = np.where(classifier.classes_ == 1)[0][
+        0
+    ]  # Get index of class 1 (correct)
+    logger.info(
+        f"Using SHAP values for class index {correct_class_idx} (correct predictions)"
+    )
+
     # 1. Permutation importance
     logger.info("Computing permutation importance...")
     perm_importance = permutation_importance(
@@ -394,66 +322,111 @@ def main(
 
     # 2. SHAP values
     logger.info("Computing SHAP values...")
-    # Use kmeans to summarize background data
-    background = shap.kmeans(
+    # Sample background data
+    background = shap.sample(
         features_scaled,
         min(n_background_samples, len(features_scaled)),
+        random_state=SEED,
     )
 
     # Use KernelExplainer for MLP
     explainer = shap.KernelExplainer(
         model=classifier.predict_proba,
         data=background,
+        seed=SEED,
+        link="identity",  # Explain probabilities directly
     )
 
-    # Compute SHAP values in batches to manage memory
-    batch_size = 1000
-    n_samples = len(features_scaled)
-    n_batches = (n_samples + batch_size - 1) // batch_size
+    # Get SHAP values directly from explainer
+    shap_values = explainer(features_scaled)
 
-    all_shap_values = []
-    for i in range(n_batches):
-        start_idx = i * batch_size
-        end_idx = min((i + 1) * batch_size, n_samples)
-        logger.info(f"Computing SHAP values for batch {i + 1}/{n_batches}")
-        batch_shap = explainer.shap_values(features_scaled[start_idx:end_idx])[1]
-        all_shap_values.append(batch_shap)
+    # Switch to original feature space for visualization
+    # This is safe because standardization is a univariate transformation
+    shap_values.data = features
+    shap_values.feature_names = feature_names
 
-    shap_values = np.vstack(all_shap_values)
+    # Plot SHAP summary using built-in function
+    plt.figure(figsize=(10, 8))
+    shap.plots.beeswarm(
+        shap_values[:, :, correct_class_idx], show=False, max_display=12
+    )  # for correct class
+    plt.title("SHAP Feature Impact on P(correct) (colored by feature value)")
+    plt.tight_layout()
+    plt.savefig(output_dir / "shap_summary.png", dpi=300, bbox_inches="tight")
+    plt.close()
 
-    # Plot SHAP summary
-    plot_shap_summary(
-        features_scaled_df,
-        shap_values,
-        output_dir / "shap_summary.png",
-    )
-
-    # Add new SHAP summary plot with feature value coloring
-    plot_shap_summary_with_values(
-        features_scaled_df,
-        shap_values,
-        output_dir / "shap_summary_with_values.png",
-    )
+    # Plot SHAP bar plot
+    plt.figure(figsize=(10, 8))
+    clustering = shap.utils.hclust(features_scaled, labels)
+    shap.plots.bar(
+        shap_values[:, :, correct_class_idx],
+        clustering=clustering,
+        show=False,
+        clustering_cutoff=0.5,
+    )  # for correct class
+    plt.title("SHAP Feature Importance for P(correct)")
+    plt.tight_layout()
+    plt.savefig(output_dir / "shap_importance.png", dpi=300, bbox_inches="tight")
+    plt.close()
 
     # Plot SHAP dependence plots for top 3 features
-    mean_abs_shap = np.abs(shap_values).mean(axis=0)
+    mean_abs_shap = np.abs(shap_values.values[:, :, correct_class_idx]).mean(
+        axis=0
+    )  # for correct class
     top_features_idx = np.argsort(mean_abs_shap)[-3:][::-1]
     for idx in top_features_idx:
         feature_name = feature_names[idx]
-        plot_shap_dependence_with_interactions(
-            features_scaled_df,
-            shap_values,
-            feature_name,
-            output_dir / f"shap_dependence_{feature_name}_interactions.png",
+        plt.figure(figsize=(10, 6))
+        shap.plots.scatter(
+            shap_values[:, idx, correct_class_idx],
+            show=False,
+            color=plt.cm.viridis(0.3),
         )
+        plt.title(f"SHAP Dependence Plot for {feature_name} (impact on P(correct))")
+        plt.tight_layout()
+        plt.savefig(
+            output_dir / f"shap_dependence_{feature_name}.png",
+            dpi=300,
+            bbox_inches="tight",
+        )
+        plt.close()
 
-    # Plot SHAP dependence plots for all features without interaction coloring
-    plot_shap_dependence_no_interaction(
-        features_scaled_df,
-        shap_values,
-        feature_names,
-        output_dir,
+    # Plot SHAP interaction plots for all combinations of top 3 features
+    for i, idx1 in enumerate(top_features_idx):
+        feature1 = feature_names[idx1]
+        for j, idx2 in enumerate(top_features_idx):
+            if i != j:  # Skip self-interactions
+                feature2 = feature_names[idx2]
+                plt.figure(figsize=(12, 8))
+                shap.plots.scatter(
+                    shap_values[:, feature1, correct_class_idx],
+                    color=shap_values[
+                        :, feature2, correct_class_idx
+                    ],  # Use second feature for coloring
+                    show=False,
+                )
+                plt.title(
+                    f"SHAP Interaction Plot for {feature1} vs {feature2} (impact on P(correct))"
+                )
+                plt.tight_layout()
+                plt.savefig(
+                    output_dir / f"shap_interaction_{feature1}_vs_{feature2}.png",
+                    dpi=300,
+                    bbox_inches="tight",
+                )
+                plt.close()
+
+    # Plot SHAP heatmap for top 10 features
+    plt.figure(figsize=(12, 8))
+    shap.plots.heatmap(
+        shap_values[:, :, correct_class_idx],  # for correct class
+        max_display=12,
+        show=False,
     )
+    plt.title("SHAP Feature Impact Heatmap (impact on P(correct))")
+    plt.tight_layout()
+    plt.savefig(output_dir / "shap_heatmap.png", dpi=300, bbox_inches="tight")
+    plt.close()
 
     # 3. Feature correlations
     logger.info("Computing feature correlations...")
@@ -467,7 +440,9 @@ def main(
         {
             "Feature": feature_names,
             "Permutation Importance": [perm_importance_dict[f] for f in feature_names],
-            "Mean |SHAP| (logits)": np.abs(shap_values).mean(axis=0),
+            "Mean |SHAP| (impact on P(correct))": np.abs(
+                shap_values.values[:, :, correct_class_idx]
+            ).mean(axis=0),  # for correct class
         }
     )
     results.to_csv(output_dir / "feature_importance_results.csv", index=False)
@@ -481,8 +456,13 @@ def main(
     )[:5]:
         print(f"{feature}: {importance:.4f}")
 
-    print("\nTop 5 features by mean |SHAP| (logits):")
-    mean_abs_shap_dict = dict(zip(feature_names, np.abs(shap_values).mean(axis=0)))
+    print("\nTop 5 features by mean |SHAP| (impact on P(correct)):")
+    mean_abs_shap_dict = dict(
+        zip(
+            feature_names,
+            np.abs(shap_values.values[:, :, correct_class_idx]).mean(axis=0),
+        )
+    )  # for correct class
     for feature, importance in sorted(
         mean_abs_shap_dict.items(), key=lambda x: x[1], reverse=True
     )[:5]:
@@ -501,4 +481,4 @@ def main(
 
 
 if __name__ == "__main__":
-    typer.run(main)
+    app()
