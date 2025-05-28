@@ -337,12 +337,16 @@ def main(
         link="identity",  # Explain probabilities directly
     )
 
-    # Get SHAP values directly from explainer
-    shap_values = explainer(features_scaled)
+    # Randomly sample 10,000 training spectra from the dataset
+    np.random.seed(SEED)
+    indices = np.random.choice(features_scaled.shape[0], size=10000, replace=False)
+
+    # Get SHAP values from explainer for a random subset of the training data
+    shap_values = explainer(features_scaled[indices])
 
     # Switch to original feature space for visualization
     # This is safe because standardization is a univariate transformation
-    shap_values.data = features
+    shap_values.data = features[indices]
     shap_values.feature_names = feature_names
 
     # Plot SHAP summary using built-in function
@@ -363,6 +367,7 @@ def main(
         clustering=clustering,
         show=False,
         clustering_cutoff=0.5,
+        max_display=12,
     )  # for correct class
     plt.title("SHAP Feature Importance for P(correct)")
     plt.tight_layout()
