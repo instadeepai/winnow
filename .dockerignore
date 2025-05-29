@@ -25,3 +25,6 @@
 
 # To install winnow
 !pyproject.toml
+
+# To run the calibration
+!configs

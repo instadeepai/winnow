@@ -16,7 +16,7 @@ spec:
         provider: "github" # Optional, vscode tunnel provider. Options are "github" or "microsoft", defaults to "github"
   operator: tf
   image: winnow
-  command: make analyze-features
+  command: make calibrator-generalisation
 
   tensorboard: # optional, disabled by default
     enabled: false

@@ -162,3 +162,23 @@ analyze-features: set-ceph-credentials set-gcp-credentials
 	# aws s3 cp results/ s3://winnow-g88rh/classifier_comparison/ --recursive --profile winnow
 	# Copy the results back to Google Cloud Storage
 	gsutil -m cp -R mlp_feature_importance_results/ gs://winnow-fdr/classifier_comparison/dt_feature_importance_results/
+
+## Assess calibrator generalisation
+calibrator-generalisation: set-ceph-credentials set-gcp-credentials
+	mkdir -p data/spectrum_data
+	mkdir -p data/beam_preds
+	mkdir -p models
+	mkdir -p results
+	# Copy the data from Ceph bucket to the local data directory
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/labelled/*-annotated-0000-00001.parquet data/spectrum_data/ --profile winnow
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/dataset-*.csv data/beam_preds/ --profile winnow
+	# Run the generalisation evaluation script
+	python scripts/evaluate_calibrator_generalization.py \
+		--data-source instanovo \
+		--config-dir configs \
+		--model-output-dir models/generalisation \
+		--results-output-dir results/generalisation
+	# Copy the results back to Ceph bucket
+	# aws s3 cp results/ s3://winnow-g88rh/calibrator_generalisation/ --recursive --profile winnow
+	# Copy the results back to Google Cloud Storage
+	gsutil -m cp -R results/ gs://winnow-fdr/calibrator_generalisation/
