@@ -182,3 +182,19 @@ calibrator-generalisation: set-ceph-credentials set-gcp-credentials
 	# aws s3 cp results/ s3://winnow-g88rh/calibrator_generalisation/ --recursive --profile winnow
 	# Copy the results back to Google Cloud Storage
 	gsutil -m cp -R results/ gs://winnow-fdr/calibrator_generalisation/
+
+## Train general model
+train-general-model: set-ceph-credentials set-gcp-credentials
+	mkdir -p data
+	mkdir -p model
+	mkdir -p results
+	# Copy the data from Ceph bucket to the local data directory
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/labelled/train_spectrum_all_datasets.parquet data/ --profile winnow
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/labelled/train_beam_all_datasets.csv data/ --profile winnow
+	# Run the generalisation evaluation script
+	winnow train --data-source instanovo --dataset-config-path configs/general_model.yaml --model-output-folder model --dataset-output-path results/general_model_training_results.csv
+	# Copy the results back to Ceph bucket
+	# aws s3 cp results/ s3://winnow-g88rh/general_model/ --recursive --profile winnow
+	# Copy the results back to Google Cloud Storage
+	gsutil -m cp -R results/ gs://winnow-fdr/general_model/
+	gsutil -m cp -R model/ gs://winnow-fdr/general_model/
