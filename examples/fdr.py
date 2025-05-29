@@ -242,6 +242,22 @@ def _(test_dataset_metadata):
     return
 
 
+app._unparsable_cell(
+    r"""
+    def update_posterior(posteriors: jax.Array, prior_train: float, prior_test: float) -> float:
+        adapted_posteriors = (
+            ((prior_test/prior_train) * posteriors) / 
+            (((prior_test/prior_train) * posteriors)  + (((1 - prior_test)/(1 - prior_train)) * (1 - posteriors)))
+        )
+        return adapted_posteriors
+    
+    def update_priors(posteriors: jax.Array) - > float:
+        return jnp.mean(posteriors).item()
+    """,
+    name="_"
+)
+
+
 @app.cell
 def _(
     DatabaseGroundedFDRControl,
