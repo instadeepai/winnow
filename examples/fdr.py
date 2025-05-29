@@ -8,7 +8,11 @@ app = marimo.App(width="medium")
 def _():
     import marimo as mo
 
+    import functools
     import ast
+
+    import jax
+    import jax.numpy as jnp
 
     import pandas as pd
 
@@ -19,15 +23,7 @@ def _():
     from winnow.fdr.bayes import EmpiricalBayesFDRControl, Distribution
 
     from winnow.datasets.calibration_dataset import RESIDUE_MASSES
-    return (
-        DatabaseGroundedFDRControl,
-        EmpiricalBayesFDRControl,
-        RESIDUE_MASSES,
-        alt,
-        ast,
-        mo,
-        pd,
-    )
+    return alt, ast, jax, jnp, mo, pd
 
 
 @app.cell
@@ -46,7 +42,7 @@ def _(mo):
         "Snake Venoms": "snakevenoms", "Immunopeptidomics": "immuno"
     }
     mo.hstack([dataset, confidence_type, n_steps])
-    return SPECIES_DICT, confidence_type, dataset, n_steps
+    return SPECIES_DICT, confidence_type, dataset
 
 
 @app.cell
@@ -112,7 +108,7 @@ def _(alt, jnp, pd, test_dataset_metadata):
         cutoff_plots = alt.Chart(cutoffs).mark_rule(strokeDash=[4, 4]).encode(x='value:Q', color='source')
         line_plot = alt.Chart().mark_rule(strokeDash=[8, 8]).encode(y=alt.datum(0.05)).properties(title=title)
         fdr_plot = alt.Chart(multi_plot_df).mark_line().encode(x='confidence', y='fdr', color='source')
-    
+
         return fdr_plot + line_plot + cutoff_plots
     return (plot_fdr_accuracy,)
 
@@ -133,49 +129,6 @@ def _(
         confidence_column=confidence_column,
         fdr_function=nonparametric_calibrated_estimator
     ))
-    return
-
-
-@app.cell
-def _(
-    confidence_column,
-    confidence_type,
-    dataset,
-    jnp,
-    mixture_fdr_control,
-    plot_fdr_accuracy,
-    test_dataset_metadata,
-):
-    mixture_fdr = lambda probabilities: jnp.array([mixture_fdr_control.compute_fdr(score=probability) for probability in probabilities])
-    plot_fdr_accuracy(
-        title=f"Mixture FDR Estimator: {dataset.value}, {confidence_type.value}",
-        input_df=test_dataset_metadata,
-        confidence_column=confidence_column,
-        fdr_function=mixture_fdr
-    )
-    return
-
-
-@app.cell
-def _(
-    confidence_column,
-    confidence_type,
-    dataset,
-    mixture_fdr_control,
-    nonparametric_calibrated_estimator,
-    plot_fdr_accuracy,
-    test_dataset_metadata,
-):
-    pep_df = test_dataset_metadata[[confidence_column, 'correct']]
-    pep_df['posterior confidence'] = pep_df[confidence_column].apply(
-        lambda confidence: 1 - mixture_fdr_control.compute_posterior_probability(score=confidence)
-    )
-    plot_fdr_accuracy(
-        title=f"Nonparametric Beta Calibrated FDR Estimator: {dataset.value}, {confidence_type.value}",
-        input_df=pep_df,
-        confidence_column='posterior confidence',
-        fdr_function=nonparametric_calibrated_estimator
-    )
     return
 
 
@@ -242,101 +195,17 @@ def _(test_dataset_metadata):
     return
 
 
-app._unparsable_cell(
-    r"""
+@app.cell
+def _(jax, jnp):
     def update_posterior(posteriors: jax.Array, prior_train: float, prior_test: float) -> float:
         adapted_posteriors = (
             ((prior_test/prior_train) * posteriors) / 
             (((prior_test/prior_train) * posteriors)  + (((1 - prior_test)/(1 - prior_train)) * (1 - posteriors)))
         )
         return adapted_posteriors
-    
-    def update_priors(posteriors: jax.Array) - > float:
+
+    def update_priors(posteriors: jax.Array) -> float:
         return jnp.mean(posteriors).item()
-    """,
-    name="_"
-)
-
-
-@app.cell
-def _(
-    DatabaseGroundedFDRControl,
-    EmpiricalBayesFDRControl,
-    RESIDUE_MASSES,
-    confidence_column,
-    mo,
-    n_steps,
-    test_dataset_metadata,
-):
-    database_grounded_fdr_control = DatabaseGroundedFDRControl(
-        confidence_feature=confidence_column
-    )
-    database_grounded_fdr_control.fit(
-        dataset=test_dataset_metadata, residue_masses=RESIDUE_MASSES
-    )
-    database_cutoff = database_grounded_fdr_control.get_confidence_cutoff(threshold=0.05)
-
-    mixture_fdr_control = EmpiricalBayesFDRControl()
-    mixture_fdr_control.fit(dataset=test_dataset_metadata[confidence_column], lr=0.0001, n_steps=n_steps.value)
-    mixture_cutoff = mixture_fdr_control.get_confidence_cutoff(threshold=0.05)
-
-    mo.md(
-        f"""
-        Database-grounded cutoff: **{database_cutoff:.3f}**, Mixture cutoff: **{mixture_cutoff:.3f}**
-        """
-    )
-    return (mixture_fdr_control,)
-
-
-@app.cell
-def _():
-    import functools
-    import jax
-    import jax.numpy as jnp
-    return functools, jax, jnp
-
-
-@app.cell
-def _(functools, jax, jnp, mixture_fdr_control, test_dataset_metadata):
-    domain = jnp.arange(start=0.01, stop=1, step=0.01)
-
-    correct_cdf = functools.partial(
-        jax.scipy.stats.beta.cdf, a=mixture_fdr_control.mixture_parameters.correct_alpha,
-        b=mixture_fdr_control.mixture_parameters.correct_beta
-    )(domain)
-    incorrect_cdf = functools.partial(
-        jax.scipy.stats.beta.cdf, a=mixture_fdr_control.mixture_parameters.incorrect_alpha,
-        b=mixture_fdr_control.mixture_parameters.incorrect_beta
-    )(domain)
-
-    num_samples = len(test_dataset_metadata)
-    proportion_positive = mixture_fdr_control.mixture_parameters.proportion
-
-    correct_cdf = num_samples * proportion_positive * jnp.concatenate([jnp.array([0.]), correct_cdf, jnp.array([1.])])
-    incorrect_cdf = num_samples * (1 - proportion_positive) * jnp.concatenate([jnp.array([0.]), incorrect_cdf, jnp.array([1.])])
-
-    correct_hist = correct_cdf[1:] - correct_cdf[:-1]
-    incorrect_hist = incorrect_cdf[1:] - incorrect_cdf[:-1]
-
-    return correct_hist, incorrect_hist
-
-
-@app.cell
-def _(correct_hist, incorrect_hist, jnp, pd):
-    hist_df = pd.DataFrame(
-        {
-            'confidence': jnp.arange(start=0, stop=1, step=0.01).tolist(),
-            'correct': correct_hist.tolist(), 'incorrect': incorrect_hist.tolist()
-
-        }
-    )
-    long_df = pd.melt(hist_df, id_vars=['confidence'], value_vars=['correct', 'incorrect'])
-    return (long_df,)
-
-
-@app.cell
-def _(alt, long_df, mo):
-    mo.ui.altair_chart(alt.Chart(long_df).mark_bar(opacity=0.7).encode(x='confidence', y='value', color='variable'))
     return
 
 
