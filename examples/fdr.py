@@ -8,22 +8,34 @@ app = marimo.App(width="medium")
 def _():
     import marimo as mo
 
-    import functools
     import ast
+    import functools
+    from pathlib import Path
 
     import jax
     import jax.numpy as jnp
+
+    from sklearn.model_selection import train_test_split
 
     import pandas as pd
 
     import altair as alt
     alt.data_transformers.enable("vegafusion")
 
-    from winnow.fdr.database_grounded import DatabaseGroundedFDRControl
-    from winnow.fdr.bayes import EmpiricalBayesFDRControl, Distribution
+    from winnow.calibration.calibrator import ProbabilityCalibrator
 
-    from winnow.datasets.calibration_dataset import RESIDUE_MASSES
-    return alt, ast, jax, jnp, mo, pd
+    from winnow.datasets.calibration_dataset import CalibrationDataset, RESIDUE_MASSES
+    return (
+        CalibrationDataset,
+        Path,
+        ProbabilityCalibrator,
+        alt,
+        jax,
+        jnp,
+        mo,
+        pd,
+        train_test_split,
+    )
 
 
 @app.cell
@@ -35,32 +47,81 @@ def _(mo):
         ],
         value="Hela QC"
     )
-    n_steps = mo.ui.number(label="No. updates", start=5000, stop=200_000, step=5000)
+    checkpoint = mo.ui.dropdown(
+        label="Checkpoint",
+        options=[
+            "General", "Hela QC", "S. Brodae", "GluC", "Herceptin", "Snake Venoms", "Immunopeptidomics", "Wound Fluids"
+        ],
+        value="Hela QC"
+    )
     confidence_type = mo.ui.dropdown(label="Confidence type", options=["Raw", "Calibrated"], value="Calibrated")
     SPECIES_DICT = {
         "Hela QC": "helaqc", "S. Brodae": "sbrodae", "GluC": "gluc", "Herceptin": "herceptin",
-        "Snake Venoms": "snakevenoms", "Immunopeptidomics": "immuno"
+        "Snake Venoms": "snakevenoms", "Immunopeptidomics": "immuno", "Wound Fluids": "woundfluids",
+        "General": "general"
     }
-    mo.hstack([dataset, confidence_type, n_steps])
-    return SPECIES_DICT, confidence_type, dataset
+    mo.hstack([dataset, checkpoint, confidence_type])
+    return SPECIES_DICT, checkpoint, confidence_type, dataset
 
 
 @app.cell
-def _(SPECIES_DICT, ast, dataset, pd):
-    test_dataset_metadata = pd.read_csv(
-        f"/Users/amandlamabona/Projects/winnow/calibrated_datasets/labelled/{SPECIES_DICT[dataset.value]}_test_labelled.csv"
+def _(Path, ProbabilityCalibrator, SPECIES_DICT, checkpoint):
+    calibrator = ProbabilityCalibrator.load(
+        path=Path("/Users/amandlamabona/Projects/winnow/checkpoints") / SPECIES_DICT[checkpoint.value]
+    )
+    return (calibrator,)
+
+
+@app.cell
+def _(
+    CalibrationDataset,
+    SPECIES_DICT,
+    calibrator,
+    dataset,
+    pd,
+    train_test_split,
+):
+    # -- Load data
+    calibration_dataset = CalibrationDataset.from_predictions_csv(
+        spectrum_path=f"/Users/amandlamabona/Projects/winnow/input_data/spectrum_data/labelled/dataset-{SPECIES_DICT[dataset.value]}-annotated-0000-0001.parquet",
+        beam_predictions_path=f"/Users/amandlamabona/Projects/winnow/input_data/beam_preds/labelled/{SPECIES_DICT[dataset.value]}-annotated_beam_preds.csv",
     )
 
-    def try_convert(value):
-        try:
-            return ast.literal_eval(value)
-        except (ValueError, SyntaxError):
-            return value  # Return original value if conversion fails
+    filtered_dataset = (
+        calibration_dataset.filter_entries(
+            metadata_predicate=lambda row: not isinstance(row["prediction"], list),
+        )
+        .filter_entries(metadata_predicate=lambda row: not row["prediction"])
+        .filter_entries(
+            metadata_predicate=lambda row: row["precursor_charge"] > 6
+        )  # Prosit-specific filtering, see https://github.com/Nesvilab/FragPipe/issues/1775
+        .filter_entries(
+            metadata_predicate=lambda row: len(row["prediction"]) > 30
+        )  # Prosit-specific filtering
+        .filter_entries(
+            predictions_predicate=lambda row: len(row[1].sequence) > 30
+        )  # Prosit-specific filtering
+    )
+
+    TEST_FRACTION = 0.2
+    RANDOM_STATE = 42
+    _, test = train_test_split(
+        filtered_dataset, test_size=TEST_FRACTION, random_state=RANDOM_STATE
+    )
+
+    test_metadata, test_predictions = zip(*test)
+    test_dataset = CalibrationDataset(
+        metadata=pd.DataFrame(test_metadata).reset_index(drop=True),
+        predictions=list(test_predictions),
+    )
+
+    calibrator.predict(dataset=test_dataset)
+    return (test_dataset,)
 
 
-    # Apply conversion to all object (string) columns
-    for col in test_dataset_metadata.select_dtypes(include=["object"]).columns:
-        test_dataset_metadata[col] = test_dataset_metadata[col].apply(try_convert)
+@app.cell
+def _(test_dataset):
+    test_dataset_metadata = test_dataset.metadata
     return (test_dataset_metadata,)
 
 
@@ -79,7 +140,7 @@ def _(alt, confidence_type, mo, test_dataset_metadata):
 @app.cell
 def _(confidence_column, test_dataset_metadata):
     confidence = test_dataset_metadata[confidence_column].sort_values(ascending=False)
-    return (confidence,)
+    return
 
 
 @app.cell
@@ -150,19 +211,20 @@ def _(alt, dataset, jnp, mo, pd, test_dataset_metadata):
     pr_curve_df = pd.concat([
             compute_pr_curve('confidence'), compute_pr_curve('calibrated_confidence')
     ])
+
+    def get_recall_threshold(dataframe: pd.DataFrame) -> float:
+        drops, *_ = jnp.where(jnp.diff(jnp.array(dataframe['precision'] > 0.95, dtype=jnp.int32)) < 0)
+        return dataframe.iloc[drops[-1].item()]['recall'].item()
+
+    recall_thresholds = pr_curve_df.groupby('source').apply(get_recall_threshold).to_frame(name='value').reset_index()
+    print(recall_thresholds.shape)
+    threshold_plots = alt.Chart(recall_thresholds).mark_rule(strokeDash=[4, 4]).encode(x='value:Q', color='source')
     pr_plot = alt.Chart(pr_curve_df).mark_line().encode(
         x='recall', y=alt.Y('precision').scale(domain=(pr_curve_df['precision'].min(), 1.0)),
         color='source'
     )
     line_plot = alt.Chart().mark_rule(strokeDash=[8, 8]).encode(y=alt.datum(0.95))
-    mo.ui.altair_chart((pr_plot + line_plot).properties(title=f"Precision-Recall Curve: {dataset.value}"))
-    return (pr_curve_df,)
-
-
-@app.cell
-def _(pr_curve_df):
-    first, second = pr_curve_df.groupby('source')
-    first
+    mo.ui.altair_chart((pr_plot + threshold_plots + line_plot).properties(title=f"Precision-Recall Curve: {dataset.value}"))
     return
 
 
@@ -175,24 +237,6 @@ def _(jnp):
         false_discovery_rate = cum_error_probabilities / counts
         return false_discovery_rate
     return (nonparametric_calibrated_estimator,)
-
-
-@app.cell
-def _(confidence, nonparametric_calibrated_estimator):
-    fdr = nonparametric_calibrated_estimator(probabilities=confidence)
-    return
-
-
-@app.cell
-def _():
-    import bisect
-    return
-
-
-@app.cell
-def _(test_dataset_metadata):
-    1- len(test_dataset_metadata[test_dataset_metadata['correct']])/len(test_dataset_metadata)
-    return
 
 
 @app.cell
