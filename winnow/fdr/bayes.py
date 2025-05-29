@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import warnings
 
 from scipy import optimize
 
@@ -167,23 +168,83 @@ class EmpiricalBayesFDRControl(FDRControl):
             incorrect_beta=svi_state.params["incorrect_beta"],
         )
 
-    def get_confidence_cutoff(self, threshold: float) -> float:
+    def get_confidence_cutoff(self, threshold: float, mesh_size: int = 1000) -> float:
         """Compute the confidence score cutoff for a given FDR threshold.
 
-        This function determines the confidence score above which PSMs should be retained
-        to maintain the desired FDR level.
+        This function determines the confidence score cutoff for a given FDR threshold.
+        It finds the leftmost (least conservative) root since the FDR function can have
+        multiple intersections at the desired threshold.
 
         Args:
             threshold (float):
                 The target FDR threshold, where 0 < threshold < 1.
+            mesh_size (int, optional):
+                Number of points in the mesh used to find the root. A larger value
+                gives more precise initial estimates but takes longer to compute.
+                Defaults to 1000.
 
         Returns:
             float:
                 The confidence score cutoff corresponding to the specified FDR level.
+                Returns 1.0 if FDR is always above threshold (no valid cutoff).
+                Returns 0.0 if FDR is always below threshold (all scores valid).
         """
-        return optimize.bisect(
-            lambda cutoff: self.compute_fdr(cutoff) - threshold, 0.0, 1.0
-        )
+        # Create a fine mesh of points
+        mesh_points = jnp.linspace(0.0, 1.0, mesh_size)
+
+        # Vectorize compute_fdr over the mesh points
+        compute_fdr_vectorized = jax.vmap(self.compute_fdr)
+        fdr_values = compute_fdr_vectorized(mesh_points)
+
+        # Check if FDR is always above or below threshold
+        if jnp.all(fdr_values > threshold):
+            warnings.warn(
+                f"FDR is always above threshold {threshold}. No valid cutoff exists. "
+                "Returning 1.0 since no scores meet the FDR requirement.",
+                UserWarning,
+            )
+            return 1.0
+
+        if jnp.all(fdr_values < threshold):
+            warnings.warn(
+                f"FDR is always below threshold {threshold}. All scores meet the FDR requirement. "
+                "Returning 0.0 since all scores are valid.",
+                UserWarning,
+            )
+            return 0.0
+
+        # Find where FDR crosses the threshold (changes sign)
+        signs = jnp.sign(fdr_values - threshold)
+        sign_changes = jnp.where(jnp.diff(signs) != 0)[0]
+
+        if len(sign_changes) == 0:
+            # This case should not occur due to the checks above, but keeping as safety
+            warnings.warn(
+                f"No root found for FDR threshold {threshold} despite FDR crossing threshold. "
+                "This may indicate numerical instability. Returning 1.0 as fallback.",
+                UserWarning,
+            )
+            return 1.0
+
+        # Get the leftmost crossing point
+        leftmost_crossing_idx = sign_changes[0]
+        initial_guess = mesh_points[leftmost_crossing_idx]
+
+        # Use the leftmost crossing as initial guess for more precise root finding
+        try:
+            return optimize.bisect(
+                lambda cutoff: self.compute_fdr(cutoff) - threshold,
+                initial_guess - 0.01,  # Slightly left of the crossing
+                min(initial_guess + 0.01, 1.0),  # Slightly right of the crossing
+                xtol=1e-6,
+            )
+        except ValueError as e:
+            warnings.warn(
+                f"Bisection failed to find precise root: {str(e)}. "
+                f"Using mesh point {initial_guess:.6f} as fallback.",
+                UserWarning,
+            )
+            return initial_guess
 
     def compute_fdr(self, score: float) -> float:
         """Compute FDR estimate at a given confidence cutoff.
@@ -220,7 +281,7 @@ class EmpiricalBayesFDRControl(FDRControl):
             / (p_mixture_tail + FDR_EPS)
         )
 
-        return p_incorrect_given_score.item()
+        return p_incorrect_given_score
 
     def compute_posterior_probability(self, score: float) -> float:
         """Compute posterior error probability, or local FDR, for a given confidence score.
