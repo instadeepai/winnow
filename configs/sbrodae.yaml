@@ -1,2 +1,2 @@
-beam_predictions_path: data/beam_preds/de_novo/sbrodae-annotated_beam_preds.csv
-spectrum_path: data/spectrum_data/dataset-sbrodae-annotated-0000-00001.parquet
+beam_predictions_path: data/beam_preds/sbrodae-annotated_beam_preds.csv
+spectrum_path: data/spectrum_data/dataset-sbrodae-annotated-0000-0001.parquet
