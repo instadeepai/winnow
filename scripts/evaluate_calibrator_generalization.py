@@ -21,9 +21,9 @@ from winnow.datasets.calibration_dataset import RESIDUE_MASSES, CalibrationDatas
 from winnow.scripts.main import load_dataset, filter_dataset, DataSource
 
 # --- Logging Setup ---
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("winnow.evaluate_generalization")  # Use a unique logger name
 logger.setLevel(logging.INFO)
-logger.addHandler(logging.StreamHandler())
+logger.propagate = False  # Prevent propagation to parent loggers
 logger.addHandler(RichHandler())
 
 # --- Constants ---
