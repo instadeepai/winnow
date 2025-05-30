@@ -20,6 +20,8 @@ dependencies = [
     "altair>=5.5.0",
     "vegafusion[embed]>=2.0.2",
     "vl-convert-python>=1.6.0",
+    "flax>=0.10.6",
+    "ray[data]>=2.46.0",
 ]
 
 [build-system]
