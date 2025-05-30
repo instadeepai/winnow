@@ -237,6 +237,12 @@ def main(
             max=10000,
         ),
     ] = 1000,
+    num_features_samples: Annotated[
+        int,
+        typer.Option(
+            help="Number of features samples to use for SHAP value computation.",
+        ),
+    ] = 10000,
 ) -> None:
     """Analyze feature importance and correlations for the calibrator.
 
@@ -322,12 +328,22 @@ def main(
 
     # 2. SHAP values
     logger.info("Computing SHAP values...")
-    # Sample background data
-    background = shap.sample(
-        features_scaled,
-        min(n_background_samples, len(features_scaled)),
-        random_state=SEED,
+    # Sample background data and features to assess SHAP values
+    # Get random indices first to ensure we can map back to original features
+    total_samples = (
+        min(n_background_samples, len(features_scaled)) + num_features_samples
     )
+    indices = np.random.choice(
+        len(features_scaled), size=total_samples, replace=False, random_state=SEED
+    )
+
+    # Use these indices to sample both scaled and unscaled features
+    background_and_features_scaled = features_scaled[indices]
+    background_and_features_unscaled = features[indices]
+
+    sampled_features_scaled = background_and_features_scaled[:num_features_samples]
+    sampled_features_unscaled = background_and_features_unscaled[:num_features_samples]
+    background = background_and_features_scaled[num_features_samples:]
 
     # Use KernelExplainer for MLP
     explainer = shap.KernelExplainer(
@@ -337,16 +353,12 @@ def main(
         link="identity",  # Explain probabilities directly
     )
 
-    # Randomly sample 10,000 training spectra from the dataset
-    np.random.seed(SEED)
-    indices = np.random.choice(features_scaled.shape[0], size=10000, replace=False)
-
     # Get SHAP values from explainer for a random subset of the training data
-    shap_values = explainer(features_scaled[indices])
+    shap_values = explainer(sampled_features_scaled)
 
     # Switch to original feature space for visualization
     # This is safe because standardization is a univariate transformation
-    shap_values.data = features[indices]
+    shap_values.data = sampled_features_unscaled
     shap_values.feature_names = feature_names
 
     # Plot SHAP summary using built-in function
