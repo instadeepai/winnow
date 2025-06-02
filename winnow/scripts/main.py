@@ -8,7 +8,7 @@ from winnow.calibration.calibration_features import (
 )
 from winnow.calibration.calibrator import ProbabilityCalibrator
 from winnow.datasets.calibration_dataset import RESIDUE_MASSES, CalibrationDataset
-from winnow.fdr.bayes import EmpiricalBayesFDRControl
+from winnow.fdr.nonparametric import NonParametricFDRControl
 from winnow.fdr.database_grounded import DatabaseGroundedFDRControl
 
 from dataclasses import dataclass
@@ -28,8 +28,6 @@ SEED = 42
 MZ_TOLERANCE = 0.02
 HIDDEN_DIM = 10
 TRAIN_FRACTION = 0.1
-FDR_LR = 0.005
-FDR_NSTEPS = 5000
 
 
 class DataSource(Enum):
@@ -195,20 +193,15 @@ def initialise_calibrator() -> ProbabilityCalibrator:
 
 
 def apply_fdr_control(
-    fdr_control: Union[EmpiricalBayesFDRControl, DatabaseGroundedFDRControl],
+    fdr_control: Union[NonParametricFDRControl, DatabaseGroundedFDRControl],
     dataset: CalibrationDataset,
     fdr_threshold: float,
     confidence_column: str,
 ) -> pd.DataFrame:
     """Apply empirical Bayes FDR control."""
-    if isinstance(fdr_control, EmpiricalBayesFDRControl):
-        fdr_control.fit(
-            dataset=dataset.metadata[confidence_column], lr=FDR_LR, n_steps=FDR_NSTEPS
-        )
+    if isinstance(fdr_control, NonParametricFDRControl):
+        fdr_control.fit(dataset=dataset.metadata[confidence_column])
         dataset.metadata = fdr_control.add_psm_pep(dataset.metadata, confidence_column)
-        dataset.metadata = fdr_control.add_psm_p_value(
-            dataset.metadata, confidence_column
-        )
     else:
         fdr_control.fit(
             dataset=dataset.metadata[confidence_column],
@@ -340,7 +333,7 @@ def predict(
     if method is FDRMethod.winnow:
         logger.info("Applying FDR control.")
         dataset_metadata = apply_fdr_control(
-            EmpiricalBayesFDRControl(), dataset, fdr_threshold, confidence_column
+            NonParametricFDRControl(), dataset, fdr_threshold, confidence_column
         )
     elif method is FDRMethod.database:
         logger.info("Applying FDR control.")
