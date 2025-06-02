@@ -1,6 +1,6 @@
 """Contains classes and functions for probability recalibration."""
 
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Tuple, Union, Optional
 from pathlib import Path
 import pickle
 import numpy as np
@@ -24,6 +24,7 @@ class ProbabilityCalibrator:
     """A class for recalibrating probabilities for a de novo peptide sequencing method.
 
     This class provides functionality to recalibrate predicted probabilities by fitting a logistic regression model using various features computed from a calibration dataset.
+    It also supports label shift correction using the Saerens-style EM algorithm.
     """
 
     def __init__(self, seed: int = 42) -> None:
@@ -38,6 +39,8 @@ class ProbabilityCalibrator:
             max_iter=1000,
         )
         self.scaler = StandardScaler()
+        self.prior_train: Optional[float] = None
+        self.prior_test: Optional[float] = None
 
     @property
     def columns(self) -> List[str]:
@@ -73,6 +76,7 @@ class ProbabilityCalibrator:
         calibrator_classifier_path = path / "calibrator.pkl"
         irt_predictor_path = path / "irt_predictor.pkl"
         scaler_path = path / "scaler.pkl"
+        prior_path = path / "prior.pkl"
 
         with calibrator_classifier_path.open(mode="wb") as f:
             pickle.dump(calibrator.classifier, f)
@@ -82,6 +86,9 @@ class ProbabilityCalibrator:
 
         with scaler_path.open(mode="wb") as f:
             pickle.dump(calibrator.scaler, f)
+
+        with prior_path.open(mode="wb") as f:
+            pickle.dump({"prior_train": calibrator.prior_train}, f)
 
     @classmethod
     def load(cls, path: Path) -> "ProbabilityCalibrator":
@@ -110,6 +117,7 @@ class ProbabilityCalibrator:
         calibrator.load_classifier(path / "calibrator.pkl")
         calibrator.load_irt_predictor(path / "irt_predictor.pkl")
         calibrator.load_scaler(path / "scaler.pkl")
+        calibrator.load_prior(path / "prior.pkl")
         return calibrator
 
     def load_classifier(self, path: Path) -> None:
@@ -138,6 +146,16 @@ class ProbabilityCalibrator:
         """
         with path.open(mode="rb") as f:
             self.scaler = pickle.load(f)
+
+    def load_prior(self, path: Path) -> None:
+        """Load the prior from a file.
+
+        Args:
+            path (Path): The path to load the prior from.
+        """
+        with path.open(mode="rb") as f:
+            prior_data = pickle.load(f)
+            self.prior_train = prior_data["prior_train"]
 
     def add_feature(self, feature: CalibrationFeatures) -> None:
         """Add a feature for the classifier used for calibration.
@@ -185,7 +203,8 @@ class ProbabilityCalibrator:
     def fit(self, dataset: CalibrationDataset) -> None:
         """Fit the logistic regression model using the given calibration dataset.
 
-        This method computes the features from the dataset, prepares the labels, and trains a logistic regression model for recalibrating probabilities.
+        This method computes the features from the dataset, prepares the labels, and trains a binary classifier for recalibrating probabilities.
+        It also estimates and stores the training prior.
 
         Args:
             dataset (CalibrationDataset): The dataset used for training the classifier.
@@ -194,6 +213,9 @@ class ProbabilityCalibrator:
         # Fit and transform features with scaler
         features_scaled = self.scaler.fit_transform(features)
         self.classifier.fit(features_scaled, labels)
+
+        # Estimate and store training prior
+        self.prior_train = float(np.mean(labels))
 
     def compute_features(
         self, dataset: CalibrationDataset, labelled: bool
@@ -235,16 +257,106 @@ class ProbabilityCalibrator:
         else:
             return features.values
 
-    def predict(self, dataset: CalibrationDataset) -> None:
+    def predict(
+        self,
+        dataset: CalibrationDataset,
+        correct_label_shift: bool = True,
+        max_iters: int = 20,
+        tol: float = 1e-4,
+    ) -> None:
         """Predict the calibrated probabilities for a given dataset.
 
-        This method computes the features and uses the trained classifier to predict the calibrated probabilities for the dataset. The calibrated probabilities are stored in the dataset under the "calibrated_confidence" column.
+        This method computes the features and uses the trained classifier to predict the calibrated probabilities for the dataset.
+        If correct_label_shift is True, it also applies prior shift correction using the EM algorithm.
+        The calibrated probabilities are stored in the dataset under the "calibrated_confidence" column.
 
         Args:
             dataset (CalibrationDataset): The dataset for which predictions are made.
+            correct_label_shift (bool, optional): Whether to apply label shift correction. Defaults to True.
+            max_iters (int, optional): Maximum number of EM iterations. Defaults to 20.
+            tol (float, optional): Convergence tolerance for EM. Defaults to 1e-4.
         """
         features = self.compute_features(dataset=dataset, labelled=False)
         # Transform features with scaler
         features_scaled = self.scaler.transform(features)
-        correct_probs = self.classifier.predict_proba(features_scaled)
-        dataset.metadata["calibrated_confidence"] = correct_probs[:, 1].tolist()
+        p_raw = self.classifier.predict_proba(features_scaled)[:, 1]
+
+        if correct_label_shift and self.prior_train is not None:
+            p_adapted, self.prior_test = self._em_prior_shift_loop(
+                p_raw=p_raw,
+                prior_train=self.prior_train,
+                max_iters=max_iters,
+                tol=tol,
+            )
+            dataset.metadata["calibrated_confidence"] = p_adapted.tolist()
+        else:
+            dataset.metadata["calibrated_confidence"] = p_raw.tolist()
+
+    def _update_posterior(
+        self, p_raw: np.ndarray, prior_train: float, prior_test: float
+    ) -> np.ndarray:
+        """Update posteriors to account for prior shift using the Saerens formula.
+
+        Args:
+            p_raw (np.ndarray): Raw posterior probabilities under training prior
+            prior_train (float): Training set prior probability
+            prior_test (float): Test set prior probability
+
+        Returns:
+            np.ndarray: Adapted posterior probabilities
+        """
+        alpha = prior_test / prior_train
+        beta = (1 - prior_test) / (1 - prior_train)
+        numerator = alpha * p_raw
+        denominator = alpha * p_raw + beta * (1 - p_raw)
+        return numerator / denominator
+
+    def _update_prior(self, p_adapted: np.ndarray) -> float:
+        """Update the test prior based on mean of adapted posteriors.
+
+        Args:
+            p_adapted (np.ndarray): Adapted posterior probabilities
+
+        Returns:
+            float: New estimate of test prior
+        """
+        return float(np.mean(p_adapted))
+
+    def _em_prior_shift_loop(
+        self,
+        p_raw: np.ndarray,
+        prior_train: float,
+        max_iters: int = 20,
+        tol: float = 1e-4,
+    ) -> Tuple[np.ndarray, float]:
+        """Run EM until prior_test converges or max iterations reached.
+
+        Args:
+            p_raw (np.ndarray): Raw posterior probabilities
+            prior_train (float): Training set prior probability
+            max_iters (int, optional): Maximum number of EM iterations. Defaults to 20.
+            tol (float, optional): Convergence tolerance. Defaults to 1e-4.
+
+        Returns:
+            Tuple[np.ndarray, float]: Final adapted posteriors and estimated test prior
+        """
+        prev_prior = prior_train
+        new_prior = 0.5
+
+        for _ in range(max_iters):
+            # E-step: get adapted posteriors
+            new_posteriors = self._update_posterior(p_raw, prev_prior, new_prior)
+
+            prev_prior = new_prior
+
+            # M-step: compute new prior_test
+            new_prior = self._update_prior(new_posteriors)
+
+            # Check convergence
+            if abs(new_prior - prev_prior) < tol:
+                break
+
+        prior_test = new_prior
+        new_posteriors = self._update_posterior(p_raw, prior_train, prior_test)
+
+        return new_posteriors, prior_test

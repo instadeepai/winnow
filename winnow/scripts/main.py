@@ -30,6 +30,8 @@ HIDDEN_DIM = 10
 TRAIN_FRACTION = 0.1
 FDR_LR = 0.005
 FDR_NSTEPS = 5000
+EM_MAX_ITERS = 20
+EM_TOL = 1e-4
 
 
 class DataSource(Enum):
@@ -211,7 +213,7 @@ def apply_fdr_control(
         )
     else:
         fdr_control.fit(
-            dataset=dataset.metadata[confidence_column],
+            dataset=dataset.metadata,
             residue_masses=RESIDUE_MASSES,
         )
     dataset.metadata = fdr_control.add_psm_fdr(dataset.metadata, confidence_column)
@@ -227,6 +229,83 @@ def check_if_labelled(dataset: CalibrationDataset) -> None:
         raise ValueError(
             "Database-grounded FDR control can only be performed on annotated data."
         )
+
+
+def _log_prior_info(
+    calibrator: ProbabilityCalibrator, correct_label_shift: bool
+) -> None:
+    """Log information about priors and label shift.
+
+    Args:
+        calibrator (ProbabilityCalibrator): The calibrator instance
+        correct_label_shift (bool): Whether label shift correction is enabled
+    """
+    if correct_label_shift and calibrator.prior_test is not None:
+        logger.info(f"Estimated test prior: {calibrator.prior_test:.4f}")
+        if calibrator.prior_train is not None:
+            shift = calibrator.prior_test - calibrator.prior_train
+            logger.info(f"Prior shift: {shift:+.4f}")
+        else:
+            logger.warning("Training prior not available, cannot calculate shift")
+
+
+def _check_label_shift_settings(
+    calibrator: ProbabilityCalibrator,
+    correct_label_shift: bool,
+) -> bool:
+    """Check and validate label shift correction settings.
+
+    Args:
+        calibrator (ProbabilityCalibrator): The calibrator instance
+        dataset (CalibrationDataset): The dataset to be processed
+        correct_label_shift (bool): Whether label shift correction is requested
+
+    Returns:
+        Tuple[bool, bool]: (correct_label_shift, use_true_labels_for_prior) with any necessary adjustments
+    """
+    if correct_label_shift and calibrator.prior_train is not None:
+        logger.info("Applying label shift correction")
+        logger.info(f"Training prior: {calibrator.prior_train:.4f}")
+    else:
+        logger.info("Skipping label shift correction")
+        correct_label_shift = False
+
+    return correct_label_shift
+
+
+def _apply_fdr_control(
+    method: FDRMethod,
+    dataset: CalibrationDataset,
+    fdr_threshold: float,
+    confidence_column: str,
+) -> pd.DataFrame:
+    """Apply FDR control using the specified method.
+
+    Args:
+        method (FDRMethod): The FDR control method to use
+        dataset (CalibrationDataset): The dataset to process
+        fdr_threshold (float): The target FDR threshold
+        confidence_column (str): Name of the column with confidence scores
+
+    Returns:
+        pd.DataFrame: The filtered dataset metadata
+    """
+    if method is FDRMethod.winnow:
+        logger.info("Applying FDR control.")
+        return apply_fdr_control(
+            EmpiricalBayesFDRControl(), dataset, fdr_threshold, confidence_column
+        )
+    elif method is FDRMethod.database:
+        logger.info("Applying FDR control.")
+        check_if_labelled(dataset)
+        return apply_fdr_control(
+            DatabaseGroundedFDRControl(confidence_feature=confidence_column),
+            dataset,
+            fdr_threshold,
+            confidence_column,
+        )
+    else:
+        raise ValueError(f"Unknown FDR method: {method}")
 
 
 @app.command(name="train", help="Fit a calibration model.")
@@ -309,7 +388,15 @@ def predict(
         str, typer.Option(help="Name of the column with confidence scores.")
     ],
     output_path: Annotated[Path, typer.Option(help="The path to write the output to.")],
-):
+    correct_label_shift: Annotated[
+        bool,
+        typer.Option(
+            "--no-label-shift",
+            is_flag=True,
+            help="Disable label shift correction (enabled by default). Use this flag when predicting on data from same distribution as training.",
+        ),
+    ] = True,
+) -> None:
     """Calibrate model scores, estimate FDR and filter for a threshold.
 
     Args:
@@ -320,6 +407,7 @@ def predict(
         fdr_threshold (Annotated[ float, typer.Option, optional): The target FDR threshold (e.g. 0.01 for 1%, 0.05 for 5% etc.).
         confidence_column (Annotated[ str, typer.Option, optional): Name of the column with confidence scores.
         output_path (Annotated[ Path, typer.Option, optional): The path to write the output to.
+        correct_label_shift (Annotated[ bool, typer.Option, optional): Whether to apply label shift correction.
     """
     # -- Load dataset
     logger.info("Loading datasets.")
@@ -334,23 +422,23 @@ def predict(
     logger.info("Loading calibrator.")
     calibrator = ProbabilityCalibrator.load(model_folder)
 
-    logger.info("Calibrating scores.")
-    calibrator.predict(dataset)
+    # Check and validate label shift settings
+    correct_label_shift = _check_label_shift_settings(calibrator, correct_label_shift)
 
-    if method is FDRMethod.winnow:
-        logger.info("Applying FDR control.")
-        dataset_metadata = apply_fdr_control(
-            EmpiricalBayesFDRControl(), dataset, fdr_threshold, confidence_column
-        )
-    elif method is FDRMethod.database:
-        logger.info("Applying FDR control.")
-        check_if_labelled(dataset)
-        dataset_metadata = apply_fdr_control(
-            DatabaseGroundedFDRControl(confidence_feature=confidence_column),
-            dataset,
-            fdr_threshold,
-            confidence_column,
-        )
+    # Apply calibration
+    logger.info("Calibrating scores.")
+    calibrator.predict(
+        dataset,
+        correct_label_shift=correct_label_shift,
+    )
+
+    # Log prior information
+    _log_prior_info(calibrator, correct_label_shift)
+
+    # Apply FDR control and save results
+    dataset_metadata = _apply_fdr_control(
+        method, dataset, fdr_threshold, confidence_column
+    )
 
     # -- Write output
     logger.info("Writing output.")
