@@ -16,7 +16,7 @@ spec:
         provider: "github" # Optional, vscode tunnel provider. Options are "github" or "microsoft", defaults to "github"
   operator: tf
   image: winnow
-  command: make train-general-model
+  command: make compare-classifiers
 
   tensorboard: # optional, disabled by default
     enabled: false

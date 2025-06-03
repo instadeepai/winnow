@@ -323,6 +323,47 @@ def plot_calibration_curves(
     plt.close()
 
 
+def plot_precision_recall_curves(
+    results: Dict[str, Dict[str, Any]],
+    output_dir: Path,
+) -> None:
+    """Plot precision-recall curves for all classifiers.
+
+    Args:
+        results: Dictionary of evaluation results
+        output_dir: Directory to save plots
+    """
+    plt.figure(figsize=(10, 8))
+
+    for name, result in results.items():
+        # Get predictions and true labels
+        y_true = result["val_labels"]
+        y_pred_proba = result["val_predictions"]
+
+        # Compute precision-recall curve
+        precision, recall, _ = precision_recall_curve(y_true, y_pred_proba)
+
+        # Plot precision-recall curve
+        plt.plot(
+            recall,
+            precision,
+            label=f"{name}",
+        )
+
+    plt.xlabel("Recall")
+    plt.ylabel("Precision")
+    plt.title("Precision-Recall Curves for Different Classifiers")
+    plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(
+        output_dir / "precision_recall_curves.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
+    plt.close()
+
+
 def plot_metric_comparison(
     results: Dict[str, Dict[str, Any]],
     metric: str,
@@ -538,6 +579,8 @@ def main(
     """
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
+    predictions_dir = output_dir / "predictions"
+    predictions_dir.mkdir(parents=True, exist_ok=True)
 
     # Load datasets and compute features on combined data
     logger.info("Loading datasets and computing features...")
@@ -557,6 +600,11 @@ def main(
     val_features = features[val_indices]
     val_labels = labels[val_indices]
 
+    # Save validation labels
+    pd.DataFrame({"true_label": val_labels}).to_csv(
+        predictions_dir / "validation_labels.csv", index=False
+    )
+
     # Evaluate each classifier
     logger.info("Evaluating classifiers...")
     results: Dict[str, Dict[str, Any]] = {}
@@ -572,6 +620,11 @@ def main(
             val_labels=val_labels,
         )
 
+        # Save predictions
+        pd.DataFrame({"predicted_probability": result["val_predictions"]}).to_csv(
+            predictions_dir / f"{name}_predictions.csv", index=False
+        )
+
         # Store results
         results[name] = result
         logger.info(
@@ -582,6 +635,7 @@ def main(
     # Generate plots
     plot_roc_curves(results, output_dir)
     plot_calibration_curves(results, output_dir)
+    plot_precision_recall_curves(results, output_dir)
     for metric in ["auc", "brier_score", "average_precision", "calibration_error"]:
         plot_metric_comparison(results, metric, output_dir)
 

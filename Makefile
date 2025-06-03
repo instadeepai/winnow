@@ -136,6 +136,8 @@ compare-classifiers: set-ceph-credentials set-gcp-credentials
 	# aws s3 cp results/ s3://winnow-g88rh/classifier_comparison/ --recursive --profile winnow
 	# Copy the results back to Google Cloud Storage
 	gsutil -m cp -R results/ gs://winnow-fdr/classifier_comparison/
+	# Ensure predictions are also copied
+	gsutil -m cp -R results/predictions/ gs://winnow-fdr/classifier_comparison/predictions/
 
 ## Tune the HistGradientBoostingClassifier
 tune-calibrator: set-ceph-credentials set-gcp-credentials
