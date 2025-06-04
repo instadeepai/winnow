@@ -65,6 +65,11 @@ def _(MODIFICATIONS, ModifiedPeptideTokenizer, RESIDUES):
 
 
 @app.cell
+def _():
+    return
+
+
+@app.cell
 def _(convert_to_str, functools, ray):
     spectrum_dataset = ray.data.read_parquet(
         '/Users/amandlamabona/Projects/winnow/input_data/spectrum_data/labelled/dataset-helaqc-annotated-0000-0001.parquet',
@@ -96,12 +101,20 @@ def _(spectrum_dataset):
 
 @app.cell
 def _(pl):
-    hela_predictions_data = pl.scan_csv('/Users/amandlamabona/Projects/winnow/input_data/beam_preds/labelled/helaqc-annotated_beam_preds.csv')
-    hela_predictions_data = hela_predictions_data.select(
+    SPECIES='train'
+    predictions_data = pl.scan_csv(f'/Users/amandlamabona/Projects/winnow/input_data/beam_preds/labelled/{SPECIES}_beam_all_datasets.csv')
+    predictions_data = predictions_data.select(
         pl.col('global_index'), pl.col('sequence').str.replace('L', 'I'), pl.col('preds').str.replace('L', 'I')
     )
-    hela_predictions_data.collect().write_parquet('/Users/amandlamabona/Projects/winnow/input_data/beam_preds/labelled/helaqc-annotated_beam_preds.parquet')
-    return (hela_predictions_data,)
+
+    spectrum_data = pl.scan_parquet(f'/Users/amandlamabona/Projects/winnow/input_data/spectrum_data/labelled/{SPECIES}_spectrum_all_datasets.parquet')
+    spectrum_data = spectrum_data.select(pl.col('global_index'), pl.col('mz_array'), pl.col('intensity_array'))
+
+    data = spectrum_data.join(predictions_data, on='global_index').with_columns(
+        (pl.col('sequence') == pl.col('preds')).alias('correct')
+    )
+    data.collect().write_parquet(f'/Users/amandlamabona/Projects/winnow/input_data/processed/{SPECIES}.parquet')
+    return
 
 
 @app.cell
@@ -115,11 +128,18 @@ def _(ray):
 
 
 @app.cell
-def _(convert_from_str, functools, predictions_dataset, spectrum_dataset):
+def _(
+    batch_spectra,
+    convert_from_str,
+    functools,
+    predictions_dataset,
+    spectrum_dataset,
+):
     full_dataset = spectrum_dataset.join(
-        ds=predictions_dataset, join_type='inner', on=('global_index',), num_partitions=600
+        ds=predictions_dataset, join_type='inner', on=('global_index',), num_partitions=10
     )
     full_dataset = full_dataset.map(functools.partial(convert_from_str, column='mz_array')).map(functools.partial(convert_from_str, column='intensity_array'))
+    full_dataset = full_dataset.map_batches(functools.partial(batch_spectra, num_peaks=200))
     full_dataset
     return
 
@@ -134,22 +154,6 @@ def _():
 def _(pl):
     hela_spectrum_data = pl.scan_parquet('/Users/amandlamabona/Projects/winnow/input_data/spectrum_data/labelled/dataset-helaqc-annotated-0000-0001.parquet')
     hela_spectrum_data = hela_spectrum_data.select(pl.col('global_index'), pl.col('mz_array'), pl.col('intensity_array'))
-    return (hela_spectrum_data,)
-
-
-@app.cell
-def _(pl):
-    spectrum_data = pl.scan_parquet('/Users/amandlamabona/Projects/winnow/input_data/spectrum_data/labelled/train_spectrum_all_datasets.parquet')
-    spectrum_data.select(pl.col('global_index'), pl.col('sequence'))
-    return
-
-
-@app.cell
-def _(hela_predictions_data, hela_spectrum_data, pl):
-    hela_data = hela_spectrum_data.join(hela_predictions_data, on='global_index').with_columns(
-        (pl.col('sequence') == pl.col('preds')).alias('correct')
-    )
-    hela_data.collect().write_parquet('/Users/amandlamabona/Projects/winnow/hela_data.parquet')
     return
 
 
@@ -377,15 +381,6 @@ def _(batch):
 @app.cell
 def _(batch, jnp):
     jnp.array(batch['correct'], dtype=int)
-    return
-
-
-@app.cell
-def _(data_loader):
-    batch_counter = 0
-    for local_batch in data_loader.iter_batches(batch_size=8):
-        print('Batch received', batch_counter)
-        batch_counter += 1
     return
 
 
