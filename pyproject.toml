@@ -21,7 +21,8 @@ dependencies = [
     "vegafusion[embed]>=2.0.2",
     "vl-convert-python>=1.6.0",
     "flax>=0.10.6",
-    "ray[data]>=2.46.0",
+    "ray[data, default]>=2.46.0",
+    "py-spy>=0.4.0",
 ]
 
 [build-system]
