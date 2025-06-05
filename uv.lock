@@ -3118,19 +3118,6 @@ wheels = [
 ]
 
 [[package]]
-name = "plotly"
-version = "6.1.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "narwhals" },
-    { name = "packaging" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/ae/77/431447616eda6a432dc3ce541b3f808ecb8803ea3d4ab2573b67f8eb4208/plotly-6.1.2.tar.gz", hash = "sha256:4fdaa228926ba3e3a213f4d1713287e69dcad1a7e66cf2025bd7d7026d5014b4", size = 7662971 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/bf/6f/759d5da0517547a5d38aabf05d04d9f8adf83391d2c7fc33f904417d3ba2/plotly-6.1.2-py3-none-any.whl", hash = "sha256:f1548a8ed9158d59e03d7fed548c7db5549f3130d9ae19293c8638c202648f6d", size = 16265530 },
-]
-
-[[package]]
 name = "pluggy"
 version = "1.6.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4982,7 +4969,6 @@ dependencies = [
     { name = "marimo" },
     { name = "numba" },
     { name = "numpyro" },
-    { name = "plotly" },
     { name = "py-spy" },
     { name = "ray", extra = ["data", "default"] },
     { name = "scikit-learn" },
@@ -5016,7 +5002,6 @@ requires-dist = [
     { name = "marimo", specifier = ">=0.13.9" },
     { name = "numba", specifier = "==0.60.0" },
     { name = "numpyro", specifier = ">=0.17.0" },
-    { name = "plotly", specifier = ">=6.0.1" },
     { name = "py-spy", specifier = ">=0.4.0" },
     { name = "ray", extras = ["data", "default"], specifier = ">=2.46.0" },
     { name = "scikit-learn", specifier = ">=1.6.1" },

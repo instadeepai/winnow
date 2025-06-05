@@ -16,7 +16,6 @@ dependencies = [
     "tomli>=2.2.1",
     "typer>=0.15.2",
     "marimo>=0.13.9",
-    "plotly>=6.0.1",
     "altair>=5.5.0",
     "vegafusion[embed]>=2.0.2",
     "vl-convert-python>=1.6.0",
