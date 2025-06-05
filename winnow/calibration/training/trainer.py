@@ -2,16 +2,24 @@
 Interfaces for the Trainer.
 """
 import dataclasses
+import functools
 from typing import Callable, Dict
 
+import jax
 import jax.numpy as jnp
+
 import orbax.checkpoint as ocp
+
 from flax import nnx
+
+import optax
+
 from jaxtyping import Float
 from ray.data import Dataset
 from tqdm import tqdm
 
-from .loggers import LoggingManager
+from winnow.calibration.training.loggers import LoggingManager
+from winnow.calibration.training.data import pad_batch_spectra
 
 
 @dataclasses.dataclass
@@ -40,8 +48,8 @@ class MetricsManager:
 
     def evaluate(
         self,
-        y_true: Float[jnp.ndarray, " batch_size ..."],
-        y_pred: Float[jnp.ndarray, " batch_size ..."]
+        y_pred: Float[jnp.ndarray, " batch_size ..."],
+        y_true: Float[jnp.ndarray, " batch_size ..."]
     ) -> Metrics:
         """
         Evaluate the model.
@@ -68,14 +76,13 @@ class TrainerConfig:
     """
     Configuration for the trainer.
     """
-    input_column: str
-    label_column: str
+    learning_rate: float
     num_epochs: int
     batch_size: int
     eval_frequency: int
     eval_batch_size: int
-    learning_rate: float
     patience: int
+    num_peaks: int
 
 
 class Trainer:
@@ -86,44 +93,69 @@ class Trainer:
         self,
         model: nnx.Module,
         optimizer: nnx.Optimizer,
-        loss_fn: Callable[
-            [Float[jnp.ndarray, " batch_size ..."],
-             Float[jnp.ndarray, " batch_size ..."]],
-            Float[jnp.ndarray, " batch_size ..."]
-        ],
         logging_manager: LoggingManager,
         checkpoint_manager: ocp.CheckpointManager,
         metrics_manager: MetricsManager
     ):
         self.model = model
         self.optimizer = optimizer
-        self.loss_fn = loss_fn
         self.logging_manager = logging_manager
         self.checkpoint_manager = checkpoint_manager
         self.metrics_manager = metrics_manager
+        self.graphdefs, self.state = nnx.split((model, optimizer))
 
-        def wrapped_loss_fn(
+        def loss_fn(
             model: nnx.Module,
-            xs: Float[jnp.ndarray, " batch_size ..."],
-            ys: Float[jnp.ndarray, " batch_size ..."]
-        ) -> Float[jnp.ndarray, " batch_size ..."]:
+            mz_array: jnp.ndarray,
+            intensity_array: jnp.ndarray,
+            spectrum_mask: jnp.ndarray,
+            residue_indices: jnp.ndarray,
+            modification_indices: jnp.ndarray,
+            peptide_mask: jnp.ndarray,
+            labels: jnp.ndarray
+        ) -> jnp.ndarray:
             """
             Loss function.
             """
-            y_preds = model(xs) # type: ignore[operator]
-            return self.loss_fn(y_preds, ys)
+            logits = model(
+                mz_array=mz_array,
+                intensity_array=intensity_array,
+                spectrum_mask=spectrum_mask,
+                residue_indices=residue_indices,
+                modification_indices=modification_indices,
+                peptide_mask=peptide_mask
+            ) # type: ignore[operator]
+            return jnp.mean(optax.sigmoid_binary_cross_entropy(logits, labels))
 
+        @jax.jit
         def update(
-            model: nnx.Module, optimizer: nnx.Optimizer,
-            xs: Float[jnp.ndarray, " batch_size ..."],
-            ys: Float[jnp.ndarray, " batch_size ..."]
-        ) -> float:
+            graphdefs: nnx.GraphDef,
+            state: nnx.State,
+            mz_array: jnp.ndarray,
+            intensity_array: jnp.ndarray,
+            spectrum_mask: jnp.ndarray,
+            residue_indices: jnp.ndarray,
+            modification_indices: jnp.ndarray,
+            peptide_mask: jnp.ndarray,
+            labels: jnp.ndarray
+        ) -> tuple[float, nnx.State]:
             """
             Update the model.
             """
-            loss, grads = nnx.value_and_grad(wrapped_loss_fn)(model, xs, ys)
+            model, optimizer = nnx.merge(graphdefs, state)
+            loss, grads = nnx.value_and_grad(loss_fn)(
+                model=model,
+                mz_array=mz_array,
+                intensity_array=intensity_array,
+                spectrum_mask=spectrum_mask,
+                residue_indices=residue_indices,
+                modification_indices=modification_indices,
+                peptide_mask=peptide_mask,
+                labels=labels
+            )
             optimizer.update(grads)
-            return loss
+            state = nnx.state((model, optimizer))
+            return loss, state
 
         self.update = nnx.jit(update)
 
@@ -140,16 +172,34 @@ class Trainer:
         step, evals_without_improvement, best_checkpoint_metric = 0, 0, float("-inf")
         for _ in tqdm(range(config.num_epochs), desc="Epochs"):
             for batch in tqdm(
-                train_data.iter_batches(batch_size=config.batch_size), desc="Batches"
+                train_data.iter_batches(
+                    batch_size=config.batch_size,
+                    _collate_fn=functools.partial(pad_batch_spectra, num_peaks=config.num_peaks),  # type: ignore[arg-type]
+                ), desc="Batches"
             ):
-                xs = jnp.array(batch[config.input_column])
-                ys = jnp.array(batch[config.label_column])
-                loss = self.update(self.model, self.optimizer, xs, ys)
+                mz_array = jnp.array(batch['mz_array'])
+                intensity_array = jnp.array(batch['intensity_array'])
+                spectrum_mask = jnp.array(batch['spectrum_mask'])
+                residue_indices = jnp.array(batch['residues_ids'])
+                modification_indices = jnp.array(batch['modifications_ids'])
+                peptide_mask = jnp.array(batch['peptide_mask'])
+                labels = jnp.array(batch['correct'])
+                loss, self.state = self.update(
+                    graphdefs=self.graphdefs,
+                    state=self.state,
+                    mz_array=mz_array,
+                    intensity_array=intensity_array,
+                    spectrum_mask=spectrum_mask,
+                    residue_indices=residue_indices,
+                    modification_indices=modification_indices,
+                    peptide_mask=peptide_mask,
+                    labels=labels
+                )
                 self.logging_manager.log_metric("train/loss", loss, step)
                 step += 1
                 if step % config.eval_frequency == 0:
                     checkpoint_metric = self.evaluate(
-                        val_data, config.eval_batch_size, step
+                        data=val_data, num_peaks=config.num_peaks, batch_size=config.eval_batch_size, step=step
                     )
                     if checkpoint_metric > best_checkpoint_metric:
                         evals_without_improvement = 0
@@ -162,27 +212,52 @@ class Trainer:
                         evals_without_improvement += 1
                     if evals_without_improvement >= config.patience:
                         break
+        nnx.update(self.graphdefs, self.state)  # Ensure the final state is updated in the graphdefs
+        self.logging_manager.log_metric("train/best_checkpoint_metric", best_checkpoint_metric, step)
+                
 
-    def evaluate(self, data: Dataset, batch_size: int, step: int) -> float:
+    def evaluate(self, data: Dataset, num_peaks: int, batch_size: int, step: int) -> float:
         """
         Evaluate the model.
         Args:
             data: The dataset to predict on.
+            num_peaks: The number of peaks to consider.
             batch_size: The batch size.
             step: The current step.
         """
+        model, _ = nnx.merge(self.graphdefs, self.state)
         # Collect predictions and targets
-        predictions_list, ys_list = [], []
-        for batch in data.iter_batches(batch_size=batch_size):
-            xs = jnp.array(batch["x"])
-            ys_list.append(jnp.array(batch["y"]))
-            preds = self.model(xs) # type: ignore[operator]
+        predictions_list, label_list = [], []
+        for batch in tqdm(
+            data.iter_batches(batch_size=batch_size, _collate_fn=functools.partial(pad_batch_spectra, num_peaks=num_peaks)),
+            desc="Evaluating"
+        ):
+            # Convert batch data to JAX arrays
+            mz_array = jnp.array(batch['mz_array'])
+            intensity_array = jnp.array(batch['intensity_array'])
+            spectrum_mask = jnp.array(batch['spectrum_mask'])
+            residue_indices = jnp.array(batch['residues_ids'])
+            modification_indices = jnp.array(batch['modifications_ids'])
+            peptide_mask = jnp.array(batch['peptide_mask'])
+            label_list.append(jnp.array(batch['correct']))
+
+
+            preds = jax.nn.sigmoid(
+                model(
+                    mz_array=mz_array,
+                    intensity_array=intensity_array,
+                    spectrum_mask=spectrum_mask,
+                    residue_indices=residue_indices,
+                    modification_indices=modification_indices,
+                    peptide_mask=peptide_mask
+                    )
+                )  # type: ignore[operator]
             predictions_list.append(preds)
         predictions = jnp.concatenate(predictions_list, axis=0)
-        ys = jnp.concatenate(ys_list, axis=0)
+        labels = jnp.concatenate(label_list, axis=0)
 
         # Evaluate and log metrics
-        metrics = self.metrics_manager.evaluate(ys, predictions)
+        metrics = self.metrics_manager.evaluate(predictions, labels)
         self.logging_manager.log_metric(
             "eval/checkpoint_metric", metrics.metrics[metrics.checkpoint_metric], step
         )
