@@ -23,9 +23,7 @@ class ProbabilityCalibrator(nnx.Module):
         """Initialize the ProbabilityCalibrator.
         
         Args:
-            tokenizer: Tokenizer for modified peptides.
-            spectrum_encoder: Encoder for mass spectra.
-            peptide_encoder: Encoder for peptides.
+            config: Configuration for the calibrator, including spectrum and peptide encoders.
             rngs: Random number generators for initialization.
         """
         self.config = config
@@ -48,6 +46,7 @@ class ProbabilityCalibrator(nnx.Module):
         Args:
             mz_array: Mass spectra of shape (batch_size, num_spectra, spectrum_dim).
             intensity_array: Intensity values of shape (batch_size, num_spectra, spectrum_dim).
+            spectrum_mask: Mask for the spectra of shape (batch_size, num_spectra).
             residue_indices: Indices of the residues in the peptides.
             modification_indices: Indices of the modifications in the peptides.
             peptide_mask: Mask for the peptides.
@@ -69,6 +68,6 @@ class ProbabilityCalibrator(nnx.Module):
         )
 
         # Apply a final linear layer to get probabilities
-        probabilities = self.head(encoded_peptides)
+        logits = self.head(encoded_peptides)
 
-        return jax.nn.sigmoid(probabilities)  # Ensure probabilities are in [0, 1] range
+        return jnp.squeeze(logits, -1)  # Ensure probabilities are in [0, 1] range
