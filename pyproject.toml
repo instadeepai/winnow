@@ -23,6 +23,7 @@ dependencies = [
     "flax>=0.10.6",
     "ray[data, default]>=2.46.0",
     "py-spy>=0.4.0",
+    "scikit-learn>=1.6.1",
 ]
 
 [build-system]
