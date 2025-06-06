@@ -19,7 +19,7 @@ spec:
       count: 1
       resources:
         cpus: 24 # optional: number of GPUs wanted
-        ramRatio: 10 # total ram = ramRatio * cpus, mandatory (must be >= 2): RAM ratio wanted (in GB)
+        ramRatio: 2 # total ram = ramRatio * cpus, mandatory (must be >= 2): RAM ratio wanted (in GB)
         shmSizeGB: null
         accelerators:
           gpu:

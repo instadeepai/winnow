@@ -21,8 +21,8 @@ model:
   seed: 42
 training:
   num_epochs: 1
-  batch_size: 1
-  eval_batch_size: 1
+  batch_size: 8
+  eval_batch_size: 8
   learning_rate: 0.0001
   eval_frequency: 20
   patience: 20
