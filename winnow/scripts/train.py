@@ -1,3 +1,4 @@
+import os
 import hydra
 from omegaconf import DictConfig
 
@@ -31,9 +32,9 @@ def main(config: DictConfig):
     # Initialize Ray for distributed data processing 
     ray.init()
 
-    # Load the dataset from Parquet files
-    train_dataset = ray.data.read_parquet(config.data.train_path, override_num_blocks=1200)
-    val_dataset = ray.data.read_parquet(config.data.val_path, override_num_blocks=1200)
+    # Load the dataset from Parquet files   
+    train_dataset = ray.data.read_parquet(os.path.join(os.environ["AICHOR_INPUT_PATH"], config.data.train_path), override_num_blocks=1200)
+    val_dataset = ray.data.read_parquet(os.path.join(os.environ["AICHOR_INPUT_PATH"], config.data.val_path), override_num_blocks=1200)
 
     # Initialize model
     calibrator_config = CalibratorConfig(

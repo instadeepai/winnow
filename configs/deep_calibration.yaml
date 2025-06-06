@@ -1,6 +1,6 @@
 data:
-  train_path: 's3://int-winnow-p-df0e4efbe01b43db-inputs/train.parquet'
-  val_path: 's3://int-winnow-p-df0e4efbe01b43db-inputs/val.parquet'
+  train_path: 'train.parquet'
+  val_path: 'val.parquet'
 model:
   spectrum_encoder:
     dim_model: 256
