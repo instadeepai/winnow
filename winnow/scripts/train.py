@@ -31,18 +31,21 @@ jax.config.update("jax_platform_name", 'gpu')
 @hydra.main(version_base=None, config_path='../../configs', config_name='deep_calibration')
 def main(config: DictConfig):
     """ Main function to run the deep calibration training. """
-    # Initialize Ray for distributed data processing 
+    # Initialize Ray for distributed data processing
+    print('AICHOR_INPUT_PATH', os.environ["AICHOR_INPUT_PATH"])
+    print('AICHOR_S3_ENDPOINT', os.environ.get("AICHOR_S3_ENDPOINT", 'not found'))
+    print('S3_ENDPOINT', os.environ.get("S3_ENDPOINT", 'not found'))
     ray.init()
 
     # Load the dataset from Parquet files   
     train_dataset = ray.data.read_parquet(
         os.path.join(os.environ["AICHOR_INPUT_PATH"], config.data.train_path),
-        filesystem=S3FileSystem(endpoint_override=os.environ["AWS_ENDPOINT_URL"]),
+        filesystem=S3FileSystem(endpoint_override=os.environ["S3_ENDPOINT"]),
         override_num_blocks=1200
     )
     val_dataset = ray.data.read_parquet(
         os.path.join(os.environ["AICHOR_INPUT_PATH"], config.data.val_path),
-        filesystem=S3FileSystem(endpoint_override=os.environ["AWS_ENDPOINT_URL"]),
+        filesystem=S3FileSystem(endpoint_override=os.environ["S3_ENDPOINT"]),
         override_num_blocks=1200
     )
 
