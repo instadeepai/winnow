@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=https://instadeep.aichor.ai/schema/latest/manifest.schema.json
+kind: AIchorManifest
+apiVersion: 0.2.2
+name: test
+builder:
+  image: winnow-deep-calibration
+  dockerfile: Dockerfile
+  context: .
+
+spec:
+  operator: tf
+  image: winnow-deep-calibration
+  command: uv run python winnow/scripts/train.py
+  tensorboard:
+    enabled: true
+
+  types:
+    Worker: # UPDATE ME
+      count: 1
+      resources:
+        cpus: 24 # optional: number of GPUs wanted
+        ramRatio: 10 # total ram = ramRatio * cpus, mandatory (must be >= 2): RAM ratio wanted (in GB)
+        shmSizeGB: null
+        accelerators:
+          gpu:
+            count: 1
+            type: gpu
+            product: NVIDIA-H100-80GB-HBM3
