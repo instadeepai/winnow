@@ -23,6 +23,7 @@ from winnow.calibration.training.loggers import LoggingManager, SystemLogger
 from winnow.calibration.training.trainer import Trainer, TrainerConfig, MetricsManager
 
 jax.config.update("jax_debug_nans", True)
+jax.config.update("jax_platform_name", 'gpu')
 
 @hydra.main(version_base=None, config_path='../../configs', config_name='deep_calibration')
 def main(config: DictConfig):
@@ -31,9 +32,8 @@ def main(config: DictConfig):
     ray.init()
 
     # Load the dataset from Parquet files
-    data_loader = ray.data.read_parquet(config.data.path, override_num_blocks=1200)
-    train_dataset = data_loader.random_sample(fraction=config.data.train_fraction, seed=config.data.seed)
-    val_dataset = data_loader.random_sample(fraction=config.data.validation_fraction, seed=config.data.seed)
+    train_dataset = ray.data.read_parquet(config.data.train_path, override_num_blocks=1200)
+    val_dataset = ray.data.read_parquet(config.data.val_path, override_num_blocks=1200)
 
     # Initialize model
     calibrator_config = CalibratorConfig(

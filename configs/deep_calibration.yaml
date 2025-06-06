@@ -1,8 +1,6 @@
 data:
-  path: '/home/amandlamabona/data/winnow/processed/val.parquet'
-  train_fraction: 0.01
-  validation_fraction: 0.005
-  seed: 42
+  train_path: 's3://int-winnow-p-df0e4efbe01b43db-inputs/train.parquet'
+  val_path: 's3://int-winnow-p-df0e4efbe01b43db-inputs/val.parquet'
 model:
   spectrum_encoder:
     dim_model: 256
