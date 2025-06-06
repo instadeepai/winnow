@@ -1235,8 +1235,8 @@ wheels = [
 
 [[package]]
 name = "instanovo"
-version = "1.1.3"
-source = { git = "https://gitlab.com/instadeep/dtu-denovo-sequencing.git#ec5d1276afc486d8835eaa933f51efee9ee7f1a1" }
+version = "1.1.2"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "datasets" },
     { name = "gitpython" },
@@ -1261,6 +1261,10 @@ dependencies = [
     { name = "tqdm" },
     { name = "transfusion-asr" },
     { name = "typer" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/bb/18/0e786503c246c0ca9981599ad103949b85756ffa1ac9198100dc67918a0a/instanovo-1.1.2.tar.gz", hash = "sha256:dbe5f37de2df22552f8180124a95b7aa3e1aafad7c059036d24a16c9028b6f7a", size = 113034 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3c/be/c25767deff9232c48388cbe494d2bb10116ac4312278f7e3052d69b72f88/instanovo-1.1.2-py3-none-any.whl", hash = "sha256:3b22cf31309fcee97c833015d97322b34cbf7cfc9987d8666c51ee5fc817ccb0", size = 131286 },
 ]
 
 [[package]]
@@ -4995,7 +4999,7 @@ dev = [
 requires-dist = [
     { name = "altair", specifier = ">=5.5.0" },
     { name = "flax", specifier = ">=0.10.6" },
-    { name = "instanovo", git = "https://gitlab.com/instadeep/dtu-denovo-sequencing.git" },
+    { name = "instanovo", specifier = ">=1.1.1" },
     { name = "ipywidgets", specifier = ">=8.1.5" },
     { name = "jax", specifier = ">=0.5.2" },
     { name = "koinapy", specifier = ">=0.0.10" },
