@@ -12,6 +12,8 @@ import orbax.checkpoint as ocp
 
 import ray
 
+from pyarrow.fs import S3FileSystem
+
 from sklearn.metrics import roc_auc_score
 
 from winnow.calibration.training.data import tokenizer
@@ -33,8 +35,16 @@ def main(config: DictConfig):
     ray.init()
 
     # Load the dataset from Parquet files   
-    train_dataset = ray.data.read_parquet(os.path.join(os.environ["AICHOR_INPUT_PATH"], config.data.train_path), override_num_blocks=1200)
-    val_dataset = ray.data.read_parquet(os.path.join(os.environ["AICHOR_INPUT_PATH"], config.data.val_path), override_num_blocks=1200)
+    train_dataset = ray.data.read_parquet(
+        os.path.join(os.environ["AICHOR_INPUT_PATH"], config.data.train_path),
+        filesystem=S3FileSystem(endpoint_override=os.environ["AWS_ENDPOINT_URL"]),
+        override_num_blocks=1200
+    )
+    val_dataset = ray.data.read_parquet(
+        os.path.join(os.environ["AICHOR_INPUT_PATH"], config.data.val_path),
+        filesystem=S3FileSystem(endpoint_override=os.environ["AWS_ENDPOINT_URL"]),
+        override_num_blocks=1200
+    )
 
     # Initialize model
     calibrator_config = CalibratorConfig(
