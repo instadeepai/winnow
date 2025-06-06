@@ -12,4 +12,3 @@ __pycache__
 *.ipc
 *.pkl
 *.json
-*.yaml

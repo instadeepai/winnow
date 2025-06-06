@@ -1,0 +1,35 @@
+data:
+  path: '/home/amandlamabona/data/winnow/processed/val.parquet'
+  train_fraction: 0.01
+  validation_fraction: 0.005
+  seed: 42
+model:
+  spectrum_encoder:
+    dim_model: 256
+    num_heads: 8
+    dim_feedforward: 512
+    num_layers: 8
+    dropout_rate: 0.0
+  peptide_encoder:
+    dim_residue: 256
+    dim_modification: 256
+    dim_model: 256
+    num_self_heads: 8
+    num_condition_heads: 8
+    dim_feedforward: 512
+    num_layers: 8
+    max_len: 1000
+    dropout_rate: 0.0
+  seed: 42
+training:
+  num_epochs: 1
+  batch_size: 1
+  eval_batch_size: 1
+  learning_rate: 0.0001
+  eval_frequency: 20
+  patience: 20
+  num_peaks: 200
+logging:
+  log_file: 'logs/deep_calibration.log'
+checkpointing:
+  checkpoint_path: '/home/amandlamabona/winnow/checkpoints/deep'
