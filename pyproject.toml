@@ -36,6 +36,10 @@ packages = ["winnow"]
 dev = [
     "pre-commit>=4.1.0",
     "pytest>=8.3.5",
+    "ipykernel>=6.29.5",
+    "tensorboard-plugin-profile>=2.19.9",
+    "tensorflow>=2.18.1",
+    "python-dotenv>=1.1.0",
 ]
 
 cuda = [

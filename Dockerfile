@@ -26,7 +26,7 @@ RUN mkdir checkpoints
 RUN mkdir logs
 
 # Install project
-RUN uv sync --locked --group cuda
+RUN uv sync --locked --group cuda --group dev
 
 ENV XLA_PYTHON_CLIENT_PREALLOCATE=false
 
