@@ -84,8 +84,8 @@ def main(config: DictConfig):
         model=calibrator, optimizer=optimizer, logging_manager=logging_manager,
         checkpoint_manager=checkpoint_manager, metrics_manager=metrics_manager
     )
-
-    trainer.train(config=train_config, train_data=train_dataset, val_data=val_dataset)
+    with jax.profiler.trace('/app/logs/tensorboard'):
+        trainer.train(config=train_config, train_data=train_dataset, val_data=val_dataset)
 
 if __name__ == '__main__':
     main()
