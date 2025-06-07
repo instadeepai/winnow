@@ -22,7 +22,7 @@ from winnow.calibration.model.spectrum_encoder import SpectrumEncoderConfig
 from winnow.calibration.model.peptide_encoder import PeptideEncoderConfig
 from winnow.calibration.model.probability_calibrator import ProbabilityCalibrator, CalibratorConfig
 
-from winnow.calibration.training.loggers import LoggingManager, SystemLogger
+from winnow.calibration.training.loggers import LoggingManager, SystemLogger, NeptuneLogger
 from winnow.calibration.training.trainer import Trainer, TrainerConfig, MetricsManager
 
 jax.config.update("jax_debug_nans", True)
@@ -32,21 +32,18 @@ jax.config.update("jax_platform_name", 'gpu')
 def main(config: DictConfig):
     """ Main function to run the deep calibration training. """
     # Initialize Ray for distributed data processing
-    print('AICHOR_INPUT_PATH', os.environ["AICHOR_INPUT_PATH"])
-    print('AICHOR_S3_ENDPOINT', os.environ.get("AICHOR_S3_ENDPOINT", 'not found'))
-    print('S3_ENDPOINT', os.environ.get("S3_ENDPOINT", 'not found'))
     ray.init()
 
     # Load the dataset from Parquet files   
     train_dataset = ray.data.read_parquet(
-        os.path.join(os.environ["AICHOR_INPUT_PATH"], config.data.train_path),
-        filesystem=S3FileSystem(endpoint_override=os.environ["S3_ENDPOINT"]),
-        override_num_blocks=1200
+        paths=os.path.join(config.data.bucket_path, config.data.train_path),
+        filesystem=S3FileSystem(endpoint_override=os.environ["AWS_ENDPOINT_URL"]),
+        override_num_blocks=config.data.num_blocks
     )
     val_dataset = ray.data.read_parquet(
-        os.path.join(os.environ["AICHOR_INPUT_PATH"], config.data.val_path),
-        filesystem=S3FileSystem(endpoint_override=os.environ["S3_ENDPOINT"]),
-        override_num_blocks=1200
+        paths=os.path.join(config.data.bucket_path, config.data.val_path),
+        filesystem=S3FileSystem(endpoint_override=os.environ["AWS_ENDPOINT_URL"]),
+        override_num_blocks=config.data.num_blocks
     )
 
     # Initialize model
@@ -67,7 +64,11 @@ def main(config: DictConfig):
 
     # Initialize logging, metrics, and checkpoint managers
     logging_manager = LoggingManager(
-        loggers=[SystemLogger(log_file=config.logging.log_file)],
+        loggers=[
+            SystemLogger(log_file=config.logging.log_file),
+            NeptuneLogger(project_name=config.logging.neptune_project,
+                          api_token=os.environ["NEPTUNE_API_TOKEN"])
+        ],
     )
 
     metrics_manager = MetricsManager(
