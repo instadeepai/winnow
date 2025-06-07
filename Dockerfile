@@ -9,6 +9,7 @@ COPY --from=ghcr.io/astral-sh/uv:0.6.6 /uv /uvx /bin/
 # Install git
 RUN apt-get update && \
     apt-get install -y git && \
+    apt-get install -y tmux && \
     rm -rf /var/lib/apt/lists/*
 
 # Create virtual environment
