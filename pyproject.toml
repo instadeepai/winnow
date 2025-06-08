@@ -40,6 +40,7 @@ dev = [
     "tensorboard-plugin-profile>=2.19.9",
     "tensorflow>=2.18.1",
     "python-dotenv>=1.1.0",
+    "py-spy>=0.4.0",
 ]
 
 cuda = [

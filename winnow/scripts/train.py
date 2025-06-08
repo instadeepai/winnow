@@ -1,3 +1,4 @@
+import functools
 import os
 import hydra
 from omegaconf import DictConfig
@@ -16,7 +17,7 @@ from pyarrow.fs import S3FileSystem
 
 from sklearn.metrics import roc_auc_score
 
-from winnow.calibration.training.data import tokenizer
+from winnow.calibration.training.data import tokenizer, pad_batch_spectra
 
 from winnow.calibration.model.spectrum_encoder import SpectrumEncoderConfig
 from winnow.calibration.model.peptide_encoder import PeptideEncoderConfig
@@ -86,6 +87,8 @@ def main(config: DictConfig):
     )
     with jax.profiler.trace('/app/logs/tensorboard'):
         trainer.train(config=train_config, train_data=train_dataset, val_data=val_dataset)
+    if config.logging.ray_timeline_path:
+        ray.timeline(filename=config.logging.ray_timeline_path)
 
 if __name__ == '__main__':
     main()

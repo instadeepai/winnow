@@ -1,7 +1,7 @@
 data:
   bucket_path: 's3://winnow-g88rh'
-  train_path: 'transformer/train.parquet'
-  val_path: 'transformer/val.parquet'
+  train_path: 'transformer/val.parquet'
+  val_path: 'transformer/debug.parquet'
   num_blocks: 1200
 model:
   spectrum_encoder:
@@ -23,8 +23,8 @@ model:
   seed: 42
 training:
   num_epochs: 1
-  batch_size: 16
-  eval_batch_size: 16
+  batch_size: 8
+  eval_batch_size: 8
   learning_rate: 0.0001
   eval_frequency: 20
   patience: 20
@@ -32,5 +32,6 @@ training:
 logging:
   neptune_project: InstaDeep/OnTrack-77
   log_file: 'logs/deep_calibration.log'
+  ray_timeline_path: 'logs/ray_timeline_long.json'
 checkpointing:
   checkpoint_path: '/app/checkpoints/deep'
