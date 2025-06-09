@@ -42,7 +42,7 @@ df = pl.scan_parquet(
         "aws_secret_access_key": os.getenv("AWS_SECRET_ACCESS_KEY"),
         "aws_endpoint_url": os.getenv("AWS_ENDPOINT_URL"),
     }
-).limit(100).collect()
+).limit(1600).collect()
 
 ray.init()
 
