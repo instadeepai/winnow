@@ -1,6 +1,10 @@
+import os
 import typing
 
 import jax.numpy as jnp
+import polars as pl
+
+import ray
 
 from winnow.constants import MODIFICATIONS, RESIDUES
 from winnow.calibration.model.tokenizer import ModifiedPeptideTokenizer
@@ -9,6 +13,31 @@ tokenizer = ModifiedPeptideTokenizer(
     residues=RESIDUES,
     modifications=MODIFICATIONS,
 )
+
+class RayDataLoader:
+    def __init__(self, df: pl.DataFrame, collect_fn: typing.Callable):
+        self.df = df
+        self.data_length = df.select(pl.len()).item()
+        self.collect_fn = collect_fn
+        
+        def process_batch_ray(df: pl.DataFrame, batch_index: int, batch_size: int, num_peaks: int):
+            os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+            batch = df.slice(batch_index, batch_size).to_dicts()
+            keys = batch[0].keys()
+            return collect_fn({
+                key: [sample[key] for sample in batch]
+                for key in keys
+            }, num_peaks=num_peaks)
+        self.process_batch = ray.remote(process_batch_ray)
+
+    def iter_batches(self, batch_size: int, num_peaks: int):
+        ray_df = ray.put(self.df)
+        tasks = [self.process_batch.remote(ray_df, batch_index, batch_size, num_peaks)
+                 for batch_index in range(0, self.data_length, batch_size)]
+        while tasks:
+            ready, tasks = ray.wait(tasks)
+            for ready_task in ready:
+                yield ray.get(ready_task)
 
 def pad_batch_spectra(
     batch: typing.Dict[str, jnp.ndarray], num_peaks: int

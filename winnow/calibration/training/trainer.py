@@ -177,13 +177,7 @@ Trainer(
         step, evals_without_improvement, best_checkpoint_metric = 0, 0, float("-inf")
         for _ in tqdm(range(config.num_epochs), desc="Epochs"):
             for batch in tqdm(
-                train_data.iter_batches(
-                    prefetch_batches=20,
-                    batch_size=config.batch_size,
-                    _collate_fn=functools.partial(
-                        pad_batch_spectra, num_peaks=config.num_peaks
-                    ),  # type: ignore[arg-type]
-                ),
+                train_data.iter_batches(batch_size=config.batch_size, num_peaks=config.num_peaks),
                 desc="Batches",
             ):
                 mz_array = jnp.array(batch["mz_array"])
@@ -245,11 +239,7 @@ Trainer(
         # Collect predictions and targets
         predictions_list, label_list = [], []
         for batch in tqdm(
-            data.iter_batches(
-                prefetch_batches=20,
-                batch_size=batch_size,
-                _collate_fn=functools.partial(pad_batch_spectra, num_peaks=num_peaks),
-            ),
+            data.iter_batches(batch_size=batch_size, num_peaks=num_peaks),
             desc="Evaluating",
         ):
             # Convert batch data to JAX arrays

@@ -1,6 +1,6 @@
 data:
   bucket_path: 's3://winnow-g88rh'
-  train_path: 'transformer/val.parquet'
+  train_path: 'transformer/debug.parquet'
   val_path: 'transformer/debug.parquet'
   num_blocks: 1200
 model:
@@ -32,6 +32,6 @@ training:
 logging:
   neptune_project: InstaDeep/OnTrack-77
   log_file: 'logs/deep_calibration.log'
-  ray_timeline_path: 'logs/ray_timeline_long.json'
+  ray_timeline_path: 'logs/ray_timeline_data_loader.json'
 checkpointing:
   checkpoint_path: '/app/checkpoints/deep'

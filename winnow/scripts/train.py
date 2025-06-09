@@ -12,12 +12,15 @@ import optax
 import orbax.checkpoint as ocp
 
 import ray
+import polars as pl
 
 from pyarrow.fs import S3FileSystem
 
 from sklearn.metrics import roc_auc_score
 
-from winnow.calibration.training.data import tokenizer, pad_batch_spectra
+from winnow.calibration.training.data import (
+    tokenizer, RayDataLoader, pad_batch_spectra
+)
 
 from winnow.calibration.model.spectrum_encoder import SpectrumEncoderConfig
 from winnow.calibration.model.peptide_encoder import PeptideEncoderConfig
@@ -36,15 +39,27 @@ def main(config: DictConfig):
     ray.init()
 
     # Load the dataset from Parquet files   
-    train_dataset = ray.data.read_parquet(
-        paths=os.path.join(config.data.bucket_path, config.data.train_path),
-        filesystem=S3FileSystem(endpoint_override=os.environ["AWS_ENDPOINT_URL"]),
-        override_num_blocks=config.data.num_blocks
+    train_dataset = RayDataLoader(
+        df=pl.read_parquet(
+            os.path.join(config.data.bucket_path, config.data.train_path),
+            storage_options={
+                "aws_access_key_id": os.environ["AWS_ACCESS_KEY_ID"],
+                "aws_secret_access_key": os.environ["AWS_SECRET_ACCESS_KEY"],
+                "aws_endpoint_url": os.environ["AWS_ENDPOINT_URL"],
+            }
+        ),
+        collect_fn=pad_batch_spectra
     )
-    val_dataset = ray.data.read_parquet(
-        paths=os.path.join(config.data.bucket_path, config.data.val_path),
-        filesystem=S3FileSystem(endpoint_override=os.environ["AWS_ENDPOINT_URL"]),
-        override_num_blocks=config.data.num_blocks
+    val_dataset = RayDataLoader(
+        df=pl.read_parquet(
+            os.path.join(config.data.bucket_path, config.data.val_path),
+            storage_options={
+                "aws_access_key_id": os.environ["AWS_ACCESS_KEY_ID"],
+                "aws_secret_access_key": os.environ["AWS_SECRET_ACCESS_KEY"],
+                "aws_endpoint_url": os.environ["AWS_ENDPOINT_URL"],
+            }
+        ),
+        collect_fn=pad_batch_spectra
     )
 
     # Initialize model
