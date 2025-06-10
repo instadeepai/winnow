@@ -54,39 +54,7 @@ RESIDUE_MASSES: dict[str, float] = {
     "[UNIMOD:1]": 42.010565,  # Acetylation
 }
 
-RESIDUE_REMAPPING: dict[str, str] = {
-    "M(ox)": "M[UNIMOD:35]",  # Oxidation
-    "M(+15.99)": "M[UNIMOD:35]",
-    "S(p)": "S[UNIMOD:21]",  # Phosphorylation
-    "T(p)": "T[UNIMOD:21]",
-    "Y(p)": "Y[UNIMOD:21]",
-    "S(+79.97)": "S[UNIMOD:21]",
-    "T(+79.97)": "T[UNIMOD:21]",
-    "Y(+79.97)": "Y[UNIMOD:21]",
-    "Q(+0.98)": "Q[UNIMOD:7]",  # Deamidation
-    "N(+0.98)": "N[UNIMOD:7]",
-    "Q(+.98)": "Q[UNIMOD:7]",
-    "N(+.98)": "N[UNIMOD:7]",
-    "C(+57.02)": "C[UNIMOD:4]",  # Carboxyamidomethylation
-    "(+42.01)": "[UNIMOD:1]",  # Acetylation
-    "(+43.01)": "[UNIMOD:5]",  # Carbamylation
-    "(-17.03)": "[UNIMOD:385]",  # Loss of ammonia
-}
-
-INVALID_PROSIT_TOKENS: list = [
-    "\\+25.98",
-    "UNIMOD:7",
-    "UNIMOD:21",
-    "UNIMOD:1",
-    "UNIMOD:5",
-    "UNIMOD:385",
-    # Each C is also treated as Cysteine with carbamidomethylation in Prosit.
-]
-
-
-residue_set = ResidueSet(
-    residue_masses=RESIDUE_MASSES, residue_remapping=RESIDUE_REMAPPING
-)
+residue_set = ResidueSet(residue_masses=RESIDUE_MASSES)
 metrics = Metrics(residue_set=residue_set, isotope_error_range=[0, 1])
 
 
