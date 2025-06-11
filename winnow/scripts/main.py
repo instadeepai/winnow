@@ -8,6 +8,12 @@ from winnow.calibration.calibration_features import (
 )
 from winnow.calibration.calibrator import ProbabilityCalibrator
 from winnow.datasets.calibration_dataset import RESIDUE_MASSES, CalibrationDataset
+from winnow.datasets.data_loaders import (
+    InstaNovoDatasetLoader,
+    CasanovoDatasetLoader,
+    PointNovoDatasetLoader,
+    SavedDatasetLoader,
+)
 from winnow.fdr.nonparametric import NonParametricFDRControl
 from winnow.fdr.database_grounded import DatabaseGroundedFDRControl
 
@@ -38,7 +44,7 @@ class DataSource(Enum):
     winnow = "winnow"
     instanovo = "instanovo"
     pointnovo = "pointnovo"
-    mztab = "mztab"
+    casanovo = "casanovo"
 
 
 @dataclass
@@ -57,8 +63,8 @@ class InstaNovoDatasetConfig:
 
 
 @dataclass
-class MZTabDatasetConfig:
-    """Config for calibration datasets saved in MZTab format."""
+class CasanovoDatasetConfig:
+    """Config for calibration datasets saved in Casanovo format."""
 
     labelled_path: Path
     mgf_path: Path
@@ -116,39 +122,35 @@ def load_dataset(
             winnow_dataset_config = WinnowDatasetConfig(
                 **yaml.safe_load(dataset_config_file)
             )
-            dataset = CalibrationDataset.load(
-                data_dir=Path(winnow_dataset_config.data_dir)
-            )
+            dataset = SavedDatasetLoader().load(Path(winnow_dataset_config.data_dir))
         elif data_source is DataSource.instanovo:
             instanovo_dataset_config = InstaNovoDatasetConfig(
                 **yaml.safe_load(dataset_config_file)
             )
-            dataset = CalibrationDataset.from_predictions_csv(
-                beam_predictions_path=Path(
-                    instanovo_dataset_config.beam_predictions_path
-                ),
-                spectrum_path=Path(instanovo_dataset_config.spectrum_path),
+            dataset = InstaNovoDatasetLoader().load(
+                Path(instanovo_dataset_config.spectrum_path),
+                Path(instanovo_dataset_config.beam_predictions_path),
             )
-        elif data_source is DataSource.mztab:
-            mztab_dataset_config = MZTabDatasetConfig(
+        elif data_source is DataSource.casanovo:
+            casanovo_dataset_config = CasanovoDatasetConfig(
                 **yaml.safe_load(dataset_config_file)
             )
-            dataset = CalibrationDataset.from_predictions_mztab(
-                labelled_path=Path(mztab_dataset_config.labelled_path),
-                mgf_path=Path(mztab_dataset_config.mgf_path),
-                predictions_path=Path(mztab_dataset_config.predictions_path),
+            dataset = CasanovoDatasetLoader().load(
+                Path(casanovo_dataset_config.labelled_path),
+                Path(casanovo_dataset_config.mgf_path),
+                Path(casanovo_dataset_config.predictions_path),
             )
         elif data_source is DataSource.pointnovo:
             pointnovo_dataset_config = PointNovoDatasetConfig(
                 **yaml.safe_load(dataset_config_file)
             )
-            dataset = CalibrationDataset.from_pointnovo_predictions(
-                mgf_path=Path(pointnovo_dataset_config.mgf_path),
-                predictions_path=Path(pointnovo_dataset_config.predictions_path),
+            dataset = PointNovoDatasetLoader().load(
+                Path(pointnovo_dataset_config.mgf_path),
+                Path(pointnovo_dataset_config.predictions_path),
             )
         else:
             raise TypeError(
-                f"Data source was {data_source}. Only 'instanovo', 'mztab' and 'pointnovo' are supported."
+                f"Data source was {data_source}. Only 'instanovo', 'casanovo' and 'pointnovo' are supported."
             )
     return dataset
 
