@@ -14,14 +14,75 @@ import numpy as np
 import pandas as pd
 import polars as pl
 import polars.selectors as cs
+from pyteomics import mztab
+
+from instanovo.utils.residues import ResidueSet
+from instanovo.utils.metrics import Metrics
 
 from winnow.datasets.interfaces import DatasetLoader
 from winnow.datasets.calibration_dataset import (
     CalibrationDataset,
     ScoredSequence,
-    metrics,
-    INVALID_PROSIT_TOKENS,
 )
+
+RESIDUE_MASSES: dict[str, float] = {
+    "G": 57.021464,
+    "A": 71.037114,
+    "S": 87.032028,
+    "P": 97.052764,
+    "V": 99.068414,
+    "T": 101.047670,
+    "C": 103.009185,
+    "L": 113.084064,
+    "I": 113.084064,
+    "N": 114.042927,
+    "D": 115.026943,
+    "Q": 128.058578,
+    "K": 128.094963,
+    "E": 129.042593,
+    "M": 131.040485,
+    "H": 137.058912,
+    "F": 147.068414,
+    "R": 156.101111,
+    "Y": 163.063329,
+    "W": 186.079313,
+    # Modifications
+    "M[UNIMOD:35]": 147.035400,  # Oxidation
+    "N[UNIMOD:7]": 115.026943,  # Deamidation
+    "Q[UNIMOD:7]": 129.042594,  # Deamidation
+    "C[UNIMOD:4]": 160.030649,  # Carboxyamidomethylation
+    "S[UNIMOD:21]": 166.998028,  # Phosphorylation
+    "T[UNIMOD:21]": 181.01367,  # Phosphorylation
+    "Y[UNIMOD:21]": 243.029329,  # Phosphorylation
+    "[UNIMOD:385]": -17.026549,  # Ammonia Loss
+    "[UNIMOD:5]": 43.005814,  # Carbamylation
+    "[UNIMOD:1]": 42.010565,  # Acetylation
+}
+
+RESIDUE_REMAPPING: dict[str, str] = {
+    "M+15.995": "M[UNIMOD:35]",  # Oxidation
+    "Q+0.984": "Q[UNIMOD:7]",  # Deamidation
+    "N+0.984": "N[UNIMOD:7]",  # Deamidation
+    "+42.011": "[UNIMOD:1]",  # Acetylation
+    "+43.006": "[UNIMOD:5]",  # Carbamylation
+    "-17.027": "[UNIMOD:385]",  # Loss of ammonia
+    "C+57.021": "C[UNIMOD:4]",  # Carboxyamidomethylation
+    # "+43.006-17.027": "[UNIMOD:5][UNIMOD:385]",  # Carbamylation and Loss of ammonia
+}
+
+INVALID_PROSIT_TOKENS: list = [
+    "\\+25.98",
+    "UNIMOD:7",
+    "UNIMOD:21",
+    "UNIMOD:1",
+    "UNIMOD:5",
+    "UNIMOD:385",
+    # Each C is also treated as Cysteine with carbamidomethylation in Prosit.
+]
+
+
+residue_set = ResidueSet(residue_masses=RESIDUE_MASSES)
+metrics = Metrics(residue_set=residue_set, isotope_error_range=[0, 1])
 
 
 class InstaNovoDatasetLoader(DatasetLoader):
@@ -264,138 +325,366 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
 
 class CasanovoDatasetLoader(DatasetLoader):
-    """Loader for Casanovo predictions.
+    """Loader for Casanovo predictions."""
 
-    Note: This loader is not yet implemented.
-    """
+    def __init__(
+        self, residue_remapping: dict[str, str] | None = None, *args: Any, **kwargs: Any
+    ) -> None:
+        """Initialise the CasanovoDatasetLoader.
+
+        Args:
+            residue_remapping: Optional dictionary mapping modification strings to UNIMOD format.
+                If None, uses the default RESIDUE_REMAPPING.
+            *args: Additional positional arguments for parent class
+            **kwargs: Additional keyword arguments for parent class
+        """
+        super().__init__(*args, **kwargs)
+        self.residue_remapping = (
+            residue_remapping if residue_remapping is not None else RESIDUE_REMAPPING
+        )
+
+    @staticmethod
+    def _load_dataset(predictions_path: Path) -> pl.DataFrame:
+        """Load predictions from mzTab file.
+
+        Args:
+            predictions_path: Path to mzTab file containing predictions
+
+        Returns:
+            DataFrame containing predictions
+        """
+        predictions = mztab.MzTab(predictions_path).spectrum_match_table
+        return pl.DataFrame(predictions)
+
+    @staticmethod
+    def _load_spectrum_data(spectrum_path: Path | str) -> Tuple[pl.DataFrame, bool]:
+        """Load spectrum data from either a Parquet or IPC file.
+
+        Args:
+            spectrum_path: Path to spectrum data file
+
+        Returns:
+            DataFrame containing spectrum data
+        """
+        spectrum_path = Path(spectrum_path)
+        has_labels = False
+
+        if spectrum_path.suffix == ".parquet":
+            df = pl.read_parquet(spectrum_path)
+        elif spectrum_path.suffix == ".ipc":
+            df = pl.read_ipc(spectrum_path)
+        else:
+            raise ValueError(f"Unsupported file format: {spectrum_path.suffix}")
+
+        if "sequence" in df.columns:
+            has_labels = True
+
+        return df, has_labels
 
     def load(self, *args: Path, **kwargs: Any) -> CalibrationDataset:
         """Load a calibration dataset from Casanovo predictions.
 
         Args:
-            *args: Should contain labelled_path, mgf_path, and predictions_path in that order
+            *args: Should contain spectrum_path and predictions_path in that order
             **kwargs: Not used
 
         Returns:
-            CalibrationDataset: A dataset containing merged labelled data, spectra, and predictions.
+            CalibrationDataset: An instance of the CalibrationDataset class containing metadata and predictions.
 
         Raises:
-            NotImplementedError: This loader is not yet implemented.
             ValueError: If incorrect number of positional arguments provided
         """
-        if len(args) != 3:
+        if len(args) != 2:
             raise ValueError(
-                "Expected exactly 3 positional arguments: labelled_path, mgf_path, and predictions_path"
+                "Expected exactly 2 positional arguments: spectrum_path and predictions_path"
             )
-        raise NotImplementedError("CasanovoDatasetLoader is not yet implemented")
+        spectrum_path, predictions_path = args
 
-        # -- Load labelled data
-        # labelled = pl.read_ipc(labelled_path).to_pandas()
-        # labelled.rename({"spectrum_index": "scan"}, axis=1, inplace=True)
+        # Load and process spectrum data
+        spectrum_data, has_labels = self._load_spectrum_data(spectrum_path)
+        spectrum_data = self._process_spectrum_data(spectrum_data, has_labels)
 
-        # -- Load MGF
-        # raw_mgf = list(mgf.read(open(mgf_path)))
-        # for spectrum in raw_mgf:
-        #     spectrum["scan"] = int(
-        #         spectrum["params"]["title"].replace('"', "").split("scan=")[-1]
-        #     )
+        # Load and process predictions
+        predictions = self._load_dataset(predictions_path)
+        predictions = self._process_predictions(predictions)
+        predictions = self._tokenize_predictions(predictions)
 
-        # -- Load predictions
-        # predictions = mztab.MzTab(predictions_path).spectrum_match_table
-        # predictions["index"] = predictions["spectra_ref"].apply(
-        #     lambda index: int(index.split("=")[-1])
-        # )
-        # predictions = predictions.set_index("index", drop=False)
-        # predictions["scan"] = predictions["index"].apply(
-        #     lambda index: raw_mgf[index]["scan"]
-        # )
+        # Filter out invalid Prosit tokens before getting top predictions
+        predictions = self._filter_invalid_prosit_tokens(predictions)
 
-        # Process peptide sequences
-        # predictions["sequence"] = predictions["sequence"].apply(
-        #     lambda sequence: sequence.replace("M+15.995", "M(ox)")
-        #     .replace("C+57.021", "C")
-        #     .replace("N+0.984", "N(+.98)")
-        #     .replace("Q+0.984", "Q(+.98)")
-        # )
+        # Get valid spectra_refs after filtering
+        valid_spectra = predictions.select("spectra_ref").unique()
 
-        # Merge labelled data with predictions
-        # predictions = pd.merge(labelled, predictions, on="scan")
-        # columns = [
-        #     "scan",
-        #     "mz_array",
-        #     "intensity_array",
-        #     "charge",
-        #     "retention_time",
-        #     "precursor_mass",
-        #     "Sequence",
-        #     "modified_sequence",
-        #     "sequence",
-        #     "search_engine_score[1]",
-        # ]
-        # predictions = predictions[columns]
-        # predictions.rename(
-        #     {
-        #         "retention_time": "retention_time",
-        #         "Sequence": "peptide",
-        #         "sequence": "prediction",
-        #         "search_engine_score[1]": "confidence",
-        #         "charge": "precursor_charge",
-        #     },
-        #     axis=1,
-        #     inplace=True,
-        # )
+        # Create beam predictions
+        beam_predictions = self._create_beam_predictions(predictions, valid_spectra)
 
-        # Filter invalid sequences
-        # predictions = predictions[
-        #     predictions["prediction"].apply(
-        #         lambda peptide: not (peptide.startswith("+") or peptide.startswith("-"))
-        #     )
-        # ]
+        # Get top predictions for metadata
+        top_predictions = self._get_top_predictions(predictions)
 
-        # Normalise sequences
-        # predictions["peptide"] = predictions["peptide"].apply(
-        #     lambda peptide: peptide.replace("L", "I")
-        #     if isinstance(peptide, str)
-        #     else peptide
-        # )
-        # predictions["prediction"] = predictions["prediction"].apply(
-        #     lambda peptide: peptide.replace("L", "I")
-        #     if isinstance(peptide, str)
-        #     else peptide
-        # )
+        # Merge data and compute statistics
+        metadata = self._merge_data(spectrum_data, top_predictions)
+        metadata = self._evaluate_predictions(metadata, has_labels)
 
-        # Tokenise sequences
-        # predictions["peptide"] = predictions["peptide"].apply(
-        #     lambda peptide: re.split(r"(?<=.)(?=[A-Z])", peptide)
-        # )
-        # predictions["prediction"] = predictions["prediction"].apply(
-        #     lambda peptide: re.split(r"(?<=.)(?=[A-Z])", peptide)
-        # )
+        # Convert to pandas and ensure prediction column is a list
+        metadata_pd = metadata.to_pandas()
+        metadata_pd["prediction"] = metadata_pd["prediction"].apply(
+            lambda x: x.tolist() if isinstance(x, np.ndarray) else x
+        )
 
-        # Compute match statistics
-        # predictions["num_matches"] = predictions.apply(
-        #     lambda row: (
-        #         metrics._novor_match(row["peptide"], row["prediction"])
-        #         if not (
-        #             isinstance(row["peptide"], float)
-        #             or isinstance(row["prediction"], float)
-        #         )
-        #         else 0
-        #     ),
-        #     axis=1,
-        # )
-        # predictions["correct"] = predictions.apply(
-        #     lambda row: (
-        #         row["num_matches"] == len(row["peptide"]) == len(row["prediction"])
-        #         if not (
-        #             isinstance(row["peptide"], float)
-        #             or isinstance(row["prediction"], float)
-        #         )
-        #         else False
-        #     ),
-        #     axis=1,
-        # )
-        # return CalibrationDataset(metadata=predictions, predictions=[None] * len(predictions))
+        return CalibrationDataset(metadata=metadata_pd, predictions=beam_predictions)
+
+    def _filter_invalid_prosit_tokens(self, predictions: pl.DataFrame) -> pl.DataFrame:
+        """Filter out predictions containing invalid Prosit tokens.
+
+        Args:
+            predictions: DataFrame containing predictions
+
+        Returns:
+            DataFrame with only valid predictions, filtering out entire spectra if any
+            of their predictions contain invalid tokens
+        """
+        # Create a mask for each spectrum indicating if it has any invalid predictions
+        invalid_spectra = (
+            predictions.group_by("spectra_ref")
+            .agg(
+                [
+                    # Check for invalid PTMs
+                    pl.col("prediction")
+                    .list.eval(
+                        pl.element().str.contains("|".join(INVALID_PROSIT_TOKENS))
+                    )
+                    .list.any()
+                    .slice(0, 2)
+                    .any()
+                    .alias("has_invalid_tokens"),
+                    # Check for unmodified Cysteine
+                    pl.col("prediction")
+                    .list.eval(pl.element().eq("C"))
+                    .list.any()
+                    .slice(0, 2)
+                    .any()
+                    .alias("has_unmodified_cys"),
+                ]
+            )
+            .filter(pl.col("has_invalid_tokens") | pl.col("has_unmodified_cys"))
+            .select("spectra_ref")
+        )
+
+        # Filter out all predictions for spectra that have any invalid predictions
+        return predictions.join(invalid_spectra, on="spectra_ref", how="anti")
+
+    def _create_beam_predictions(
+        self, predictions: pl.DataFrame, valid_spectra: pl.DataFrame
+    ) -> List[Optional[List[ScoredSequence]]]:
+        """Create beam predictions from Casanovo predictions.
+
+        Args:
+            predictions: DataFrame containing predictions
+            valid_spectra: DataFrame containing valid spectra
+        Returns:
+            List of beam predictions
+        """
+        # Create ScoredSequence objects for each spectrum's predictions
+        beam_predictions = []
+        for spectrum_ref in valid_spectra.get_column("spectra_ref"):
+            # Get all predictions for this spectrum, sorted by confidence
+            spectrum_preds = predictions.filter(pl.col("spectra_ref") == spectrum_ref)
+            spectrum_preds = spectrum_preds.sort("confidence", descending=True)
+
+            # Convert to ScoredSequence objects
+            scored_sequences = []
+            for row in spectrum_preds.iter_rows(named=True):
+                scored_sequences.append(
+                    ScoredSequence(
+                        sequence=row["prediction"],
+                        mass_error=None,  # Casanovo doesn't provide mass error
+                        sequence_log_probability=row["confidence"],
+                        token_log_probabilities=row["token_scores"],
+                    )
+                )
+            beam_predictions.append(scored_sequences if scored_sequences else None)
+        return beam_predictions
+
+    def _map_modifications(self, sequence: str) -> str:
+        """Map modifications to UNIMOD."""
+        for mod, unimod in self.residue_remapping.items():
+            sequence = sequence.replace(mod, unimod)
+        return sequence
+
+    def _process_predictions(self, predictions: pl.DataFrame) -> pl.DataFrame:
+        """Process raw predictions into a standardized format.
+
+        Args:
+            predictions: Raw predictions from mzTab file
+
+        Returns:
+            Processed predictions with standardized columns
+        """
+        return predictions.with_columns(
+            [
+                # Extract spectrum index
+                pl.col("spectra_ref")
+                .str.extract(r"index=(\d+)")
+                .cast(pl.Int64)
+                .alias("index"),
+                # Replace L with I
+                pl.col("sequence")
+                .str.replace("L", "I")
+                .alias("prediction_untokenised"),
+                pl.col("search_engine_score[1]").alias("confidence"),
+                # Split scores into tokens
+                pl.col("opt_ms_run[1]_aa_scores")
+                .str.split(",")
+                .cast(pl.List(pl.Float64))
+                .alias("token_scores"),
+            ]
+        ).drop(["search_engine_score[1]", "opt_ms_run[1]_aa_scores", "sequence"])
+
+    def _tokenize_predictions(self, predictions: pl.DataFrame) -> pl.DataFrame:
+        """Tokenize peptide predictions and map modifications.
+
+        Args:
+            predictions: Processed predictions
+
+        Returns:
+            Predictions with tokenized sequences
+        """
+        return predictions.with_columns(
+            [
+                # First map modifications to UNIMOD format
+                pl.col("prediction_untokenised")
+                .map_elements(self._map_modifications, return_dtype=pl.Utf8)
+                .alias("prediction"),
+            ]
+        ).with_columns(
+            [
+                # Then split into amino acid tokens
+                pl.col("prediction")
+                .map_elements(metrics._split_peptide, return_dtype=pl.List(pl.Utf8))
+                .alias("prediction"),
+            ]
+        )
+
+    def _get_top_predictions(self, predictions: pl.DataFrame) -> pl.DataFrame:
+        """Get highest scoring prediction for each spectrum.
+
+        Args:
+            predictions: Tokenized predictions
+
+        Returns:
+            DataFrame containing only the highest scoring prediction per spectrum
+        """
+        return predictions.group_by("spectra_ref").agg(
+            pl.col("*").sort_by("confidence", descending=True).first()
+        )
+
+    def _process_spectrum_data(
+        self, spectrum_data: pl.DataFrame, has_labels: bool
+    ) -> pl.DataFrame:
+        """Process spectrum data into standardized format.
+
+        Args:
+            spectrum_data: Raw spectrum data
+
+        Returns:
+            Processed spectrum data with standardised columns
+        """
+        if has_labels:
+            spectrum_data = spectrum_data.with_columns(
+                # Replace L with I
+                pl.col("sequence").str.replace("L", "I").alias("sequence_untokenised")
+            )
+            spectrum_data = spectrum_data.with_columns(
+                pl.col("sequence_untokenised")
+                .map_elements(metrics._split_peptide, return_dtype=pl.List(pl.Utf8))
+                .alias("sequence")
+            )
+        return spectrum_data
+
+    def _merge_data(
+        self, spectrum_data: pl.DataFrame, predictions: pl.DataFrame
+    ) -> pl.DataFrame:
+        """Merge spectrum data with top prediction for each spectrum.
+
+        Args:
+            spectrum_data: Processed spectrum data
+            predictions: Top predictions for each spectrum
+
+        Returns:
+            Merged DataFrame containing both spectrum data and predictions
+        """
+        return (
+            spectrum_data.with_row_index()
+            .join(predictions, left_on="index", right_on="index", how="inner")
+            .drop("index")
+        )
+
+    def _evaluate_predictions(
+        self, metadata: pl.DataFrame, has_labels: bool
+    ) -> pl.DataFrame:
+        """Compute match statistics between predictions and ground truth.
+
+        Args:
+            metadata: Merged data containing both predictions and ground truth
+            has_labels: Whether the dataset has ground truth labels
+
+        Returns:
+            DataFrame with added match statistics
+        """
+        # First check validity of predictions and peptides
+        metadata = metadata.with_columns(
+            [
+                # Check if prediction is a valid list of amino acids
+                pl.col("prediction")
+                .map_elements(lambda x: isinstance(x, list), return_dtype=pl.Boolean)
+                .alias("valid_prediction"),
+            ]
+        )
+
+        if has_labels:
+            metadata = metadata.with_columns(
+                [
+                    # Check if peptide is a valid list of amino acids
+                    pl.col("sequence")
+                    .map_elements(
+                        lambda x: isinstance(x, list), return_dtype=pl.Boolean
+                    )
+                    .alias("valid_peptide"),
+                ]
+            )
+
+        # Then compute match statistics
+        return metadata.with_columns(
+            [
+                # Compute number of matching amino acids
+                pl.struct(["sequence", "prediction"])
+                .map_elements(
+                    lambda row: metrics._novor_match(row["sequence"], row["prediction"])
+                    if isinstance(row["sequence"], list)
+                    and isinstance(row["prediction"], list)
+                    else 0,
+                    return_dtype=pl.Int64,
+                )
+                .alias("num_matches"),
+            ]
+        ).with_columns(
+            [
+                # Compute whether prediction is completely correct
+                pl.struct(["sequence", "prediction", "num_matches"])
+                .map_elements(
+                    lambda row: (
+                        row["num_matches"]
+                        == len(row["sequence"])
+                        == len(row["prediction"])
+                        if isinstance(row["sequence"], list)
+                        and isinstance(row["prediction"], list)
+                        else False
+                    ),
+                    return_dtype=pl.Boolean,
+                )
+                .alias("correct")
+            ]
+        )
 
 
 class PointNovoDatasetLoader(DatasetLoader):
