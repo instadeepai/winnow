@@ -11,12 +11,12 @@ builder:
 spec:
   debug:
       vscode:
-        enabled: false # required
+        enabled: true # required
         path: "/aichor/code" # Optional, defaults to "code". Refer the absolute path of the binary if not findable in $PATH
         provider: "github" # Optional, vscode tunnel provider. Options are "github" or "microsoft", defaults to "github"
   operator: tf
   image: winnow
-  command: make set-ceph-credentials && make train-general-model
+  command: make set-ceph-credentials && make set-gcp-credentials
 
   tensorboard: # optional, disabled by default
     enabled: false
@@ -25,7 +25,7 @@ spec:
     Worker:
       count: 1
       resources:
-        cpus: 8
+        cpus: 4
         ramRatio: 8 # >= 2
 
         accelerators:
