@@ -17,7 +17,7 @@ import polars as pl
 from sklearn.metrics import roc_auc_score
 
 from winnow.calibration.training.data import (
-    tokenizer, RayActorDataLoader, pad_batch_spectra
+    tokenizer#, RayActorDataLoader, pad_batch_spectra
 )
 
 from winnow.calibration.model.spectrum_encoder import SpectrumEncoderConfig
@@ -50,14 +50,9 @@ def main(config: DictConfig):
             pl.col('preds').map_elements(
                 lambda sequence: len(tokenizer.tokenize(sequence)[0])
             ).alias('preds_length')
-        ).filter(pl.col('preds_length') < config.data.max_length)
+        ).filter(pl.col('preds_length') < config.training.max_length)
     print("Length of train_df after filtering:", len(train_df))
-    train_dataset = RayActorDataLoader(
-        df=train_df,
-        collect_fn=pad_batch_spectra,
-        num_actors=config.data.num_actors,
-        max_length=config.data.max_length
-    )
+    train_dataset = ray.data.from_arrow(train_df.to_arrow())
 
     val_df = pl.read_parquet(
             os.path.join(config.data.bucket_path, config.data.val_path),
@@ -72,14 +67,9 @@ def main(config: DictConfig):
             pl.col('preds').map_elements(
                 lambda sequence: len(tokenizer.tokenize(sequence)[0])
             ).alias('preds_length')
-        ).filter(pl.col('preds_length') < config.data.max_length)
+        ).filter(pl.col('preds_length') < config.training.max_length)
     print("Length of val_df after filtering:", len(val_df))
-    val_dataset = RayActorDataLoader(
-        df=val_df,
-        collect_fn=pad_batch_spectra,
-        num_actors=config.data.num_actors,
-        max_length=config.data.max_length
-    )
+    val_dataset = ray.data.from_arrow(val_df.to_arrow())
 
     # Initialize model
     calibrator_config = CalibratorConfig(

@@ -2,6 +2,7 @@
 
 import dataclasses
 from typing import Callable, Dict
+import functools
 
 import jax
 import jax.numpy as jnp
@@ -82,7 +83,7 @@ class TrainerConfig:
     eval_batch_size: int
     patience: int
     num_peaks: int
-
+    max_length: int
 
 class Trainer:
     """Trainer that trains a model."""
@@ -203,7 +204,14 @@ Trainer(
         step, evals_without_improvement, best_checkpoint_metric = 0, 0, float("-inf")
         for _ in tqdm(range(config.num_epochs), desc="Epochs"):
             for batch in tqdm(
-                train_data.iter_batches(batch_size=config.batch_size, num_peaks=config.num_peaks),
+                train_data.iter_batches(
+                    batch_size=config.batch_size,
+                    _collate_fn=functools.partial(
+                        pad_batch_spectra,
+                        num_peaks=config.num_peaks,
+                        max_length=config.max_length,
+                    ),
+                ),
                 desc="Batches",
             ):
                 mz_array = jax.device_put(jnp.array(batch["mz_array"]), device=jax.devices("gpu")[0])
@@ -230,6 +238,7 @@ Trainer(
                     checkpoint_metric = self.evaluate(
                         data=val_data,
                         num_peaks=config.num_peaks,
+                        max_length=config.max_length,
                         batch_size=config.eval_batch_size,
                         step=step,
                     )
@@ -251,7 +260,7 @@ Trainer(
         )
 
     def evaluate(
-        self, data: Dataset, num_peaks: int, batch_size: int, step: int
+        self, data: Dataset, num_peaks: int, batch_size: int, step: int, max_length: int
     ) -> float:
         """Evaluate the model.
 
@@ -264,7 +273,12 @@ Trainer(
         # Collect predictions and targets
         predictions_list, label_list = [], []
         for batch in tqdm(
-            data.iter_batches(batch_size=batch_size, num_peaks=num_peaks),
+            data.iter_batches(
+                batch_size=batch_size,
+                _collate_fn=functools.partial(
+                    pad_batch_spectra, num_peaks=num_peaks, max_length=max_length
+                )
+            ),
             desc="Evaluating",
         ):
             # Convert batch data to JAX arrays
