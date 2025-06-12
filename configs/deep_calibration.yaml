@@ -28,7 +28,7 @@ training:
   batch_size: 16
   eval_batch_size: 16
   learning_rate: 0.0001
-  eval_frequency: 20
+  eval_frequency: 200
   patience: 20
   num_peaks: 200
 logging:
