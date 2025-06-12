@@ -26,7 +26,7 @@ training:
   num_epochs: 10
   batch_size: 256
   eval_batch_size: 256
-  learning_rate: 0.0001
+  learning_rate: 0.001
   eval_frequency: 500
   patience: 20
   num_peaks: 200
