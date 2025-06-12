@@ -10,7 +10,7 @@ builder:
 spec:
   operator: tf
   image: winnow-deep-calibration
-  command: uv run python winnow/scripts/test_polars_dataloading.py
+  command: uv run python winnow/scripts/train.py
   tensorboard:
     enabled: true
 
