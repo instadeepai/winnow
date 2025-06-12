@@ -14,7 +14,7 @@ class ModifiedPeptideTokenizer:
             modifications: Tuple of modification identifiers (e.g., ('[UNIMOD:4]', '[UNIMOD:35]', ...)).
         """
         # Define vocabularies
-        self.residue_vocabulary = residues + ("[PAD]",)
+        self.residue_vocabulary = residues + ("", "[PAD]")
         self.residue_pad_index = len(self.residue_vocabulary) - 1
 
         self.modifications_vocabulary = modifications + ("", "[PAD]")
@@ -41,11 +41,58 @@ class ModifiedPeptideTokenizer:
             correspond to the modifications (or empty string if no modification).
         """
         residue_indices, modification_indices = [], []
-        for residue, modification in re.findall(
-            r"([A-Z])(\[UNIMOD:[0-9]+\])?", peptide
-        ):
-            residue_indices.append(self.residues_to_indices[residue])
-            modification_indices.append(self.modifications_to_indices[modification])
+        i = 0
+        while i < len(peptide):
+            residue = ""
+            modification = ""
+
+            # Case 1: Amino Acid Residue
+            if "A" <= peptide[i] <= "Z":
+                residue = peptide[i]
+                i += 1
+                # Check for a following modification
+                if i < len(peptide) and peptide[i] == "[":
+                    match = re.match(r"(\[.+?\])", peptide[i:])
+                    if match:
+                        modification = match.group(1)
+                        i += len(modification)
+
+            # Case 2: Modification without a preceding residue
+            elif peptide[i] == "[":
+                match = re.match(r"(\[.+?\])", peptide[i:])
+                if match:
+                    # Residue is empty string
+                    modification = match.group(1)
+                    i += len(modification)
+                else:
+                    # Not a valid modification tag, raise an exception
+                    raise ValueError(
+                        f"Invalid peptide sequence: unmatched '[' at position {i} in '{peptide}'"
+                    )
+            else:
+                # Unrecognized character, raise an exception
+                raise ValueError(
+                    f"Invalid character in peptide: '{peptide[i]}' at position {i} in '{peptide}'"
+                )
+
+            try:
+                residue_indices.append(self.residues_to_indices[residue])
+            except KeyError:
+                print(
+                    f"Residue '{residue}' not found in vocabulary. Sequence: {peptide}"
+                )
+                residue_indices.append(self.residue_pad_index)
+
+            try:
+                modification_indices.append(
+                    self.modifications_to_indices[modification]
+                )
+            except KeyError:
+                print(
+                    f"Modification '{modification}' not found in vocabulary. Sequence: {peptide}"
+                )
+                modification_indices.append(self.modifications_to_indices[""])
+
         assert len(residue_indices) == len(modification_indices)
         return residue_indices, modification_indices
 
@@ -92,7 +139,7 @@ class ModifiedPeptideTokenizer:
         return peptide
 
     def pad_tokenize(
-        self, peptides: list[str]
+        self, peptides: list[str], max_length: int
     ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         """Tokenize a list of modified peptides and pad them to the same length.
 
@@ -120,9 +167,10 @@ class ModifiedPeptideTokenizer:
             residue_indices, modification_indices = self.tokenize(peptide=peptide)
             residues_array.append(jnp.array(residue_indices, dtype=int))
             modifications_array.append(jnp.array(modification_indices, dtype=int))
+            if len(residue_indices) >= max_length:
+                print(f"Peptide {peptide} is longer than {max_length} with residue indices {residue_indices}.")
             lengths.append(len(residue_indices))
 
-        max_length = max(lengths)
         residues_array = jnp.stack(
             [
                 jnp.pad(

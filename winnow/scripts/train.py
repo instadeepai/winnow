@@ -14,12 +14,10 @@ import orbax.checkpoint as ocp
 import ray
 import polars as pl
 
-from pyarrow.fs import S3FileSystem
-
 from sklearn.metrics import roc_auc_score
 
 from winnow.calibration.training.data import (
-    tokenizer, RayDataLoader, pad_batch_spectra
+    tokenizer, RayActorDataLoader, pad_batch_spectra
 )
 
 from winnow.calibration.model.spectrum_encoder import SpectrumEncoderConfig
@@ -39,27 +37,48 @@ def main(config: DictConfig):
     ray.init()
 
     # Load the dataset from Parquet files   
-    train_dataset = RayDataLoader(
-        df=pl.read_parquet(
+    train_df = pl.read_parquet(
             os.path.join(config.data.bucket_path, config.data.train_path),
             storage_options={
                 "aws_access_key_id": os.environ["AWS_ACCESS_KEY_ID"],
                 "aws_secret_access_key": os.environ["AWS_SECRET_ACCESS_KEY"],
                 "aws_endpoint_url": os.environ["AWS_ENDPOINT_URL"],
             }
-        ),
-        collect_fn=pad_batch_spectra
+        )
+    print("Length of train_df:", len(train_df))
+    train_df = train_df.with_columns(
+            pl.col('preds').map_elements(
+                lambda sequence: len(tokenizer.tokenize(sequence)[0])
+            ).alias('preds_length')
+        ).filter(pl.col('preds_length') < config.data.max_length)
+    print("Length of train_df after filtering:", len(train_df))
+    train_dataset = RayActorDataLoader(
+        df=train_df,
+        collect_fn=pad_batch_spectra,
+        num_actors=config.data.num_actors,
+        max_length=config.data.max_length
     )
-    val_dataset = RayDataLoader(
-        df=pl.read_parquet(
+
+    val_df = pl.read_parquet(
             os.path.join(config.data.bucket_path, config.data.val_path),
             storage_options={
                 "aws_access_key_id": os.environ["AWS_ACCESS_KEY_ID"],
                 "aws_secret_access_key": os.environ["AWS_SECRET_ACCESS_KEY"],
                 "aws_endpoint_url": os.environ["AWS_ENDPOINT_URL"],
             }
-        ),
-        collect_fn=pad_batch_spectra
+    )
+    print("Length of val_df:", len(val_df))
+    val_df = val_df.with_columns(
+            pl.col('preds').map_elements(
+                lambda sequence: len(tokenizer.tokenize(sequence)[0])
+            ).alias('preds_length')
+        ).filter(pl.col('preds_length') < config.data.max_length)
+    print("Length of val_df after filtering:", len(val_df))
+    val_dataset = RayActorDataLoader(
+        df=val_df,
+        collect_fn=pad_batch_spectra,
+        num_actors=config.data.num_actors,
+        max_length=config.data.max_length
     )
 
     # Initialize model
@@ -100,8 +119,7 @@ def main(config: DictConfig):
         model=calibrator, optimizer=optimizer, logging_manager=logging_manager,
         checkpoint_manager=checkpoint_manager, metrics_manager=metrics_manager
     )
-    with jax.profiler.trace('/app/logs/tensorboard'):
-        trainer.train(config=train_config, train_data=train_dataset, val_data=val_dataset)
+    trainer.train(config=train_config, train_data=train_dataset, val_data=val_dataset)
     if config.logging.ray_timeline_path:
         ray.timeline(filename=config.logging.ray_timeline_path)
 

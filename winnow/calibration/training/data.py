@@ -15,10 +15,11 @@ tokenizer = ModifiedPeptideTokenizer(
 )
 
 class RayDataLoader:
-    def __init__(self, df: pl.DataFrame, collect_fn: typing.Callable):
+    def __init__(self, df: pl.DataFrame, collect_fn: typing.Callable, max_length: int):
         self.df = df
         self.data_length = df.select(pl.len()).item()
         self.collect_fn = collect_fn
+        self.max_length = max_length
         
         def process_batch_ray(df: pl.DataFrame, batch_index: int, batch_size: int, num_peaks: int):
             os.environ["CUDA_VISIBLE_DEVICES"] = "0"
@@ -27,7 +28,7 @@ class RayDataLoader:
             return collect_fn({
                 key: [sample[key] for sample in batch]
                 for key in keys
-            }, num_peaks=num_peaks)
+            }, num_peaks=num_peaks, max_length=max_length)
         self.process_batch = ray.remote(process_batch_ray)
 
     def iter_batches(self, batch_size: int, num_peaks: int):
@@ -39,14 +40,49 @@ class RayDataLoader:
             for ready_task in ready:
                 yield ray.get(ready_task)
 
+class RayActorDataLoader:
+    def __init__(self, df: pl.DataFrame, collect_fn: typing.Callable, num_actors: int, max_length: int):
+        self.df = df
+        self.collect_fn = collect_fn
+        self.num_actors = num_actors
+        self.max_length = max_length
+
+    def iter_batches(self, batch_size: int, num_peaks: int):
+        data_length = self.df.select(pl.len()).item()
+        df_ref = ray.put(self.df)
+        actor_pool = ray.util.ActorPool([
+            BatchProcessor.remote(batch_size, num_peaks, self.collect_fn, self.max_length   )
+            for _ in range(self.num_actors)
+        ])
+        return actor_pool.map_unordered(
+            lambda actor, batch_index: actor.process_batch.remote(df_ref, batch_index),
+            range(0, data_length, batch_size)
+        )
+
+@ray.remote
+class BatchProcessor:
+    def __init__(self, batch_size: int, num_peaks: int, collect_fn: typing.Callable, max_length: int):
+        self.batch_size = batch_size
+        self.num_peaks = num_peaks
+        self.collect_fn = collect_fn
+        self.max_length = max_length
+    
+    def process_batch(self, df: pl.DataFrame, batch_index: int):
+        os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+        batch = df.slice(batch_index, self.batch_size).to_dicts()
+        return self.collect_fn({
+            key: [sample[key] for sample in batch]
+            for key in batch[0].keys()
+        }, num_peaks=self.num_peaks, max_length=self.max_length)
+
 def pad_batch_spectra(
-    batch: typing.Dict[str, jnp.ndarray], num_peaks: int
+    batch: typing.Dict[str, jnp.ndarray], num_peaks: int, max_length: int
 ) -> typing.Dict[str, jnp.ndarray]:
     # Initialize batch variables
     mz_list, intensities_list, length_list = [], [], []
 
     # Pad batch
-    for mz_array, intensities_array in list(zip(batch['mz_array'], batch['intensity_array'])):
+    for mz_array, intensities_array in zip(batch['mz_array'], batch['intensity_array']):
         # Coerce spectra into jax arrays
         local_mzs = jnp.array(mz_array)
         local_intensities = jnp.array(intensities_array)
@@ -77,5 +113,7 @@ def pad_batch_spectra(
     batch['spectrum_mask'] = jnp.arange(0, num_peaks).reshape(1, -1) < length_array.reshape(-1, 1)
 
     # Batch peptides
-    batch['residues_ids'], batch['modifications_ids'], batch['peptide_mask'] = tokenizer.pad_tokenize(peptides=batch['sequence'])
+    (
+        batch['residues_ids'], batch['modifications_ids'], batch['peptide_mask']
+    ) = tokenizer.pad_tokenize(peptides=batch['preds'], max_length=max_length)
     return batch
