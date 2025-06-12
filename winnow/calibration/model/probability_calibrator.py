@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-
 import jax.numpy as jnp
 from flax import nnx
 
@@ -70,8 +69,6 @@ class ProbabilityCalibrator(nnx.Module):
             condition_embedding=encoded_spectra,
             condition_mask=spectrum_mask,
         )
-
         # Apply a final linear layer to get probabilities
         logits = self.head(encoded_peptides)
-
         return jnp.squeeze(logits, -1)  # Ensure probabilities are in [0, 1] range
