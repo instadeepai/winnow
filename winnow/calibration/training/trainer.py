@@ -1,7 +1,6 @@
 """Interfaces for the Trainer."""
 
 import dataclasses
-import functools
 from typing import Callable, Dict
 
 import jax
@@ -101,7 +100,8 @@ class Trainer:
         self.logging_manager = logging_manager
         self.checkpoint_manager = checkpoint_manager
         self.metrics_manager = metrics_manager
-        self.graphdefs, self.state = nnx.split((self.model, self.optimizer))
+        self.graphdef, self.state = nnx.split((model, optimizer))
+        self.state = jax.device_put(self.state, device=jax.devices("gpu")[0])
 
         def loss_fn(
             model: nnx.Module,
@@ -124,9 +124,10 @@ class Trainer:
             )  # type: ignore[operator]
             return jnp.mean(optax.sigmoid_binary_cross_entropy(logits, labels))
 
+        @jax.jit
         def update(
-            graphdefs: nnx.GraphDef,
             state: nnx.State,
+            graphdef: nnx.GraphDef,
             mz_array: jnp.ndarray,
             intensity_array: jnp.ndarray,
             spectrum_mask: jnp.ndarray,
@@ -134,9 +135,9 @@ class Trainer:
             modification_indices: jnp.ndarray,
             peptide_mask: jnp.ndarray,
             labels: jnp.ndarray,
-        ) -> tuple[float, nnx.State]:
+        ) -> float:
             """Update the model."""
-            model, optimizer = nnx.merge(graphdefs, state)
+            model, optimizer = nnx.merge(graphdef, state)
             loss, grads = nnx.value_and_grad(loss_fn)(
                 model=model,
                 mz_array=mz_array,
@@ -148,10 +149,35 @@ class Trainer:
                 labels=labels,
             )
             optimizer.update(grads)
-            state = nnx.state((model, optimizer))
+            _, state = nnx.split((model, optimizer))
             return loss, state
 
         self.update = update
+
+        @jax.jit
+        def predict(
+            state: nnx.State,
+            graphdef: nnx.GraphDef,
+            mz_array: jnp.ndarray,
+            intensity_array: jnp.ndarray,
+            spectrum_mask: jnp.ndarray,
+            residue_indices: jnp.ndarray,
+            modification_indices: jnp.ndarray,
+            peptide_mask: jnp.ndarray,
+        ) -> jnp.ndarray:
+            """Predict the model."""
+            model, _ = nnx.merge(graphdef, state)
+            logits = model(
+                mz_array=mz_array,
+                intensity_array=intensity_array,
+                spectrum_mask=spectrum_mask,
+                residue_indices=residue_indices,
+                modification_indices=modification_indices,
+                peptide_mask=peptide_mask,
+            )
+            return jax.nn.sigmoid(logits)
+
+        self.predict = predict
 
     def __str__(self) -> str:
         return f"""
@@ -180,16 +206,16 @@ Trainer(
                 train_data.iter_batches(batch_size=config.batch_size, num_peaks=config.num_peaks),
                 desc="Batches",
             ):
-                mz_array = jnp.array(batch["mz_array"])
-                intensity_array = jnp.array(batch["intensity_array"])
-                spectrum_mask = jnp.array(batch["spectrum_mask"])
-                residue_indices = jnp.array(batch["residues_ids"])
-                modification_indices = jnp.array(batch["modifications_ids"])
-                peptide_mask = jnp.array(batch["peptide_mask"])
-                labels = jnp.array(batch["correct"])
+                mz_array = jax.device_put(jnp.array(batch["mz_array"]), device=jax.devices("gpu")[0])
+                intensity_array = jax.device_put(jnp.array(batch["intensity_array"]), device=jax.devices("gpu")[0])
+                spectrum_mask = jax.device_put(jnp.array(batch["spectrum_mask"]), device=jax.devices("gpu")[0])
+                residue_indices = jax.device_put(jnp.array(batch["residues_ids"]), device=jax.devices("gpu")[0])
+                modification_indices = jax.device_put(jnp.array(batch["modifications_ids"]), device=jax.devices("gpu")[0])
+                peptide_mask = jax.device_put(jnp.array(batch["peptide_mask"]), device=jax.devices("gpu")[0])
+                labels = jax.device_put(jnp.array(batch["correct"]), device=jax.devices("gpu")[0])
                 loss, self.state = self.update(
-                    graphdefs=self.graphdefs,
                     state=self.state,
+                    graphdef=self.graphdef,
                     mz_array=mz_array,
                     intensity_array=intensity_array,
                     spectrum_mask=spectrum_mask,
@@ -217,9 +243,9 @@ Trainer(
                         evals_without_improvement += 1
                     if evals_without_improvement >= config.patience:
                         break
-        nnx.update(
-            (self.model, self.optimizer), self.state
-        )  # Ensure the final state is updated in the graphdefs
+            # nnx.update(
+            #     (self.model, self.optimizer), self.state
+            # )  # Ensure the final state is updated in the graphdefs
         self.logging_manager.log_metric(
             "train/best_checkpoint_metric", best_checkpoint_metric, step
         )
@@ -235,7 +261,6 @@ Trainer(
             batch_size: The batch size.
             step: The current step.
         """
-        model, _ = nnx.merge(self.graphdefs, self.state)
         # Collect predictions and targets
         predictions_list, label_list = [], []
         for batch in tqdm(
@@ -251,16 +276,16 @@ Trainer(
             peptide_mask = jnp.array(batch["peptide_mask"])
             label_list.append(jnp.array(batch["correct"]))
 
-            preds = jax.nn.sigmoid(
-                model(
-                    mz_array=mz_array,
-                    intensity_array=intensity_array,
-                    spectrum_mask=spectrum_mask,
-                    residue_indices=residue_indices,
-                    modification_indices=modification_indices,
-                    peptide_mask=peptide_mask,
-                )
-            )  # type: ignore[operator]
+            preds = self.predict(
+                state=self.state,
+                graphdef=self.graphdef,
+                mz_array=mz_array,
+                intensity_array=intensity_array,
+                spectrum_mask=spectrum_mask,
+                residue_indices=residue_indices,
+                modification_indices=modification_indices,
+                peptide_mask=peptide_mask,
+            )
             predictions_list.append(preds)
         predictions = jnp.concatenate(predictions_list, axis=0)
         labels = jnp.concatenate(label_list, axis=0)
