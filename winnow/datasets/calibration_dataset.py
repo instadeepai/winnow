@@ -81,7 +81,7 @@ class CalibrationDataset:
             data_dir (Path): Directory to save the dataset. This will contain `metadata.csv` and
                             optionally, `predictions.pkl` for serialized beam search results.
         """
-        data_dir.mkdir(parents=True)
+        data_dir.mkdir(parents=True, exist_ok=True)
         with (data_dir / "metadata.csv").open(mode="w") as metadata_file:
             output_metadata = self.metadata.copy(deep=True)
             if "sequence" in output_metadata.columns:
