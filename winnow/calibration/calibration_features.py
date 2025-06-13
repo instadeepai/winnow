@@ -611,7 +611,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         self.train_fraction = train_fraction
         self.hidden_dim = hidden_dim
         self.prosit_model = koinapy.Koina("Prosit_2019_irt", "koina.wilhelmlab.org:443")
-        self.irt_predictor = MLPRegressor(hidden_layer_sizes=[hidden_dim])
+        self.irt_predictor = MLPRegressor(hidden_layer_sizes=[hidden_dim], max_iter=500)
 
     @property
     def dependencies(self) -> List[FeatureDependency]:
