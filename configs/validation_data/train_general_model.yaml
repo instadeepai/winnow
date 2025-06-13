@@ -1,0 +1,2 @@
+spectrum_path: validation_datasets_corrected/spectrum_data/labelled/train_spectrum_all_datasets.parquet
+beam_predictions_path: validation_datasets_corrected/beam_preds/labelled/train_beam_all_datasets.csv

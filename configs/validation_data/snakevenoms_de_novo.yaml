@@ -1,0 +1,2 @@
+spectrum_path: validation_datasets_corrected/spectrum_data/de_novo/snakevenoms_raw_filtered.parquet
+beam_predictions_path: validation_datasets_corrected/beam_preds/de_novo/snakevenoms_raw_beam_preds_filtered.csv

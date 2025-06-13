@@ -121,3 +121,110 @@ set-gcp-credentials:
 ## Set the Ceph credentials
 set-ceph-credentials:
 	python scripts/set_ceph_credentials.py
+
+#################################################################################
+## Analysis commands															#
+#################################################################################
+
+.PHONY: train-general-model evaluate-general-model-validation-datasets
+
+## Analyze the feature importance and correlations
+analyze-features: set-ceph-credentials set-gcp-credentials
+	# Copy the data from Ceph bucket to the local data directory
+	mkdir -p data
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/labelled/train_spectrum_all_datasets.parquet data/ --profile winnow
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/labelled/train_beam_all_datasets.csv data/ --profile winnow
+	python scripts/analyze_features.py --train-spectrum-path data/train_spectrum_all_datasets.parquet --train-predictions-path data/train_beam_all_datasets.csv --output-dir mlp_feature_importance_results/ --n-background-samples 500
+	# Copy the results back to Ceph bucket
+	# aws s3 cp results/ s3://winnow-g88rh/classifier_comparison/ --recursive --profile winnow
+	# Copy the results back to Google Cloud Storage
+	gsutil -m cp -R mlp_feature_importance_results/ gs://winnow-fdr/classifier_comparison/dt_feature_importance_results/
+
+## Assess calibrator generalisation
+calibrator-generalisation: set-ceph-credentials set-gcp-credentials
+	mkdir -p data/spectrum_data
+	mkdir -p data/beam_preds
+	mkdir -p models
+	mkdir -p results
+	# Copy the data from Ceph bucket to the local data directory
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/labelled/ data/spectrum_data/ --recursive --exclude "*" --include "dataset*" --profile winnow
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/labelled/ data/beam_preds/ --recursive --exclude "*" --include "*-annotated_beam_preds.csv" --profile winnow
+	# Run the generalisation evaluation script
+	python scripts/evaluate_calibrator_generalization.py \
+		--data-source instanovo \
+		--config-dir configs \
+		--model-output-dir models/generalisation \
+		--results-output-dir results/generalisation
+	# Copy the results back to Ceph bucket
+	# aws s3 cp results/ s3://winnow-g88rh/calibrator_generalisation/ --recursive --profile winnow
+	# Copy the results back to Google Cloud Storage
+	gsutil -m cp -R results/ gs://winnow-fdr/calibrator_generalisation/
+	gsutil -m cp -R models/ gs://winnow-fdr/calibrator_generalisation/
+
+val_datasets := gluc helaqc herceptin immuno sbrodae snakevenoms woundfluids
+ext_datasets := PXD014877 PXD019483 PXD023064
+
+## Train general model
+train-general-model:
+	# Run the generalisation evaluation script
+	winnow train --data-source instanovo --dataset-config-path configs/validation_data/train_general_model.yaml --model-output-folder general_model/model --dataset-output-path general_model/results/general_model_training_results.csv
+	# Copy the results back to Ceph bucket
+	aws s3 cp general_model/ s3://winnow-g88rh/general_model/ --recursive --profile winnow
+
+## Evaluate general model on validation datasets
+evaluate-general-model-validation-datasets: set-ceph-credentials set-gcp-credentials
+	# Make folders
+	mkdir -p validation_datasets_corrected/winnow_metadata/labelled
+	mkdir -p validation_datasets_corrected/winnow_metadata/de_novo
+	mkdir -p validation_datasets_corrected/beam_preds/labelled
+	mkdir -p validation_datasets_corrected/beam_preds/de_novo
+	mkdir -p validation_datasets_corrected/spectrum_data/labelled
+	mkdir -p validation_datasets_corrected/spectrum_data/de_novo
+	mkdir -p general_model/model
+	# Copy the data from Ceph bucket to the local data directory
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/labelled/ s3://winnow-g88rh/validation_datasets_corrected/beam_preds/labelled/ --recursive --profile winnow
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/de_novo/ s3://winnow-g88rh/validation_datasets_corrected/beam_preds/de_novo/ --recursive --profile winnow
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/labelled/ s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/labelled/ --recursive --profile winnow
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/de_novo/ s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/de_novo/ --recursive --profile winnow
+	aws s3 cp s3://winnow-g88rh/general_model/model/ general_model/model/ --recursive --profile winnow
+	# Run the generalisation evaluation script
+	# 1. Evaluate labelled data
+	winnow predict --data-source instanovo --dataset-config-path configs/validation_data/test_general_model_validation_data.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column "calibrated_confidence" --output-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output.csv
+	winnow predict --data-source instanovo --dataset-config-path configs/validation_data/test_general_model_validation_data.yaml --model-folder general_model/model --method database-ground --fdr-threshold 1.0 --confidence-column "calibrated_confidence" --output-path validation_datasets_corrected/winnow_metadata/labelled/general_test_dbg_output.csv
+	# 2. Evaluate unlabelled data
+	@for ds in $(val_datasets); do \
+		winnow predict --data-source instanovo --dataset-config-path configs/validation_data/$${ds}_de_novo.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column "calibrated_confidence" --output-path validation_datasets_corrected/winnow_metadata/de_novo/$${ds}_de_novo_preds.csv; \
+	done
+	# Copy the results back to Ceph bucket
+	aws s3 cp validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output.csv s3://winnow-g88rh/validation_datasets_corrected/winnow_metadata/labelled/ --profile winnow
+	aws s3 cp validation_datasets_corrected/winnow_metadata/labelled/general_test_dbg_output.csv s3://winnow-g88rh/validation_datasets_corrected/winnow_metadata/labelled/ --profile winnow
+	aws s3 cp validation_datasets_corrected/winnow_metadata/de_novo/ s3://winnow-g88rh/validation_datasets_corrected/winnow_metadata/de_novo/ --recursive --profile winnow
+	# Copy to Google Cloud Storage
+	gsutil -m cp -R validation_datasets_corrected/ gs://winnow-fdr/validation_datasets_corrected/
+
+## Evaluate general model on external datasets
+evaluate-general-model-external-datasets: set-ceph-credentials set-gcp-credentials
+	# Make folders
+	mkdir -p external_datasets/winnow_metadata/labelled
+	mkdir -p external_datasets/winnow_metadata/de_novo
+	mkdir -p external_datasets/beam_preds/labelled
+	mkdir -p external_datasets/beam_preds/de_novo
+	mkdir -p external_datasets/spectrum_data/labelled
+	mkdir -p external_datasets/spectrum_data/de_novo
+	mkdir -p general_model/model
+	# Copy the data from Ceph bucket to the local data directory
+	aws s3 cp s3://winnow-g88rh/external_datasets/spectrum_data/labelled/ s3://winnow-g88rh/external_datasets/spectrum_data/labelled/ --recursive --profile winnow
+	aws s3 cp s3://winnow-g88rh/external_datasets/beam_preds/labelled/ s3://winnow-g88rh/external_datasets/beam_preds/labelled/ --recursive --profile winnow
+	aws s3 cp s3://winnow-g88rh/general_model/model/ general_model/model/ --recursive --profile winnow
+	# Run the generalisation evaluation script
+	# 1. Evaluate labelled data
+	winnow predict --data-source instanovo --dataset-config-path configs/external-data/external_data.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column "calibrated_confidence" --output-path external_datasets/winnow_metadata/labelled/general_test_winnow_output.csv
+	# 2. Evaluate unlabelled data
+	@for ds in $(ext_datasets); do \
+		winnow predict --data-source instanovo --dataset-config-path configs/external_data/$${ds}_de_novo.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column "calibrated_confidence" --output-path validation_datasets_corrected/winnow_metadata/de_novo/$${ds}_de_novo_preds.csv; \
+	done
+	# Copy the results back to Ceph bucket
+	aws s3 cp external_datasets/winnow_metadata/labelled/general_test_winnow_output.csv s3://winnow-g88rh/external_datasets/winnow_metadata/labelled/ --profile winnow
+	aws s3 cp external_datasets/winnow_metadata/de_novo/ s3://winnow-g88rh/external_datasets/winnow_metadata/de_novo/ --recursive --profile winnow
+	# Copy to Google Cloud Storage
+	gsutil -m cp -R external_datasets/ gs://winnow-fdr/external_datasets/
