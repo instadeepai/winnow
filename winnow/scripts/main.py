@@ -202,7 +202,7 @@ def apply_fdr_control(
     fdr_threshold: float,
     confidence_column: str,
 ) -> pd.DataFrame:
-    """Apply empirical Bayes FDR control."""
+    """Apply non-parametric FDR control."""
     if isinstance(fdr_control, NonParametricFDRControl):
         fdr_control.fit(dataset=dataset.metadata[confidence_column])
         dataset.metadata = fdr_control.add_psm_pep(dataset.metadata, confidence_column)
@@ -212,9 +212,9 @@ def apply_fdr_control(
             residue_masses=RESIDUE_MASSES,
         )
     dataset.metadata = fdr_control.add_psm_fdr(dataset.metadata, confidence_column)
-    confidence_cutoff = fdr_control.get_confidence_cutoff(threshold=fdr_threshold)
     output_data = dataset.metadata
-    output_data = output_data[output_data[confidence_column] >= confidence_cutoff]
+    # confidence_cutoff = fdr_control.get_confidence_cutoff(threshold=fdr_threshold)
+    # output_data = output_data[output_data[confidence_column] >= confidence_cutoff]
     return output_data
 
 
@@ -300,7 +300,7 @@ def _apply_fdr_control(
     if method is FDRMethod.winnow:
         logger.info("Applying FDR control.")
         return apply_fdr_control(
-            EmpiricalBayesFDRControl(), dataset, fdr_threshold, confidence_column
+            NonParametricFDRControl(), dataset, fdr_threshold, confidence_column
         )
     elif method is FDRMethod.database:
         logger.info("Applying FDR control.")
@@ -361,6 +361,7 @@ def train(
 
     # -- Write output
     logger.info("Writing output.")
+    dataset_output_path.parent.mkdir(parents=True, exist_ok=True)
     annotated_dataset.to_csv(dataset_output_path)
     logger.info(f"Training dataset results saved: {dataset_output_path}")
 
@@ -460,5 +461,7 @@ def predict(
     )
 
     logger.info("Writing output.")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     dataset_metadata.to_csv(output_path)
     logger.info(f"Outputs saved: {output_path}")
