@@ -25,3 +25,5 @@
 
 # To install winnow
 !pyproject.toml
+
+!configs
