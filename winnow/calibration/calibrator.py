@@ -28,6 +28,10 @@ class ProbabilityCalibrator:
     """
 
     def __init__(self, seed: int = 42) -> None:
+        self.seed = seed  # Store the seed
+        # Set numpy's random seed for any numpy operations
+        np.random.seed(seed)
+
         self.feature_dict: Dict[str, CalibrationFeatures] = {}
         self.dependencies: Dict[str, FeatureDependency] = {}
         self.dependency_reference_counter: Dict[str, int] = {}
@@ -212,6 +216,9 @@ class ProbabilityCalibrator:
         Args:
             dataset (CalibrationDataset): The dataset used for training the classifier.
         """
+        # Reset numpy's random seed to ensure reproducibility
+        np.random.seed(self.seed)
+
         features, labels = self.compute_features(dataset=dataset, labelled=True)
         # Fit and transform features with scaler
         features_scaled = self.scaler.fit_transform(features)

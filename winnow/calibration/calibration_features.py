@@ -607,11 +607,19 @@ class RetentionTimeFeature(CalibrationFeatures):
     This feature uses the Prosit model to predict indexed retention times (iRT) for peptides and trains a regression model to calibrate predictions based on observed retention times.
     """
 
-    def __init__(self, hidden_dim: int, train_fraction: float) -> None:
+    def __init__(self, hidden_dim: int, train_fraction: float, seed: int = 42) -> None:
         self.train_fraction = train_fraction
         self.hidden_dim = hidden_dim
+        self.seed = seed  # Store the seed
         self.prosit_model = koinapy.Koina("Prosit_2019_irt", "koina.wilhelmlab.org:443")
-        self.irt_predictor = MLPRegressor(hidden_layer_sizes=[hidden_dim], max_iter=500)
+        # Initialize the model with the seed
+        self.irt_predictor = MLPRegressor(
+            hidden_layer_sizes=[hidden_dim],
+            max_iter=500,
+            random_state=seed,
+        )
+        # Set numpy's random seed for any numpy operations
+        np.random.seed(seed)
 
     @property
     def dependencies(self) -> List[FeatureDependency]:
@@ -655,6 +663,9 @@ class RetentionTimeFeature(CalibrationFeatures):
         Args:
             dataset (CalibrationDataset): The dataset containing peptide sequences and retention times.
         """
+        # Reset numpy's random seed to ensure reproducibility
+        np.random.seed(self.seed)
+
         # -- Make calibration dataset
         train_data = dataset.metadata.copy(deep=True)
         train_data = train_data.sort_values(by="confidence", ascending=False)
