@@ -167,6 +167,12 @@ ext_datasets := PXD014877 PXD019483 PXD023064
 
 ## Train general model
 train-general-model:
+	# Make folders
+	mkdir -p validation_datasets_corrected/beam_preds/labelled
+	mkdir -p validation_datasets_corrected/spectrum_data/labelled
+	# Copy the data from Ceph bucket to the local data directory
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/labelled/train_beam_all_datasets.csv validation_datasets_corrected/beam_preds/labelled/ --profile winnow
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/labelled/train_spectrum_all_datasets.parquet validation_datasets_corrected/spectrum_data/labelled/ --profile winnow
 	# Run the generalisation evaluation script
 	winnow train --data-source instanovo --dataset-config-path configs/validation_data/train_general_model.yaml --model-output-folder general_model/model --dataset-output-path general_model/results/general_model_training_results.csv
 	# Copy the results back to Ceph bucket
@@ -191,7 +197,6 @@ evaluate-general-model-validation-datasets: set-ceph-credentials set-gcp-credent
 	# Run the generalisation evaluation script
 	# 1. Evaluate labelled data
 	winnow predict --data-source instanovo --dataset-config-path configs/validation_data/test_general_model_validation_data.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column "calibrated_confidence" --output-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output.csv
-	winnow predict --data-source instanovo --dataset-config-path configs/validation_data/test_general_model_validation_data.yaml --model-folder general_model/model --method database-ground --fdr-threshold 1.0 --confidence-column "calibrated_confidence" --output-path validation_datasets_corrected/winnow_metadata/labelled/general_test_dbg_output.csv
 	# 2. Evaluate unlabelled data
 	@for ds in $(val_datasets); do \
 		winnow predict --data-source instanovo --dataset-config-path configs/validation_data/$${ds}_de_novo.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column "calibrated_confidence" --output-path validation_datasets_corrected/winnow_metadata/de_novo/$${ds}_de_novo_preds.csv; \
@@ -228,7 +233,6 @@ evaluate-general-model-external-datasets: set-ceph-credentials set-gcp-credentia
 	# 1. Evaluate labelled data
 	@for ds in $(ext_datasets); do \
 	winnow predict --data-source instanovo --dataset-config-path configs/external_datasets/$${ds}_lcfm.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column "calibrated_confidence" --output-path external_datasets/winnow_metadata/lcfm/$${ds}_lcfm_preds_winnow.csv; \
-	winnow predict --data-source instanovo --dataset-config-path configs/external_datasets/$${ds}_lcfm.yaml --model-folder general_model/model --method database-ground --fdr-threshold 1.0 --confidence-column "calibrated_confidence" --output-path external_datasets/winnow_metadata/lcfm/$${ds}_lcfm_preds_dbg.csv; \
 	done
 	# 2. Evaluate de novo unlabelled data
 	@for ds in $(ext_datasets); do \

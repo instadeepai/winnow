@@ -16,7 +16,7 @@ spec:
         provider: "github" # Optional, vscode tunnel provider. Options are "github" or "microsoft", defaults to "github"
   operator: tf
   image: winnow
-  command: make train-general-model
+  command: make evaluate-general-model-external-datasets
 
   tensorboard: # optional, disabled by default
     enabled: false
@@ -26,7 +26,7 @@ spec:
       count: 1
       resources:
         cpus: 4
-        ramRatio: 8 # >= 2
+        ramRatio: 20 # >= 2
 
         accelerators:
           gpu:
