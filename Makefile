@@ -203,7 +203,6 @@ evaluate-general-model-validation-datasets: set-ceph-credentials set-gcp-credent
 	done
 	# Copy the results back to Ceph bucket
 	aws s3 cp validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output.csv s3://winnow-g88rh/validation_datasets_corrected/winnow_metadata/labelled/ --profile winnow
-	aws s3 cp validation_datasets_corrected/winnow_metadata/labelled/general_test_dbg_output.csv s3://winnow-g88rh/validation_datasets_corrected/winnow_metadata/labelled/ --profile winnow
 	aws s3 cp validation_datasets_corrected/winnow_metadata/de_novo/ s3://winnow-g88rh/validation_datasets_corrected/winnow_metadata/de_novo/ --recursive --profile winnow
 	# Copy to Google Cloud Storage
 	gsutil -m cp -R validation_datasets_corrected/ gs://winnow-fdr/validation_datasets_corrected/
