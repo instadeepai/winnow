@@ -1,0 +1,2 @@
+spectrum_path: external_datasets/spectrum_data/de_novo/PXD019483/PXD019483.parquet
+beam_predictions_path: external_datasets/beam_preds/de_novo/PXD019483/PXD019483.csv

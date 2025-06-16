@@ -1,0 +1,2 @@
+beam_predictions_path: data/beam_preds/gluc-annotated_beam_preds.csv
+spectrum_path: data/spectrum_data/dataset-gluc-annotated-0000-0001.parquet

@@ -1,0 +1,3 @@
+# External datasets
+beam_predictions_path: data/beam_preds/de_novo/annotated_beam_preds.csv
+spectrum_path: data/spectrum_data/de_novo/raw_filtered.parquet

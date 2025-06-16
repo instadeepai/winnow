@@ -1,0 +1,2 @@
+spectrum_path: data/test_spectrum_all_datasets.parquet
+beam_predictions_path: data/test_beam_all_datasets.csv

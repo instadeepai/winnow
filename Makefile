@@ -156,7 +156,8 @@ calibrator-generalisation: set-ceph-credentials set-gcp-credentials
 		--model-output-dir models/generalisation \
 		--results-output-dir results/generalisation
 	# Copy the results back to Ceph bucket
-	# aws s3 cp results/ s3://winnow-g88rh/calibrator_generalisation/ --recursive --profile winnow
+	aws s3 cp results/ s3://winnow-g88rh/calibrator_generalisation/ --recursive --profile winnow
+	aws s3 cp models/ s3://winnow-g88rh/calibrator_generalisation/ --recursive --profile winnow
 	# Copy the results back to Google Cloud Storage
 	gsutil -m cp -R results/ gs://winnow-fdr/calibrator_generalisation/
 	gsutil -m cp -R models/ gs://winnow-fdr/calibrator_generalisation/
