@@ -126,7 +126,7 @@ set-ceph-credentials:
 ## Analysis commands															#
 #################################################################################
 
-.PHONY: train-general-model evaluate-general-model-validation-datasets
+.PHONY: train-general-model evaluate-general-model-validation-datasets evaluate-general-model-external-datasets add-db-fdr-validation-datasets add-db-fdr-external-datasets
 
 ## Analyze the feature importance and correlations
 analyze-features: set-ceph-credentials set-gcp-credentials
@@ -150,7 +150,7 @@ calibrator-generalisation: set-ceph-credentials set-gcp-credentials
 	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/labelled/ data/spectrum_data/ --recursive --exclude "*" --include "dataset*" --profile winnow
 	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/labelled/ data/beam_preds/ --recursive --exclude "*" --include "*-annotated_beam_preds.csv" --profile winnow
 	# Run the generalisation evaluation script
-	python scripts/evaluate_calibrator_generalization.py \
+	python scripts/evaluate_calibrator_generalisation.py \
 		--data-source instanovo \
 		--config-dir configs/calibrator_generalisation \
 		--model-output-dir models/generalisation \
@@ -244,3 +244,38 @@ evaluate-general-model-external-datasets: set-ceph-credentials set-gcp-credentia
 	aws s3 cp external_datasets/winnow_metadata/acfm/ s3://winnow-g88rh/external_datasets/winnow_metadata/acfm/ --recursive --profile winnow
 	# Copy to Google Cloud Storage
 	gsutil -m cp -R external_datasets/ gs://winnow-fdr/external_datasets/
+
+## Add database-grounded FDR to validation datasets
+add-db-fdr-validation-datasets: set-ceph-credentials set-gcp-credentials
+	# Make folders
+	mkdir -p validation_datasets_corrected/winnow_metadata/labelled
+	# Copy the data from Ceph bucket to the local data directory
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output.csv validation_datasets_corrected/winnow_metadata/labelled/ --profile winnow
+	# Add database-grounded FDR to labelled data
+	python scripts/add_db_fdr.py \
+		--input-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output.csv \
+		--output-path validation_datasets_corrected/winnow_metadata/labelled/general_test.csv \
+		--confidence-column calibrated_confidence
+	# Copy the results back to Ceph bucket
+	aws s3 cp validation_datasets_corrected/winnow_metadata/labelled/general_test.csv s3://winnow-g88rh/validation_datasets_corrected/winnow_metadata/labelled/ --profile winnow
+	# Copy to Google Cloud Storage
+	gsutil -m cp -R validation_datasets_corrected/winnow_metadata/labelled/general_test.csv gs://winnow-fdr/validation_datasets_corrected/winnow_metadata/labelled/
+
+## Add database-grounded FDR to external datasets
+add-db-fdr-external-datasets: set-ceph-credentials set-gcp-credentials
+	# Make folders
+	mkdir -p external_datasets/winnow_metadata/lcfm
+	mkdir -p external_datasets/winnow_metadata/acfm
+	# Copy the data from Ceph bucket to the local data directory
+	aws s3 cp s3://winnow-g88rh/external_datasets/winnow_metadata/lcfm/ external_datasets/winnow_metadata/lcfm/ --recursive --profile winnow
+	# Add database-grounded FDR to labelled data (LCFM)
+	@for ds in $(ext_datasets); do \
+		python scripts/add_db_fdr.py \
+			--input-path external_datasets/winnow_metadata/lcfm/$${ds}_lcfm_preds_winnow.csv \
+			--output-path external_datasets/winnow_metadata/lcfm/$${ds}_lcfm_preds.csv \
+			--confidence-column calibrated_confidence; \
+	done
+	# Copy the results back to Ceph bucket
+	aws s3 cp external_datasets/winnow_metadata/lcfm/ s3://winnow-g88rh/external_datasets/winnow_metadata/lcfm/ --recursive --profile winnow
+	# Copy to Google Cloud Storage
+	gsutil -m cp -R external_datasets/winnow_metadata/lcfm/ gs://winnow-fdr/external_datasets/winnow_metadata/lcfm/
