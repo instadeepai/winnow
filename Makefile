@@ -126,7 +126,7 @@ set-ceph-credentials:
 ## Analysis commands															#
 #################################################################################
 
-.PHONY: train-general-model evaluate-general-model-validation-datasets evaluate-general-model-external-datasets add-db-fdr-validation-datasets add-db-fdr-external-datasets
+.PHONY: train-general-model evaluate-general-model-validation-datasets evaluate-general-model-external-datasets add-db-fdr-validation-datasets add-db-fdr-external-datasets evaluate-calibrator-generalisation analyze-features
 
 ## Analyze the feature importance and correlations
 analyze-features: set-ceph-credentials set-gcp-credentials
@@ -136,7 +136,7 @@ analyze-features: set-ceph-credentials set-gcp-credentials
 	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/labelled/train_beam_all_datasets.csv data/ --profile winnow
 	python scripts/analyze_features.py --train-spectrum-path data/train_spectrum_all_datasets.parquet --train-predictions-path data/train_beam_all_datasets.csv --output-dir mlp_feature_importance_results/ --n-background-samples 500
 	# Copy the results back to Ceph bucket
-	# aws s3 cp results/ s3://winnow-g88rh/classifier_comparison/ --recursive --profile winnow
+	aws s3 cp mlp_feature_importance_results s3://winnow-g88rh/classifier_comparison/ --recursive --profile winnow
 	# Copy the results back to Google Cloud Storage
 	gsutil -m cp -R mlp_feature_importance_results/ gs://winnow-fdr/classifier_comparison/dt_feature_importance_results/
 

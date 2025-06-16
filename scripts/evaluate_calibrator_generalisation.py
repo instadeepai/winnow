@@ -71,11 +71,11 @@ def load_and_split_dataset(
     # Create train and test datasets
     train_dataset = CalibrationDataset(
         metadata=dataset.metadata.iloc[train_idx].reset_index(drop=True),
-        predictions=dataset.predictions[train_idx],
+        predictions=[dataset.predictions[i] for i in train_idx.tolist()],
     )
     test_dataset = CalibrationDataset(
         metadata=dataset.metadata.iloc[test_idx].reset_index(drop=True),
-        predictions=dataset.predictions[test_idx],
+        predictions=[dataset.predictions[i] for i in test_idx.tolist()],
     )
 
     return train_dataset, test_dataset
