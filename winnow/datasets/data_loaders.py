@@ -57,6 +57,11 @@ RESIDUE_MASSES: dict[str, float] = {
     "[UNIMOD:385]": -17.026549,  # Ammonia Loss
     "[UNIMOD:5]": 43.005814,  # Carbamylation
     "[UNIMOD:1]": 42.010565,  # Acetylation
+    # External data modifications
+    "C[UNIMOD:312]": 222.013284,  # Cysteinylation
+    "E[UNIMOD:27]": 111.032028,  # Glu -> pyro-Glu
+    "Q[UNIMOD:28]": 111.032029,  # Gln -> pyro-Gln
+    "(+25.98)": 25.980265,  # Carbamylation & NH3 loss
 }
 
 RESIDUE_REMAPPING: dict[str, str] = {
@@ -67,7 +72,7 @@ RESIDUE_REMAPPING: dict[str, str] = {
     "+43.006": "[UNIMOD:5]",  # Carbamylation
     "-17.027": "[UNIMOD:385]",  # Loss of ammonia
     "C+57.021": "C[UNIMOD:4]",  # Carboxyamidomethylation
-    # "+43.006-17.027": "[UNIMOD:5][UNIMOD:385]",  # Carbamylation and Loss of ammonia
+    "+43.006-17.027": "(+25.98)",  # "[UNIMOD:5][UNIMOD:385]",  # Carbamylation and Loss of ammonia
 }
 
 INVALID_PROSIT_TOKENS: list = [

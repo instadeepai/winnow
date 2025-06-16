@@ -152,7 +152,7 @@ calibrator-generalisation: set-ceph-credentials set-gcp-credentials
 	# Run the generalisation evaluation script
 	python scripts/evaluate_calibrator_generalization.py \
 		--data-source instanovo \
-		--config-dir configs \
+		--config-dir configs/calibrator_generalisation \
 		--model-output-dir models/generalisation \
 		--results-output-dir results/generalisation
 	# Copy the results back to Ceph bucket
@@ -207,6 +207,7 @@ evaluate-general-model-external-datasets: set-ceph-credentials set-gcp-credentia
 	# Make folders
 	mkdir -p external_datasets/winnow_metadata/lcfm
 	mkdir -p external_datasets/winnow_metadata/de_novo
+	mkdir -p external_datasets/winnow_metadata/acfm
 	mkdir -p external_datasets/beam_preds/lcfm
 	mkdir -p external_datasets/beam_preds/de_novo
 	mkdir -p external_datasets/beam_preds/acfm
