@@ -268,7 +268,6 @@ add-db-fdr-validation-datasets: set-ceph-credentials set-gcp-credentials
 add-db-fdr-external-datasets: set-ceph-credentials set-gcp-credentials
 	# Make folders
 	mkdir -p external_datasets/winnow_metadata/lcfm
-	mkdir -p external_datasets/winnow_metadata/acfm
 	# Copy the data from Ceph bucket to the local data directory
 	aws s3 cp s3://winnow-g88rh/external_datasets/winnow_metadata/lcfm/ external_datasets/winnow_metadata/lcfm/ --recursive --profile winnow
 	# Add database-grounded FDR to labelled data (LCFM)
