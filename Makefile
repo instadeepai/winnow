@@ -126,7 +126,7 @@ set-ceph-credentials:
 ## Analysis commands															#
 #################################################################################
 
-.PHONY: train-general-model evaluate-general-model-validation-datasets evaluate-general-model-external-datasets add-db-fdr-validation-datasets add-db-fdr-external-datasets evaluate-calibrator-generalisation analyze-features
+.PHONY: train-general-model evaluate-general-model-validation-datasets evaluate-general-model-external-datasets add-db-fdr-validation-datasets add-db-fdr-external-datasets evaluate-calibrator-generalisation analyze-features evaluate-holdout-sets
 
 ## Analyze the feature importance and correlations
 analyze-features: set-ceph-credentials set-gcp-credentials
@@ -141,14 +141,14 @@ analyze-features: set-ceph-credentials set-gcp-credentials
 	gsutil -m cp -R mlp_feature_importance_results/ gs://winnow-fdr/classifier_comparison/dt_feature_importance_results/
 
 ## Assess calibrator generalisation
-calibrator-generalisation: set-ceph-credentials set-gcp-credentials
+calibrator-generalisation: # set-ceph-credentials set-gcp-credentials
 	mkdir -p data/spectrum_data
 	mkdir -p data/beam_preds
 	mkdir -p models
 	mkdir -p results
 	# Copy the data from Ceph bucket to the local data directory
-	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/labelled/ data/spectrum_data/ --recursive --exclude "*" --include "dataset*" --profile winnow
-	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/labelled/ data/beam_preds/ --recursive --exclude "*" --include "*-annotated_beam_preds.csv" --profile winnow
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/labelled/ data/spectrum_data/ --recursive --exclude "*" --include "dataset*" --profile winnow --endpoint-url https://s3.aichor-dataplane-prod.eqx.ext.id-baremetal.net
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/labelled/ data/beam_preds/ --recursive --exclude "*" --include "*-annotated_beam_preds.csv" --profile winnow --endpoint-url https://s3.aichor-dataplane-prod.eqx.ext.id-baremetal.net
 	# Run the generalisation evaluation script
 	python scripts/evaluate_calibrator_generalisation.py \
 		--data-source instanovo \
@@ -156,17 +156,17 @@ calibrator-generalisation: set-ceph-credentials set-gcp-credentials
 		--model-output-dir models/generalisation \
 		--results-output-dir results/generalisation
 	# Copy the results back to Ceph bucket
-	aws s3 cp results/ s3://winnow-g88rh/calibrator_generalisation/ --recursive --profile winnow
-	aws s3 cp models/ s3://winnow-g88rh/calibrator_generalisation/ --recursive --profile winnow
-	# Copy the results back to Google Cloud Storage
-	gsutil -m cp -R results/ gs://winnow-fdr/calibrator_generalisation/
-	gsutil -m cp -R models/ gs://winnow-fdr/calibrator_generalisation/
+	# aws s3 cp results/ s3://winnow-g88rh/calibrator_generalisation/ --recursive --profile winnow
+	# aws s3 cp models/ s3://winnow-g88rh/calibrator_generalisation/ --recursive --profile winnow
+	# # Copy the results back to Google Cloud Storage
+	# gsutil -m cp -R results/ gs://winnow-fdr/calibrator_generalisation/
+	# gsutil -m cp -R models/ gs://winnow-fdr/calibrator_generalisation/
 
 val_datasets := gluc helaqc herceptin immuno sbrodae snakevenoms woundfluids
 ext_datasets := PXD014877 PXD019483 PXD023064
 
 ## Train general model
-train-general-model:
+train-general-model: set-ceph-credentials set-gcp-credentials
 	# Make folders
 	mkdir -p validation_datasets_corrected/beam_preds/labelled
 	mkdir -p validation_datasets_corrected/spectrum_data/labelled
@@ -179,7 +179,7 @@ train-general-model:
 	aws s3 cp general_model/ s3://winnow-g88rh/general_model/ --recursive --profile winnow
 
 ## Evaluate general model on validation datasets
-evaluate-general-model-validation-datasets: set-ceph-credentials set-gcp-credentials
+evaluate-general-model-validation-datasets: # set-ceph-credentials set-gcp-credentials
 	# Make folders
 	mkdir -p validation_datasets_corrected/winnow_metadata/labelled
 	mkdir -p validation_datasets_corrected/winnow_metadata/de_novo
@@ -189,26 +189,26 @@ evaluate-general-model-validation-datasets: set-ceph-credentials set-gcp-credent
 	mkdir -p validation_datasets_corrected/spectrum_data/de_novo
 	mkdir -p general_model/model
 	# Copy the data from Ceph bucket to the local data directory
-	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/labelled/ validation_datasets_corrected/beam_preds/labelled/ --recursive --profile winnow
-	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/de_novo/ validation_datasets_corrected/beam_preds/de_novo/ --recursive --profile winnow
-	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/labelled/ validation_datasets_corrected/spectrum_data/labelled/ --recursive --profile winnow
-	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/de_novo/ validation_datasets_corrected/spectrum_data/de_novo/ --recursive --profile winnow
-	aws s3 cp s3://winnow-g88rh/general_model/model/ general_model/model/ --recursive --profile winnow
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/labelled/ validation_datasets_corrected/beam_preds/labelled/ --recursive --profile winnow --endpoint-url https://s3.aichor-dataplane-prod.eqx.ext.id-baremetal.net
+	# aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/de_novo/ validation_datasets_corrected/beam_preds/de_novo/ --recursive --profile winnow --endpoint-url https://s3.aichor-dataplane-prod.eqx.ext.id-baremetal.net
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/labelled/ validation_datasets_corrected/spectrum_data/labelled/ --recursive --profile winnow --endpoint-url https://s3.aichor-dataplane-prod.eqx.ext.id-baremetal.net
+	# aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/de_novo/ validation_datasets_corrected/spectrum_data/de_novo/ --recursive --profile winnow --endpoint-url https://s3.aichor-dataplane-prod.eqx.ext.id-baremetal.net
+	# aws s3 cp s3://winnow-g88rh/general_model/model/ general_model/model/ --recursive --profile winnow --endpoint-url https://s3.aichor-dataplane-prod.eqx.ext.id-baremetal.net
 	# Run the generalisation evaluation script
 	# 1. Evaluate labelled data
 	winnow predict --data-source instanovo --dataset-config-path configs/validation_data/test_general_model_validation_data.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column "calibrated_confidence" --output-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output.csv
 	# 2. Evaluate unlabelled data
-	@for ds in $(val_datasets); do \
-		winnow predict --data-source instanovo --dataset-config-path configs/validation_data/$${ds}_de_novo.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column "calibrated_confidence" --output-path validation_datasets_corrected/winnow_metadata/de_novo/$${ds}_de_novo_preds.csv; \
-	done
-	# Copy the results back to Ceph bucket
-	aws s3 cp validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output.csv s3://winnow-g88rh/validation_datasets_corrected/winnow_metadata/labelled/ --profile winnow
-	aws s3 cp validation_datasets_corrected/winnow_metadata/de_novo/ s3://winnow-g88rh/validation_datasets_corrected/winnow_metadata/de_novo/ --recursive --profile winnow
-	# Copy to Google Cloud Storage
-	gsutil -m cp -R validation_datasets_corrected/ gs://winnow-fdr/validation_datasets_corrected/
+	# @for ds in $(val_datasets); do \
+	# 	winnow predict --data-source instanovo --dataset-config-path configs/validation_data/$${ds}_de_novo.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column "calibrated_confidence" --output-path validation_datasets_corrected/winnow_metadata/de_novo/$${ds}_de_novo_preds.csv; \
+	# done
+	# # Copy the results back to Ceph bucket
+	# aws s3 cp validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output.csv s3://winnow-g88rh/validation_datasets_corrected/winnow_metadata/labelled/ --profile winnow
+	# aws s3 cp validation_datasets_corrected/winnow_metadata/de_novo/ s3://winnow-g88rh/validation_datasets_corrected/winnow_metadata/de_novo/ --recursive --profile winnow
+	# # Copy to Google Cloud Storage
+	# gsutil -m cp -R validation_datasets_corrected/ gs://winnow-fdr/validation_datasets_corrected/
 
 ## Evaluate general model on external datasets
-evaluate-general-model-external-datasets: set-ceph-credentials set-gcp-credentials
+evaluate-general-model-external-datasets: # set-ceph-credentials set-gcp-credentials
 	# Make folders
 	mkdir -p external_datasets/winnow_metadata/lcfm
 	mkdir -p external_datasets/winnow_metadata/de_novo
@@ -221,32 +221,32 @@ evaluate-general-model-external-datasets: set-ceph-credentials set-gcp-credentia
 	mkdir -p external_datasets/spectrum_data/acfm
 	mkdir -p general_model/model
 	# Copy the data from Ceph bucket to the local data directory
-	aws s3 cp s3://winnow-g88rh/external_datasets/spectrum_data/lcfm/ external_datasets/spectrum_data/lcfm/ --recursive --profile winnow
-	aws s3 cp s3://winnow-g88rh/external_datasets/beam_preds/lcfm/ external_datasets/beam_preds/lcfm/ --recursive --profile winnow
-	aws s3 cp s3://winnow-g88rh/external_datasets/beam_preds/de_novo/ external_datasets/beam_preds/de_novo/ --recursive --profile winnow
-	aws s3 cp s3://winnow-g88rh/external_datasets/spectrum_data/de_novo/ external_datasets/spectrum_data/de_novo/ --recursive --profile winnow
-	aws s3 cp s3://winnow-g88rh/external_datasets/beam_preds/acfm/ external_datasets/beam_preds/acfm/ --recursive --profile winnow
-	aws s3 cp s3://winnow-g88rh/external_datasets/spectrum_data/acfm/ external_datasets/spectrum_data/acfm/ --recursive --profile winnow
-	aws s3 cp s3://winnow-g88rh/general_model/model/ general_model/model/ --recursive --profile winnow
+	aws s3 cp s3://winnow-g88rh/external_datasets/spectrum_data/lcfm/ external_datasets/spectrum_data/lcfm/ --recursive --profile winnow --endpoint-url https://s3.aichor-dataplane-prod.eqx.ext.id-baremetal.net
+	aws s3 cp s3://winnow-g88rh/external_datasets/beam_preds/lcfm/ external_datasets/beam_preds/lcfm/ --recursive --profile winnow --endpoint-url https://s3.aichor-dataplane-prod.eqx.ext.id-baremetal.net
+	# aws s3 cp s3://winnow-g88rh/external_datasets/beam_preds/de_novo/ external_datasets/beam_preds/de_novo/ --recursive --profile winnow --endpoint-url https://s3.aichor-dataplane-prod.eqx.ext.id-baremetal.net
+	# aws s3 cp s3://winnow-g88rh/external_datasets/spectrum_data/de_novo/ external_datasets/spectrum_data/de_novo/ --recursive --profile winnow --endpoint-url https://s3.aichor-dataplane-prod.eqx.ext.id-baremetal.net
+	# aws s3 cp s3://winnow-g88rh/external_datasets/beam_preds/acfm/ external_datasets/beam_preds/acfm/ --recursive --profile winnow --endpoint-url https://s3.aichor-dataplane-prod.eqx.ext.id-baremetal.net
+	# aws s3 cp s3://winnow-g88rh/external_datasets/spectrum_data/acfm/ external_datasets/spectrum_data/acfm/ --recursive --profile winnow --endpoint-url https://s3.aichor-dataplane-prod.eqx.ext.id-baremetal.net
+	# aws s3 cp s3://winnow-g88rh/general_model/model/ general_model/model/ --recursive --profile winnow --endpoint-url https://s3.aichor-dataplane-prod.eqx.ext.id-baremetal.net
 	# Run the generalisation evaluation script
 	# 1. Evaluate labelled data
 	@for ds in $(ext_datasets); do \
 	winnow predict --data-source instanovo --dataset-config-path configs/external_datasets/$${ds}_lcfm.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column "calibrated_confidence" --output-path external_datasets/winnow_metadata/lcfm/$${ds}_lcfm_preds_winnow.csv; \
 	done
-	# 2. Evaluate de novo unlabelled data
-	@for ds in $(ext_datasets); do \
-		winnow predict --data-source instanovo --dataset-config-path configs/external_datasets/$${ds}_de_novo.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column "calibrated_confidence" --output-path external_datasets/winnow_metadata/de_novo/$${ds}_de_novo_preds.csv; \
-	done
-	# 3. Evaluate raw unlabelled data
-	@for ds in $(ext_datasets); do \
-		winnow predict --data-source instanovo --dataset-config-path configs/external_datasets/$${ds}_acfm.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column "calibrated_confidence" --output-path external_datasets/winnow_metadata/acfm/$${ds}_acfm_preds.csv; \
-	done
-	# Copy the results back to Ceph bucket
-	aws s3 cp external_datasets/winnow_metadata/lcfm/ s3://winnow-g88rh/external_datasets/winnow_metadata/lcfm/ --recursive --profile winnow
-	aws s3 cp external_datasets/winnow_metadata/de_novo/ s3://winnow-g88rh/external_datasets/winnow_metadata/de_novo/ --recursive --profile winnow
-	aws s3 cp external_datasets/winnow_metadata/acfm/ s3://winnow-g88rh/external_datasets/winnow_metadata/acfm/ --recursive --profile winnow
-	# Copy to Google Cloud Storage
-	gsutil -m cp -R external_datasets/ gs://winnow-fdr/external_datasets/
+	# # 2. Evaluate de novo unlabelled data
+	# @for ds in $(ext_datasets); do \
+	# 	winnow predict --data-source instanovo --dataset-config-path configs/external_datasets/$${ds}_de_novo.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column "calibrated_confidence" --output-path external_datasets/winnow_metadata/de_novo/$${ds}_de_novo_preds.csv; \
+	# done
+	# # 3. Evaluate raw unlabelled data
+	# @for ds in $(ext_datasets); do \
+	# 	winnow predict --data-source instanovo --dataset-config-path configs/external_datasets/$${ds}_acfm.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column "calibrated_confidence" --output-path external_datasets/winnow_metadata/acfm/$${ds}_acfm_preds.csv; \
+	# done
+	# # Copy the results back to Ceph bucket
+	# aws s3 cp external_datasets/winnow_metadata/lcfm/ s3://winnow-g88rh/external_datasets/winnow_metadata/lcfm/ --recursive --profile winnow
+	# aws s3 cp external_datasets/winnow_metadata/de_novo/ s3://winnow-g88rh/external_datasets/winnow_metadata/de_novo/ --recursive --profile winnow
+	# aws s3 cp external_datasets/winnow_metadata/acfm/ s3://winnow-g88rh/external_datasets/winnow_metadata/acfm/ --recursive --profile winnow
+	# # Copy to Google Cloud Storage
+	# gsutil -m cp -R external_datasets/ gs://winnow-fdr/external_datasets/
 
 ## Add database-grounded FDR to validation datasets
 add-db-fdr-validation-datasets: set-ceph-credentials set-gcp-credentials
@@ -265,11 +265,11 @@ add-db-fdr-validation-datasets: set-ceph-credentials set-gcp-credentials
 	gsutil -m cp -R validation_datasets_corrected/winnow_metadata/labelled/general_test.csv gs://winnow-fdr/validation_datasets_corrected/winnow_metadata/labelled/
 
 ## Add database-grounded FDR to external datasets
-add-db-fdr-external-datasets: set-ceph-credentials set-gcp-credentials
-	# Make folders
-	mkdir -p external_datasets/winnow_metadata/lcfm
-	# Copy the data from Ceph bucket to the local data directory
-	aws s3 cp s3://winnow-g88rh/external_datasets/winnow_metadata/lcfm/ external_datasets/winnow_metadata/lcfm/ --recursive --profile winnow
+add-db-fdr-external-datasets: # set-ceph-credentials set-gcp-credentials
+	# # Make folders
+	# mkdir -p external_datasets/winnow_metadata/lcfm
+	# # Copy the data from Ceph bucket to the local data directory
+	# aws s3 cp s3://winnow-g88rh/external_datasets/winnow_metadata/lcfm/ external_datasets/winnow_metadata/lcfm/ --recursive --profile winnow
 	# Add database-grounded FDR to labelled data (LCFM)
 	@for ds in $(ext_datasets); do \
 		python scripts/add_db_fdr.py \
@@ -277,7 +277,48 @@ add-db-fdr-external-datasets: set-ceph-credentials set-gcp-credentials
 			--output-path external_datasets/winnow_metadata/lcfm/$${ds}_lcfm_preds.csv \
 			--confidence-column calibrated_confidence; \
 	done
-	# Copy the results back to Ceph bucket
-	aws s3 cp external_datasets/winnow_metadata/lcfm/ s3://winnow-g88rh/external_datasets/winnow_metadata/lcfm/ --recursive --profile winnow
-	# Copy to Google Cloud Storage
-	gsutil -m cp -R external_datasets/winnow_metadata/lcfm/ gs://winnow-fdr/external_datasets/winnow_metadata/lcfm/
+	# # Copy the results back to Ceph bucket
+	# aws s3 cp external_datasets/winnow_metadata/lcfm/ s3://winnow-g88rh/external_datasets/winnow_metadata/lcfm/ --recursive --profile winnow
+	# # Copy to Google Cloud Storage
+	# gsutil -m cp -R external_datasets/winnow_metadata/lcfm/ gs://winnow-fdr/external_datasets/winnow_metadata/lcfm/
+
+## Evaluate combined data
+evaluate-combined-data:
+	# Train model on combined data
+	winnow train --data-source instanovo --dataset-config-path configs/combined_data/val.yaml --model-output-folder general_model/model --dataset-output-path general_model/results/general_model_training_results.csv
+	# Validation hold-out set
+	winnow predict --data-source instanovo --dataset-config-path configs/validation_data/test_general_model_validation_data.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column "calibrated_confidence" --output-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output.csv
+	python scripts/add_db_fdr.py \
+		--input-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output.csv \
+		--output-path validation_datasets_corrected/winnow_metadata/labelled/general_test.csv \
+		--confidence-column calibrated_confidence
+	# External datasets
+	@for ds in $(ext_datasets); do \
+		winnow predict --data-source instanovo --dataset-config-path configs/external_datasets/$${ds}_lcfm.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column "calibrated_confidence" --output-path external_datasets/winnow_metadata/lcfm/$${ds}_lcfm_preds.csv; \
+	done
+	@for ds in $(ext_datasets); do \
+		python scripts/add_db_fdr.py \
+			--input-path external_datasets/winnow_metadata/lcfm/$${ds}_lcfm_preds_winnow.csv \
+			--output-path external_datasets/winnow_metadata/lcfm/$${ds}_lcfm_preds.csv \
+			--confidence-column calibrated_confidence; \
+	done
+	# Calibrator generalisation
+	python scripts/evaluate_calibrator_generalisation.py \
+		--data-source instanovo \
+		--config-dir configs/calibrator_generalisation \
+		--model-output-dir models/generalisation \
+		--results-output-dir results/generalisation
+# NB, ignore the PXD014877 results as it was part of the training set.
+
+## Evaluate holdout sets
+evaluate-holdout-sets:
+	mkdir -p holdout_results
+	@for holdout_set in $(val_datasets); do \
+		echo "Evaluating holdout set: $$holdout_set"; \
+		mkdir -p holdout_models/all_less_$${holdout_set}; \
+		winnow train --data-source instanovo --dataset-config-path configs/holdout/all_less_$${holdout_set}.yaml --model-output-folder holdout_models/all_less_$${holdout_set} --dataset-output-path holdout_results/all_less_$${holdout_set}_train_results.csv; \
+		winnow predict --data-source instanovo --dataset-config-path configs/validation_data/$${holdout_set}_labelled.yaml --model-folder holdout_models/all_less_$${holdout_set} --method winnow --fdr-threshold 0.05 --confidence-column "calibrated_confidence" --output-path holdout_results/all_less_$${holdout_set}_labelled_test_results.csv; \
+		python scripts/add_db_fdr.py --input-path holdout_results/all_less_$${holdout_set}_labelled_test_results.csv --output-path holdout_results/all_less_$${holdout_set}_labelled_test_results_with_db_fdr.csv --confidence-column calibrated_confidence; \
+		winnow predict --data-source instanovo --dataset-config-path configs/validation_data/$${holdout_set}_de_novo.yaml --model-folder holdout_models/all_less_$${holdout_set} --method winnow --fdr-threshold 0.05 --confidence-column "calibrated_confidence" --output-path holdout_results/all_less_$${holdout_set}_de_novo_test_results.csv; \
+		python scripts/add_db_fdr.py --input-path holdout_results/all_less_$${holdout_set}_de_novo_test_results.csv --output-path holdout_results/all_less_$${holdout_set}_de_novo_test_results_with_db_fdr.csv --confidence-column calibrated_confidence; \
+	done
