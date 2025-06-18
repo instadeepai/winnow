@@ -96,7 +96,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
     @staticmethod
     def _load_dataset(
         predictions_path: Path,
-    ) -> Tuple[pl.DataFrame, pl.DataFrame, bool]:
+    ) -> Tuple[pl.DataFrame, pl.DataFrame]:
         """Loads a dataset from a CSV file and optionally filters it."""
 
         def _filter_dataset_for_prosit(df: pl.DataFrame) -> pl.DataFrame:
@@ -120,11 +120,10 @@ class InstaNovoDatasetLoader(DatasetLoader):
             return df
 
         df = pl.read_csv(predictions_path)
-        has_labels = "sequence" in df.columns
         df = _filter_dataset_for_prosit(df)
         beam_df = df.select(cs.contains("_beam_"))
         preds_df = df.select(~cs.contains(["_beam_", "_log_probs_"]))
-        return preds_df, beam_df, has_labels
+        return preds_df, beam_df
 
     @staticmethod
     def _process_beams(beam_df: pl.DataFrame) -> List[Optional[List[ScoredSequence]]]:
@@ -174,15 +173,13 @@ class InstaNovoDatasetLoader(DatasetLoader):
         ]
 
     @staticmethod
-    def _process_dataset(dataset: pd.DataFrame, has_labels: bool) -> pd.DataFrame:
+    def _process_dataset(dataset: pd.DataFrame) -> pd.DataFrame:
         """Processes the predictions obtained from saved beams."""
         rename_dict = {
             "preds": "prediction_untokenised",
             "preds_tokenised": "prediction",
             "log_probs": "confidence",
         }
-        if has_labels:
-            rename_dict["sequence"] = "sequence_untokenised"
         dataset.rename(rename_dict, axis=1, inplace=True)
 
         dataset["prediction"] = dataset["prediction"].apply(
@@ -192,15 +189,6 @@ class InstaNovoDatasetLoader(DatasetLoader):
         dataset.loc[dataset["confidence"] == -1.0, "confidence"] = float("-inf")
         dataset["confidence"] = dataset["confidence"].apply(np.exp)
 
-        if has_labels:
-            dataset["sequence_untokenised"] = dataset["sequence_untokenised"].apply(
-                lambda peptide: peptide.replace("L", "I")
-                if isinstance(peptide, str)
-                else peptide
-            )
-            dataset["sequence"] = dataset["sequence_untokenised"].apply(
-                metrics._split_peptide
-            )
         dataset["prediction"] = dataset["prediction"].apply(
             lambda peptide: [
                 "I" if amino_acid == "L" else amino_acid for amino_acid in peptide
@@ -217,16 +205,23 @@ class InstaNovoDatasetLoader(DatasetLoader):
         return dataset
 
     @staticmethod
-    def _load_spectrum_data(spectrum_path: Path | str) -> pl.DataFrame:
+    def _load_spectrum_data(spectrum_path: Path | str) -> Tuple[pl.DataFrame, bool]:
         """Loads spectrum data from either a Parquet or IPC file."""
         spectrum_path = Path(spectrum_path)
 
         if spectrum_path.suffix == ".parquet":
-            return pl.read_parquet(spectrum_path)
+            df = pl.read_parquet(spectrum_path)
         elif spectrum_path.suffix == ".ipc":
-            return pl.read_ipc(spectrum_path)
+            df = pl.read_ipc(spectrum_path)
         else:
             raise ValueError(f"Unsupported file format: {spectrum_path.suffix}")
+
+        if "sequence" in df.columns:
+            has_labels = True
+        else:
+            has_labels = False
+
+        return df, has_labels
 
     @staticmethod
     def _process_spectrum_data(df: pl.DataFrame, has_labels: bool) -> pd.DataFrame:
@@ -319,10 +314,10 @@ class InstaNovoDatasetLoader(DatasetLoader):
             )
         spectrum_path, beam_predictions_path = args
 
-        predictions, beams, has_labels = self._load_dataset(beam_predictions_path)
+        predictions, beams = self._load_dataset(beam_predictions_path)
         beams = self._process_beams(beams)
-        predictions = self._process_dataset(predictions.to_pandas(), has_labels)
-        inputs = self._load_spectrum_data(spectrum_path)
+        predictions = self._process_dataset(predictions.to_pandas())
+        inputs, has_labels = self._load_spectrum_data(spectrum_path)
         inputs = self._process_spectrum_data(inputs, has_labels)
         predictions = self._merge_spectrum_data(predictions, inputs)
         predictions = self._evaluate_predictions(predictions, has_labels)
