@@ -1,0 +1,2 @@
+spectrum_path: holdout_sets/all_less_woundfluids.parquet
+beam_predictions_path: holdout_sets/all_less_woundfluids.csv

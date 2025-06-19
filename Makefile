@@ -311,14 +311,45 @@ evaluate-combined-data:
 # NB, ignore the PXD014877 results as it was part of the training set.
 
 ## Evaluate holdout sets
-evaluate-holdout-sets:
+evaluate-holdout-sets: set-ceph-credentials set-gcp-credentials
+	# Copy data from Ceph bucket to local directory
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/ validation_datasets_corrected/spectrum_data/ --recursive --profile winnow
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/ validation_datasets_corrected/beam_preds/ --recursive --profile winnow
+	aws s3 cp s3://winnow-g88rh/fasta/ fasta/ --recursive --profile winnow
+	# Make folders
 	mkdir -p holdout_results
+	mkdir -p holdout_models
+	mkdir -p holdout_sets
+	# Create holdout sets
+	python scripts/create_holdout_sets.py
+	# Train models and evaluate holdout sets
 	@for holdout_set in $(val_datasets); do \
 		echo "Evaluating holdout set: $$holdout_set"; \
 		mkdir -p holdout_models/all_less_$${holdout_set}; \
 		winnow train --data-source instanovo --dataset-config-path configs/holdout/all_less_$${holdout_set}.yaml --model-output-folder holdout_models/all_less_$${holdout_set} --dataset-output-path holdout_results/all_less_$${holdout_set}_train_results.csv; \
-		winnow predict --data-source instanovo --dataset-config-path configs/validation_data/$${holdout_set}_labelled.yaml --model-folder holdout_models/all_less_$${holdout_set} --method winnow --fdr-threshold 0.05 --confidence-column "calibrated_confidence" --output-path holdout_results/all_less_$${holdout_set}_labelled_test_results.csv; \
-		python scripts/add_db_fdr.py --input-path holdout_results/all_less_$${holdout_set}_labelled_test_results.csv --output-path holdout_results/all_less_$${holdout_set}_labelled_test_results_with_db_fdr.csv --confidence-column calibrated_confidence; \
-		winnow predict --data-source instanovo --dataset-config-path configs/validation_data/$${holdout_set}_de_novo.yaml --model-folder holdout_models/all_less_$${holdout_set} --method winnow --fdr-threshold 0.05 --confidence-column "calibrated_confidence" --output-path holdout_results/all_less_$${holdout_set}_de_novo_test_results.csv; \
-		python scripts/add_db_fdr.py --input-path holdout_results/all_less_$${holdout_set}_de_novo_test_results.csv --output-path holdout_results/all_less_$${holdout_set}_de_novo_test_results_with_db_fdr.csv --confidence-column calibrated_confidence; \
+
+		winnow predict --data-source instanovo --dataset-config-path configs/validation_data/$${holdout_set}_labelled.yaml --model-folder holdout_models/all_less_$${holdout_set} --method winnow --fdr-threshold 0.05 --confidence-column "calibrated_confidence" --output-path holdout_results/all_less_$${holdout_set}_labelled_test_results.csv --confidence-cutoff-path holdout_results/all_less_$${holdout_set}_winnow_labelled_confidence_cutoff.txt; \
+		python scripts/add_db_fdr.py --input-path holdout_results/all_less_$${holdout_set}_labelled_test_results.csv --output-path holdout_results/all_less_$${holdout_set}_labelled_test_results_with_db_fdr.csv --confidence-column calibrated_confidence --fdr-threshold 0.05 --confidence-cutoff-path holdout_results/all_less_$${holdout_set}_dbg_labelled_confidence_cutoff.txt; \
+
+		winnow predict --data-source instanovo --dataset-config-path configs/validation_data/$${holdout_set}_raw.yaml --model-folder holdout_models/all_less_$${holdout_set} --method winnow --fdr-threshold 0.05 --confidence-column "calibrated_confidence" --output-path holdout_results/all_less_$${holdout_set}_raw_test_results.csv --confidence-cutoff-path holdout_results/all_less_$${holdout_set}_winnow_raw_confidence_cutoff.txt; \
 	done
+	# Map peptides to proteomes
+	# gluc
+	python scripts/map_peptides_to_proteomes.py --metadata-csv holdout_results/all_less_gluc_raw_test_results.csv --fasta-file fasta/human.fasta --output-csv holdout_results/all_less_gluc_raw_test_results.csv
+	# helaqc
+	python scripts/map_peptides_to_proteomes.py --metadata-csv holdout_results/all_less_helaqc_raw_test_results.csv --fasta-file fasta/human.fasta --output-csv holdout_results/all_less_helaqc_raw_test_results.csv
+	# herceptin
+	python scripts/map_peptides_to_proteomes.py --metadata-csv holdout_results/all_less_herceptin_raw_test_results.csv --fasta-file fasta/herceptin.fasta --output-csv holdout_results/all_less_herceptin_raw_test_results.csv
+	# sbrodae
+	python scripts/map_peptides_to_proteomes.py --metadata-csv holdout_results/all_less_sbrodae_raw_test_results.csv --fasta-file fasta/Sb_proteome.fasta --output-csv holdout_results/all_less_sbrodae_raw_test_results.csv
+	# snakevenoms
+	python scripts/map_peptides_to_proteomes.py --metadata-csv holdout_results/all_less_snakevenoms_raw_test_results.csv --fasta-file fasta/uniprot-serpentes-2022.05.09.fasta --output-csv holdout_results/all_less_snakevenoms_raw_test_results.csv
+	# NB. we ignore immuno and woundfluids as contains many species
+	# Create plots
+	python scripts/create_holdout_plots.py
+	# Copy results to Ceph bucket
+	aws s3 cp holdout_results/ s3://winnow-g88rh/poster/holdout_results/ --recursive --profile winnow
+	aws s3 cp holdout_models/ s3://winnow-g88rh/poster/holdout_models/ --recursive --profile winnow
+	# Copy results to Google Cloud Storage
+	gsutil -m cp -R holdout_results/ gs://winnow-fdr/poster/holdout_results/
+	gsutil -m cp -R holdout_models/ gs://winnow-fdr/poster/holdout_models/

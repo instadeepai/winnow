@@ -79,7 +79,7 @@ class ProbabilityCalibrator:
             calibrator (ProbabilityCalibrator): The calibrator to save.
             path (Path): The path to save the calibrator to.
         """
-        path.mkdir(parents=True)
+        path.mkdir(parents=True, exist_ok=True)
         calibrator_classifier_path = path / "calibrator.pkl"
         irt_predictor_path = path / "irt_predictor.pkl"
         scaler_path = path / "scaler.pkl"

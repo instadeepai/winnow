@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from enum import Enum
 import typer
 from typing_extensions import Annotated
-from typing import Union, Tuple
+from typing import Union, Tuple, Optional
 import logging
 from rich.logging import RichHandler
 from pathlib import Path
@@ -201,7 +201,7 @@ def apply_fdr_control(
     dataset: CalibrationDataset,
     fdr_threshold: float,
     confidence_column: str,
-) -> pd.DataFrame:
+) -> Tuple[pd.DataFrame, float]:
     """Apply non-parametric FDR control."""
     if isinstance(fdr_control, NonParametricFDRControl):
         fdr_control.fit(dataset=dataset.metadata[confidence_column])
@@ -213,9 +213,10 @@ def apply_fdr_control(
         )
     dataset.metadata = fdr_control.add_psm_fdr(dataset.metadata, confidence_column)
     output_data = dataset.metadata
-    # confidence_cutoff = fdr_control.get_confidence_cutoff(threshold=fdr_threshold)
+    confidence_cutoff = fdr_control.get_confidence_cutoff(threshold=fdr_threshold)
+    logger.info(f"Confidence cutoff for FDR {fdr_threshold}: {confidence_cutoff}")
     # output_data = output_data[output_data[confidence_column] >= confidence_cutoff]
-    return output_data
+    return output_data, confidence_cutoff
 
 
 def check_if_labelled(dataset: CalibrationDataset) -> None:
@@ -285,7 +286,7 @@ def _apply_fdr_control(
     dataset: CalibrationDataset,
     fdr_threshold: float,
     confidence_column: str,
-) -> pd.DataFrame:
+) -> Tuple[pd.DataFrame, float]:
     """Apply FDR control using the specified method.
 
     Args:
@@ -295,7 +296,7 @@ def _apply_fdr_control(
         confidence_column (str): Name of the column with confidence scores
 
     Returns:
-        pd.DataFrame: The filtered dataset metadata
+        Tuple[pd.DataFrame, float]: The filtered dataset metadata and confidence cutoff
     """
     if method is FDRMethod.winnow:
         logger.info("Applying FDR control.")
@@ -396,6 +397,9 @@ def predict(
         str, typer.Option(help="Name of the column with confidence scores.")
     ],
     output_path: Annotated[Path, typer.Option(help="The path to write the output to.")],
+    confidence_cutoff_path: Annotated[
+        Optional[Path], typer.Option(help="The path to write the confidence cutoff to.")
+    ] = None,
     correct_label_shift: Annotated[
         bool,
         typer.Option(
@@ -423,6 +427,7 @@ def predict(
         fdr_threshold (Annotated[ float, typer.Option, optional): The target FDR threshold (e.g. 0.01 for 1%, 0.05 for 5% etc.).
         confidence_column (Annotated[ str, typer.Option, optional): Name of the column with confidence scores.
         output_path (Annotated[ Path, typer.Option, optional): The path to write the output to.
+        confidence_cutoff_path (Annotated[ Path, typer.Option, optional): The path to write the confidence cutoff to.
         correct_label_shift (Annotated[ bool, typer.Option, optional): Whether to apply label shift correction.
         use_true_labels_for_prior (Annotated[ bool, typer.Option, optional): Whether to use true labels for prior calculation.
     """
@@ -456,7 +461,7 @@ def predict(
     _log_prior_info(calibrator, correct_label_shift)
 
     # Apply FDR control and save results
-    dataset_metadata = _apply_fdr_control(
+    dataset_metadata, confidence_cutoff = _apply_fdr_control(
         method, dataset, fdr_threshold, confidence_column
     )
 
@@ -465,3 +470,10 @@ def predict(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     dataset_metadata.to_csv(output_path)
     logger.info(f"Outputs saved: {output_path}")
+
+    # Save confidence cutoff if path is provided
+    if confidence_cutoff_path is not None:
+        confidence_cutoff_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(confidence_cutoff_path, "w") as f:
+            f.write(str(confidence_cutoff))
+        logger.info(f"Confidence cutoff saved: {confidence_cutoff_path}")

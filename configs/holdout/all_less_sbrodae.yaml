@@ -1,0 +1,2 @@
+spectrum_path: holdout_sets/all_less_sbrodae.parquet
+beam_predictions_path: holdout_sets/all_less_sbrodae.csv

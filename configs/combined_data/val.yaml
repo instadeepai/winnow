@@ -1,0 +1,2 @@
+spectrum_path: combined_data/train_spectrum_all_datasets_with_external.parquet
+beam_predictions_path: combined_data/train_beam_all_datasets_with_external.csv
