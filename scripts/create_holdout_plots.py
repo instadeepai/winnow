@@ -509,7 +509,7 @@ def plot_proteome_hits_bar_chart(
 
     config = {
         "file_path_template": "holdout_results/all_less_{species}_raw_test_results.csv",
-        "label_column": "proteome_hits",
+        "label_column": "proteome_hit",
         "winnow_positive_label": "Non-Parametric Proteome Hits",
         "winnow_negative_label": "Non-Parametric Non-Proteome Hits",
         "dbg_positive_label": "Database-Grounded Proteome Hits",
@@ -793,9 +793,9 @@ def main():
                     f"holdout_results/all_less_{species}_raw_test_results.csv"
                 )
 
-                # Create combined raw data plot for the species (uses "proteome_hits" column)
+                # Create combined raw data plot for the species (uses "proteome_hit" column)
                 fig, (ax1, ax2, ax3, ax4, ax5) = create_combined_species_plot(
-                    raw_metadata, f"{species} (Raw)", "proteome_hits"
+                    raw_metadata, f"{species} (Raw)", "proteome_hit"
                 )
                 fig.savefig(
                     f"holdout_results/plots/all_less_{species}_raw_combined_plot.png",
