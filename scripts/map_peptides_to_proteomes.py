@@ -1,69 +1,79 @@
 import os
-import pandas as pd
+import polars as pl
 from Bio import SeqIO
 import argparse
-from tqdm import tqdm
-from typing import List
-import re
-
-
-def remove_unimod_mods(seq: str) -> str:
-    """Remove UNIMOD modifications from a peptide sequence."""
-    if pd.notnull(seq):
-        return re.sub(r"\[UNIMOD:\d+\]", "", seq)
-    return seq
+import logging
 
 
 def normalize_sequence(seq: str) -> str:
     """Normalize a peptide sequence."""
-    if pd.notnull(seq):
+    if seq is not None:
         return seq.replace("I", "L")
     return seq
 
 
-def preprocess_peptide(seq: str) -> str:
-    """Preprocess a peptide sequence."""
-    seq = remove_unimod_mods(seq)
-    seq = normalize_sequence(seq)
-    return seq
-
-
-def find_peptide_in_proteome(peptide: str, fasta_file: str) -> bool:
-    """Find a peptide in the specified proteome fasta file and return True if found."""
+def load_proteome_sequences(fasta_file: str) -> set:
+    """Load all sequences from the FASTA file into a set for fast lookup."""
     if not os.path.exists(fasta_file):
-        print(f"Warning: FASTA file not found at {fasta_file}")
-        return False
+        logging.warning(f"FASTA file not found at {fasta_file}")
+        return set()
 
+    sequences = set()
     for record in SeqIO.parse(fasta_file, "fasta"):
-        if peptide in normalize_sequence(str(record.seq)):
-            return True
+        normalized_seq = normalize_sequence(str(record.seq))
+        sequences.add(normalized_seq)
 
-    return False
+    return sequences
 
 
 def main(metadata_csv: str, fasta_file: str, output_csv: str) -> None:
     """Map peptides to proteomes using FASTA files."""
-    df = pd.read_csv(metadata_csv)
+    logging.info(f"Loading proteome sequences from: {fasta_file}")
+    proteome_sequences = load_proteome_sequences(fasta_file)
+    logging.info(f"Loaded {len(proteome_sequences)} unique sequences from proteome")
 
-    print(f"Processing data with proteome file: {fasta_file}")
+    logging.info(f"Processing data with proteome file: {fasta_file}")
 
-    # Prepare boolean column for results
-    proteome_hit_col: List[bool] = []
+    # Read CSV with polars
+    df = pl.read_csv(metadata_csv)
 
-    for _, row in tqdm(df.iterrows(), total=len(df)):
-        raw_peptide = row["prediction_untokenised"]
+    logging.info(f"Processing {len(df)} rows")
 
-        peptide = preprocess_peptide(raw_peptide)
-        has_hit = find_peptide_in_proteome(peptide, fasta_file)
-        proteome_hit_col.append(has_hit)
+    # Preprocess peptides using native polars expressions
+    df_processed = df.with_columns(
+        [
+            pl.col("prediction_untokenised")
+            .str.replace_all(r"\[UNIMOD:\d+\]", "")  # Remove UNIMOD modifications
+            .str.replace("I", "L")  # Normalize I to L
+            .alias("processed_peptide")
+        ]
+    )
 
-    df["proteome_hit"] = proteome_hit_col
+    logging.info(f"Processed {len(df_processed)} rows")
 
-    df.to_csv(output_csv, index=False)
-    print(f"Done. Results written to {output_csv}")
+    # Check for hits using native polars expressions
+    df_with_hits = df_processed.with_columns(
+        [pl.col("processed_peptide").is_in(proteome_sequences).alias("proteome_hit")]
+    )
+
+    logging.info(f"Found {len(df_with_hits)} hits")
+
+    # Drop the intermediate processed_peptide column
+    df_final = df_with_hits.drop("processed_peptide")
+
+    # Write results
+    df_final.write_csv(output_csv)
+    logging.info(f"Done. Results written to {output_csv}")
 
 
 if __name__ == "__main__":
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
     parser = argparse.ArgumentParser(
         description="Map peptides to proteomes using FASTA files."
     )

@@ -317,9 +317,9 @@ evaluate-holdout-sets: set-ceph-credentials set-gcp-credentials
 	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/ validation_datasets_corrected/beam_preds/ --recursive --profile winnow
 	aws s3 cp s3://winnow-g88rh/fasta/ fasta/ --recursive --profile winnow
 	# Make folders
-	mkdir -p holdout_results
 	mkdir -p holdout_models
 	mkdir -p holdout_sets
+	mkdir -p holdout_results/plots
 	# Create holdout sets
 	python scripts/create_holdout_sets.py
 	# Train models and evaluate holdout sets
