@@ -327,10 +327,8 @@ evaluate-holdout-sets: set-ceph-credentials set-gcp-credentials
 		echo "Evaluating holdout set: $$holdout_set"; \
 		mkdir -p holdout_models/all_less_$${holdout_set}; \
 		winnow train --data-source instanovo --dataset-config-path configs/holdout/all_less_$${holdout_set}.yaml --model-output-folder holdout_models/all_less_$${holdout_set} --dataset-output-path holdout_results/all_less_$${holdout_set}_train_results.csv; \
-
 		winnow predict --data-source instanovo --dataset-config-path configs/validation_data/$${holdout_set}_labelled.yaml --model-folder holdout_models/all_less_$${holdout_set} --method winnow --fdr-threshold 0.05 --confidence-column "calibrated_confidence" --output-path holdout_results/all_less_$${holdout_set}_labelled_test_results.csv --confidence-cutoff-path holdout_results/all_less_$${holdout_set}_winnow_labelled_confidence_cutoff.txt; \
 		python scripts/add_db_fdr.py --input-path holdout_results/all_less_$${holdout_set}_labelled_test_results.csv --output-path holdout_results/all_less_$${holdout_set}_labelled_test_results_with_db_fdr.csv --confidence-column calibrated_confidence --fdr-threshold 0.05 --confidence-cutoff-path holdout_results/all_less_$${holdout_set}_dbg_labelled_confidence_cutoff.txt; \
-
 		winnow predict --data-source instanovo --dataset-config-path configs/validation_data/$${holdout_set}_raw.yaml --model-folder holdout_models/all_less_$${holdout_set} --method winnow --fdr-threshold 0.05 --confidence-column "calibrated_confidence" --output-path holdout_results/all_less_$${holdout_set}_raw_test_results.csv --confidence-cutoff-path holdout_results/all_less_$${holdout_set}_winnow_raw_confidence_cutoff.txt; \
 	done
 	# Map peptides to proteomes

@@ -12,16 +12,16 @@ def normalize_sequence(seq: str) -> str:
     return seq
 
 
-def load_proteome_sequences(fasta_file: str) -> set:
-    """Load all sequences from the FASTA file into a set for fast lookup."""
+def load_proteome_sequences(fasta_file: str) -> list:
+    """Load all sequences from the FASTA file into a list for substring matching."""
     if not os.path.exists(fasta_file):
         logging.warning(f"FASTA file not found at {fasta_file}")
-        return set()
+        return []
 
-    sequences = set()
+    sequences = []
     for record in SeqIO.parse(fasta_file, "fasta"):
         normalized_seq = normalize_sequence(str(record.seq))
-        sequences.add(normalized_seq)
+        sequences.append(normalized_seq)
 
     return sequences
 
@@ -30,33 +30,47 @@ def main(metadata_csv: str, fasta_file: str, output_csv: str) -> None:
     """Map peptides to proteomes using FASTA files."""
     logging.info(f"Loading proteome sequences from: {fasta_file}")
     proteome_sequences = load_proteome_sequences(fasta_file)
-    logging.info(f"Loaded {len(proteome_sequences)} unique sequences from proteome")
+    logging.info(f"Loaded {len(proteome_sequences)} sequences from proteome")
 
     logging.info(f"Processing data with proteome file: {fasta_file}")
 
     # Read CSV with polars
     df = pl.read_csv(metadata_csv)
 
-    logging.info(f"Processing {len(df)} rows")
+    logging.info(f"Found in metadata {len(df)} rows")
 
     # Preprocess peptides using native polars expressions
     df_processed = df.with_columns(
         [
             pl.col("prediction_untokenised")
+            .str.replace_all(
+                r"\(\+\d+\.?\d*\)", ""
+            )  # Matches (+123), (+123.45), (+123.456)
             .str.replace_all(r"\[UNIMOD:\d+\]", "")  # Remove UNIMOD modifications
-            .str.replace("I", "L")  # Normalize I to L
+            .str.replace_all("I", "L", literal=True)  # Normalize I to L
             .alias("processed_peptide")
         ]
     )
 
     logging.info(f"Processed {len(df_processed)} rows")
 
-    # Check for hits using native polars expressions
+    # Check for substring hits using polars contains method
+    # Create a condition that checks if the peptide is contained in any proteome sequence
+    contains_conditions = [
+        pl.lit(seq).str.contains(pl.col("processed_peptide"), literal=True)
+        for seq in proteome_sequences
+    ]
+
     df_with_hits = df_processed.with_columns(
-        [pl.col("processed_peptide").is_in(proteome_sequences).alias("proteome_hit")]
+        [
+            pl.fold(pl.lit(False), lambda acc, x: acc | x, contains_conditions).alias(
+                "proteome_hit"
+            )
+        ]
     )
 
-    logging.info(f"Found {len(df_with_hits)} hits")
+    num_hits = df_with_hits.select("proteome_hit").sum().item()
+    logging.info(f"Found {num_hits} hits")
 
     # Drop the intermediate processed_peptide column
     df_final = df_with_hits.drop("processed_peptide")

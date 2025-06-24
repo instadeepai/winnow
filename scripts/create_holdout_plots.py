@@ -1,8 +1,19 @@
 import matplotlib.pyplot as plt
 import pandas as pd
 from sklearn.calibration import calibration_curve
-from typing import Tuple, List
+from typing import Tuple, List, Callable, Union
 import numpy as np
+
+# Species name mapping for nicer plot labels
+SPECIES_NAME_MAPPING = {
+    "helaqc": "HeLa Single Shot",
+    "gluc": "HeLa Degradome",
+    "herceptin": "Herceptin",
+    "snakevenoms": "Snake Venomics",
+    "woundfluids": "Wound Exudates",
+    "sbrodae": "Scalindua brodae",
+    "immuno": "Immunopeptidomics",
+}
 
 
 def compute_pr_curve(
@@ -208,6 +219,155 @@ def plot_probability_calibration(
     return fig, (ax1, ax2)
 
 
+def get_plot_dataframe(
+    input_df: pd.DataFrame, confidence_column: str, fdr_function: Callable
+) -> pd.DataFrame:
+    """Create a dataframe for FDR plotting with true and estimated FDR values.
+
+    Args:
+        input_df: DataFrame containing confidence scores and correct labels
+        confidence_column: Name of the column containing confidence scores
+        fdr_function: Function to calculate estimated FDR
+
+    Returns:
+        DataFrame with confidence, FDR, and source columns
+    """
+    sorted_df = input_df.sort_values(ascending=False, by=[confidence_column])
+    cum_correct = np.cumsum(np.array(sorted_df["correct"]))
+    cum_counts = np.arange(1, len(input_df) + 1)
+    true_fdr = (cum_counts - cum_correct) / cum_counts
+    estimated_fdr = fdr_function(sorted_df[confidence_column])
+    multi_plot_df = pd.DataFrame(
+        {
+            "confidence": pd.concat(
+                [sorted_df[confidence_column], sorted_df[confidence_column]]
+            ),
+            "fdr": true_fdr.tolist() + estimated_fdr.tolist(),
+            "source": true_fdr.shape[0] * ["true"]
+            + estimated_fdr.shape[0] * ["estimate"],
+        }
+    )
+    return multi_plot_df
+
+
+def get_confidence_threshold(dataframe: pd.DataFrame) -> float:
+    """Get confidence threshold where FDR crosses 0.05.
+
+    Args:
+        dataframe: DataFrame containing confidence and FDR values
+
+    Returns:
+        Confidence threshold value
+    """
+    sorted_df = dataframe.sort_values(by=["confidence"])
+    idxs = np.where(np.diff(np.sign(np.array(sorted_df["fdr"]) - 0.05)) != 0)
+
+    # Check if we found any crossings
+    if len(idxs[0]) == 0:
+        # If no crossing found, return the minimum confidence value
+        # This happens when FDR never crosses 0.05
+        if sorted_df["fdr"].min() < 0.05:
+            return sorted_df["confidence"].min()
+        else:
+            return 1.0
+
+    return sorted_df["confidence"].values[idxs[0][0] + 1].item()
+
+
+def plot_fdr_accuracy_on_axes(
+    metadata: pd.DataFrame,
+    ax: plt.Axes,
+    fdr_function: Callable,
+    confidence_column: str = "confidence",
+    title: str = "FDR Accuracy",
+) -> None:
+    """Plot FDR accuracy comparison on a given axes.
+
+    Args:
+        metadata: DataFrame containing confidence scores and labels
+        ax: Matplotlib axes to plot on
+        fdr_function: Function to calculate estimated FDR
+        confidence_column: Name of the column containing confidence scores
+        title: Title for the plot
+        label_column: Name of the column containing boolean labels
+    """
+    # Get the multi-plot dataframe
+    multi_plot_df = get_plot_dataframe(
+        input_df=metadata,
+        confidence_column=confidence_column,
+        fdr_function=fdr_function,
+    )
+
+    # Get confidence thresholds
+    cutoffs = (
+        multi_plot_df.groupby("source")
+        .apply(get_confidence_threshold)
+        .to_frame(name="value")
+        .reset_index()
+    )
+
+    # Plot FDR lines for each source
+    for source in multi_plot_df["source"].unique():
+        source_data = multi_plot_df[multi_plot_df["source"] == source]
+        if source == "true":
+            color = "#4A90E2"  # Muted blue
+            label = "True FDR"
+        else:
+            color = "#F5A623"  # Muted gold
+            label = "Estimated FDR"
+        ax.plot(
+            source_data["confidence"],
+            source_data["fdr"],
+            label=label,
+            linewidth=2,
+            color=color,
+        )
+
+    # Add horizontal line at FDR = 0.05
+    ax.axhline(y=0.05, color="black", linestyle="--", alpha=0.7, linewidth=1.5)
+
+    # Add vertical lines for confidence thresholds
+    for _, row in cutoffs.iterrows():
+        ax.axvline(
+            x=row["value"], color="gray", linestyle=":", alpha=0.7, linewidth=1.5
+        )
+
+    # Customize the plot
+    ax.set_xlabel("Confidence", fontsize=12)
+    ax.set_ylabel("False Discovery Rate (FDR)", fontsize=12)
+    ax.set_title(title, fontsize=12)
+    ax.legend(fontsize=10)
+    ax.grid(True, alpha=0.3)
+
+    # Set y-axis to start from 0 and go up to a reasonable max
+    ax.set_ylim(0, min(1.0, multi_plot_df["fdr"].max() * 1.1))
+
+
+def plot_fdr_accuracy(
+    metadata: pd.DataFrame,
+    title: str,
+    fdr_function: Callable,
+    confidence_column: str = "confidence",
+    label_column: str = "correct",
+) -> Tuple[plt.Figure, plt.Axes]:
+    """Plot FDR accuracy comparison.
+
+    Args:
+        metadata: DataFrame containing confidence scores and labels
+        title: Title for the plot
+        fdr_function: Function to calculate estimated FDR
+        confidence_column: Name of the column containing confidence scores
+        label_column: Name of the column containing boolean labels
+
+    Returns:
+        Tuple of (figure, axes)
+    """
+    fig, ax = plt.subplots(figsize=(6, 4))
+    plot_fdr_accuracy_on_axes(metadata, ax, fdr_function, confidence_column, title)
+    plt.tight_layout()
+    return fig, ax
+
+
 def count_num_matches_at_fdr(
     metadata: pd.DataFrame,
     confidence_column: str,
@@ -285,6 +445,7 @@ def plot_comparison_bar_chart(
             plot_data.append(
                 {
                     "species": species,
+                    "species_display": SPECIES_NAME_MAPPING.get(species, species),
                     "winnow_positive": winnow_positive,
                     "winnow_negative": winnow_negative,
                     "dbg_positive": dbg_positive,
@@ -293,10 +454,13 @@ def plot_comparison_bar_chart(
             )
 
         except FileNotFoundError:
-            print(f"Warning: Data file not found for species {species}")
+            print(
+                f"Warning: Data file not found for species {SPECIES_NAME_MAPPING.get(species, species)}"
+            )
             plot_data.append(
                 {
                     "species": species,
+                    "species_display": SPECIES_NAME_MAPPING.get(species, species),
                     "winnow_positive": 0,
                     "winnow_negative": 0,
                     "dbg_positive": 0,
@@ -307,8 +471,12 @@ def plot_comparison_bar_chart(
     # Create DataFrame for plotting
     plot_df = pd.DataFrame(plot_data)
 
-    # Create the plot
-    fig, ax = plt.subplots(1, 1, figsize=(16, 12))
+    # Create the plot with GridSpec for better layout control
+    fig = plt.figure(figsize=(16, 14))
+    gs = fig.add_gridspec(2, 1, height_ratios=[3, 1], hspace=0.3)
+
+    # Main chart subplot
+    ax = fig.add_subplot(gs[0])
 
     # Set up bar positions
     x = range(len(species_list))
@@ -357,19 +525,20 @@ def plot_comparison_bar_chart(
     ax.set_ylabel(f"Number of PSMs at {fdr_threshold * 100}% FDR", fontsize=12)
     ax.set_title(config["title"].format(fdr_threshold * 100), fontsize=14)
 
-    # Set x-axis labels
+    # Set x-axis labels using mapped species names
     ax.set_xticks(x)
-    ax.set_xticklabels(species_list, rotation=45, ha="right")
+    ax.set_xticklabels(plot_df["species_display"], rotation=45, ha="right")
 
     # Add legend
     ax.legend(fontsize=10)
 
     # Add grid
     ax.grid(True, alpha=0.3, axis="y")
+    ax.set_yscale("log")
 
-    # Create a summary table below the plot
+    # Create a summary table in the second subplot
     table_data = []
-    for i, species in enumerate(species_list):
+    for i, _species in enumerate(species_list):
         # Calculate rates for each method
         np_total = (
             plot_df.iloc[i]["winnow_positive"] + plot_df.iloc[i]["winnow_negative"]
@@ -381,7 +550,7 @@ def plot_comparison_bar_chart(
 
         table_data.append(
             [
-                species,
+                plot_df.iloc[i]["species_display"],
                 f"{plot_df.iloc[i]['winnow_positive']}",
                 f"{plot_df.iloc[i]['winnow_negative']}",
                 f"{np_rate * 100:.1f}%",
@@ -391,8 +560,8 @@ def plot_comparison_bar_chart(
             ]
         )
 
-    # Add table below the plot
-    table_ax = fig.add_axes([0.1, 0.05, 0.8, 0.25])  # Position table below the plot
+    # Table subplot
+    table_ax = fig.add_subplot(gs[1])
     table_ax.axis("tight")
     table_ax.axis("off")
 
@@ -401,7 +570,7 @@ def plot_comparison_bar_chart(
         colLabels=config["table_headers"],
         cellLoc="center",
         loc="center",
-        colWidths=[0.15, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25],
+        colWidths=[0.12, 0.27, 0.27, 0.27, 0.27, 0.27, 0.27],
     )
 
     # Style the table
@@ -419,8 +588,6 @@ def plot_comparison_bar_chart(
         for j in range(len(table_data[0])):
             if i % 2 == 0:
                 table[(i, j)].set_facecolor("#f0f0f0")
-
-    ax.set_yscale("log")
 
     plt.tight_layout()
 
@@ -453,7 +620,7 @@ def plot_psm_hits_bar_chart(
         "winnow_negative_label": "Non-Parametric False Positive",
         "dbg_positive_label": "Database-Grounded True Positive",
         "dbg_negative_label": "Database-Grounded False Positive",
-        "title": "Comparison of PSMs Identified at {}% FDR: Non-Parametric vs Database-Grounded",
+        "title": "Comparison of PSMs Identified at {}% FDR: Non-Parametric FDR Estimation vs Database-Grounded FDR Estimation",
         "table_headers": [
             "Species",
             "Non-Parametric TP",
@@ -505,24 +672,89 @@ def plot_proteome_hits_bar_chart(
             filtered_winnow_cutoffs.append(raw_winnow_confidence_cutoffs[i])
             filtered_dbg_cutoffs.append(labelled_dbg_confidence_cutoffs[i])
         else:
-            print(f"Skipping {species} - no raw data available")
+            print(
+                f"Skipping {SPECIES_NAME_MAPPING.get(species, species)} - no raw data available"
+            )
 
     config = {
         "file_path_template": "holdout_results/all_less_{species}_raw_test_results.csv",
         "label_column": "proteome_hit",
         "winnow_positive_label": "Non-Parametric Proteome Hits",
-        "winnow_negative_label": "Non-Parametric Non-Proteome Hits",
+        "winnow_negative_label": "Non-Parametric No Hits",
         "dbg_positive_label": "Database-Grounded Proteome Hits",
-        "dbg_negative_label": "Database-Grounded Non-Proteome Hits",
-        "title": "Comparison of Proteome Hits at {}% FDR: Non-Parametric vs Database-Grounded (Raw Data)",
+        "dbg_negative_label": "Database-Grounded No Hits",
+        "title": "Comparison of Proteome Hits at {}% FDR: Non-Parametric FDR Estimation vs Database-Grounded FDR Estimation",
         "table_headers": [
             "Species",
             "Non-Parametric Proteome Hits",
-            "Non-Parametric Non-Proteome Hits",
-            "Non-Parametric Non-hit Rate",
+            "Non-Parametric No Hits",
+            "Non-Parametric Error Rate",
             "Database-Grounded Proteome Hits",
-            "Database-Grounded Non-Proteome Hits",
-            "Database-Grounded Non-hit Rate",
+            "Database-Grounded No Hits",
+            "Database-Grounded Error Rate",
+        ],
+    }
+
+    return plot_comparison_bar_chart(
+        species_with_raw_data,
+        filtered_winnow_cutoffs,
+        filtered_dbg_cutoffs,
+        config,
+        fdr_threshold,
+    )
+
+
+def plot_raw_confidence_comparison_bar_chart(
+    species_list: List[str],
+    raw_winnow_confidence_cutoffs: List[float],
+    raw_dbg_confidence_cutoffs: List[float],
+    fdr_threshold: float = 0.05,
+) -> Tuple[plt.Figure, plt.Axes]:
+    """Create a stacked bar chart comparing the number of proteome hits at given FDR threshold.
+
+    Compares between Winnow calibrated confidence and database-grounded raw confidence methods for each species.
+    Skips over species that don't have raw data files (immuno, woundfluids).
+
+    Args:
+        species_list: List of species names
+        raw_winnow_confidence_cutoffs: List of confidence cutoffs at a 5% FDR for Winnow method (calibrated confidence)
+        raw_dbg_confidence_cutoffs: List of confidence cutoffs at a 5% FDR for database-grounded method (raw confidence)
+        fdr_threshold: FDR threshold (default 0.05 for 5% FDR)
+
+    Returns:
+        Tuple of (figure, axes)
+    """
+    # Filter out species that don't have raw data files
+    species_with_raw_data = []
+    filtered_winnow_cutoffs = []
+    filtered_dbg_cutoffs = []
+
+    for i, species in enumerate(species_list):
+        if species not in ["immuno", "woundfluids"]:
+            species_with_raw_data.append(species)
+            filtered_winnow_cutoffs.append(raw_winnow_confidence_cutoffs[i])
+            filtered_dbg_cutoffs.append(raw_dbg_confidence_cutoffs[i])
+        else:
+            print(
+                f"Skipping {SPECIES_NAME_MAPPING.get(species, species)} - no raw data available"
+            )
+
+    config = {
+        "file_path_template": "holdout_results/all_less_{species}_raw_test_results.csv",
+        "label_column": "proteome_hit",
+        "winnow_positive_label": "Calibrated Non-Parametric Proteome Hits",
+        "winnow_negative_label": "Calibrated Non-Parametric No Hits",
+        "dbg_positive_label": "Raw Database-Grounded Proteome Hits",
+        "dbg_negative_label": "Raw Database-Grounded No Hits",
+        "title": "Comparison of Proteome Hits at {}% FDR: Calibrated Confidence and Non-Parametric FDR Estimation vs Raw Confidence and Database-Grounded FDR Estimation",
+        "table_headers": [
+            "Species",
+            "Calibrated Non-Parametric Proteome Hits",
+            "Calibrated Non-Parametric No Hits",
+            "Calibrated Non-Parametric Error Rate",
+            "Raw Database-Grounded Proteome Hits",
+            "Raw Database-Grounded No Hits",
+            "Raw Database-Grounded Error Rate",
         ],
     }
 
@@ -573,16 +805,20 @@ def create_species_pie_chart(
             species_data.append(
                 {
                     "species": species,
+                    "species_display": SPECIES_NAME_MAPPING.get(species, species),
                     "total_psms": total_rows,
                     "color": species_colors[i % len(species_colors)],
                 }
             )
 
         except FileNotFoundError:
-            print(f"Warning: Could not find data file for species {species}")
+            print(
+                f"Warning: Could not find data file for species {SPECIES_NAME_MAPPING.get(species, species)}"
+            )
             species_data.append(
                 {
                     "species": species,
+                    "species_display": SPECIES_NAME_MAPPING.get(species, species),
                     "total_psms": 0,
                     "color": species_colors[i % len(species_colors)],
                 }
@@ -613,9 +849,10 @@ def create_species_pie_chart(
         pad=20,
     )
 
-    # Add legend with counts
+    # Add legend with counts using mapped species names
     legend_labels = [
-        f"{row['species']} ({int(row['total_psms'])} PSMs)" for _, row in df.iterrows()
+        f"{row['species_display']} ({int(row['total_psms'])} PSMs)"
+        for _, row in df.iterrows()
     ]
     ax.legend(
         wedges,
@@ -630,22 +867,47 @@ def create_species_pie_chart(
     return fig, ax
 
 
+def nonparametric_calibrated_estimator(probabilities: pd.Series) -> pd.Series:
+    """Non-parametric calibrated estimator for FDR.
+
+    Args:
+        probabilities: List of confidence scores
+
+    Returns:
+        List of estimated FDR values
+    """
+    error_probabilities = np.array(1 - probabilities)
+    counts = np.arange(1, len(error_probabilities) + 1)
+    cum_error_probabilities = np.cumsum(error_probabilities)
+    false_discovery_rate = cum_error_probabilities / counts
+    return false_discovery_rate
+
+
 def create_combined_species_plot(
-    metadata: pd.DataFrame, title: str, label_column: str = "correct"
-) -> Tuple[plt.Figure, Tuple[plt.Axes, plt.Axes, plt.Axes, plt.Axes, plt.Axes]]:
-    """Create a combined plot with PR curve, confidence distributions, and probability calibration for a species."""
-    # Create a single figure with 3 rows and 2 columns
-    fig = plt.figure(figsize=(15, 18))
+    metadata: pd.DataFrame,
+    title: str,
+    label_column: str = "correct",
+    labelled: bool = False,
+) -> Tuple[
+    plt.Figure,
+    Union[
+        Tuple[plt.Axes, plt.Axes, plt.Axes, plt.Axes, plt.Axes, plt.Axes],
+        Tuple[plt.Axes, plt.Axes, plt.Axes, plt.Axes, plt.Axes],
+    ],
+]:
+    """Create a combined plot with PR curve, confidence distributions, probability calibration, and FDR accuracy for a species."""
+    # Create a single figure with 4 rows and 2 columns
+    fig = plt.figure(figsize=(15, 24))
 
     # Set the main title for the entire figure
     plt.suptitle(title, fontsize=16, y=0.98)
 
     # Plot 1: PR curve (spans full width, top row)
-    ax1 = plt.subplot2grid((3, 2), (0, 0), colspan=2)
+    ax1 = plt.subplot2grid((4, 2), (0, 0), colspan=2)
     plot_pr_curve_on_axes(metadata, ax1, "Precision-Recall Curve", label_column)
 
-    # Plot 2: Confidence distribution (middle left)
-    ax2 = plt.subplot2grid((3, 2), (1, 0))
+    # Plot 2: Confidence distribution (second row left)
+    ax2 = plt.subplot2grid((4, 2), (1, 0))
     plot_confidence_distribution_on_axes(
         metadata,
         ax2,
@@ -654,8 +916,8 @@ def create_combined_species_plot(
         label_column=label_column,
     )
 
-    # Plot 3: Calibrated confidence distribution (middle right)
-    ax3 = plt.subplot2grid((3, 2), (1, 1))
+    # Plot 3: Calibrated confidence distribution (second row right)
+    ax3 = plt.subplot2grid((4, 2), (1, 1))
     plot_confidence_distribution_on_axes(
         metadata,
         ax3,
@@ -664,14 +926,14 @@ def create_combined_species_plot(
         label_column=label_column,
     )
 
-    # Plot 4: Original confidence calibration (bottom left)
-    ax4 = plt.subplot2grid((3, 2), (2, 0))
+    # Plot 4: Original confidence calibration (third row left)
+    ax4 = plt.subplot2grid((4, 2), (2, 0))
     plot_calibration_curve_on_axes(
         metadata, ax4, "confidence", "Confidence Calibration", label_column
     )
 
-    # Plot 5: Calibrated confidence calibration (bottom right)
-    ax5 = plt.subplot2grid((3, 2), (2, 1))
+    # Plot 5: Calibrated confidence calibration (third row right)
+    ax5 = plt.subplot2grid((4, 2), (2, 1))
     plot_calibration_curve_on_axes(
         metadata,
         ax5,
@@ -680,25 +942,39 @@ def create_combined_species_plot(
         label_column,
     )
 
-    plt.tight_layout()
-    plt.subplots_adjust(top=0.95)  # Add more space at the top
+    if labelled:
+        # Plot 6: FDR accuracy comparison (fourth row, spans full width)
+        ax6 = plt.subplot2grid((4, 2), (3, 0), colspan=2)
+        plot_fdr_accuracy_on_axes(
+            metadata,
+            ax6,
+            nonparametric_calibrated_estimator,
+            "calibrated_confidence",
+            "FDR Accuracy (Calibrated Confidence)",
+        )
+
+        plt.tight_layout()
+        plt.subplots_adjust(top=0.95)  # Add more space at the top
+
+        return fig, (ax1, ax2, ax3, ax4, ax5, ax6)
 
     return fig, (ax1, ax2, ax3, ax4, ax5)
 
 
 def load_confidence_cutoffs(
     species_list: List[str],
-) -> Tuple[List[Tuple[float, float]], List[float]]:
+) -> Tuple[List[Tuple[float, float]], List[float], List[float]]:
     """Load confidence cutoffs from files generated during FDR analysis.
 
     Args:
         species_list: List of species names
 
     Returns:
-        Tuple of (winnow_confidence_cutoffs, dbg_confidence_cutoffs)
+        Tuple of (winnow_confidence_cutoffs, labelled_dbg_confidence_cutoffs, labelled_dbg_raw_confidence_cutoffs)
     """
     winnow_confidence_cutoffs = []
-    dbg_confidence_cutoffs = []
+    labelled_dbg_confidence_cutoffs = []
+    raw_dbg_confidence_cutoffs = []
 
     for species in species_list:
         # Load Winnow confidence cutoff
@@ -721,20 +997,35 @@ def load_confidence_cutoffs(
                 f"Could not find Winnow confidence cutoff file for {species}."
             )
 
-        # Load DBG confidence cutoff
-        dbg_cutoff_path = (
+        # Load DBG labelled confidence cutoff
+        dbg_labelled_cutoff_path = (
             f"holdout_results/all_less_{species}_dbg_labelled_confidence_cutoff.txt"
         )
         try:
-            with open(dbg_cutoff_path, "r") as f:
-                dbg_cutoff = float(f.read().strip())
-            dbg_confidence_cutoffs.append(dbg_cutoff)
+            with open(dbg_labelled_cutoff_path, "r") as f:
+                dbg_labelled_cutoff = float(f.read().strip())
+            labelled_dbg_confidence_cutoffs.append(dbg_labelled_cutoff)
         except FileNotFoundError:
             raise FileNotFoundError(
-                f"Could not find DBG confidence cutoff file for {species}: {dbg_cutoff_path}"
+                f"Could not find database-grounded labelled confidence cutoff file for {species}: {dbg_labelled_cutoff_path}"
             )
 
-    return winnow_confidence_cutoffs, dbg_confidence_cutoffs
+        # Load DBG raw confidence cutoff
+        dbg_raw_cutoff_path = f"holdout_results/all_less_{species}_dbg_labelled_confidence_cutoff_raw_conf.txt"
+        try:
+            with open(dbg_raw_cutoff_path, "r") as f:
+                dbg_raw_cutoff = float(f.read().strip())
+            raw_dbg_confidence_cutoffs.append(dbg_raw_cutoff)
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                f"Could not find database-grounded raw confidence cutoff file for {species}: {dbg_raw_cutoff_path}"
+            )
+
+    return (
+        winnow_confidence_cutoffs,
+        labelled_dbg_confidence_cutoffs,
+        raw_dbg_confidence_cutoffs,
+    )
 
 
 def main():
@@ -750,9 +1041,11 @@ def main():
     ]
 
     # Load confidence cutoffs from files
-    labelled_and_raw_winnow_confidence_cutoffs, labelled_dbg_confidence_cutoffs = (
-        load_confidence_cutoffs(species_list)
-    )
+    (
+        labelled_and_raw_winnow_confidence_cutoffs,
+        labelled_dbg_confidence_cutoffs,
+        raw_dbg_confidence_cutoffs,
+    ) = load_confidence_cutoffs(species_list)
     labelled_winnow_confidence_cutoffs = [
         cutoff[0] for cutoff in labelled_and_raw_winnow_confidence_cutoffs
     ]
@@ -763,7 +1056,9 @@ def main():
     print(
         f"Loaded Winnow confidence cutoffs: {labelled_and_raw_winnow_confidence_cutoffs}"
     )
-    print(f"Loaded DBG confidence cutoffs: {labelled_dbg_confidence_cutoffs}")
+    print(
+        f"Loaded database-grounded confidence cutoffs: {labelled_dbg_confidence_cutoffs}"
+    )
 
     for species in species_list:
         # Load labelled metadata
@@ -772,8 +1067,11 @@ def main():
         )
 
         # Create combined labelled data plot for the species (uses "correct" column)
-        fig, (ax1, ax2, ax3, ax4, ax5) = create_combined_species_plot(
-            labelled_metadata, f"{species} (Labelled)", "correct"
+        fig, (ax1, ax2, ax3, ax4, ax5, ax6) = create_combined_species_plot(
+            labelled_metadata,
+            f"{SPECIES_NAME_MAPPING.get(species, species)} (Labelled)",
+            "correct",
+            labelled=True,
         )
         fig.savefig(
             f"holdout_results/plots/all_less_{species}_labelled_combined_plot.png",
@@ -795,7 +1093,10 @@ def main():
 
                 # Create combined raw data plot for the species (uses "proteome_hit" column)
                 fig, (ax1, ax2, ax3, ax4, ax5) = create_combined_species_plot(
-                    raw_metadata, f"{species} (Raw)", "proteome_hit"
+                    raw_metadata,
+                    f"{SPECIES_NAME_MAPPING.get(species, species)} (Raw)",
+                    "proteome_hit",
+                    labelled=False,
                 )
                 fig.savefig(
                     f"holdout_results/plots/all_less_{species}_raw_combined_plot.png",
@@ -808,9 +1109,13 @@ def main():
                 )
                 plt.close(fig)
             except FileNotFoundError:
-                print(f"Warning: Raw data file not found for species {species}")
+                print(
+                    f"Warning: Raw data file not found for species {SPECIES_NAME_MAPPING.get(species, species)}"
+                )
         else:
-            print(f"Skipping raw combined plot for {species} - no raw data available")
+            print(
+                f"Skipping raw combined plot for {SPECIES_NAME_MAPPING.get(species, species)} - no raw data available"
+            )
 
     # Create FDR PSMs comparison bar chart
     fig, ax = plot_psm_hits_bar_chart(
@@ -857,6 +1162,23 @@ def main():
     )
     fig.savefig(
         "holdout_results/plots/proteome_hits_bar_chart.pdf",
+        bbox_inches="tight",
+    )
+    plt.close(fig)
+
+    # Create raw confidence comparison bar chart
+    fig, ax = plot_raw_confidence_comparison_bar_chart(
+        species_list=species_list,
+        raw_winnow_confidence_cutoffs=raw_winnow_confidence_cutoffs,
+        raw_dbg_confidence_cutoffs=raw_dbg_confidence_cutoffs,
+    )
+    fig.savefig(
+        "holdout_results/plots/raw_confidence_comparison_bar_chart.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
+    fig.savefig(
+        "holdout_results/plots/raw_confidence_comparison_bar_chart.pdf",
         bbox_inches="tight",
     )
     plt.close(fig)
