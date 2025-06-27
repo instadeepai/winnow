@@ -11,12 +11,12 @@ builder:
 spec:
   debug:
       vscode:
-        enabled: true # required
+        enabled: false # required
         path: "/aichor/code" # Optional, defaults to "code". Refer the absolute path of the binary if not findable in $PATH
         provider: "github" # Optional, vscode tunnel provider. Options are "github" or "microsoft", defaults to "github"
   operator: tf
   image: winnow
-  command: make evaluate-holdout-datasets
+  command: make evaluate-general-model-external-datasets
 
   tensorboard: # optional, disabled by default
     enabled: false
@@ -26,7 +26,7 @@ spec:
       count: 1
       resources:
         cpus: 8
-        ramRatio: 8 # >= 2
+        ramRatio: 9 # >= 2
 
         accelerators:
           gpu:
