@@ -195,16 +195,16 @@ evaluate-general-model-validation-datasets: set-ceph-credentials set-gcp-credent
 	aws s3 cp s3://winnow-g88rh/fasta/ fasta/ --recursive --profile winnow
 	# Run the generalisation evaluation script
 	# 1. Evaluate labelled data
-	winnow predict --data-source instanovo --dataset-config-path configs/validation_data/test_general_model_validation_data.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column calibrated_confidence --output-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output.csv --no-label-shift --confidence-cutoff-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_conf_cutoff.txt
+	winnow predict --data-source instanovo --dataset-config-path configs/validation_data/test_general_model_validation_data.yaml --model-folder general_model/model --method winnow --fdr-threshold 0.05 --confidence-column calibrated_confidence --output-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output.csv --no-label-shift --confidence-cutoff-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_conf_cutoff.txt
 	python scripts/add_db_fdr.py --input-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output.csv --output-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output.csv --confidence-column calibrated_confidence --confidence-cutoff-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output_conf_cutoff.txt
 	python scripts/add_db_fdr.py --input-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output.csv --output-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output_raw_conf.csv --confidence-column confidence --confidence-cutoff-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output_raw_conf_cutoff.txt
 	# 2. Evaluate unlabelled data
 	@for ds in $(val_datasets); do \
-		winnow predict --data-source instanovo --dataset-config-path configs/validation_data/$${ds}_de_novo.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column calibrated_confidence --output-path validation_datasets_corrected/winnow_metadata/de_novo/$${ds}_de_novo_preds.csv --no-label-shift --confidence-cutoff-path validation_datasets_corrected/winnow_metadata/de_novo/$${ds}_de_novo_conf_cutoff.txt; \
+		winnow predict --data-source instanovo --dataset-config-path configs/validation_data/$${ds}_de_novo.yaml --model-folder general_model/model --method winnow --fdr-threshold 0.05 --confidence-column calibrated_confidence --output-path validation_datasets_corrected/winnow_metadata/de_novo/$${ds}_de_novo_preds.csv --no-label-shift --confidence-cutoff-path validation_datasets_corrected/winnow_metadata/de_novo/$${ds}_de_novo_conf_cutoff.txt; \
 	done
 	# 3. Evaluate full search space
 	@for ds in $(val_datasets); do \
-		winnow predict --data-source instanovo --dataset-config-path configs/validation_data/$${ds}_raw.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column calibrated_confidence --output-path validation_datasets_corrected/winnow_metadata/raw/$${ds}_raw_preds.csv --no-label-shift --confidence-cutoff-path validation_datasets_corrected/winnow_metadata/raw/$${ds}_raw_conf_cutoff.txt; \
+		winnow predict --data-source instanovo --dataset-config-path configs/validation_data/$${ds}_raw.yaml --model-folder general_model/model --method winnow --fdr-threshold 0.05 --confidence-column calibrated_confidence --output-path validation_datasets_corrected/winnow_metadata/raw/$${ds}_raw_preds.csv --no-label-shift --confidence-cutoff-path validation_datasets_corrected/winnow_metadata/raw/$${ds}_raw_conf_cutoff.txt; \
 	done
 	# Map peptides to proteomes
 	# gluc
@@ -242,17 +242,17 @@ evaluate-general-model-external-datasets: set-ceph-credentials set-gcp-credentia
 	# Run the generalisation evaluation script
 	# 1. Evaluate labelled data
 	@for ds in $(ext_datasets); do \
-		winnow predict --data-source instanovo --dataset-config-path configs/external_datasets/$${ds}_lcfm.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column calibrated_confidence --output-path external_datasets/winnow_metadata/lcfm/$${ds}_lcfm_preds_winnow.csv --no-label-shift --confidence-cutoff-path external_datasets/winnow_metadata/lcfm/$${ds}_lcfm_conf_cutoff_winnow.txt; \
+		winnow predict --data-source instanovo --dataset-config-path configs/external_datasets/$${ds}_lcfm.yaml --model-folder general_model/model --method winnow --fdr-threshold 0.05 --confidence-column calibrated_confidence --output-path external_datasets/winnow_metadata/lcfm/$${ds}_lcfm_preds_winnow.csv --no-label-shift --confidence-cutoff-path external_datasets/winnow_metadata/lcfm/$${ds}_lcfm_conf_cutoff_winnow.txt; \
 		python scripts/add_db_fdr.py --input-path external_datasets/winnow_metadata/lcfm/$${ds}_lcfm_preds_winnow.csv --output-path external_datasets/winnow_metadata/lcfm/$${ds}_lcfm_preds.csv --confidence-column calibrated_confidence --confidence-cutoff-path external_datasets/winnow_metadata/lcfm/$${ds}_lcfm_conf_cutoff_dbg.txt; \
 		python scripts/add_db_fdr.py --input-path external_datasets/winnow_metadata/lcfm/$${ds}_lcfm_preds_winnow.csv --output-path external_datasets/winnow_metadata/lcfm/$${ds}_lcfm_preds_raw_conf.csv --confidence-column confidence --confidence-cutoff-path external_datasets/winnow_metadata/lcfm/$${ds}_lcfm_conf_cutoff_dbg_raw_conf.txt; \
 	done
 	# 2. Evaluate de novo unlabelled data
 	@for ds in $(ext_datasets); do \
-		winnow predict --data-source instanovo --dataset-config-path configs/external_datasets/$${ds}_de_novo.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column calibrated_confidence --output-path external_datasets/winnow_metadata/de_novo/$${ds}_de_novo_preds.csv --no-label-shift --confidence-cutoff-path external_datasets/winnow_metadata/de_novo/$${ds}_de_novo_conf_cutoff_winnow.txt; \
+		winnow predict --data-source instanovo --dataset-config-path configs/external_datasets/$${ds}_de_novo.yaml --model-folder general_model/model --method winnow --fdr-threshold 0.05 --confidence-column calibrated_confidence --output-path external_datasets/winnow_metadata/de_novo/$${ds}_de_novo_preds.csv --no-label-shift --confidence-cutoff-path external_datasets/winnow_metadata/de_novo/$${ds}_de_novo_conf_cutoff_winnow.txt; \
 	done
 	# 3. Evaluate raw unlabelled data
 	@for ds in $(ext_datasets); do \
-		winnow predict --data-source instanovo --dataset-config-path configs/external_datasets/$${ds}_acfm.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column calibrated_confidence --output-path external_datasets/winnow_metadata/acfm/$${ds}_acfm_preds.csv --no-label-shift --confidence-cutoff-path external_datasets/winnow_metadata/acfm/$${ds}_acfm_conf_cutoff_winnow.txt; \
+		winnow predict --data-source instanovo --dataset-config-path configs/external_datasets/$${ds}_acfm.yaml --model-folder general_model/model --method winnow --fdr-threshold 0.05 --confidence-column calibrated_confidence --output-path external_datasets/winnow_metadata/acfm/$${ds}_acfm_preds.csv --no-label-shift --confidence-cutoff-path external_datasets/winnow_metadata/acfm/$${ds}_acfm_conf_cutoff_winnow.txt; \
 	done
 	# Compute proteome mapping
 	python scripts/map_peptides_to_proteomes.py --metadata-csv external_datasets/winnow_metadata/acfm/PXD014877_acfm_preds.csv --fasta-file fasta/Celegans.fasta --output-csv external_datasets/winnow_metadata/acfm/PXD014877_acfm_preds.csv
@@ -303,14 +303,14 @@ evaluate-combined-data:
 	# Train model on combined data
 	winnow train --data-source instanovo --dataset-config-path configs/combined_data/val.yaml --model-output-folder general_model/model --dataset-output-path general_model/results/general_model_training_results.csv
 	# Validation hold-out set
-	winnow predict --data-source instanovo --dataset-config-path configs/validation_data/test_general_model_validation_data.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column "calibrated_confidence" --output-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output.csv
+	winnow predict --data-source instanovo --dataset-config-path configs/validation_data/test_general_model_validation_data.yaml --model-folder general_model/model --method winnow --fdr-threshold 0.05 --confidence-column "calibrated_confidence" --output-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output.csv
 	python scripts/add_db_fdr.py \
 		--input-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output.csv \
 		--output-path validation_datasets_corrected/winnow_metadata/labelled/general_test.csv \
 		--confidence-column calibrated_confidence
 	# External datasets
 	@for ds in $(ext_datasets); do \
-		winnow predict --data-source instanovo --dataset-config-path configs/external_datasets/$${ds}_lcfm.yaml --model-folder general_model/model --method winnow --fdr-threshold 1.0 --confidence-column "calibrated_confidence" --output-path external_datasets/winnow_metadata/lcfm/$${ds}_lcfm_preds.csv; \
+		winnow predict --data-source instanovo --dataset-config-path configs/external_datasets/$${ds}_lcfm.yaml --model-folder general_model/model --method winnow --fdr-threshold 0.05 --confidence-column "calibrated_confidence" --output-path external_datasets/winnow_metadata/lcfm/$${ds}_lcfm_preds.csv; \
 	done
 	@for ds in $(ext_datasets); do \
 		python scripts/add_db_fdr.py \
