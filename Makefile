@@ -183,17 +183,14 @@ evaluate-general-model-validation-datasets: set-ceph-credentials set-gcp-credent
 	# Make folders
 	mkdir -p validation_datasets_corrected/winnow_metadata/labelled
 	mkdir -p validation_datasets_corrected/winnow_metadata/de_novo
-	mkdir -p validation_datasets_corrected/beam_preds/labelled
-	mkdir -p validation_datasets_corrected/beam_preds/de_novo
-	mkdir -p validation_datasets_corrected/spectrum_data/labelled
-	mkdir -p validation_datasets_corrected/spectrum_data/de_novo
+	mkdir -p validation_datasets_corrected/winnow_metadata/raw
+	mkdir -p validation_datasets_corrected/beam_preds
+	mkdir -p validation_datasets_corrected/spectrum_data
 	mkdir -p general_model/model
 	mkdir -p fasta
 	# Copy the data from Ceph bucket to the local data directory
-	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/labelled/ validation_datasets_corrected/beam_preds/labelled/ --recursive --profile winnow
-	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/de_novo/ validation_datasets_corrected/beam_preds/de_novo/ --recursive --profile winnow
-	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/labelled/ validation_datasets_corrected/spectrum_data/labelled/ --recursive --profile winnow
-	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/de_novo/ validation_datasets_corrected/spectrum_data/de_novo/ --recursive --profile winnow
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/ validation_datasets_corrected/beam_preds/ --recursive --profile winnow
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/ validation_datasets_corrected/spectrum_data/ --recursive --profile winnow
 	aws s3 cp s3://winnow-g88rh/general_model/model/ general_model/model/ --recursive --profile winnow
 	aws s3 cp s3://winnow-g88rh/fasta/ fasta/ --recursive --profile winnow
 	# Run the generalisation evaluation script
