@@ -270,7 +270,7 @@ class ProbabilityCalibrator:
     def predict(
         self,
         dataset: CalibrationDataset,
-        correct_label_shift: bool = True,
+        correct_label_shift: bool = False,
         max_iters: int = 20,
         tol: float = 1e-4,
         use_true_labels_for_prior: bool = False,

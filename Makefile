@@ -194,33 +194,29 @@ evaluate-general-model-validation-datasets: set-ceph-credentials set-gcp-credent
 	aws s3 cp s3://winnow-g88rh/general_model/model/ general_model/model/ --recursive --profile winnow
 	aws s3 cp s3://winnow-g88rh/fasta/ fasta/ --recursive --profile winnow
 	# Run the generalisation evaluation script
-	# 1. Evaluate labelled data
+	# 1. Evaluate on held-out labelled data
 	winnow predict --data-source instanovo --dataset-config-path configs/validation_data/test_general_model_validation_data.yaml --model-folder general_model/model --method winnow --fdr-threshold 0.05 --confidence-column calibrated_confidence --output-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output.csv --no-label-shift --confidence-cutoff-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_conf_cutoff.txt
 	python scripts/add_db_fdr.py --input-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output.csv --output-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output.csv --confidence-column calibrated_confidence --confidence-cutoff-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output_conf_cutoff.txt
 	python scripts/add_db_fdr.py --input-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output.csv --output-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output_raw_conf.csv --confidence-column confidence --confidence-cutoff-path validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output_raw_conf_cutoff.txt
 	# 2. Evaluate unlabelled data
+	# Note that we do not use the raw data as this contains the general model training set
 	@for ds in $(val_datasets); do \
 		winnow predict --data-source instanovo --dataset-config-path configs/validation_data/$${ds}_de_novo.yaml --model-folder general_model/model --method winnow --fdr-threshold 0.05 --confidence-column calibrated_confidence --output-path validation_datasets_corrected/winnow_metadata/de_novo/$${ds}_de_novo_preds.csv --no-label-shift --confidence-cutoff-path validation_datasets_corrected/winnow_metadata/de_novo/$${ds}_de_novo_conf_cutoff.txt; \
 	done
-	# 3. Evaluate full search space
-	@for ds in $(val_datasets); do \
-		winnow predict --data-source instanovo --dataset-config-path configs/validation_data/$${ds}_raw.yaml --model-folder general_model/model --method winnow --fdr-threshold 0.05 --confidence-column calibrated_confidence --output-path validation_datasets_corrected/winnow_metadata/raw/$${ds}_raw_preds.csv --no-label-shift --confidence-cutoff-path validation_datasets_corrected/winnow_metadata/raw/$${ds}_raw_conf_cutoff.txt; \
-	done
 	# Map peptides to proteomes
 	# gluc
-	python scripts/map_peptides_to_proteomes.py --metadata-csv validation_datasets_corrected/winnow_metadata/raw/gluc_raw_preds.csv --fasta-file fasta/human.fasta --output-csv validation_datasets_corrected/winnow_metadata/raw/gluc_raw_preds.csv
+	python scripts/map_peptides_to_proteomes.py --metadata-csv validation_datasets_corrected/winnow_metadata/de_novo/gluc_de_novo_preds.csv --fasta-file fasta/human.fasta --output-csv validation_datasets_corrected/winnow_metadata/de_novo/gluc_de_novo_preds.csv
 	# helaqc
-	python scripts/map_peptides_to_proteomes.py --metadata-csv validation_datasets_corrected/winnow_metadata/raw/helaqc_raw_preds.csv --fasta-file fasta/human.fasta --output-csv validation_datasets_corrected/winnow_metadata/raw/helaqc_raw_preds.csv
+	python scripts/map_peptides_to_proteomes.py --metadata-csv validation_datasets_corrected/winnow_metadata/de_novo/helaqc_de_novo_preds.csv --fasta-file fasta/human.fasta --output-csv validation_datasets_corrected/winnow_metadata/de_novo/helaqc_de_novo_preds.csv
 	# herceptin
-	python scripts/map_peptides_to_proteomes.py --metadata-csv validation_datasets_corrected/winnow_metadata/raw/herceptin_raw_preds.csv --fasta-file fasta/herceptin.fasta --output-csv validation_datasets_corrected/winnow_metadata/raw/herceptin_raw_preds.csv
+	python scripts/map_peptides_to_proteomes.py --metadata-csv validation_datasets_corrected/winnow_metadata/de_novo/herceptin_de_novo_preds.csv --fasta-file fasta/herceptin.fasta --output-csv validation_datasets_corrected/winnow_metadata/de_novo/herceptin_de_novo_preds.csv
 	# sbrodae
-	python scripts/map_peptides_to_proteomes.py --metadata-csv validation_datasets_corrected/winnow_metadata/raw/sbrodae_raw_preds.csv --fasta-file fasta/Sb_proteome.fasta --output-csv validation_datasets_corrected/winnow_metadata/raw/sbrodae_raw_preds.csv
+	python scripts/map_peptides_to_proteomes.py --metadata-csv validation_datasets_corrected/winnow_metadata/de_novo/sbrodae_de_novo_preds.csv --fasta-file fasta/Sb_proteome.fasta --output-csv validation_datasets_corrected/winnow_metadata/de_novo/sbrodae_de_novo_preds.csv
 	# snakevenoms
-	python scripts/map_peptides_to_proteomes.py --metadata-csv validation_datasets_corrected/winnow_metadata/raw/snakevenoms_raw_preds.csv --fasta-file fasta/uniprot-serpentes-2022.05.09.fasta --output-csv validation_datasets_corrected/winnow_metadata/raw/snakevenoms_raw_preds.csv
+	python scripts/map_peptides_to_proteomes.py --metadata-csv validation_datasets_corrected/winnow_metadata/de_novo/snakevenoms_de_novo_preds.csv --fasta-file fasta/uniprot-serpentes-2022.05.09.fasta --output-csv validation_datasets_corrected/winnow_metadata/de_novo/snakevenoms_de_novo_preds.csv
 	# NB. we ignore immuno and woundfluids as contains many species
 	# Copy the results back to Ceph bucket
-	aws s3 cp validation_datasets_corrected/winnow_metadata/labelled/general_test_winnow_output.csv s3://winnow-g88rh/validation_datasets_corrected/winnow_metadata/labelled/ --profile winnow
-	aws s3 cp validation_datasets_corrected/winnow_metadata/de_novo/ s3://winnow-g88rh/validation_datasets_corrected/winnow_metadata/de_novo/ --recursive --profile winnow
+	aws s3 cp validation_datasets_corrected/winnow_metadata/ s3://winnow-g88rh/validation_datasets_corrected/winnow_metadata/ --recursive --profile winnow
 	# Copy to Google Cloud Storage
 	gsutil -m cp -R validation_datasets_corrected/winnow_metadata/ gs://winnow-fdr/validation_datasets_corrected/winnow_metadata/
 
@@ -254,7 +250,7 @@ evaluate-general-model-external-datasets: set-ceph-credentials set-gcp-credentia
 	@for ds in $(ext_datasets); do \
 		winnow predict --data-source instanovo --dataset-config-path configs/external_datasets/$${ds}_acfm.yaml --model-folder general_model/model --method winnow --fdr-threshold 0.05 --confidence-column calibrated_confidence --output-path external_datasets/winnow_metadata/acfm/$${ds}_acfm_preds.csv --no-label-shift --confidence-cutoff-path external_datasets/winnow_metadata/acfm/$${ds}_acfm_conf_cutoff_winnow.txt; \
 	done
-	# Compute proteome mapping
+	# Compute proteome mapping on the full search space of data
 	python scripts/map_peptides_to_proteomes.py --metadata-csv external_datasets/winnow_metadata/acfm/PXD014877_acfm_preds.csv --fasta-file fasta/Celegans.fasta --output-csv external_datasets/winnow_metadata/acfm/PXD014877_acfm_preds.csv
 	python scripts/map_peptides_to_proteomes.py --metadata-csv external_datasets/winnow_metadata/acfm/PXD019483_acfm_preds.csv --fasta-file fasta/human.fasta --output-csv external_datasets/winnow_metadata/acfm/PXD019483_acfm_preds.csv
 	python scripts/map_peptides_to_proteomes.py --metadata-csv external_datasets/winnow_metadata/acfm/PXD023064_acfm_preds.csv --fasta-file fasta/human.fasta --output-csv external_datasets/winnow_metadata/acfm/PXD023064_acfm_preds.csv
@@ -262,7 +258,6 @@ evaluate-general-model-external-datasets: set-ceph-credentials set-gcp-credentia
 	aws s3 cp external_datasets/winnow_metadata/ s3://winnow-g88rh/external_datasets/winnow_metadata/ --recursive --profile winnow
 	# Copy to Google Cloud Storage
 	gsutil -m cp -R external_datasets/winnow_metadata/ gs://winnow-fdr/external_datasets/winnow_metadata
-	gsutil -m cp -R general_model/model/ gs://winnow-fdr/general_model/model
 
 ## Add database-grounded FDR to validation datasets
 add-db-fdr-validation-datasets: set-ceph-credentials set-gcp-credentials

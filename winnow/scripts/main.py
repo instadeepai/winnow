@@ -407,7 +407,7 @@ def predict(
             is_flag=True,
             help="Disable label shift correction (enabled by default). Use this flag when predicting on data from same distribution as training.",
         ),
-    ] = True,
+    ] = False,
     use_true_labels_for_prior: Annotated[
         bool,
         typer.Option(
