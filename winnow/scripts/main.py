@@ -445,9 +445,12 @@ def predict(
     calibrator = ProbabilityCalibrator.load(model_folder)
 
     # Check and validate label shift settings
-    correct_label_shift, use_true_labels_for_prior = _check_label_shift_settings(
-        calibrator, dataset, correct_label_shift, use_true_labels_for_prior
-    )
+    # correct_label_shift, use_true_labels_for_prior = _check_label_shift_settings(
+    #     calibrator, dataset, correct_label_shift, use_true_labels_for_prior
+    # )
+
+    correct_label_shift = False
+    use_true_labels_for_prior = False
 
     # Apply calibration
     logger.info("Calibrating scores.")
