@@ -132,13 +132,13 @@ set-ceph-credentials:
 analyze-features: set-ceph-credentials set-gcp-credentials
 	# Copy the data from Ceph bucket to the local data directory
 	mkdir -p data
-	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/labelled/train_spectrum_all_datasets.parquet data/ --profile winnow
-	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/labelled/train_beam_all_datasets.csv data/ --profile winnow
-	python scripts/analyze_features.py --train-spectrum-path data/train_spectrum_all_datasets.parquet --train-predictions-path data/train_beam_all_datasets.csv --output-dir mlp_feature_importance_results/ --n-background-samples 500
+	aws s3 cp s3://winnow-g88rh/new_data/new_general_train.parquet data/ --profile winnow
+	aws s3 cp s3://winnow-g88rh/new_data/new_general_train.csv data/ --profile winnow
+	python scripts/analyze_features.py --train-spectrum-path data/new_general_train.parquet --train-predictions-path data/new_general_train.csv --output-dir new_mlp_feature_importance_results/ --n-background-samples 500
 	# Copy the results back to Ceph bucket
-	aws s3 cp mlp_feature_importance_results s3://winnow-g88rh/classifier_comparison/ --recursive --profile winnow
+	aws s3 cp new_mlp_feature_importance_results s3://winnow-g88rh/classifier_comparison/ --recursive --profile winnow
 	# Copy the results back to Google Cloud Storage
-	gsutil -m cp -R mlp_feature_importance_results/ gs://winnow-fdr/classifier_comparison/dt_feature_importance_results/
+	gsutil -m cp -R new_mlp_feature_importance_results/ gs://winnow-fdr/classifier_comparison/new_mlp_feature_importance_results/
 
 ## Assess calibrator generalisation
 calibrator-generalisation: set-ceph-credentials set-gcp-credentials
