@@ -22,6 +22,7 @@ dependencies = [
     "tqdm>=4.67.1",
     "pandas>=2.2.3",
     "polars>=1.25.2",
+    "shap>=0.48.0",
 ]
 
 [build-system]
