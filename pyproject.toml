@@ -23,6 +23,7 @@ dependencies = [
     "pandas>=2.2.3",
     "polars>=1.25.2",
     "shap>=0.48.0",
+    "xgboost>=3.0.2",
 ]
 
 [build-system]
