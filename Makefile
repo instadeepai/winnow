@@ -362,3 +362,56 @@ evaluate-holdout-sets: set-ceph-credentials set-gcp-credentials
 	# Copy results to Google Cloud Storage
 	gsutil -m cp -R holdout_results/ gs://winnow-fdr/poster/holdout_results/
 	gsutil -m cp -R holdout_models/ gs://winnow-fdr/poster/holdout_models/
+
+evaluate-new-general-model: set-ceph-credentials
+	# Make folders
+	mkdir -p new_model/model
+	mkdir -p new_model/results
+	# Copy data from Ceph bucket to local directory
+	aws s3 cp s3://winnow-g88rh/new_model/model/ new_model/model/ --recursive --profile winnow
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/ validation_datasets_corrected/spectrum_data/ --recursive --profile winnow
+	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/ validation_datasets_corrected/beam_preds/ --recursive --profile winnow
+	aws s3 cp s3://winnow-g88rh/external_datasets/spectrum_data/ external_datasets/spectrum_data/ --recursive --profile winnow
+	aws s3 cp s3://winnow-g88rh/external_datasets/beam_preds/ external_datasets/beam_preds/ --recursive --profile winnow
+	aws s3 cp s3://winnow-g88rh/fasta/ fasta/ --recursive --profile winnow
+	# Evaluate on labelled data from holdout sets
+	# # PXD014877 (worm)
+	winnow predict --data-source instanovo --dataset-config-path new_configs/eval_labelled_PXD014877.yaml --model-folder new_model/model --method winnow --fdr-threshold 0.05 --confidence-column calibrated_confidence --output-path new_model/results/labelled_PXD014877_results.csv --no-label-shift --confidence-cutoff-path new_model/results/labelled_PXD014877_conf_cutoff.txt
+	python scripts/add_db_fdr.py --input-path new_model/results/labelled_PXD014877_results.csv --output-path new_model/results/labelled_PXD014877_results.csv --confidence-column calibrated_confidence --confidence-cutoff-path new_model/results/labelled_PXD014877_cc_conf_cutoff.txt
+	python scripts/add_db_fdr.py --input-path new_model/results/labelled_PXD014877_results.csv --output-path new_model/results/labelled_PXD014877_results.csv --confidence-column confidence --confidence-cutoff-path new_model/results/labelled_PXD014877_results_c_conf_cutoff.txt
+	# PXD023064 (immuno)
+	winnow predict --data-source instanovo --dataset-config-path new_configs/eval_labelled_PXD023064.yaml --model-folder new_model/model --method winnow --fdr-threshold 0.05 --confidence-column calibrated_confidence --output-path new_model/results/labelled_PXD023064_results.csv --no-label-shift --confidence-cutoff-path new_model/results/labelled_PXD023064_conf_cutoff.txt
+	python scripts/add_db_fdr.py --input-path new_model/results/labelled_PXD023064_results.csv --output-path new_model/results/labelled_PXD023064_results.csv --confidence-column calibrated_confidence --confidence-cutoff-path new_model/results/labelled_PXD023064_cc_conf_cutoff.txt
+	python scripts/add_db_fdr.py --input-path new_model/results/labelled_PXD023064_results.csv --output-path new_model/results/labelled_PXD023064_results.csv --confidence-column confidence --confidence-cutoff-path new_model/results/labelled_PXD023064_results_c_conf_cutoff.txt
+	# Evaluate on labelled test set
+	winnow predict --data-source instanovo --dataset-config-path new_configs/eval_test_general.yaml --model-folder new_model/model --method winnow --fdr-threshold 0.05 --confidence-column calibrated_confidence --output-path new_model/results/labelled_general_results.csv --no-label-shift --confidence-cutoff-path new_model/results/labelled_general_conf_cutoff.txt
+	python scripts/add_db_fdr.py --input-path new_model/results/labelled_general_results.csv --output-path new_model/results/labelled_general_results.csv --confidence-column calibrated_confidence --confidence-cutoff-path new_model/results/labelled_general_conf_cutoff_cc_dbg.txt
+	python scripts/add_db_fdr.py --input-path new_model/results/labelled_general_results.csv --output-path new_model/results/labelled_general_results.csv --confidence-column confidence --confidence-cutoff-path new_model/results/labelled_general_conf_cutoff_c_dbg.txt
+	# Evaluate on de novo portion of training projects
+	winnow predict --data-source instanovo --dataset-config-path new_configs/eval_de_novo_PXD019483.yaml --model-folder new_model/model --method winnow --fdr-threshold 0.05 --confidence-column calibrated_confidence --output-path new_model/results/de_novo_PXD019483_results.csv --no-label-shift --confidence-cutoff-path new_model/results/de_novo_PXD019483_conf_cutoff.txt
+	python scripts/map_peptides_to_proteomes.py --metadata-csv new_model/results/de_novo_PXD019483_results.csv --fasta-file fasta/human.fasta --output-csv new_model/results/de_novo_PXD019483_results.csv
+	@for ds in $(val_datasets); do \
+			winnow predict --data-source instanovo --dataset-config-path new_configs/eval_de_novo_$${ds}.yaml --model-folder new_model/model --method winnow --fdr-threshold 0.05 --confidence-column calibrated_confidence --output-path new_model/results/de_novo_$${ds}_preds.csv --no-label-shift --confidence-cutoff-path new_model/results/de_novo_$${ds}_conf_cutoff.txt; \
+		done
+	# Map peptides to proteomes
+	# gluc
+	python scripts/map_peptides_to_proteomes.py --metadata-csv new_model/results/de_novo_gluc_preds.csv --fasta-file fasta/human.fasta --output-csv new_model/results/de_novo_gluc_preds.csv
+	# helaqc
+	python scripts/map_peptides_to_proteomes.py --metadata-csv new_model/results/de_novo_helaqc_preds.csv --fasta-file fasta/human.fasta --output-csv new_model/results/de_novo_helaqc_preds.csv
+	# herceptin
+	python scripts/map_peptides_to_proteomes.py --metadata-csv new_model/results/de_novo_herceptin_preds.csv --fasta-file fasta/herceptin.fasta --output-csv new_model/results/de_novo_herceptin_preds.csv
+	# sbrodae
+	python scripts/map_peptides_to_proteomes.py --metadata-csv new_model/results/de_novo_sbrodae_preds.csv --fasta-file fasta/Sb_proteome.fasta --output-csv new_model/results/de_novo_sbrodae_preds.csv
+	# snakevenoms
+	python scripts/map_peptides_to_proteomes.py --metadata-csv new_model/results/de_novo_snakevenoms_preds.csv --fasta-file fasta/uniprot-serpentes-2022.05.09.fasta --output-csv new_model/results/de_novo_snakevenoms_preds.csv
+	# NB. we ignore immuno and woundfluids as contains many species
+	# Evaluate on raw data from holdout sets
+	# PXD023064 (immuno)
+	winnow predict --data-source instanovo --dataset-config-path new_configs/eval_raw_PXD023064.yaml --model-folder new_model/model --method winnow --fdr-threshold 0.05 --confidence-column calibrated_confidence --output-path new_model/results/raw_PXD023064_results.csv --no-label-shift --confidence-cutoff-path new_model/results/raw_PXD023064_conf_cutoff.txt
+	# PXD014877 (worm)
+	winnow predict --data-source instanovo --dataset-config-path new_configs/eval_raw_PXD014877.yaml --model-folder new_model/model --method winnow --fdr-threshold 0.05 --confidence-column calibrated_confidence --output-path new_model/results/raw_PXD014877_results.csv --no-label-shift --confidence-cutoff-path new_model/results/raw_PXD014877_conf_cutoff.txt
+	# Map peptides to proteomes
+	python scripts/map_peptides_to_proteomes.py --metadata-csv new_model/results/raw_PXD023064_results.csv --fasta-file fasta/human.fasta --output-csv new_model/results/raw_PXD023064_results.csv
+	python scripts/map_peptides_to_proteomes.py --metadata-csv new_model/results/raw_PXD014877_results.csv --fasta-file fasta/Celegans.fasta --output-csv new_model/results/raw_PXD014877_results.csv
+	# Copy results
+	aws s3 cp new_model/ s3://winnow-g88rh/new_model/results --recursive --profile winnow

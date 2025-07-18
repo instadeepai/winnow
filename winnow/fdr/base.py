@@ -69,6 +69,57 @@ class FDRControl(metaclass=ABCMeta):
         """Compute FDR for a given confidence score."""
         pass
 
+    def add_psm_qvalue(
+        self, dataset_metadata: pd.DataFrame, confidence_col: str
+    ) -> pd.DataFrame:
+        """Add PSM-specific q-values as a new column to the dataset.
+
+        Q-values are calculated using the following algorithm:
+        1. Sort by confidence in descending order.
+        2. Calculate FDR for each PSM.
+        3. Traverse identifications from lowest score to highest, storing the lowest
+           estimated FDR (FDRmin) that has been observed so far (i.e., for each
+           identification, retrieve the assigned FDR value, if this value is larger
+           then FDRmin, retain FDRmin. Else q-value = FDR value and FDRmin = FDR value).
+        """
+        # Sort by confidence scores in descending order
+        sorted_data = dataset_metadata.sort_values(
+            confidence_col, ascending=False
+        ).copy()
+
+        # Calculate FDR for each PSM
+        sorted_data["fdr"] = sorted_data[confidence_col].apply(self.compute_fdr)
+
+        # Calculate q-values: traverse from lowest score to highest (reverse order)
+        q_values: list[float] = []
+        fdr_min = float("inf")
+
+        # Traverse from lowest score to highest (reverse order)
+        for i in range(len(sorted_data) - 1, -1, -1):
+            current_fdr = sorted_data.iloc[i]["fdr"]
+
+            if current_fdr > fdr_min:
+                # Retain FDRmin
+                q_values.insert(
+                    0, fdr_min
+                )  # Insert at beginning since we're traversing in reverse order
+            else:
+                # q-value = FDR value and FDRmin = FDR value
+                q_values.insert(
+                    0, current_fdr
+                )  # Insert at beginning since we're traversing in reverse order
+                fdr_min = current_fdr
+
+        # Add q-values to the sorted dataframe
+        sorted_data["psm_qvalue"] = q_values
+
+        # Restore original order by merging back with original dataframe
+        result = dataset_metadata.merge(
+            sorted_data[["psm_qvalue"]], left_index=True, right_index=True, how="left"
+        )
+
+        return result
+
     def add_psm_fdr(
         self, dataset_metadata: pd.DataFrame, confidence_col: str
     ) -> pd.DataFrame:

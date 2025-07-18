@@ -1,0 +1,23 @@
+# --- Evaluate on labelled-only portion of held-out projects
+# spectrum_path: "external_datasets/spectrum_data/lcfm/PXD023064/PXD023064.parquet"
+# beam_predictions_path: "external_datasets/beam_preds/lcfm/PXD023064/PXD023064.csv"
+
+spectrum_path: "external_datasets/spectrum_data/lcfm/PXD014877/PXD014877.parquet"
+beam_predictions_path: "external_datasets/beam_preds/lcfm/PXD014877/PXD014877.csv"
+
+# --- Evaluate on raw portion of held-out projects
+# spectrum_path: "external_datasets/spectrum_data/acfm/PXD023064/PXD023064.parquet"
+# beam_predictions_path: "external_datasets/beam_preds/acfm/PXD023064/PXD023064.csv"
+
+# spectrum_path: "external_datasets/spectrum_data/acfm/PXD014877/PXD014877.parquet"
+# beam_predictions_path: "external_datasets/beam_preds/acfm/PXD014877/PXD014877.csv"
+
+# --- Evaluate on test portion of training projects
+# spectrum_path: "new_training_data/new_general_test.parquet"
+# beam_predictions_path: "new_training_data/new_general_test.csv"
+
+# --- Evaluate on de novo portion of training projects
+# spectrum_path: "external_datasets/spectrum_data/de_novo/PXD019483/PXD019483.parquet"
+# beam_predictions_path: "external_datasets/beam_preds/de_novo/PXD019483/PXD019483.csv"
+
+# and others...

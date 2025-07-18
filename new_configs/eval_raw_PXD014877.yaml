@@ -1,0 +1,2 @@
+spectrum_path: "external_datasets/spectrum_data/acfm/PXD014877/PXD014877.parquet"
+beam_predictions_path: "external_datasets/beam_preds/acfm/PXD014877/PXD014877.csv"
