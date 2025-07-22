@@ -149,6 +149,8 @@ calibrator-generalisation: set-ceph-credentials set-gcp-credentials
 	# Copy the data from Ceph bucket to the local data directory
 	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/labelled/ data/spectrum_data/ --recursive --exclude "*" --include "dataset*" --profile winnow --endpoint-url https://s3.aichor-dataplane-prod.eqx.ext.id-baremetal.net
 	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/labelled/ data/beam_preds/ --recursive --exclude "*" --include "*-annotated_beam_preds.csv" --profile winnow --endpoint-url https://s3.aichor-dataplane-prod.eqx.ext.id-baremetal.net
+	aws s3 cp s3://winnow-g88rh/external_datasets/spectrum_data/lcfm/PXD023064/PXD023064.parquet data/spectrum_data/ --profile winnow
+	aws s3 cp s3://winnow-g88rh/external_datasets/beam_preds/lcfm/PXD023064/PXD023064.csv data/beam_preds/ --profile winnow
 	# Run the generalisation evaluation script
 	python scripts/evaluate_calibrator_generalisation.py \
 		--data-source instanovo \
