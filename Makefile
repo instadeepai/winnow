@@ -373,6 +373,7 @@ evaluate-new-general-model: set-ceph-credentials
 	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/ validation_datasets_corrected/beam_preds/ --recursive --profile winnow
 	aws s3 cp s3://winnow-g88rh/external_datasets/spectrum_data/ external_datasets/spectrum_data/ --recursive --profile winnow
 	aws s3 cp s3://winnow-g88rh/external_datasets/beam_preds/ external_datasets/beam_preds/ --recursive --profile winnow
+	aws s3 cp s3://winnow-g88rh/new_data/ new_data/ --recursive --profile winnow
 	aws s3 cp s3://winnow-g88rh/fasta/ fasta/ --recursive --profile winnow
 	# Evaluate on labelled data from holdout sets
 	# # PXD014877 (worm)

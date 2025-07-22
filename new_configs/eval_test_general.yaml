@@ -1,0 +1,2 @@
+spectrum_path: "new_data/new_general_test.parquet"
+beam_predictions_path: "new_data/new_general_test.csv"
