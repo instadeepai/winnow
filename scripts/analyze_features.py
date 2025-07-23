@@ -49,6 +49,20 @@ DEFAULT_TRAIN_SPECTRUM_PATH = Path("")
 DEFAULT_TRAIN_PREDICTIONS_PATH = Path("")
 DEFAULT_OUTPUT_DIR = Path("")
 
+COLUMN_MAPPING = {
+    "confidence": "Raw Confidence",
+    "Mass Error": "Mass Error",
+    "ion_matches": "Ion Matches",
+    "ion_match_intensity": "Ion Match Intensity",
+    "chimeric_ion_matches": "Chimeric Ion Matches",
+    "chimeric_ion_match_intensity": "Chimeric Ion Match Intensity",
+    "iRT error": "iRT Error",
+    "margin": "Margin",
+    "median_margin": "Median Margin",
+    "entropy": "Entropy",
+    "z-score": "Z-Score",
+}
+
 # Example hyperparameters - you can modify these
 HYPERPARAMETERS = {
     "hidden_layer_sizes": (50, 50),
@@ -280,13 +294,14 @@ def main(
         "entropy",
         "z-score",
     ]
-    features_df = pd.DataFrame(features, columns=feature_names)
+
+    # Apply column mapping for display names
+    display_feature_names = [COLUMN_MAPPING.get(name, name) for name in feature_names]
 
     # Scale features for MLP
     logger.info("Scaling features...")
     scaler = StandardScaler()
     features_scaled = scaler.fit_transform(features)
-    features_scaled_df = pd.DataFrame(features_scaled, columns=feature_names)
 
     # Train classifier
     logger.info("Training classifier...")
@@ -314,7 +329,10 @@ def main(
         random_state=SEED,
         n_jobs=-1,
     )
-    perm_importance_dict = dict(zip(feature_names, perm_importance.importances_mean))
+    # Use display names for plotting
+    perm_importance_dict = dict(
+        zip(display_feature_names, perm_importance.importances_mean)
+    )
     plot_feature_importance(
         perm_importance_dict,
         "Permutation Feature Importance",
@@ -348,7 +366,7 @@ def main(
     # Switch to original feature space for visualization
     # This is safe because standardization is a univariate transformation
     shap_values.data = features[indices]
-    shap_values.feature_names = feature_names
+    shap_values.feature_names = display_feature_names
 
     # Plot SHAP summary using built-in function
     plt.figure(figsize=(10, 8))
@@ -381,7 +399,8 @@ def main(
     )  # for correct class
     top_features_idx = np.argsort(mean_abs_shap)[-3:][::-1]
     for idx in top_features_idx:
-        feature_name = feature_names[idx]
+        feature_name = display_feature_names[idx]
+        original_feature_name = feature_names[idx]  # For filename
         plt.figure(figsize=(10, 6))
         shap.plots.scatter(
             shap_values[:, idx, correct_class_idx],
@@ -391,7 +410,7 @@ def main(
         plt.title(f"SHAP Dependence Plot for {feature_name} (impact on P(correct))")
         plt.tight_layout()
         plt.savefig(
-            output_dir / f"shap_dependence_{feature_name}.png",
+            output_dir / f"shap_dependence_{original_feature_name}.png",
             dpi=300,
             bbox_inches="tight",
         )
@@ -399,24 +418,27 @@ def main(
 
     # Plot SHAP interaction plots for all combinations of top 3 features
     for i, idx1 in enumerate(top_features_idx):
-        feature1 = feature_names[idx1]
+        feature1_display = display_feature_names[idx1]
+        feature1_original = feature_names[idx1]
         for j, idx2 in enumerate(top_features_idx):
             if i != j:  # Skip self-interactions
-                feature2 = feature_names[idx2]
+                feature2_display = display_feature_names[idx2]
+                feature2_original = feature_names[idx2]
                 plt.figure(figsize=(12, 8))
                 shap.plots.scatter(
-                    shap_values[:, feature1, correct_class_idx],
+                    shap_values[:, feature1_display, correct_class_idx],
                     color=shap_values[
-                        :, feature2, correct_class_idx
+                        :, feature2_display, correct_class_idx
                     ],  # Use second feature for coloring
                     show=False,
                 )
                 plt.title(
-                    f"SHAP Interaction Plot for {feature1} vs {feature2} (impact on P(correct))"
+                    f"SHAP Interaction Plot for {feature1_display} vs {feature2_display} (impact on P(correct))"
                 )
                 plt.tight_layout()
                 plt.savefig(
-                    output_dir / f"shap_interaction_{feature1}_vs_{feature2}.png",
+                    output_dir
+                    / f"shap_interaction_{feature1_original}_vs_{feature2_original}.png",
                     dpi=300,
                     bbox_inches="tight",
                 )
@@ -436,16 +458,22 @@ def main(
 
     # 3. Feature correlations
     logger.info("Computing feature correlations...")
+    # Create a DataFrame with display names for correlation plotting
+    features_scaled_display_df = pd.DataFrame(
+        features_scaled, columns=display_feature_names
+    )
     plot_feature_correlations(
-        features_scaled_df,
+        features_scaled_display_df,
         output_dir / "feature_correlations.png",
     )
 
     # Save numerical results
     results = pd.DataFrame(
         {
-            "Feature": feature_names,
-            "Permutation Importance": [perm_importance_dict[f] for f in feature_names],
+            "Feature": display_feature_names,
+            "Permutation Importance": [
+                perm_importance_dict[f] for f in display_feature_names
+            ],
             "Mean |SHAP| (impact on P(correct))": np.abs(
                 shap_values.values[:, :, correct_class_idx]
             ).mean(axis=0),  # for correct class
@@ -465,7 +493,7 @@ def main(
     print("\nTop 5 features by mean |SHAP| (impact on P(correct)):")
     mean_abs_shap_dict = dict(
         zip(
-            feature_names,
+            display_feature_names,
             np.abs(shap_values.values[:, :, correct_class_idx]).mean(axis=0),
         )
     )  # for correct class
@@ -475,7 +503,7 @@ def main(
         print(f"{feature}: {importance:.4f}")
 
     print("\nStrong feature correlations (|r| > 0.7):")
-    corr_matrix = features_df.corr()
+    corr_matrix = features_scaled_display_df.corr()
     for i in range(len(corr_matrix.columns)):
         for j in range(i + 1, len(corr_matrix.columns)):
             if abs(corr_matrix.iloc[i, j]) > 0.7:

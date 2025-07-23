@@ -135,13 +135,13 @@ analyze-features: set-ceph-credentials set-gcp-credentials
 	aws s3 cp s3://winnow-g88rh/new_data/new_general_train.parquet data/ --profile winnow
 	aws s3 cp s3://winnow-g88rh/new_data/new_general_train.csv data/ --profile winnow
 	python scripts/analyze_features.py --train-spectrum-path data/new_general_train.parquet --train-predictions-path data/new_general_train.csv --output-dir new_mlp_feature_importance_results/ --n-background-samples 500
-	# Copy the results back to Ceph bucket
-	aws s3 cp new_mlp_feature_importance_results s3://winnow-g88rh/classifier_comparison/ --recursive --profile winnow
 	# Copy the results back to Google Cloud Storage
 	gsutil -m cp -R new_mlp_feature_importance_results/ gs://winnow-fdr/classifier_comparison/new_mlp_feature_importance_results/
+	# Copy the results back to Ceph bucket
+	aws s3 cp new_mlp_feature_importance_results s3://winnow-g88rh/classifier_comparison/ --recursive --profile winnow
 
 ## Assess calibrator generalisation
-calibrator-generalisation: set-ceph-credentials set-gcp-credentials
+calibrator-generalisation: # set-ceph-credentials set-gcp-credentials
 	mkdir -p data/spectrum_data
 	mkdir -p data/beam_preds
 	mkdir -p models
@@ -149,20 +149,23 @@ calibrator-generalisation: set-ceph-credentials set-gcp-credentials
 	# Copy the data from Ceph bucket to the local data directory
 	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/labelled/ data/spectrum_data/ --recursive --exclude "*" --include "dataset*" --profile winnow --endpoint-url https://s3.aichor-dataplane-prod.eqx.ext.id-baremetal.net
 	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/labelled/ data/beam_preds/ --recursive --exclude "*" --include "*-annotated_beam_preds.csv" --profile winnow --endpoint-url https://s3.aichor-dataplane-prod.eqx.ext.id-baremetal.net
-	aws s3 cp s3://winnow-g88rh/external_datasets/spectrum_data/lcfm/PXD023064/PXD023064.parquet data/spectrum_data/ --profile winnow
-	aws s3 cp s3://winnow-g88rh/external_datasets/beam_preds/lcfm/PXD023064/PXD023064.csv data/beam_preds/ --profile winnow
+	aws s3 cp s3://winnow-g88rh/external_datasets/spectrum_data/lcfm/PXD019483/PXD019483.parquet data/spectrum_data/ --profile winnow
+	aws s3 cp s3://winnow-g88rh/external_datasets/beam_preds/lcfm/PXD019483/PXD019483.csv data/beam_preds/ --profile winnow
 	# Run the generalisation evaluation script
 	python scripts/evaluate_calibrator_generalisation.py \
 		--data-source instanovo \
 		--config-dir configs/calibrator_generalisation \
 		--model-output-dir models/generalisation \
 		--results-output-dir results/generalisation
-	# Copy the results back to Ceph bucket
-	aws s3 cp results/ s3://winnow-g88rh/calibrator_generalisation/ --recursive --profile winnow
-	aws s3 cp models/ s3://winnow-g88rh/calibrator_generalisation/ --recursive --profile winnow
 	# Copy the results back to Google Cloud Storage
 	gsutil -m cp -R results/ gs://winnow-fdr/calibrator_generalisation/
 	gsutil -m cp -R models/ gs://winnow-fdr/calibrator_generalisation/
+	# Create heatmap plots
+	python scripts/plot_calibrator_generalisation_heatmap.py \
+		--results-path results/generalisation/calibrator_generalisation_results.csv \
+		--output-dir results/generalisation/plots
+	# Copy the results back to Ceph bucket
+	aws s3 cp results/ s3://winnow-g88rh/calibrator_generalisation/ --recursive --profile winnow
 
 val_datasets := gluc helaqc herceptin immuno sbrodae snakevenoms woundfluids
 ext_datasets := PXD014877 PXD019483 PXD023064
@@ -328,6 +331,8 @@ evaluate-holdout-sets: set-ceph-credentials set-gcp-credentials
 	# Copy data from Ceph bucket to local directory
 	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/spectrum_data/ validation_datasets_corrected/spectrum_data/ --recursive --profile winnow
 	aws s3 cp s3://winnow-g88rh/validation_datasets_corrected/beam_preds/ validation_datasets_corrected/beam_preds/ --recursive --profile winnow
+	aws s3 cp s3://winnow-g88rh/external_datasets/spectrum_data/ external_datasets/spectrum_data/ --recursive --profile winnow
+	aws s3 cp s3://winnow-g88rh/external_datasets/beam_preds/ external_datasets/beam_preds/ --recursive --profile winnow
 	aws s3 cp s3://winnow-g88rh/fasta/ fasta/ --recursive --profile winnow
 	# Make folders
 	mkdir -p holdout_models
@@ -340,10 +345,16 @@ evaluate-holdout-sets: set-ceph-credentials set-gcp-credentials
 		echo "Evaluating holdout set: $$holdout_set"; \
 		mkdir -p holdout_models/all_less_$${holdout_set}; \
 		winnow train --data-source instanovo --dataset-config-path configs/holdout/all_less_$${holdout_set}.yaml --model-output-folder holdout_models/all_less_$${holdout_set} --dataset-output-path holdout_results/all_less_$${holdout_set}_train_results.csv; \
-		winnow predict --data-source instanovo --dataset-config-path configs/validation_data/$${holdout_set}_labelled.yaml --model-folder holdout_models/all_less_$${holdout_set} --method winnow --fdr-threshold  --confidence-column "calibrated_confidence" --output-path holdout_results/all_less_$${holdout_set}_labelled_test_results.csv --confidence-cutoff-path holdout_results/all_less_$${holdout_set}_winnow_labelled_confidence_cutoff.txt; \
-		python scripts/add_db_fdr.py --input-path holdout_results/all_less_$${holdout_set}_labelled_test_results.csv --output-path holdout_results/all_less_$${holdout_set}_labelled_test_results_with_db_fdr.csv --confidence-column calibrated_confidence --fdr-threshold  --confidence-cutoff-path holdout_results/all_less_$${holdout_set}_dbg_labelled_confidence_cutoff.txt; \
-		winnow predict --data-source instanovo --dataset-config-path configs/validation_data/$${holdout_set}_raw.yaml --model-folder holdout_models/all_less_$${holdout_set} --method winnow --fdr-threshold  --confidence-column "calibrated_confidence" --output-path holdout_results/all_less_$${holdout_set}_raw_test_results.csv --confidence-cutoff-path holdout_results/all_less_$${holdout_set}_winnow_raw_confidence_cutoff.txt; \
+		winnow predict --data-source instanovo --dataset-config-path configs/validation_data/$${holdout_set}_labelled.yaml --model-folder holdout_models/all_less_$${holdout_set} --method winnow --fdr-threshold 0.05 --confidence-column "calibrated_confidence" --output-path holdout_results/all_less_$${holdout_set}_labelled_test_results.csv --confidence-cutoff-path holdout_results/all_less_$${holdout_set}_winnow_labelled_confidence_cutoff.txt; \
+		python scripts/add_db_fdr.py --input-path holdout_results/all_less_$${holdout_set}_labelled_test_results.csv --output-path holdout_results/all_less_$${holdout_set}_labelled_test_results_with_db_fdr.csv --confidence-column calibrated_confidence --fdr-threshold 0.05 --confidence-cutoff-path holdout_results/all_less_$${holdout_set}_dbg_labelled_confidence_cutoff.txt; \
+		winnow predict --data-source instanovo --dataset-config-path configs/validation_data/$${holdout_set}_raw.yaml --model-folder holdout_models/all_less_$${holdout_set} --method winnow --fdr-threshold 0.05 --confidence-column "calibrated_confidence" --output-path holdout_results/all_less_$${holdout_set}_raw_test_results.csv --confidence-cutoff-path holdout_results/all_less_$${holdout_set}_winnow_raw_confidence_cutoff.txt; \
 	done
+	echo "Evaluating holdout set: PXD019483"
+	mkdir -p holdout_models/all_less_PXD019483
+	winnow train --data-source instanovo --dataset-config-path configs/holdout/all_less_PXD019483.yaml --model-output-folder holdout_models/all_less_PXD019483 --dataset-output-path holdout_results/all_less_PXD019483_train_results.csv
+	winnow predict --data-source instanovo --dataset-config-path configs/external_datasets/PXD019483_lcfm.yaml --model-folder holdout_models/all_less_PXD019483 --method winnow --fdr-threshold 0.05 --confidence-column "calibrated_confidence" --output-path holdout_results/all_less_PXD019483_labelled_test_results.csv --confidence-cutoff-path holdout_results/all_less_PXD019483_winnow_labelled_confidence_cutoff.txt
+	python scripts/add_db_fdr.py --input-path holdout_results/all_less_PXD019483_labelled_test_results.csv --output-path holdout_results/all_less_PXD019483_labelled_test_results_with_db_fdr.csv --confidence-column calibrated_confidence --fdr-threshold 0.05 --confidence-cutoff-path holdout_results/all_less_PXD019483_dbg_labelled_confidence_cutoff.txt
+	winnow predict --data-source instanovo --dataset-config-path configs/external_datasets/PXD019483_acfm.yaml --model-folder holdout_models/all_less_PXD019483 --method winnow --fdr-threshold 0.05 --confidence-column "calibrated_confidence" --output-path holdout_results/all_less_PXD019483_raw_test_results.csv --confidence-cutoff-path holdout_results/all_less_PXD019483_winnow_raw_confidence_cutoff.txt
 	# Map peptides to proteomes
 	# gluc
 	python scripts/map_peptides_to_proteomes.py --metadata-csv holdout_results/all_less_gluc_raw_test_results.csv --fasta-file fasta/human.fasta --output-csv holdout_results/all_less_gluc_raw_test_results.csv
@@ -355,15 +366,17 @@ evaluate-holdout-sets: set-ceph-credentials set-gcp-credentials
 	python scripts/map_peptides_to_proteomes.py --metadata-csv holdout_results/all_less_sbrodae_raw_test_results.csv --fasta-file fasta/Sb_proteome.fasta --output-csv holdout_results/all_less_sbrodae_raw_test_results.csv
 	# snakevenoms
 	python scripts/map_peptides_to_proteomes.py --metadata-csv holdout_results/all_less_snakevenoms_raw_test_results.csv --fasta-file fasta/uniprot-serpentes-2022.05.09.fasta --output-csv holdout_results/all_less_snakevenoms_raw_test_results.csv
+	# PXD019483
+	python scripts/map_peptides_to_proteomes.py --metadata-csv holdout_results/all_less_PXD019483_raw_test_results.csv --fasta-file fasta/human.fasta --output-csv holdout_results/all_less_PXD019483_raw_test_results.csv
 	# NB. we ignore immuno and woundfluids as contains many species
 	# Create plots
 	python scripts/create_holdout_plots.py
-	# Copy results to Ceph bucket
-	aws s3 cp holdout_results/ s3://winnow-g88rh/poster/holdout_results/ --recursive --profile winnow
-	aws s3 cp holdout_models/ s3://winnow-g88rh/poster/holdout_models/ --recursive --profile winnow
 	# Copy results to Google Cloud Storage
-	gsutil -m cp -R holdout_results/ gs://winnow-fdr/poster/holdout_results/
-	gsutil -m cp -R holdout_models/ gs://winnow-fdr/poster/holdout_models/
+	gsutil -m cp -R holdout_results/ gs://winnow-fdr/new_holdout_results/
+	gsutil -m cp -R holdout_models/ gs://winnow-fdr/new_holdout_models/
+	# Copy results to Ceph bucket
+	aws s3 cp holdout_results/ s3://winnow-g88rh/new_holdout_results/ --recursive --profile winnow
+	aws s3 cp holdout_models/ s3://winnow-g88rh/new_holdout_models/ --recursive --profile winnow
 
 evaluate-new-general-model: set-ceph-credentials
 	# Make folders
