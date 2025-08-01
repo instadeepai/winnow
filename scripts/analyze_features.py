@@ -24,7 +24,7 @@ import typer
 from typer import Typer
 from rich.console import Console
 from rich.theme import Theme
-
+from matplotlib.colors import LinearSegmentedColormap
 from winnow.datasets.calibration_dataset import CalibrationDataset, RESIDUE_MASSES
 from winnow.datasets.data_loaders import InstaNovoDatasetLoader
 from winnow.calibration.calibrator import ProbabilityCalibrator
@@ -35,6 +35,101 @@ from winnow.calibration.calibration_features import (
     ChimericFeatures,
     BeamFeatures,
 )
+
+# Color scheme from the plotting script
+COLORS = {
+    "fairy": "#FFCAE9",
+    "magenta": "#8E5572",
+    "ash": "#BBC5AA",
+    "ebony": "#5A6650",
+    "sky": "#7FC8F8",
+    "navy": "#3C81AE",
+}
+
+# Configure matplotlib to match seaborn "paper" context
+plt.style.use("seaborn-v0_8-paper")
+plt.rcParams.update(
+    {
+        # Figure settings
+        "figure.figsize": [12.0, 10.0],
+        "figure.facecolor": "white",
+        "figure.dpi": 100.0,
+        # Axes settings
+        "axes.labelcolor": ".15",
+        "axes.axisbelow": True,
+        "axes.grid": False,
+        "axes.facecolor": "white",
+        "axes.edgecolor": ".15",
+        "axes.linewidth": 1.0,
+        "axes.spines.left": True,
+        "axes.spines.bottom": True,
+        "axes.spines.right": True,
+        "axes.spines.top": True,
+        # Tick settings
+        "xtick.direction": "out",
+        "ytick.direction": "out",
+        "xtick.color": ".15",
+        "ytick.color": ".15",
+        "xtick.top": False,
+        "ytick.right": False,
+        "xtick.bottom": False,
+        "ytick.left": False,
+        "xtick.major.width": 1.0,
+        "ytick.major.width": 1.0,
+        "xtick.minor.width": 0.8,
+        "ytick.minor.width": 0.8,
+        "xtick.major.size": 4.8,
+        "ytick.major.size": 4.8,
+        "xtick.minor.size": 3.2,
+        "ytick.minor.size": 3.2,
+        # Grid settings
+        "grid.linestyle": "-",
+        "grid.color": ".8",
+        "grid.linewidth": 0.8,
+        # Text settings
+        "text.color": ".15",
+        "font.family": ["sans-serif"],
+        "font.sans-serif": [
+            "Arial",
+            "DejaVu Sans",
+            "Liberation Sans",
+            "Bitstream Vera Sans",
+            "sans-serif",
+        ],
+        "font.size": 9.6,
+        "axes.labelsize": 9.6,
+        "axes.titlesize": 9.6,
+        "xtick.labelsize": 8.8,
+        "ytick.labelsize": 8.8,
+        "legend.fontsize": 8.8,
+        "legend.title_fontsize": 9.6,
+        # Line and patch settings
+        "lines.linewidth": 1.2,
+        "lines.markersize": 4.8,
+        "lines.solid_capstyle": "round",
+        "patch.linewidth": 0.8,
+        "patch.edgecolor": "black",
+        "patch.force_edgecolor": True,
+        # Image settings
+        "image.cmap": "rocket",
+    }
+)
+
+
+# Create custom colormaps using the color scheme
+def create_custom_colormap():
+    """Create a custom colormap using the color scheme."""
+    # Create a diverging colormap from navy -> ash -> fairy
+    colors = [COLORS["navy"], COLORS["ash"], COLORS["fairy"]]
+    return LinearSegmentedColormap.from_list("custom", colors, N=256)
+
+
+def create_sequential_colormap():
+    """Create a sequential colormap for single-direction plots."""
+    # Create from sky to navy
+    colors = [COLORS["navy"], COLORS["magenta"]]
+    return LinearSegmentedColormap.from_list("custom_seq", colors, N=256)
+
 
 # Set up logging
 logger = logging.getLogger("winnow")
@@ -50,17 +145,17 @@ DEFAULT_TRAIN_PREDICTIONS_PATH = Path("")
 DEFAULT_OUTPUT_DIR = Path("")
 
 COLUMN_MAPPING = {
-    "confidence": "Raw Confidence",
-    "Mass Error": "Mass Error",
-    "ion_matches": "Ion Matches",
-    "ion_match_intensity": "Ion Match Intensity",
-    "chimeric_ion_matches": "Chimeric Ion Matches",
-    "chimeric_ion_match_intensity": "Chimeric Ion Match Intensity",
-    "iRT error": "iRT Error",
+    "confidence": "Raw confidence",
+    "Mass Error": "Mass error",
+    "ion_matches": "Ion matches",
+    "ion_match_intensity": "Ion match intensity",
+    "chimeric_ion_matches": "Chimeric ion matches",
+    "chimeric_ion_match_intensity": "Chimeric ion match intensity",
+    "iRT error": "iRT error",
     "margin": "Margin",
-    "median_margin": "Median Margin",
+    "median_margin": "Median margin",
     "entropy": "Entropy",
-    "z-score": "Z-Score",
+    "z-score": "Z-score",
 }
 
 # Example hyperparameters - you can modify these
@@ -168,16 +263,16 @@ def initialize_calibrator(
 def plot_feature_importance(
     importance_scores: Dict[str, float],
     title: str,
-    output_path: Path,
+    output_path_base: Path,
 ) -> None:
     """Plot feature importance scores.
 
     Args:
         importance_scores: Dictionary mapping feature names to importance scores
         title: Plot title
-        output_path: Path to save the plot
+        output_path_base: Base path to save the plot (without extension)
     """
-    plt.figure(figsize=(10, 6))
+    plt.figure(figsize=(8, 6))
     features = list(importance_scores.keys())
     scores = list(importance_scores.values())
 
@@ -186,24 +281,27 @@ def plot_feature_importance(
     features = [features[i] for i in sorted_idx]
     scores = [scores[i] for i in sorted_idx]
 
-    plt.barh(range(len(features)), scores)
+    # Use ash color for the bars
+    plt.barh(range(len(features)), scores, color=COLORS["ash"])
     plt.yticks(range(len(features)), features)
     plt.xlabel("Importance Score")
     plt.title(title)
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+
+    # Save in both formats
+    plt.savefig(f"{output_path_base}.pdf", dpi=300, bbox_inches="tight")
+    plt.savefig(f"{output_path_base}.png", dpi=300, bbox_inches="tight")
     plt.close()
 
 
 def plot_feature_correlations(
     features: pd.DataFrame,
-    output_path: Path,
+    output_path_base: Path,
 ) -> None:
     """Plot feature correlation matrix.
 
     Args:
         features: DataFrame containing feature values
-        output_path: Path to save the plot
+        output_path_base: Base path to save the plot (without extension)
     """
     plt.figure(figsize=(12, 10))
     corr_matrix = features.corr()
@@ -211,11 +309,14 @@ def plot_feature_correlations(
     # Create mask for upper triangle
     mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
 
+    # Use custom colormap
+    custom_cmap = create_custom_colormap()
+
     # Plot correlation matrix
     sns.heatmap(
         corr_matrix,
         mask=mask,
-        cmap="RdBu_r",
+        cmap=custom_cmap,
         vmin=-1,
         vmax=1,
         center=0,
@@ -224,9 +325,11 @@ def plot_feature_correlations(
         fmt=".2f",
         cbar_kws={"shrink": 0.5},
     )
-    plt.title("Feature Correlation Matrix")
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.title("Feature correlation matrix")
+
+    # Save in both formats
+    plt.savefig(f"{output_path_base}.pdf", dpi=300, bbox_inches="tight")
+    plt.savefig(f"{output_path_base}.png", dpi=300, bbox_inches="tight")
     plt.close()
 
 
@@ -336,7 +439,7 @@ def main(
     plot_feature_importance(
         perm_importance_dict,
         "Permutation Feature Importance",
-        output_dir / "permutation_importance.png",
+        output_dir / "permutation_importance",
     )
 
     # 2. SHAP values
@@ -369,17 +472,24 @@ def main(
     shap_values.feature_names = display_feature_names
 
     # Plot SHAP summary using built-in function
-    plt.figure(figsize=(10, 8))
+    plt.figure(figsize=(8, 6))
+    # Set the color for SHAP beeswarm plot
+    sequential_cmap = create_sequential_colormap()
     shap.plots.beeswarm(
-        shap_values[:, :, correct_class_idx], show=False, max_display=12
+        shap_values[:, :, correct_class_idx],
+        show=False,
+        max_display=12,
+        color=sequential_cmap,
     )  # for correct class
-    plt.title("SHAP Feature Impact on P(correct) (colored by feature value)")
-    plt.tight_layout()
+    plt.title(r"SHAP feature impact on $P(\text{correct})$")
+
+    # Save in both formats
+    plt.savefig(output_dir / "shap_summary.pdf", dpi=300, bbox_inches="tight")
     plt.savefig(output_dir / "shap_summary.png", dpi=300, bbox_inches="tight")
     plt.close()
 
     # Plot SHAP bar plot
-    plt.figure(figsize=(10, 8))
+    plt.figure(figsize=(8, 6))
     clustering = shap.utils.hclust(features_scaled, labels)
     shap.plots.bar(
         shap_values[:, :, correct_class_idx],
@@ -388,8 +498,14 @@ def main(
         clustering_cutoff=0.5,
         max_display=12,
     )  # for correct class
-    plt.title("SHAP Feature Importance for P(correct)")
-    plt.tight_layout()
+    # Manually set bar colors after the plot is created
+    ax = plt.gca()
+    for patch in ax.patches:
+        patch.set_facecolor(COLORS["magenta"])
+    plt.title(r"SHAP feature importance for $P(\text{correct})$")
+
+    # Save in both formats
+    plt.savefig(output_dir / "shap_importance.pdf", dpi=300, bbox_inches="tight")
     plt.savefig(output_dir / "shap_importance.png", dpi=300, bbox_inches="tight")
     plt.close()
 
@@ -401,14 +517,24 @@ def main(
     for idx in top_features_idx:
         feature_name = display_feature_names[idx]
         original_feature_name = feature_names[idx]  # For filename
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=(8, 6))
         shap.plots.scatter(
             shap_values[:, idx, correct_class_idx],
             show=False,
-            color=plt.cm.viridis(0.3),
+            color=COLORS["sky"],  # Use sky blue for scatter points
         )
-        plt.title(f"SHAP Dependence Plot for {feature_name} (impact on P(correct))")
-        plt.tight_layout()
+        plt.title(
+            "SHAP dependence plot for "
+            + feature_name
+            + r" (impact on $P(\text{correct})$)"
+        )
+
+        # Save in both formats
+        plt.savefig(
+            output_dir / f"shap_dependence_{original_feature_name}.pdf",
+            dpi=300,
+            bbox_inches="tight",
+        )
         plt.savefig(
             output_dir / f"shap_dependence_{original_feature_name}.png",
             dpi=300,
@@ -424,18 +550,32 @@ def main(
             if i != j:  # Skip self-interactions
                 feature2_display = display_feature_names[idx2]
                 feature2_original = feature_names[idx2]
-                plt.figure(figsize=(12, 8))
+                plt.figure(figsize=(8, 6))
+                # Create a custom colormap for the interaction plot
+                interaction_cmap = create_sequential_colormap()
                 shap.plots.scatter(
                     shap_values[:, feature1_display, correct_class_idx],
                     color=shap_values[
                         :, feature2_display, correct_class_idx
                     ],  # Use second feature for coloring
                     show=False,
+                    cmap=interaction_cmap,
                 )
                 plt.title(
-                    f"SHAP Interaction Plot for {feature1_display} vs {feature2_display} (impact on P(correct))"
+                    "SHAP interaction plot for "
+                    + feature1_display
+                    + " vs "
+                    + feature2_display
+                    + r" (impact on $P(\text{correct})$)"
                 )
-                plt.tight_layout()
+
+                # Save in both formats
+                plt.savefig(
+                    output_dir
+                    / f"shap_interaction_{feature1_original}_vs_{feature2_original}.pdf",
+                    dpi=300,
+                    bbox_inches="tight",
+                )
                 plt.savefig(
                     output_dir
                     / f"shap_interaction_{feature1_original}_vs_{feature2_original}.png",
@@ -445,14 +585,18 @@ def main(
                 plt.close()
 
     # Plot SHAP heatmap for top 10 features
-    plt.figure(figsize=(12, 8))
+    plt.figure(figsize=(12, 10))
+    custom_cmap = create_custom_colormap()
     shap.plots.heatmap(
         shap_values[:, :, correct_class_idx],  # for correct class
         max_display=12,
         show=False,
+        cmap=custom_cmap,
     )
-    plt.title("SHAP Feature Impact Heatmap (impact on P(correct))")
-    plt.tight_layout()
+    plt.title(r"SHAP feature impact heatmap (impact on $P(\text{correct})$)")
+
+    # Save in both formats
+    plt.savefig(output_dir / "shap_heatmap.pdf", dpi=300, bbox_inches="tight")
     plt.savefig(output_dir / "shap_heatmap.png", dpi=300, bbox_inches="tight")
     plt.close()
 
@@ -464,7 +608,7 @@ def main(
     )
     plot_feature_correlations(
         features_scaled_display_df,
-        output_dir / "feature_correlations.png",
+        output_dir / "feature_correlations",
     )
 
     # Save numerical results
@@ -480,36 +624,6 @@ def main(
         }
     )
     results.to_csv(output_dir / "feature_importance_results.csv", index=False)
-
-    # Print summary
-    print("\nFeature Importance Analysis Results:")
-    print("-" * 60)
-    print("\nTop 5 features by permutation importance:")
-    for feature, importance in sorted(
-        perm_importance_dict.items(), key=lambda x: x[1], reverse=True
-    )[:5]:
-        print(f"{feature}: {importance:.4f}")
-
-    print("\nTop 5 features by mean |SHAP| (impact on P(correct)):")
-    mean_abs_shap_dict = dict(
-        zip(
-            display_feature_names,
-            np.abs(shap_values.values[:, :, correct_class_idx]).mean(axis=0),
-        )
-    )  # for correct class
-    for feature, importance in sorted(
-        mean_abs_shap_dict.items(), key=lambda x: x[1], reverse=True
-    )[:5]:
-        print(f"{feature}: {importance:.4f}")
-
-    print("\nStrong feature correlations (|r| > 0.7):")
-    corr_matrix = features_scaled_display_df.corr()
-    for i in range(len(corr_matrix.columns)):
-        for j in range(i + 1, len(corr_matrix.columns)):
-            if abs(corr_matrix.iloc[i, j]) > 0.7:
-                print(
-                    f"{corr_matrix.columns[i]} - {corr_matrix.columns[j]}: {corr_matrix.iloc[i, j]:.3f}"
-                )
 
     print(f"\nResults saved to {output_dir}")
 
