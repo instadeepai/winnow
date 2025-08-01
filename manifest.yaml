@@ -22,7 +22,7 @@ spec:
     enabled: false
 
   types:
-    Worker:
+    worker:
       count: 1
       resources:
         cpus: 8
