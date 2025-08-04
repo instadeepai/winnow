@@ -289,8 +289,8 @@ def plot_feature_importance(
     plt.title(title)
 
     # Save in both formats
-    plt.savefig(f"{output_path_base}.pdf")
-    plt.savefig(f"{output_path_base}.png")
+    plt.savefig(f"{output_path_base}.pdf", bbox_inches="tight", dpi=300)
+    plt.savefig(f"{output_path_base}.png", bbox_inches="tight", dpi=300)
     plt.close()
 
 
@@ -329,8 +329,8 @@ def plot_feature_correlations(
     plt.title("Feature correlation matrix")
 
     # Save in both formats
-    plt.savefig(f"{output_path_base}.pdf", bbox_inches="tight")
-    plt.savefig(f"{output_path_base}.png", bbox_inches="tight")
+    plt.savefig(f"{output_path_base}.pdf", bbox_inches="tight", dpi=300)
+    plt.savefig(f"{output_path_base}.png", bbox_inches="tight", dpi=300)
     plt.close()
 
 
@@ -485,8 +485,8 @@ def main(
     plt.title(r"SHAP feature impact on $P(\text{correct})$")
 
     # Save in both formats
-    plt.savefig(output_dir / "shap_summary.pdf")
-    plt.savefig(output_dir / "shap_summary.png")
+    plt.savefig(output_dir / "shap_summary.pdf", bbox_inches="tight", dpi=300)
+    plt.savefig(output_dir / "shap_summary.png", bbox_inches="tight", dpi=300)
     plt.close()
 
     # Plot SHAP bar plot
@@ -506,8 +506,8 @@ def main(
     plt.title(r"SHAP feature importance for $P(\text{correct})$")
 
     # Save in both formats
-    plt.savefig(output_dir / "shap_importance.pdf")
-    plt.savefig(output_dir / "shap_importance.png")
+    plt.savefig(output_dir / "shap_importance.pdf", bbox_inches="tight", dpi=300)
+    plt.savefig(output_dir / "shap_importance.png", bbox_inches="tight", dpi=300)
     plt.close()
 
     # Plot SHAP dependence plots for top 3 features
@@ -531,8 +531,16 @@ def main(
         )
 
         # Save in both formats
-        plt.savefig(output_dir / f"shap_dependence_{original_feature_name}.pdf")
-        plt.savefig(output_dir / f"shap_dependence_{original_feature_name}.png")
+        plt.savefig(
+            output_dir / f"shap_dependence_{original_feature_name}.pdf",
+            bbox_inches="tight",
+            dpi=300,
+        )
+        plt.savefig(
+            output_dir / f"shap_dependence_{original_feature_name}.png",
+            bbox_inches="tight",
+            dpi=300,
+        )
         plt.close()
 
     # Plot SHAP interaction plots for all combinations of top 3 features
@@ -565,11 +573,15 @@ def main(
                 # Save in both formats
                 plt.savefig(
                     output_dir
-                    / f"shap_interaction_{feature1_original}_vs_{feature2_original}.pdf"
+                    / f"shap_interaction_{feature1_original}_vs_{feature2_original}.pdf",
+                    bbox_inches="tight",
+                    dpi=300,
                 )
                 plt.savefig(
                     output_dir
-                    / f"shap_interaction_{feature1_original}_vs_{feature2_original}.png"
+                    / f"shap_interaction_{feature1_original}_vs_{feature2_original}.png",
+                    bbox_inches="tight",
+                    dpi=300,
                 )
                 plt.close()
 
@@ -585,8 +597,8 @@ def main(
     plt.title(r"SHAP feature impact heatmap (impact on $P(\text{correct})$)")
 
     # Save in both formats
-    plt.savefig(output_dir / "shap_heatmap.pdf", bbox_inches="tight")
-    plt.savefig(output_dir / "shap_heatmap.png", bbox_inches="tight")
+    plt.savefig(output_dir / "shap_heatmap.pdf", bbox_inches="tight", dpi=300)
+    plt.savefig(output_dir / "shap_heatmap.png", bbox_inches="tight", dpi=300)
     plt.close()
 
     # 3. Feature correlations
