@@ -27,7 +27,7 @@ class NonParametricFDRControl(FDRControl):
         """Fit the FDR control method to a dataset of confidence scores.
 
         Args:
-            dataset (NDArray[np.float64]):
+            dataset (pd.DataFrame):
                 An array of confidence scores from the dataset.
         """
         dataset = dataset.to_numpy()
