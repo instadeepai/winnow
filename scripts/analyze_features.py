@@ -132,6 +132,11 @@ def create_sequential_colormap():
     return LinearSegmentedColormap.from_list("custom_seq", colors, N=256)
 
 
+def to_sentence_case(feature_name: str) -> str:
+    """Convert feature name to lowercase for use in sentence context (after 'for')."""
+    return feature_name.lower()
+
+
 # Set up logging
 logger = logging.getLogger("winnow")
 logger.setLevel(logging.INFO)
@@ -285,7 +290,7 @@ def plot_feature_importance(
     # Use ash color for the bars
     plt.barh(range(len(features)), scores, color=COLORS["ash"])
     plt.yticks(range(len(features)), features)
-    plt.xlabel("Importance Score")
+    plt.xlabel("Importance score")
     plt.title(title)
 
     # Save in both formats
@@ -526,9 +531,19 @@ def main(
         )
         plt.title(
             "SHAP dependence plot for "
-            + feature_name
+            + to_sentence_case(feature_name)
             + r" (impact on $P(\text{correct})$)"
         )
+
+        # Fix y-axis label to use sentence case
+        ax = plt.gca()
+        current_ylabel = ax.get_ylabel()
+        if "SHAP value for " in current_ylabel:
+            # Replace the feature name in the y-label with sentence case version
+            new_ylabel = current_ylabel.replace(
+                feature_name, to_sentence_case(feature_name)
+            )
+            ax.set_ylabel(new_ylabel)
 
         # Save in both formats
         plt.savefig(
@@ -564,11 +579,21 @@ def main(
                 )
                 plt.title(
                     "SHAP interaction plot for "
-                    + feature1_display
+                    + to_sentence_case(feature1_display)
                     + " vs "
-                    + feature2_display
+                    + to_sentence_case(feature2_display)
                     + r" (impact on $P(\text{correct})$)"
                 )
+
+                # Fix y-axis label to use sentence case
+                ax = plt.gca()
+                current_ylabel = ax.get_ylabel()
+                if "SHAP value for " in current_ylabel:
+                    # Replace the feature name in the y-label with sentence case version
+                    new_ylabel = current_ylabel.replace(
+                        feature1_display, to_sentence_case(feature1_display)
+                    )
+                    ax.set_ylabel(new_ylabel)
 
                 # Save in both formats
                 plt.savefig(

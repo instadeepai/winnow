@@ -25,6 +25,7 @@ class DatabaseGroundedFDRControl(FDRControl):
         residue_masses: dict[str, float],
         isotope_error_range: Tuple[int, int] = (0, 1),
         drop: int = 10,
+        correct_column: str = "correct",
     ) -> None:
         """Computes the precision-recall curve by comparing model predictions to database-grounded peptide sequences.
 
@@ -45,29 +46,30 @@ class DatabaseGroundedFDRControl(FDRControl):
             residue_set=residue_set, isotope_error_range=isotope_error_range
         )
 
-        dataset["sequence"] = dataset["sequence"].apply(metrics._split_peptide)
-        # dataset["prediction"] = dataset["prediction"].apply(metrics._split_peptide)
-
-        dataset["num_matches"] = dataset.apply(
-            lambda row: (
-                metrics._novor_match(row["sequence"], row["prediction"])
-                if isinstance(row["prediction"], list)
-                else 0
-            ),
-            axis=1,
-        )
-        dataset["correct"] = dataset.apply(
-            lambda row: row["num_matches"]
-            == len(row["sequence"])
-            == len(row["prediction"]),
-            axis=1,
-        )
-        self.preds = dataset[["correct", self.confidence_feature]]
+        if correct_column == "correct":
+            dataset["sequence"] = dataset["sequence"].apply(metrics._split_peptide)
+            # dataset["prediction"] = dataset["prediction"].apply(metrics._split_peptide)
+            dataset["num_matches"] = dataset.apply(
+                lambda row: (
+                    metrics._novor_match(row["sequence"], row["prediction"])
+                    if isinstance(row["prediction"], list)
+                    else 0
+                ),
+                axis=1,
+            )
+            dataset[correct_column] = dataset.apply(
+                lambda row: row["num_matches"]
+                == len(row["sequence"])
+                == len(row["prediction"]),
+                axis=1,
+            )
+        # If correct column is "proteome_hit", we expect the column to be a boolean that is precomputed
+        self.preds = dataset[[correct_column, self.confidence_feature]]
 
         dataset = dataset.sort_values(
             by=self.confidence_feature, axis=0, ascending=False
         )
-        precision = np.cumsum(dataset["correct"]) / np.arange(1, len(dataset) + 1)
+        precision = np.cumsum(dataset[correct_column]) / np.arange(1, len(dataset) + 1)
         confidence = np.array(dataset[self.confidence_feature])
 
         self.fdr_thresholds = list(1.0 - precision[drop:])

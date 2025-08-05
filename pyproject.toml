@@ -24,6 +24,9 @@ dependencies = [
     "polars>=1.25.2",
     "shap>=0.48.0",
     "xgboost>=3.0.2",
+    "scikit-learn>=1.6.1",
+    "numpy>=2.0.2",
+    "ipykernel>=6.30.0",
 ]
 
 [build-system]

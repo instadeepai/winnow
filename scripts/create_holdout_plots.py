@@ -1,11 +1,13 @@
 import matplotlib.pyplot as plt
 import pandas as pd
 from sklearn.calibration import calibration_curve
-from typing import Tuple, List, Callable, Union
+from sklearn.metrics import auc
+from typing import Tuple, List, Callable, Union, Dict
 import numpy as np
+import seaborn as sns
 
 # Species name mapping for nicer plot labels
-SPECIES_NAME_MAPPING = {
+SPECIES_NAME_MAPPING: Dict[str, str] = {
     "helaqc": "HeLa Single Shot",
     "gluc": "HeLa Degradome",
     "herceptin": "Herceptin",
@@ -13,6 +15,7 @@ SPECIES_NAME_MAPPING = {
     "woundfluids": "Wound Exudates",
     "sbrodae": "Scalindua brodae",
     "immuno": "Immunopeptidomics",
+    "PXD023064": "HepG2",
 }
 
 
@@ -77,10 +80,10 @@ def plot_pr_curve_on_axes(
             group["recall"], group["precision"], label=name, linewidth=2, color=color
         )
 
-    ax.set_xlabel("Recall", fontsize=12)
-    ax.set_ylabel("Precision", fontsize=12)
-    ax.set_title(title, fontsize=14)
-    ax.legend(fontsize=10)
+    ax.set_xlabel("Recall")
+    ax.set_ylabel("Precision")
+    ax.set_title(title)
+    ax.legend()
     ax.grid(True, alpha=0.3)
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
@@ -102,10 +105,15 @@ def plot_confidence_distribution_on_axes(
     false_conf = plot_df[plot_df[label_column] == "F"][confidence_column]
 
     ax.hist(
-        true_conf, bins=50, alpha=0.7, label="True", color="#4A90E2", density=density
+        true_conf, bins=50, alpha=0.7, label="Correct", color="#4A90E2", density=density
     )
     ax.hist(
-        false_conf, bins=50, alpha=0.7, label="False", color="#F5A623", density=density
+        false_conf,
+        bins=50,
+        alpha=0.7,
+        label="Incorrect",
+        color="#F5A623",
+        density=density,
     )
     ax.set_xlabel(confidence_column.replace("_", " ").title())
     if density:
@@ -179,7 +187,7 @@ def plot_confidence_distributions(
 ) -> Tuple[plt.Figure, Tuple[plt.Axes, plt.Axes]]:
     """Plot confidence distributions for both confidence and calibrated confidence."""
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
-    plt.suptitle(title, fontsize=14, y=0.97)
+    plt.suptitle(title, y=0.97)
 
     plot_confidence_distribution_on_axes(
         metadata, ax1, "confidence", "Confidence Distribution", density, label_column
@@ -202,7 +210,7 @@ def plot_probability_calibration(
 ) -> Tuple[plt.Figure, Tuple[plt.Axes, plt.Axes]]:
     """Plot probability calibration curves for both confidence and calibrated confidence."""
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
-    plt.suptitle(title, fontsize=14, y=0.97)
+    plt.suptitle(title, y=0.97)
 
     plot_calibration_curve_on_axes(
         metadata, ax1, "confidence", "Confidence Calibration", label_column
@@ -333,10 +341,10 @@ def plot_fdr_accuracy_on_axes(
         )
 
     # Customize the plot
-    ax.set_xlabel("Confidence", fontsize=12)
-    ax.set_ylabel("False Discovery Rate (FDR)", fontsize=12)
-    ax.set_title(title, fontsize=12)
-    ax.legend(fontsize=10)
+    ax.set_xlabel("Confidence")
+    ax.set_ylabel("False Discovery Rate (FDR)")
+    ax.set_title(title)
+    ax.legend()
     ax.grid(True, alpha=0.3)
 
     # Set y-axis to start from 0 and go up to a reasonable max
@@ -521,16 +529,16 @@ def plot_comparison_bar_chart(
     )
 
     # Add labels and title
-    ax.set_xlabel("Species", fontsize=12)
-    ax.set_ylabel(f"Number of PSMs at {fdr_threshold * 100}% FDR", fontsize=12)
-    ax.set_title(config["title"].format(fdr_threshold * 100), fontsize=14)
+    ax.set_xlabel("Species")
+    ax.set_ylabel(f"Number of PSMs at {fdr_threshold * 100}% FDR")
+    ax.set_title(config["title"].format(fdr_threshold * 100))
 
     # Set x-axis labels using mapped species names
     ax.set_xticks(x)
     ax.set_xticklabels(plot_df["species_display"], rotation=45, ha="right")
 
     # Add legend
-    ax.legend(fontsize=10)
+    ax.legend()
 
     # Add grid
     ax.grid(True, alpha=0.3, axis="y")
@@ -845,7 +853,6 @@ def create_species_pie_chart(
     # Add title
     ax.set_title(
         f"Distribution of PSMs Across Species\n(Total: {int(total_all_psms)} PSMs)",
-        fontsize=14,
         pad=20,
     )
 
@@ -861,6 +868,124 @@ def create_species_pie_chart(
         loc="center left",
         bbox_to_anchor=(1, 0, 0.5, 1),
     )
+
+    plt.tight_layout()
+
+    return fig, ax
+
+
+def compute_auc_from_pr_curve(
+    metadata: pd.DataFrame,
+    confidence_column: str,
+    label_column: str,
+) -> float:
+    """Compute Area Under the Curve for precision-recall curve.
+
+    Args:
+        metadata: DataFrame containing confidence scores and labels
+        confidence_column: Name of the column containing confidence scores
+        label_column: Name of the column containing boolean labels
+
+    Returns:
+        AUC value for the precision-recall curve
+    """
+    pr_data = compute_pr_curve(
+        input_dataset=metadata,
+        confidence_column=confidence_column,
+        label_column=label_column,
+        name="temp",
+    )
+
+    # Calculate AUC using trapezoidal rule
+    auc_value = auc(pr_data["recall"], pr_data["precision"])
+    return auc_value
+
+
+def create_generalization_heatmap(
+    species_list: List[str], label_column: str = "correct"
+) -> Tuple[plt.Figure, plt.Axes]:
+    """Create a heatmap showing generalization performance across hold-one-out datasets.
+
+    Args:
+        species_list: List of species names
+        label_column: Name of the column containing boolean labels
+
+    Returns:
+        Tuple of (figure, axes)
+    """
+    # Initialize results dictionary
+    results: Dict[str, List[Union[str, float]]] = {
+        "Species": [],
+        "Original Confidence AUC-PR": [],
+        "Calibrated Confidence AUC-PR": [],
+    }
+
+    # For each species (as test set), compute AUC for both confidence types
+    for species in species_list:
+        try:
+            # Load test results for this holdout species
+            if label_column == "correct":
+                metadata = pd.read_csv(
+                    f"holdout_results/all_less_{species}_labelled_test_results_with_db_fdr.csv"
+                )
+            else:
+                # For proteome hits, use raw data
+                metadata = pd.read_csv(
+                    f"holdout_results/all_less_{species}_raw_test_results.csv"
+                )
+
+            # Compute AUC for original confidence
+            original_auc = compute_auc_from_pr_curve(
+                metadata, "confidence", label_column
+            )
+
+            # Compute AUC for calibrated confidence
+            calibrated_auc = compute_auc_from_pr_curve(
+                metadata, "calibrated_confidence", label_column
+            )
+
+            # Store results
+            results["Species"].append(SPECIES_NAME_MAPPING.get(species, species))
+            results["Original Confidence AUC-PR"].append(original_auc)
+            results["Calibrated Confidence AUC-PR"].append(calibrated_auc)
+
+        except FileNotFoundError:
+            print(f"Warning: Could not find data file for species {species}")
+            results["Species"].append(SPECIES_NAME_MAPPING.get(species, species))
+            results["Original Confidence AUC-PR"].append(np.nan)
+            results["Calibrated Confidence AUC-PR"].append(np.nan)
+
+    # Create DataFrame for heatmap
+    df = pd.DataFrame(results)
+    df = df.set_index("Species")
+
+    # Create the heatmap
+    fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+
+    # Create heatmap with custom colormap
+    sns.heatmap(
+        df.T,  # Transpose so methods are rows and species are columns
+        annot=True,  # Show values in cells
+        fmt=".3f",  # Format to 3 decimal places
+        cmap="RdYlBu_r",  # Red-Yellow-Blue colormap (reversed)
+        center=0.5,  # Center colormap at 0.5
+        vmin=0,  # Minimum value
+        vmax=1,  # Maximum value
+        cbar_kws={"label": "AUC-PR"},
+        ax=ax,
+    )
+
+    # Customize the plot
+    ax.set_title(
+        f"Generalization Performance: AUC-PR Across Hold-One-Out Datasets\n({label_column.title()} Labels)",
+        pad=20,
+    )
+    ax.set_xlabel("Test Species (Hold-Out)")
+    ax.set_ylabel("Confidence Method")
+
+    # Rotate x-axis labels for better readability
+    plt.xticks(rotation=45, ha="right")
+    plt.yticks(rotation=0)
 
     plt.tight_layout()
 
@@ -900,7 +1025,7 @@ def create_combined_species_plot(
     fig = plt.figure(figsize=(15, 24))
 
     # Set the main title for the entire figure
-    plt.suptitle(title, fontsize=16, y=0.98)
+    plt.suptitle(title, y=0.98)
 
     # Plot 1: PR curve (spans full width, top row)
     ax1 = plt.subplot2grid((4, 2), (0, 0), colspan=2)
@@ -1179,6 +1304,36 @@ def main():
     )
     fig.savefig(
         "holdout_results/plots/raw_confidence_comparison_bar_chart.pdf",
+        bbox_inches="tight",
+    )
+    plt.close(fig)
+
+    # Create generalization heatmap for PSMs
+    fig, ax = create_generalization_heatmap(
+        species_list=species_list, label_column="correct"
+    )
+    fig.savefig(
+        "holdout_results/plots/generalization_heatmap_psms.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
+    fig.savefig(
+        "holdout_results/plots/generalization_heatmap_psms.pdf",
+        bbox_inches="tight",
+    )
+    plt.close(fig)
+
+    # Create generalization heatmap for Proteome Hits
+    fig, ax = create_generalization_heatmap(
+        species_list=species_list, label_column="proteome_hit"
+    )
+    fig.savefig(
+        "holdout_results/plots/generalization_heatmap_proteome_hits.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
+    fig.savefig(
+        "holdout_results/plots/generalization_heatmap_proteome_hits.pdf",
         bbox_inches="tight",
     )
     plt.close(fig)
