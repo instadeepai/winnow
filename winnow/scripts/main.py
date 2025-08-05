@@ -7,7 +7,7 @@ from winnow.calibration.calibration_features import (
     BeamFeatures,
 )
 from winnow.calibration.calibrator import ProbabilityCalibrator
-from winnow.datasets.calibration_dataset import RESIDUE_MASSES, CalibrationDataset
+from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.datasets.data_loaders import (
     InstaNovoDatasetLoader,
     CasanovoDatasetLoader,
@@ -16,6 +16,7 @@ from winnow.datasets.data_loaders import (
 )
 from winnow.fdr.bayes import EmpiricalBayesFDRControl
 from winnow.fdr.database_grounded import DatabaseGroundedFDRControl
+from winnow.constants import RESIDUE_MASSES
 
 from dataclasses import dataclass
 from enum import Enum

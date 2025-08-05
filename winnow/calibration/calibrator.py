@@ -17,7 +17,8 @@ from winnow.calibration.calibration_features import (
     ChimericFeatures,
     BeamFeatures,
 )
-from winnow.datasets.calibration_dataset import CalibrationDataset, RESIDUE_MASSES
+from winnow.datasets.calibration_dataset import CalibrationDataset
+from winnow.constants import RESIDUE_MASSES
 
 
 class ProbabilityCalibrator:

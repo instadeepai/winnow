@@ -19,9 +19,8 @@ from winnow.datasets.interfaces import DatasetLoader
 from winnow.datasets.calibration_dataset import (
     CalibrationDataset,
     ScoredSequence,
-    metrics,
-    INVALID_PROSIT_TOKENS,
 )
+from winnow.constants import metrics, INVALID_PROSIT_TOKENS
 
 
 class InstaNovoDatasetLoader(DatasetLoader):
