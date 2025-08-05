@@ -30,7 +30,14 @@ class InstaNovoDatasetLoader(DatasetLoader):
     def _load_beam_preds(
         predictions_path: Path,
     ) -> Tuple[pl.DataFrame, pl.DataFrame]:
-        """Loads a dataset from a CSV file and optionally filters it."""
+        """Loads a dataset from a CSV file and optionally filters it.
+
+        Args:
+            predictions_path (Path): The path to the CSV file containing the predictions.
+
+        Returns:
+            Tuple[pl.DataFrame, pl.DataFrame]: A tuple containing the predictions and beams dataframes.
+        """
 
         def _filter_dataset_for_prosit(df: pl.DataFrame) -> pl.DataFrame:
             """Applies filters to remove unsupported modifications."""
@@ -60,7 +67,14 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
     @staticmethod
     def _process_beams(beam_df: pl.DataFrame) -> List[Optional[List[ScoredSequence]]]:
-        """Processes beam predictions into scored sequences."""
+        """Processes beam predictions into scored sequences.
+
+        Args:
+            beam_df (pl.DataFrame): The dataframe containing the beam predictions.
+
+        Returns:
+            List[Optional[List[ScoredSequence]]]: A list of scored sequences for each row in the dataframe.
+        """
 
         def convert_row_to_scored_sequences(
             row: dict,
@@ -107,7 +121,15 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
     @staticmethod
     def _process_predictions(dataset: pd.DataFrame, has_labels: bool) -> pd.DataFrame:
-        """Processes the predictions obtained from saved beams."""
+        """Processes the predictions obtained from saved beams.
+
+        Args:
+            dataset (pd.DataFrame): The dataframe containing the predictions.
+            has_labels (bool): Whether the dataset has ground truth labels.
+
+        Returns:
+            pd.DataFrame: The processed dataframe.
+        """
         rename_dict = {
             "preds": "prediction_untokenised",
             "preds_tokenised": "prediction",
@@ -150,7 +172,14 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
     @staticmethod
     def _load_spectrum_data(spectrum_path: Path | str) -> Tuple[pl.DataFrame, bool]:
-        """Loads spectrum data from either a Parquet or IPC file."""
+        """Loads spectrum data from either a Parquet or IPC file.
+
+        Args:
+            spectrum_path (Path | str): The path to the spectrum data file.
+
+        Returns:
+            Tuple[pl.DataFrame, bool]: A tuple containing the spectrum data and a boolean indicating whether the dataset has ground truth labels.
+        """
         spectrum_path = Path(spectrum_path)
 
         if spectrum_path.suffix == ".parquet":
@@ -169,7 +198,15 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
     @staticmethod
     def _process_spectrum_data(df: pl.DataFrame, has_labels: bool) -> pd.DataFrame:
-        """Processes the input data from the de novo sequencing model."""
+        """Processes the input data from the de novo sequencing model.
+
+        Args:
+            df (pl.DataFrame): The dataframe containing the spectrum data.
+            has_labels (bool): Whether the dataset has ground truth labels.
+
+        Returns:
+            pd.DataFrame: The processed dataframe.
+        """
         df = df.to_pandas()
         if has_labels:
             df["sequence"] = (
@@ -187,7 +224,15 @@ class InstaNovoDatasetLoader(DatasetLoader):
     def _merge_spectrum_data(
         beam_dataset: pd.DataFrame, spectrum_dataset: pd.DataFrame
     ) -> pd.DataFrame:
-        """Merge the input and output data from the de novo sequencing model."""
+        """Merge the input and output data from the de novo sequencing model.
+
+        Args:
+            beam_dataset (pd.DataFrame): The dataframe containing the beam predictions.
+            spectrum_dataset (pd.DataFrame): The dataframe containing the spectrum data.
+
+        Returns:
+            pd.DataFrame: The merged dataframe.
+        """
         merged_df = pd.merge(
             beam_dataset,
             spectrum_dataset,
@@ -212,7 +257,15 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
     @staticmethod
     def _evaluate_predictions(dataset: pd.DataFrame, has_labels: bool) -> pd.DataFrame:
-        """Evaluates predictions in a dataset by checking validity and accuracy."""
+        """Evaluates predictions in a dataset by checking validity and accuracy.
+
+        Args:
+            dataset (pd.DataFrame): The dataframe containing the predictions.
+            has_labels (bool): Whether the dataset has ground truth labels.
+
+        Returns:
+            pd.DataFrame: The processed dataframe.
+        """
         if has_labels:
             dataset["valid_peptide"] = dataset["sequence"].apply(
                 lambda peptide: isinstance(peptide, list)
