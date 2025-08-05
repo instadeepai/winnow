@@ -31,7 +31,7 @@ SPECIES_NAME_MAPPING = {
     "sbrodae": "Scalindua brodae",
     "snakevenoms": "Snake venomics",
     "woundfluids": "Wound exudates",
-    "PXD014877": "C. elegans",
+    "PXD014877": r"$\mathit{C.\ elegans}$",
     "PXD019483": "HepG2",
     "PXD023064": "Immunopeptidomics-2",
     "general": "General test set",
