@@ -64,6 +64,11 @@ class NonParametricFDRControl(FDRControl):
         if self._confidence_scores is None:
             raise ValueError("FDR control method must be fit before computing cutoffs")
 
+        # NOTE: FDR is computed as a cumulative average of errors over descending confidence scores.
+        # This guarantees that FDR is a monotonically decreasing function of confidence score,
+        # with strict increases for each newly included lower-confidence prediction (with a correspondingly higher error)
+        # and the same FDR value outputted for an identical confidence score.
+
         # Check edge cases first
         if np.all(self._fdr_values > threshold):
             warnings.warn(
