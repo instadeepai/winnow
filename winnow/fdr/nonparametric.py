@@ -109,13 +109,15 @@ class NonParametricFDRControl(FDRControl):
 
         if idx == len(self._confidence_scores):
             warnings.warn(
-                f"Score {score} is too low for accurate FDR control. Returning a conservative FDR estimate of 1.0 since all scores are above cutoff.",
+                f"Score {score} is below the range of fitted confidence scores (min: {self._confidence_scores[-1]:.4f}). "
+                f"Cannot compute FDR from fitted data. Returning conservative estimate of 1.0.",
                 UserWarning,
             )
             return 1.0
         elif idx == 0:
             warnings.warn(
-                f"Score {score} is too high for accurate FDR control. Returning a conservative FDR estimate since all scores are below cutoff.",
+                f"Score {score} is above the range of fitted confidence scores (max: {self._confidence_scores[0]:.4f}). "
+                f"Cannot compute FDR from fitted data. Returning conservative estimate of {self._fdr_values[0]:.4f}.",
                 UserWarning,
             )
 
