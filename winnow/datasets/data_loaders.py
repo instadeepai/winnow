@@ -43,12 +43,16 @@ class InstaNovoDatasetLoader(DatasetLoader):
             """Applies filters to remove unsupported modifications."""
             print("Applying dataset filters...")
 
+            # Filter out invalid tokens (~ negates condition in polars)
             for token in INVALID_PROSIT_TOKENS:
                 df = df.filter(~df["preds"].str.contains(token))
                 df = df.filter(~df["preds_beam_1"].str.contains(token))
 
+            # Filter out unmodified cysteine using polars string operations
             df = df.filter(~df["preds_tokenised"].str.contains("C,"))
 
+            # Filter out unmodified cysteine using regex for negative lookahead
+            # NOTE: This is a workaround for the fact that polars does not support negative lookahead in its string operations
             pattern = re.compile(r"C(?!\[)")
             indexes_to_drop = [
                 idx
@@ -61,6 +65,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
         df = pl.read_csv(predictions_path)
         df = _filter_dataset_for_prosit(df)
+        # Use polars column selectors to split dataframe
         beam_df = df.select(cs.contains("_beam_"))
         preds_df = df.select(~cs.contains(["_beam_", "_log_probs_"]))
         return preds_df, beam_df
@@ -106,6 +111,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
             return scored_sequences or None
 
+        # Apply L -> I transformation to multiple columns using polars with_columns
         beam_df = beam_df.with_columns(
             [
                 pl.col(col).str.replace_all("L", "I")
@@ -114,6 +120,8 @@ class InstaNovoDatasetLoader(DatasetLoader):
             ]
         )
 
+        # Converts each row of the polars dataframe to a list of scored sequences representing the beam predictions for that row/spectrum.
+        # All the beams are then stored in a list representing the entire dataset.
         return [
             convert_row_to_scored_sequences(row)
             for row in beam_df.iter_rows(named=True)
@@ -207,6 +215,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
         Returns:
             pd.DataFrame: The processed dataframe.
         """
+        # Convert to pandas for downstream compatibility
         df = df.to_pandas()
         if has_labels:
             df["sequence"] = (
