@@ -575,7 +575,7 @@ class PointNovoDatasetLoader(DatasetLoader):
         # return CalibrationDataset(metadata=dataset, predictions=[None] * len(dataset))
 
 
-class SavedDatasetLoader(DatasetLoader):
+class WinnowDatasetLoader(DatasetLoader):
     """Loader for previously saved CalibrationDataset instances."""
 
     def load(self, *args: Path, **kwargs: Any) -> CalibrationDataset:

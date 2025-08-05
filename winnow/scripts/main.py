@@ -12,7 +12,7 @@ from winnow.datasets.data_loaders import (
     InstaNovoDatasetLoader,
     CasanovoDatasetLoader,
     PointNovoDatasetLoader,
-    SavedDatasetLoader,
+    WinnowDatasetLoader,
 )
 from winnow.fdr.bayes import EmpiricalBayesFDRControl
 from winnow.fdr.database_grounded import DatabaseGroundedFDRControl
@@ -123,7 +123,7 @@ def load_dataset(
             winnow_dataset_config = WinnowDatasetConfig(
                 **yaml.safe_load(dataset_config_file)
             )
-            dataset = SavedDatasetLoader().load(Path(winnow_dataset_config.data_dir))
+            dataset = WinnowDatasetLoader().load(Path(winnow_dataset_config.data_dir))
         elif data_source is DataSource.instanovo:
             instanovo_dataset_config = InstaNovoDatasetConfig(
                 **yaml.safe_load(dataset_config_file)
