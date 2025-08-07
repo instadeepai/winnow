@@ -35,10 +35,26 @@ WORKDIR $HOME_DIRECTORY
 # Append the current directory to your python path
 ENV PYTHONPATH=$HOME_DIRECTORY:$PYTHONPATH
 
-# Install dependencies for Make commands
+# Install dependencies for Google Cloud CLI, InstaNovo GitLab repository and Make commands
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends make
+    apt-get install -y --no-install-recommends \
+        apt-transport-https \
+        ca-certificates \
+        gnupg \
+        curl \
+        make
+
+# Install Google Cloud CLI
+RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && \
+    curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && \
+    apt-get update -y && \
+    apt-get install google-cloud-cli -y
+RUN apt-get clean && \
+    rm -rf /var/lib/{apt,dpkg,cache,log}
+
+# Install AWS CLI
+RUN uv tool install awscli
 
 # Create group and user
 RUN groupadd --force --gid $GID $USER && \

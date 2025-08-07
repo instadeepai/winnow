@@ -82,7 +82,7 @@ install-dev:
 ## Development commands														 	#
 #################################################################################
 
-.PHONY: tests coverage test-docker coverage-docker bash
+.PHONY: tests coverage test-docker coverage-docker bash set-gcp-credentials set-ceph-credentials
 
 ## Run all tests
 tests:
@@ -103,3 +103,12 @@ coverage-docker:
 ## Open a bash shell in the Docker image
 bash:
 	docker run -it $(DOCKER_RUN_FLAGS) $(DOCKER_IMAGE) /bin/bash
+
+## Set the GCP credentials
+set-gcp-credentials:
+	uv run python scripts/set_gcp_credentials.py
+	gcloud auth activate-service-account dtu-denovo-sa@ext-dtu-denovo-sequencing-gcp.iam.gserviceaccount.com --key-file=ext-dtu-denovo-sequencing-gcp.json --project=ext-dtu-denovo-sequencing-gcp
+
+## Set the Ceph credentials
+set-ceph-credentials:
+	uv run python scripts/set_ceph_credentials.py
