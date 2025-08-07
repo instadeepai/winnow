@@ -346,7 +346,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
 
 class MZTabDatasetLoader(DatasetLoader):
-    """Loader for MZTab predictions.
+    """Loader for MZTab predictions from both traditional search engines and Casanovo outputs.
 
     This loader expects MZTab files with specific column names and formats:
 
@@ -354,7 +354,10 @@ class MZTabDatasetLoader(DatasetLoader):
         - spectra_ref: Spectrum identifier with format containing "index=N" (e.g., "ms_run[1]:index=123")
         - sequence: Peptide sequence string (may contain modifications in either UNIMOD or Casanovo format)
         - search_engine_score[1]: Confidence score for the prediction
-        - opt_ms_run[1]_aa_scores: Comma-separated amino acid level scores
+
+    Optional MZTab Columns:
+        - opt_ms_run[1]_aa_scores: Comma-separated amino acid level scores (Casanovo)
+          If missing (traditional search engines), token_log_probabilities will be set to None
 
     Expected Spectrum Data Format:
         - Parquet or IPC file with spectrum metadata
@@ -362,7 +365,8 @@ class MZTabDatasetLoader(DatasetLoader):
         - Optional 'sequence' column for ground truth labels
 
     Note: The loader handles both single prediction per spectrum and multiple predictions
-    per spectrum, creating beam predictions with List[ScoredSequence] structure.
+    per spectrum, creating beam predictions with List[ScoredSequence] structure. Works with
+    both traditional database search engines and Casanovo outputs, returning a single beam prediction if only one prediction is present.
     """
 
     def __init__(
@@ -391,7 +395,7 @@ class MZTabDatasetLoader(DatasetLoader):
         Returns:
             DataFrame containing predictions
         """
-        predictions = mztab.MzTab(predictions_path).spectrum_match_table
+        predictions = mztab.MzTab(str(predictions_path)).spectrum_match_table
         return pl.DataFrame(predictions)
 
     @staticmethod
@@ -450,12 +454,6 @@ class MZTabDatasetLoader(DatasetLoader):
         # Filter out invalid Prosit tokens before getting top predictions
         predictions = self._filter_invalid_prosit_tokens(predictions)
 
-        # Get valid spectra_refs after filtering
-        valid_spectra = predictions.select("spectra_ref").unique()
-
-        # Create beam predictions
-        beam_predictions = self._create_beam_predictions(predictions, valid_spectra)
-
         # Get top predictions for metadata
         top_predictions = self._get_top_predictions(predictions)
 
@@ -469,6 +467,11 @@ class MZTabDatasetLoader(DatasetLoader):
             lambda x: x.tolist() if isinstance(x, np.ndarray) else x
         )
 
+        # Create beam predictions in the same order as the final metadata
+        # Extract the indices from the merged metadata to ensure alignment
+        ordered_indices = metadata.get_column("index").to_list()
+        beam_predictions = self._create_beam_predictions(predictions, ordered_indices)
+
         return CalibrationDataset(metadata=metadata_pd, predictions=beam_predictions)
 
     def _process_predictions(self, predictions: pl.DataFrame) -> pl.DataFrame:
@@ -480,25 +483,43 @@ class MZTabDatasetLoader(DatasetLoader):
         Returns:
             Processed predictions with standardized columns
         """
-        return predictions.with_columns(
-            [
-                # Extract spectrum index from spectra_ref (e.g., "ms_run[1]:index=123" -> 123)
-                pl.col("spectra_ref")
-                .str.extract(r"index=(\d+)")
-                .cast(pl.Int64)
-                .alias("index"),
-                # Replace L with I for proteomics normalisation
-                pl.col("sequence")
-                .str.replace("L", "I")
-                .alias("prediction_untokenised"),
-                pl.col("search_engine_score[1]").alias("confidence"),
+        # Check if amino acid scores are available (Casanovo) or missing (traditional search engines)
+        has_aa_scores = "opt_ms_run[1]_aa_scores" in predictions.columns
+
+        # Build list of columns to process
+        columns_to_add = [
+            # Extract spectrum index from spectra_ref (e.g., "ms_run[1]:index=123" -> 123)
+            pl.col("spectra_ref")
+            .str.extract(r"index=(\d+)")
+            .cast(pl.Int64)
+            .alias("index"),
+            # Replace L with I for proteomics normalisation
+            pl.col("sequence").str.replace("L", "I").alias("prediction_untokenised"),
+            pl.col("search_engine_score[1]").alias("confidence"),
+        ]
+
+        # Add amino acid scores if available, otherwise create None column
+        if has_aa_scores:
+            columns_to_add.append(
                 # Parse a string of comma-separated scores into list of floats
                 pl.col("opt_ms_run[1]_aa_scores")
                 .str.split(",")
                 .cast(pl.List(pl.Float64))
-                .alias("token_scores"),
+                .alias("token_scores")
+            )
+            columns_to_drop = [
+                "search_engine_score[1]",
+                "opt_ms_run[1]_aa_scores",
+                "sequence",
             ]
-        ).drop(["search_engine_score[1]", "opt_ms_run[1]_aa_scores", "sequence"])
+        else:
+            columns_to_add.append(
+                # Create None column for traditional search engines that don't provide token scores
+                pl.lit(None, dtype=pl.List(pl.Float64)).alias("token_scores")
+            )
+            columns_to_drop = ["search_engine_score[1]", "sequence"]
+
+        return predictions.with_columns(columns_to_add).drop(columns_to_drop)
 
     def _tokenize_predictions(self, predictions: pl.DataFrame) -> pl.DataFrame:
         """Tokenize peptide predictions and map modifications.
@@ -566,21 +587,22 @@ class MZTabDatasetLoader(DatasetLoader):
         return predictions.join(invalid_spectra, on="spectra_ref", how="anti")
 
     def _create_beam_predictions(
-        self, predictions: pl.DataFrame, valid_spectra: pl.DataFrame
+        self, predictions: pl.DataFrame, valid_spectra_indices: List[int]
     ) -> List[Optional[List[ScoredSequence]]]:
         """Create beam predictions from MZTab predictions.
 
         Args:
             predictions: DataFrame containing predictions
-            valid_spectra: DataFrame containing valid spectra
+            valid_spectra_indices: List of indices corresponding to valid spectra in the merged metadata.
+
         Returns:
             List of beam predictions
         """
         # Create ScoredSequence objects for each spectrum's predictions
         beam_predictions = []
-        for spectrum_ref in valid_spectra.get_column("spectra_ref"):
+        for spectrum_index in valid_spectra_indices:
             # Get all predictions for this spectrum, sorted by confidence
-            spectrum_preds = predictions.filter(pl.col("spectra_ref") == spectrum_ref)
+            spectrum_preds = predictions.filter(pl.col("index") == spectrum_index)
             spectrum_preds = spectrum_preds.sort("confidence", descending=True)
 
             # Convert to ScoredSequence objects
@@ -589,9 +611,11 @@ class MZTabDatasetLoader(DatasetLoader):
                 scored_sequences.append(
                     ScoredSequence(
                         sequence=row["prediction"],
-                        mass_error=None,  # MZTab doesn't provide mass error
+                        mass_error=None,
                         sequence_log_probability=row["confidence"],
-                        token_log_probabilities=row["token_scores"],
+                        token_log_probabilities=row[
+                            "token_scores"
+                        ],  # None for traditional search engines
                     )
                 )
             beam_predictions.append(scored_sequences if scored_sequences else None)
@@ -655,7 +679,8 @@ class MZTabDatasetLoader(DatasetLoader):
         return (
             spectrum_data.with_row_index()  # Add row numbers as "index" column
             .join(predictions, left_on="index", right_on="index", how="inner")
-            .drop("index")  # Remove temporary index column
+            .sort("index")  # Ensure final order matches original spectrum order
+            # Keep index column for beam predictions ordering
         )
 
     def _evaluate_predictions(
