@@ -16,48 +16,12 @@ import polars as pl
 import polars.selectors as cs
 from pyteomics import mztab
 
-from instanovo.utils.residues import ResidueSet
-from instanovo.utils.metrics import Metrics
-
 from winnow.datasets.interfaces import DatasetLoader
 from winnow.datasets.calibration_dataset import (
     CalibrationDataset,
     ScoredSequence,
 )
-
-RESIDUE_MASSES: dict[str, float] = {
-    "G": 57.021464,
-    "A": 71.037114,
-    "S": 87.032028,
-    "P": 97.052764,
-    "V": 99.068414,
-    "T": 101.047670,
-    "C": 103.009185,
-    "L": 113.084064,
-    "I": 113.084064,
-    "N": 114.042927,
-    "D": 115.026943,
-    "Q": 128.058578,
-    "K": 128.094963,
-    "E": 129.042593,
-    "M": 131.040485,
-    "H": 137.058912,
-    "F": 147.068414,
-    "R": 156.101111,
-    "Y": 163.063329,
-    "W": 186.079313,
-    # Modifications
-    "M[UNIMOD:35]": 147.035400,  # Oxidation
-    "N[UNIMOD:7]": 115.026943,  # Deamidation
-    "Q[UNIMOD:7]": 129.042594,  # Deamidation
-    "C[UNIMOD:4]": 160.030649,  # Carboxyamidomethylation
-    "S[UNIMOD:21]": 166.998028,  # Phosphorylation
-    "T[UNIMOD:21]": 181.01367,  # Phosphorylation
-    "Y[UNIMOD:21]": 243.029329,  # Phosphorylation
-    "[UNIMOD:385]": -17.026549,  # Ammonia Loss
-    "[UNIMOD:5]": 43.005814,  # Carbamylation
-    "[UNIMOD:1]": 42.010565,  # Acetylation
-}
+from winnow.constants import metrics, INVALID_PROSIT_TOKENS
 
 RESIDUE_REMAPPING: dict[str, str] = {
     "M+15.995": "M[UNIMOD:35]",  # Oxidation
@@ -70,40 +34,37 @@ RESIDUE_REMAPPING: dict[str, str] = {
     # "+43.006-17.027": "[UNIMOD:5][UNIMOD:385]",  # Carbamylation and Loss of ammonia
 }
 
-INVALID_PROSIT_TOKENS: list = [
-    "\\+25.98",
-    "UNIMOD:7",
-    "UNIMOD:21",
-    "UNIMOD:1",
-    "UNIMOD:5",
-    "UNIMOD:385",
-    # Each C is also treated as Cysteine with carbamidomethylation in Prosit.
-]
-
-
-residue_set = ResidueSet(residue_masses=RESIDUE_MASSES)
-metrics = Metrics(residue_set=residue_set, isotope_error_range=[0, 1])
-
 
 class InstaNovoDatasetLoader(DatasetLoader):
     """Loader for InstaNovo predictions in CSV format."""
 
     @staticmethod
-    def _load_dataset(
+    def _load_beam_preds(
         predictions_path: Path,
-    ) -> Tuple[pl.DataFrame, pl.DataFrame, bool]:
-        """Loads a dataset from a CSV file and optionally filters it."""
+    ) -> Tuple[pl.DataFrame, pl.DataFrame]:
+        """Loads a dataset from a CSV file and optionally filters it.
+
+        Args:
+            predictions_path (Path): The path to the CSV file containing the predictions.
+
+        Returns:
+            Tuple[pl.DataFrame, pl.DataFrame]: A tuple containing the predictions and beams dataframes.
+        """
 
         def _filter_dataset_for_prosit(df: pl.DataFrame) -> pl.DataFrame:
             """Applies filters to remove unsupported modifications."""
             print("Applying dataset filters...")
 
+            # Filter out invalid tokens (~ negates condition in polars)
             for token in INVALID_PROSIT_TOKENS:
                 df = df.filter(~df["preds"].str.contains(token))
                 df = df.filter(~df["preds_beam_1"].str.contains(token))
 
+            # Filter out unmodified cysteine using polars string operations
             df = df.filter(~df["preds_tokenised"].str.contains("C,"))
 
+            # Filter out unmodified cysteine using regex for negative lookahead
+            # NOTE: This is a workaround for the fact that polars does not support negative lookahead in its string operations
             pattern = re.compile(r"C(?!\[)")
             indexes_to_drop = [
                 idx
@@ -115,15 +76,22 @@ class InstaNovoDatasetLoader(DatasetLoader):
             return df
 
         df = pl.read_csv(predictions_path)
-        has_labels = "sequence" in df.columns
         df = _filter_dataset_for_prosit(df)
+        # Use polars column selectors to split dataframe
         beam_df = df.select(cs.contains("_beam_"))
         preds_df = df.select(~cs.contains(["_beam_", "_log_probs_"]))
-        return preds_df, beam_df, has_labels
+        return preds_df, beam_df
 
     @staticmethod
     def _process_beams(beam_df: pl.DataFrame) -> List[Optional[List[ScoredSequence]]]:
-        """Processes beam predictions into scored sequences."""
+        """Processes beam predictions into scored sequences.
+
+        Args:
+            beam_df (pl.DataFrame): The dataframe containing the beam predictions.
+
+        Returns:
+            List[Optional[List[ScoredSequence]]]: A list of scored sequences for each row in the dataframe.
+        """
 
         def convert_row_to_scored_sequences(
             row: dict,
@@ -155,6 +123,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
             return scored_sequences or None
 
+        # Apply L -> I transformation to multiple columns using polars with_columns
         beam_df = beam_df.with_columns(
             [
                 pl.col(col).str.replace_all("L", "I")
@@ -163,14 +132,24 @@ class InstaNovoDatasetLoader(DatasetLoader):
             ]
         )
 
+        # Converts each row of the polars dataframe to a list of scored sequences representing the beam predictions for that row/spectrum.
+        # All the beams are then stored in a list representing the entire dataset.
         return [
             convert_row_to_scored_sequences(row)
             for row in beam_df.iter_rows(named=True)
         ]
 
     @staticmethod
-    def _process_dataset(dataset: pd.DataFrame, has_labels: bool) -> pd.DataFrame:
-        """Processes the predictions obtained from saved beams."""
+    def _process_predictions(dataset: pd.DataFrame, has_labels: bool) -> pd.DataFrame:
+        """Processes the predictions obtained from saved beams.
+
+        Args:
+            dataset (pd.DataFrame): The dataframe containing the predictions.
+            has_labels (bool): Whether the dataset has ground truth labels.
+
+        Returns:
+            pd.DataFrame: The processed dataframe.
+        """
         rename_dict = {
             "preds": "prediction_untokenised",
             "preds_tokenised": "prediction",
@@ -212,20 +191,43 @@ class InstaNovoDatasetLoader(DatasetLoader):
         return dataset
 
     @staticmethod
-    def _load_spectrum_data(spectrum_path: Path | str) -> pl.DataFrame:
-        """Loads spectrum data from either a Parquet or IPC file."""
+    def _load_spectrum_data(spectrum_path: Path | str) -> Tuple[pl.DataFrame, bool]:
+        """Loads spectrum data from either a Parquet or IPC file.
+
+        Args:
+            spectrum_path (Path | str): The path to the spectrum data file.
+
+        Returns:
+            Tuple[pl.DataFrame, bool]: A tuple containing the spectrum data and a boolean indicating whether the dataset has ground truth labels.
+        """
         spectrum_path = Path(spectrum_path)
 
         if spectrum_path.suffix == ".parquet":
-            return pl.read_parquet(spectrum_path)
+            df = pl.read_parquet(spectrum_path)
         elif spectrum_path.suffix == ".ipc":
-            return pl.read_ipc(spectrum_path)
+            df = pl.read_ipc(spectrum_path)
         else:
             raise ValueError(f"Unsupported file format: {spectrum_path.suffix}")
 
+        if "sequence" in df.columns:
+            has_labels = True
+        else:
+            has_labels = False
+
+        return df, has_labels
+
     @staticmethod
     def _process_spectrum_data(df: pl.DataFrame, has_labels: bool) -> pd.DataFrame:
-        """Processes the input data from the de novo sequencing model."""
+        """Processes the input data from the de novo sequencing model.
+
+        Args:
+            df (pl.DataFrame): The dataframe containing the spectrum data.
+            has_labels (bool): Whether the dataset has ground truth labels.
+
+        Returns:
+            pd.DataFrame: The processed dataframe.
+        """
+        # Convert to pandas for downstream compatibility
         df = df.to_pandas()
         if has_labels:
             df["sequence"] = (
@@ -243,7 +245,15 @@ class InstaNovoDatasetLoader(DatasetLoader):
     def _merge_spectrum_data(
         beam_dataset: pd.DataFrame, spectrum_dataset: pd.DataFrame
     ) -> pd.DataFrame:
-        """Merge the input and output data from the de novo sequencing model."""
+        """Merge the input and output data from the de novo sequencing model.
+
+        Args:
+            beam_dataset (pd.DataFrame): The dataframe containing the beam predictions.
+            spectrum_dataset (pd.DataFrame): The dataframe containing the spectrum data.
+
+        Returns:
+            pd.DataFrame: The merged dataframe.
+        """
         merged_df = pd.merge(
             beam_dataset,
             spectrum_dataset,
@@ -268,7 +278,15 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
     @staticmethod
     def _evaluate_predictions(dataset: pd.DataFrame, has_labels: bool) -> pd.DataFrame:
-        """Evaluates predictions in a dataset by checking validity and accuracy."""
+        """Evaluates predictions in a dataset by checking validity and accuracy.
+
+        Args:
+            dataset (pd.DataFrame): The dataframe containing the predictions.
+            has_labels (bool): Whether the dataset has ground truth labels.
+
+        Returns:
+            pd.DataFrame: The processed dataframe.
+        """
         if has_labels:
             dataset["valid_peptide"] = dataset["sequence"].apply(
                 lambda peptide: isinstance(peptide, list)
@@ -314,23 +332,26 @@ class InstaNovoDatasetLoader(DatasetLoader):
             )
         spectrum_path, beam_predictions_path = args
 
-        predictions, beams, has_labels = self._load_dataset(beam_predictions_path)
-        beams = self._process_beams(beams)
-        predictions = self._process_dataset(predictions.to_pandas(), has_labels)
-        inputs = self._load_spectrum_data(spectrum_path)
+        inputs, has_labels = self._load_spectrum_data(spectrum_path)
         inputs = self._process_spectrum_data(inputs, has_labels)
+
+        predictions, beams = self._load_beam_preds(beam_predictions_path)
+        beams = self._process_beams(beams)
+        predictions = self._process_predictions(predictions.to_pandas(), has_labels)
+
         predictions = self._merge_spectrum_data(predictions, inputs)
         predictions = self._evaluate_predictions(predictions, has_labels)
+
         return CalibrationDataset(metadata=predictions, predictions=beams)
 
 
-class CasanovoDatasetLoader(DatasetLoader):
-    """Loader for Casanovo predictions."""
+class MZTabDatasetLoader(DatasetLoader):
+    """Loader for MZTab predictions."""
 
     def __init__(
         self, residue_remapping: dict[str, str] | None = None, *args: Any, **kwargs: Any
     ) -> None:
-        """Initialise the CasanovoDatasetLoader.
+        """Initialise the MZTabDatasetLoader.
 
         Args:
             residue_remapping: Optional dictionary mapping modification strings to UNIMOD format.
@@ -382,7 +403,7 @@ class CasanovoDatasetLoader(DatasetLoader):
         return df, has_labels
 
     def load(self, *args: Path, **kwargs: Any) -> CalibrationDataset:
-        """Load a calibration dataset from Casanovo predictions.
+        """Load a calibration dataset from MZTab predictions.
 
         Args:
             *args: Should contain spectrum_path and predictions_path in that order
@@ -476,7 +497,7 @@ class CasanovoDatasetLoader(DatasetLoader):
     def _create_beam_predictions(
         self, predictions: pl.DataFrame, valid_spectra: pl.DataFrame
     ) -> List[Optional[List[ScoredSequence]]]:
-        """Create beam predictions from Casanovo predictions.
+        """Create beam predictions from MZTab predictions.
 
         Args:
             predictions: DataFrame containing predictions
@@ -497,7 +518,7 @@ class CasanovoDatasetLoader(DatasetLoader):
                 scored_sequences.append(
                     ScoredSequence(
                         sequence=row["prediction"],
-                        mass_error=None,  # Casanovo doesn't provide mass error
+                        mass_error=None,  # MZTab doesn't provide mass error
                         sequence_log_probability=row["confidence"],
                         token_log_probabilities=row["token_scores"],
                     )
@@ -794,7 +815,7 @@ class PointNovoDatasetLoader(DatasetLoader):
         # return CalibrationDataset(metadata=dataset, predictions=[None] * len(dataset))
 
 
-class SavedDatasetLoader(DatasetLoader):
+class WinnowDatasetLoader(DatasetLoader):
     """Loader for previously saved CalibrationDataset instances."""
 
     def load(self, *args: Path, **kwargs: Any) -> CalibrationDataset:
