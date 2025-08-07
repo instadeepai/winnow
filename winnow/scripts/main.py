@@ -67,8 +67,7 @@ class InstaNovoDatasetConfig:
 class MZTabDatasetConfig:
     """Config for calibration datasets saved in MZTab format."""
 
-    labelled_path: Path
-    mgf_path: Path
+    spectrum_path: Path
     predictions_path: Path
 
 
@@ -137,8 +136,7 @@ def load_dataset(
                 **yaml.safe_load(dataset_config_file)
             )
             dataset = MZTabDatasetLoader().load(
-                Path(mztab_dataset_config.labelled_path),
-                Path(mztab_dataset_config.mgf_path),
+                Path(mztab_dataset_config.spectrum_path),
                 Path(mztab_dataset_config.predictions_path),
             )
         elif data_source is DataSource.pointnovo:
