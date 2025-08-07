@@ -346,7 +346,24 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
 
 class MZTabDatasetLoader(DatasetLoader):
-    """Loader for MZTab predictions."""
+    """Loader for MZTab predictions.
+
+    This loader expects MZTab files with specific column names and formats:
+
+    Required MZTab Columns:
+        - spectra_ref: Spectrum identifier with format containing "index=N" (e.g., "ms_run[1]:index=123")
+        - sequence: Peptide sequence string (may contain modifications in either UNIMOD or Casanovo format)
+        - search_engine_score[1]: Confidence score for the prediction
+        - opt_ms_run[1]_aa_scores: Comma-separated amino acid level scores
+
+    Expected Spectrum Data Format:
+        - Parquet or IPC file with spectrum metadata
+        - Row indices should match the extracted indices from MZTab spectra_ref
+        - Optional 'sequence' column for ground truth labels
+
+    Note: The loader handles both single prediction per spectrum and multiple predictions
+    per spectrum, creating beam predictions with List[ScoredSequence] structure.
+    """
 
     def __init__(
         self, residue_remapping: dict[str, str] | None = None, *args: Any, **kwargs: Any
@@ -454,6 +471,60 @@ class MZTabDatasetLoader(DatasetLoader):
 
         return CalibrationDataset(metadata=metadata_pd, predictions=beam_predictions)
 
+    def _process_predictions(self, predictions: pl.DataFrame) -> pl.DataFrame:
+        """Process raw predictions into a standardized format.
+
+        Args:
+            predictions: Raw predictions from mzTab file
+
+        Returns:
+            Processed predictions with standardized columns
+        """
+        return predictions.with_columns(
+            [
+                # Extract spectrum index from spectra_ref (e.g., "ms_run[1]:index=123" -> 123)
+                pl.col("spectra_ref")
+                .str.extract(r"index=(\d+)")
+                .cast(pl.Int64)
+                .alias("index"),
+                # Replace L with I for proteomics normalisation
+                pl.col("sequence")
+                .str.replace("L", "I")
+                .alias("prediction_untokenised"),
+                pl.col("search_engine_score[1]").alias("confidence"),
+                # Parse a string of comma-separated scores into list of floats
+                pl.col("opt_ms_run[1]_aa_scores")
+                .str.split(",")
+                .cast(pl.List(pl.Float64))
+                .alias("token_scores"),
+            ]
+        ).drop(["search_engine_score[1]", "opt_ms_run[1]_aa_scores", "sequence"])
+
+    def _tokenize_predictions(self, predictions: pl.DataFrame) -> pl.DataFrame:
+        """Tokenize peptide predictions and map modifications.
+
+        Args:
+            predictions: Processed predictions
+
+        Returns:
+            Predictions with tokenized sequences
+        """
+        return predictions.with_columns(
+            [
+                # Map modifications to UNIMOD format (e.g., "M+15.995" -> "M[UNIMOD:35]")
+                pl.col("prediction_untokenised")
+                .map_elements(self._map_modifications, return_dtype=pl.Utf8)
+                .alias("prediction"),
+            ]
+        ).with_columns(
+            [
+                # Split sequence string into list of amino acid tokens
+                pl.col("prediction")
+                .map_elements(metrics._split_peptide, return_dtype=pl.List(pl.Utf8))
+                .alias("prediction"),
+            ]
+        )
+
     def _filter_invalid_prosit_tokens(self, predictions: pl.DataFrame) -> pl.DataFrame:
         """Filter out predictions containing invalid Prosit tokens.
 
@@ -461,20 +532,20 @@ class MZTabDatasetLoader(DatasetLoader):
             predictions: DataFrame containing predictions
 
         Returns:
-            DataFrame with only valid predictions, filtering out entire spectra if any
-            of their predictions contain invalid tokens
+            DataFrame with only valid predictions, filtering out entire spectra if either of the first two predictions contain invalid tokens
         """
-        # Create a mask for each spectrum indicating if it has any invalid predictions
+        # Find spectra with invalid predictions (checks each amino acid in tokenised sequences)
         invalid_spectra = (
             predictions.group_by("spectra_ref")
             .agg(
                 [
-                    # Check for invalid PTMs
+                    # Check for invalid PTMs using list.eval to examine each amino acid token
                     pl.col("prediction")
                     .list.eval(
                         pl.element().str.contains("|".join(INVALID_PROSIT_TOKENS))
                     )
                     .list.any()
+                    # NOTE: we only care about valid mods in the first 2 predictions per spectrum for chimeric beam features, since they use Prosit models
                     .slice(0, 2)
                     .any()
                     .alias("has_invalid_tokens"),
@@ -491,7 +562,7 @@ class MZTabDatasetLoader(DatasetLoader):
             .select("spectra_ref")
         )
 
-        # Filter out all predictions for spectra that have any invalid predictions
+        # Remove all predictions for spectra with any invalid predictions using anti-join
         return predictions.join(invalid_spectra, on="spectra_ref", how="anti")
 
     def _create_beam_predictions(
@@ -532,60 +603,6 @@ class MZTabDatasetLoader(DatasetLoader):
             sequence = sequence.replace(mod, unimod)
         return sequence
 
-    def _process_predictions(self, predictions: pl.DataFrame) -> pl.DataFrame:
-        """Process raw predictions into a standardized format.
-
-        Args:
-            predictions: Raw predictions from mzTab file
-
-        Returns:
-            Processed predictions with standardized columns
-        """
-        return predictions.with_columns(
-            [
-                # Extract spectrum index
-                pl.col("spectra_ref")
-                .str.extract(r"index=(\d+)")
-                .cast(pl.Int64)
-                .alias("index"),
-                # Replace L with I
-                pl.col("sequence")
-                .str.replace("L", "I")
-                .alias("prediction_untokenised"),
-                pl.col("search_engine_score[1]").alias("confidence"),
-                # Split scores into tokens
-                pl.col("opt_ms_run[1]_aa_scores")
-                .str.split(",")
-                .cast(pl.List(pl.Float64))
-                .alias("token_scores"),
-            ]
-        ).drop(["search_engine_score[1]", "opt_ms_run[1]_aa_scores", "sequence"])
-
-    def _tokenize_predictions(self, predictions: pl.DataFrame) -> pl.DataFrame:
-        """Tokenize peptide predictions and map modifications.
-
-        Args:
-            predictions: Processed predictions
-
-        Returns:
-            Predictions with tokenized sequences
-        """
-        return predictions.with_columns(
-            [
-                # First map modifications to UNIMOD format
-                pl.col("prediction_untokenised")
-                .map_elements(self._map_modifications, return_dtype=pl.Utf8)
-                .alias("prediction"),
-            ]
-        ).with_columns(
-            [
-                # Then split into amino acid tokens
-                pl.col("prediction")
-                .map_elements(metrics._split_peptide, return_dtype=pl.List(pl.Utf8))
-                .alias("prediction"),
-            ]
-        )
-
     def _get_top_predictions(self, predictions: pl.DataFrame) -> pl.DataFrame:
         """Get highest scoring prediction for each spectrum.
 
@@ -596,6 +613,7 @@ class MZTabDatasetLoader(DatasetLoader):
             DataFrame containing only the highest scoring prediction per spectrum
         """
         return predictions.group_by("spectra_ref").agg(
+            # For each spectrum, sort all predictions by confidence and take the first (highest)
             pl.col("*").sort_by("confidence", descending=True).first()
         )
 
@@ -635,9 +653,9 @@ class MZTabDatasetLoader(DatasetLoader):
             Merged DataFrame containing both spectrum data and predictions
         """
         return (
-            spectrum_data.with_row_index()
+            spectrum_data.with_row_index()  # Add row numbers as "index" column
             .join(predictions, left_on="index", right_on="index", how="inner")
-            .drop("index")
+            .drop("index")  # Remove temporary index column
         )
 
     def _evaluate_predictions(
@@ -652,10 +670,9 @@ class MZTabDatasetLoader(DatasetLoader):
         Returns:
             DataFrame with added match statistics
         """
-        # First check validity of predictions and peptides
+        # Check validity of tokenised sequences
         metadata = metadata.with_columns(
             [
-                # Check if prediction is a valid list of amino acids
                 pl.col("prediction")
                 .map_elements(lambda x: isinstance(x, list), return_dtype=pl.Boolean)
                 .alias("valid_prediction"),
@@ -665,7 +682,6 @@ class MZTabDatasetLoader(DatasetLoader):
         if has_labels:
             metadata = metadata.with_columns(
                 [
-                    # Check if peptide is a valid list of amino acids
                     pl.col("sequence")
                     .map_elements(
                         lambda x: isinstance(x, list), return_dtype=pl.Boolean
@@ -674,10 +690,10 @@ class MZTabDatasetLoader(DatasetLoader):
                 ]
             )
 
-        # Then compute match statistics
+        # Compute match statistics using struct to pass multiple columns to function
         return metadata.with_columns(
             [
-                # Compute number of matching amino acids
+                # Count matching amino acids between prediction and ground truth
                 pl.struct(["sequence", "prediction"])
                 .map_elements(
                     lambda row: metrics._novor_match(row["sequence"], row["prediction"])
@@ -690,7 +706,7 @@ class MZTabDatasetLoader(DatasetLoader):
             ]
         ).with_columns(
             [
-                # Compute whether prediction is completely correct
+                # Check if prediction is completely correct (all amino acids match)
                 pl.struct(["sequence", "prediction", "num_matches"])
                 .map_elements(
                     lambda row: (
