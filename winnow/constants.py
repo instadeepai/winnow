@@ -54,6 +54,17 @@ RESIDUE_REMAPPING: dict[str, str] = {
     "(-17.03)": "[UNIMOD:385]",  # Loss of ammonia
 }
 
+CASANOVO_RESIDUE_REMAPPING: dict[str, str] = {
+    "M+15.995": "M[UNIMOD:35]",  # Oxidation
+    "Q+0.984": "Q[UNIMOD:7]",  # Deamidation
+    "N+0.984": "N[UNIMOD:7]",  # Deamidation
+    "+42.011": "[UNIMOD:1]",  # Acetylation
+    "+43.006": "[UNIMOD:5]",  # Carbamylation
+    "-17.027": "[UNIMOD:385]",  # Loss of ammonia
+    "C+57.021": "C[UNIMOD:4]",  # Carboxyamidomethylation
+    # "+43.006-17.027": "[UNIMOD:5][UNIMOD:385]",  # Carbamylation and Loss of ammonia
+}
+
 INVALID_PROSIT_TOKENS: list = [
     "\\+25.98",
     "UNIMOD:7",

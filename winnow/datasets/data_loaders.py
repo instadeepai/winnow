@@ -21,18 +21,7 @@ from winnow.datasets.calibration_dataset import (
     CalibrationDataset,
     ScoredSequence,
 )
-from winnow.constants import metrics, INVALID_PROSIT_TOKENS
-
-RESIDUE_REMAPPING: dict[str, str] = {
-    "M+15.995": "M[UNIMOD:35]",  # Oxidation
-    "Q+0.984": "Q[UNIMOD:7]",  # Deamidation
-    "N+0.984": "N[UNIMOD:7]",  # Deamidation
-    "+42.011": "[UNIMOD:1]",  # Acetylation
-    "+43.006": "[UNIMOD:5]",  # Carbamylation
-    "-17.027": "[UNIMOD:385]",  # Loss of ammonia
-    "C+57.021": "C[UNIMOD:4]",  # Carboxyamidomethylation
-    # "+43.006-17.027": "[UNIMOD:5][UNIMOD:385]",  # Carbamylation and Loss of ammonia
-}
+from winnow.constants import metrics, INVALID_PROSIT_TOKENS, CASANOVO_RESIDUE_REMAPPING
 
 
 class InstaNovoDatasetLoader(DatasetLoader):
@@ -376,13 +365,15 @@ class MZTabDatasetLoader(DatasetLoader):
 
         Args:
             residue_remapping: Optional dictionary mapping modification strings to UNIMOD format.
-                If None, uses the default RESIDUE_REMAPPING.
+                If None, uses the default CASANOVO_RESIDUE_REMAPPING.
             *args: Additional positional arguments for parent class
             **kwargs: Additional keyword arguments for parent class
         """
         super().__init__(*args, **kwargs)
         self.residue_remapping = (
-            residue_remapping if residue_remapping is not None else RESIDUE_REMAPPING
+            residue_remapping
+            if residue_remapping is not None
+            else CASANOVO_RESIDUE_REMAPPING
         )
 
     @staticmethod
