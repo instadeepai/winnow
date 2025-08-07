@@ -333,14 +333,14 @@ class InstaNovoDatasetLoader(DatasetLoader):
         return CalibrationDataset(metadata=predictions, predictions=beams)
 
 
-class CasanovoDatasetLoader(DatasetLoader):
-    """Loader for Casanovo predictions.
+class MZTabDatasetLoader(DatasetLoader):
+    """Loader for MZTab predictions.
 
     Note: This loader is not yet implemented.
     """
 
     def load(self, *args: Path, **kwargs: Any) -> CalibrationDataset:
-        """Load a calibration dataset from Casanovo predictions.
+        """Load a calibration dataset from MZTab predictions.
 
         Args:
             *args: Should contain labelled_path, mgf_path, and predictions_path in that order
@@ -357,7 +357,7 @@ class CasanovoDatasetLoader(DatasetLoader):
             raise ValueError(
                 "Expected exactly 3 positional arguments: labelled_path, mgf_path, and predictions_path"
             )
-        raise NotImplementedError("CasanovoDatasetLoader is not yet implemented")
+        raise NotImplementedError("MZTabDatasetLoader is not yet implemented")
 
         # -- Load labelled data
         # labelled = pl.read_ipc(labelled_path).to_pandas()

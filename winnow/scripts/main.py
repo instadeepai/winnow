@@ -10,7 +10,7 @@ from winnow.calibration.calibrator import ProbabilityCalibrator
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.datasets.data_loaders import (
     InstaNovoDatasetLoader,
-    CasanovoDatasetLoader,
+    MZTabDatasetLoader,
     PointNovoDatasetLoader,
     WinnowDatasetLoader,
 )
@@ -45,7 +45,7 @@ class DataSource(Enum):
     winnow = "winnow"
     instanovo = "instanovo"
     pointnovo = "pointnovo"
-    casanovo = "casanovo"
+    mztab = "mztab"
 
 
 @dataclass
@@ -64,8 +64,8 @@ class InstaNovoDatasetConfig:
 
 
 @dataclass
-class CasanovoDatasetConfig:
-    """Config for calibration datasets saved in Casanovo format."""
+class MZTabDatasetConfig:
+    """Config for calibration datasets saved in MZTab format."""
 
     labelled_path: Path
     mgf_path: Path
@@ -132,14 +132,14 @@ def load_dataset(
                 Path(instanovo_dataset_config.spectrum_path),
                 Path(instanovo_dataset_config.beam_predictions_path),
             )
-        elif data_source is DataSource.casanovo:
-            casanovo_dataset_config = CasanovoDatasetConfig(
+        elif data_source is DataSource.mztab:
+            mztab_dataset_config = MZTabDatasetConfig(
                 **yaml.safe_load(dataset_config_file)
             )
-            dataset = CasanovoDatasetLoader().load(
-                Path(casanovo_dataset_config.labelled_path),
-                Path(casanovo_dataset_config.mgf_path),
-                Path(casanovo_dataset_config.predictions_path),
+            dataset = MZTabDatasetLoader().load(
+                Path(mztab_dataset_config.labelled_path),
+                Path(mztab_dataset_config.mgf_path),
+                Path(mztab_dataset_config.predictions_path),
             )
         elif data_source is DataSource.pointnovo:
             pointnovo_dataset_config = PointNovoDatasetConfig(
@@ -151,7 +151,7 @@ def load_dataset(
             )
         else:
             raise TypeError(
-                f"Data source was {data_source}. Only 'instanovo', 'casanovo' and 'pointnovo' are supported."
+                f"Data source was {data_source}. Only 'instanovo', 'mztab' and 'pointnovo' are supported."
             )
     return dataset
 
