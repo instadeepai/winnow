@@ -105,6 +105,13 @@ class CalibrationDataset:
     metadata: pd.DataFrame
     predictions: List[Optional[List[ScoredSequence]]]
 
+    def __post_init__(self):
+        """Validate that metadata and predictions have matching lengths."""
+        # Allow empty predictions list (no predictions available)
+        # But if predictions are provided, they must match metadata length
+        if self.predictions and len(self.metadata) != len(self.predictions):
+            raise AssertionError("Length of metadata and predictions must match")
+
     def save(self, data_dir: Path) -> None:
         """Save a `CalibrationDataset` to a directory.
 
