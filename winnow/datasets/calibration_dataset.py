@@ -715,7 +715,7 @@ class CalibrationDataset:
             predictions_predicate (Callable[[Any], bool], optional): A function that takes a beam (prediction) and returns a boolean indicating whether the prediction should be kept. Defaults to a predicate that always returns False, keeping all predictions.
 
         Returns:
-            CalibrationDataset: A new instance of `CalibrationDataset` containing only the entries that satisfy the conditions specified by the predicates.
+            CalibrationDataset: A new instance of `CalibrationDataset` containing only the entries for which the conditions specified by the predicates are False.
         """
         filter_idxs = []
 
