@@ -127,6 +127,8 @@ class EmpiricalBayesFDRControl(FDRControl):
             n_steps (int, optional):
                 Number of optimisation steps for training. Defaults to 5000.
         """
+        assert len(dataset) > 0, "Fit method requires non-empty data"
+
         self.mixture_parameters = self.train(
             examples=jnp.clip(jnp.array(dataset), EPS, 1 - EPS), lr=lr, n_steps=n_steps
         )

@@ -41,6 +41,8 @@ class DatabaseGroundedFDRControl(FDRControl):
 
             drop (int): Number of top-scoring predictions to exclude when computing FDR thresholds. Defaults to 10.
         """
+        assert len(dataset) > 0, "Fit method requires non-empty data"
+
         metrics = Metrics(
             residue_set=residue_set, isotope_error_range=isotope_error_range
         )
