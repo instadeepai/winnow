@@ -90,6 +90,9 @@ class DatabaseGroundedFDRControl(FDRControl):
             float:
                 The confidence score cutoff corresponding to the specified FDR level.
         """
+        if not hasattr(self, "fdr_thresholds") or len(self.fdr_thresholds) == 0:
+            raise AttributeError("FDR method not fitted, please call fit first")
+
         idx = bisect.bisect_right(self.fdr_thresholds, threshold) - 1
 
         if idx < 0:
@@ -106,6 +109,12 @@ class DatabaseGroundedFDRControl(FDRControl):
         Returns:
             float: The FDR estimate
         """
+        if (
+            not hasattr(self, "reversed_confidence_scores")
+            or len(self.reversed_confidence_scores) == 0
+        ):
+            raise AttributeError("FDR method not fitted, please call fit first")
+
         # Find the index where this score would be inserted in the sorted confidence scores
         idx = bisect.bisect_right(self.reversed_confidence_scores, score)
 
