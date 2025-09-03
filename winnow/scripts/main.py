@@ -209,12 +209,16 @@ def apply_fdr_control(
         dataset.metadata = fdr_control.add_psm_p_value(
             dataset.metadata, confidence_column
         )
+        dataset.metadata = fdr_control.add_psm_qvalue(
+            dataset.metadata, confidence_column
+        )
     else:
         fdr_control.fit(
             dataset=dataset.metadata[confidence_column],
             residue_masses=RESIDUE_MASSES,
         )
     dataset.metadata = fdr_control.add_psm_fdr(dataset.metadata, confidence_column)
+    dataset.metadata = fdr_control.add_psm_qvalue(dataset.metadata, confidence_column)
     confidence_cutoff = fdr_control.get_confidence_cutoff(threshold=fdr_threshold)
     output_data = dataset.metadata
     output_data = output_data[output_data[confidence_column] >= confidence_cutoff]
