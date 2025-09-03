@@ -1,17 +1,32 @@
 name: Run tests
 on:
   pull_request:
+
 jobs:
+  docker-build:
+    uses: instadeepai/mlops-reusable-ci/.github/workflows/docker-build.yaml@main
+    with:
+      display-name: Test image
+      build-path: . #project root
+      image: ghcr.io/instadeepai/winnow/test
+      cache-image: ghcr.io/instadeepai/winnow/test/cache
+      filename: "./Dockerfile.test"
+      registry-host: ghcr.io
+      registry-username: ${{ github.actor }}
+      dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
+    secrets:
+      registry-password: ${{ secrets.GITHUB_TOKEN }}
+      dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
   tests:
-    runs-on: ubuntu-latest
+    needs: docker-build
+    runs-on: instadeep-ci
+    container: # This is a mandatory step
+      image: ghcr.io/instadeepai/winnow/test:${{ github.sha }} # Image name can't include environment variables
+      credentials: # required if the image is in a private registry
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          version: "0.6.6"
-      - name: Install dependencies
-        run: uv sync --only-dev
       - name: Run tests
         run: uv run --only-dev pytest tests

@@ -1,0 +1,18 @@
+# Use a lightweight Python image with uv pre-installed
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+# Install git
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && apt clean autoclean \
+    && apt autoremove -y \
+    && rm -rf /var/lib/{apt,dpkg,cache,log}
+
+# Set working directory
+WORKDIR /app
+
+# Copy the requirements file
+COPY pyproject.toml pyproject.toml
+
+# Install dependencies
+RUN uv sync --no-cache --only-dev
