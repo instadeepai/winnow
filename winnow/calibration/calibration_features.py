@@ -1,7 +1,7 @@
 from abc import ABCMeta, abstractmethod
 import bisect
 from math import exp, isnan
-from typing import Dict, List, Tuple, Iterator
+from typing import Dict, List, Tuple, Iterator, Optional
 import warnings
 
 import pandas as pd
@@ -69,6 +69,8 @@ class FeatureDependency(metaclass=ABCMeta):
 
 class CalibrationFeatures(metaclass=ABCMeta):
     """The abstract interface for features for the calibration classifier."""
+
+    irt_predictor: Optional[MLPRegressor] = None
 
     @property
     @abstractmethod
@@ -606,6 +608,8 @@ class RetentionTimeFeature(CalibrationFeatures):
 
     This feature uses the Prosit model to predict indexed retention times (iRT) for peptides and trains a regression model to calibrate predictions based on observed retention times.
     """
+
+    irt_predictor: MLPRegressor
 
     def __init__(self, hidden_dim: int, train_fraction: float) -> None:
         self.train_fraction = train_fraction
