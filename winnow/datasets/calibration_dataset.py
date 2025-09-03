@@ -57,6 +57,10 @@ RESIDUE_MASSES: dict[str, float] = {
     "[UNIMOD:385]": -17.026549,  # Ammonia Loss
     "[UNIMOD:5]": 43.005814,  # Carbamylation
     "[UNIMOD:1]": 42.010565,  # Acetylation
+    "C[UNIMOD:312]": 222.013284,  # Cysteinylation
+    "E[UNIMOD:27]": 111.032028,  # Glu -> pyro-Glu
+    "Q[UNIMOD:28]": 111.032029,  # Gln -> pyro-Gln
+    "(+25.98)": 25.980265,  # Carbamylation & NH3 loss
 }
 
 RESIDUE_REMAPPING: dict[str, str] = {
