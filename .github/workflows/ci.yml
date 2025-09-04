@@ -1,5 +1,6 @@
-name: Run tests
+name: CI - Lint and Test
 on:
+  push:
   pull_request:
 
 jobs:
@@ -17,16 +18,36 @@ jobs:
     secrets:
       registry-password: ${{ secrets.GITHUB_TOKEN }}
       dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
-  tests:
+
+  lint:
     needs: docker-build
     runs-on: instadeep-ci
-    container: # This is a mandatory step
-      image: ghcr.io/instadeepai/winnow/test:${{ github.sha }} # Image name can't include environment variables
-      credentials: # required if the image is in a private registry
+    container:
+      image: ghcr.io/instadeepai/winnow/test:${{ github.sha }}
+      credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
+      # Workaround for https://github.com/actions/checkout/issues/1169
+      - run: git config --system --add safe.directory $GITHUB_WORKSPACE
+      - name: Run pre-commit hooks
+        run: uv run --only-dev pre-commit run --all-files
+
+  tests:
+    if: github.event_name == 'pull_request'
+    needs: docker-build
+    runs-on: instadeep-ci
+    container:
+      image: ghcr.io/instadeepai/winnow/test:${{ github.sha }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+      # Workaround for https://github.com/actions/checkout/issues/1169
+      - run: git config --system --add safe.directory $GITHUB_WORKSPACE
       - name: Run tests
         run: uv run --only-dev pytest tests
