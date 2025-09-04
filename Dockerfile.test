@@ -1,18 +1,19 @@
 # Use a lightweight Python image with uv pre-installed
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
-# Install git
+# Install git and clean up in single layer to reduce image size
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends git \
-    && apt clean autoclean \
-    && apt autoremove -y \
-    && rm -rf /var/lib/{apt,dpkg,cache,log}
+    && apt-get clean autoclean \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/{apt,dpkg,cache,log} /var/cache/apt
 
 # Set working directory
 WORKDIR /app
 
-# Copy the requirements file
-COPY pyproject.toml pyproject.toml
+# Copy uv.lock for reproducible dependency installation
+COPY uv.lock uv.lock
 
-# Install dependencies
-RUN uv sync --no-cache --only-dev
+# Install dependencies directly from lock file
+# This does not silently update the lock file, so will fail if the lock file is not up to date
+RUN uv sync --no-cache --only-dev --frozen
