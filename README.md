@@ -27,12 +27,12 @@
 <!-- PROJECT LOGO -->
 <br />
 <div align="center">
-<h3 align="center">winnow</h3>
+<h1 align="center">Winnow</h1>
 
   <p align="center">
     Confidence calibration and FDR control for <i>de novo</i> peptide sequencing
     <br />
-    <a href="https://github.com/instadeepai/winnow"><strong>Explore the docs »</strong></a>
+    <a href="https://instadeepai.github.io/winnow/"><strong>Explore the docs »</strong></a>
     <br />
     <br />
     <a href="https://github.com/instadeepai/winnow/issues/new?labels=bug&template=bug_report.md">Report Bug</a>
@@ -63,7 +63,11 @@
   </ol>
 </details>
 
-
+<!-- WORKFLOW DIAGRAM -->
+<div align="center">
+  <img src="https://raw.githubusercontent.com/instadeepai/winnow//docs/assets/winnow_workflow.png" alt="Winnow Workflow" style="max-width:100%;">
+  <p><em>Winnow workflow for confidence calibration and FDR control in de novo peptide sequencing</em></p>
+</div>
 
 <!-- ABOUT THE PROJECT -->
 ## About The Project
