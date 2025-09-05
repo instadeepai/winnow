@@ -35,8 +35,7 @@ DOCKER_RUN_FLAGS_VOLUME_MOUNT_HOME = $(DOCKER_RUN_FLAGS) --volume $(PWD):$(DOCKE
 DOCKER_RUN_FLAGS_VOLUME_MOUNT_RUNS = $(DOCKER_RUN_FLAGS) --volume $(PWD)/runs:$(DOCKER_RUNS_DIRECTORY)
 DOCKER_RUN = docker run $(DOCKER_RUN_FLAGS) $(DOCKER_IMAGE_NAME)
 
-PYTEST = uv run pytest --alluredir=allure_results --cov-report=html --cov --cov-config=.coveragerc --random-order --verbose .
-COVERAGE = uv run coverage report -m
+PYTEST = uv run pytest --verbose .
 
 #################################################################################
 ## Docker build commands																#
@@ -87,23 +86,15 @@ install-all:
 ## Development commands														 	#
 #################################################################################
 
-.PHONY: tests coverage test-docker coverage-docker bash set-gcp-credentials set-ceph-credentials
+.PHONY: tests test-docker bash set-gcp-credentials set-ceph-credentials
 
 ## Run all tests
 tests:
 	$(PYTEST)
 
-## Calculate the code coverage
-coverage:
-	$(COVERAGE)
-
 ## Run all tests in the Docker Image
 test-docker:
 	docker run $(DOCKER_RUN_FLAGS) $(DOCKER_IMAGE) $(PYTEST)
-
-## Calculate the code coverage in the Docker image
-coverage-docker:
-	docker run $(DOCKER_RUN_FLAGS) $(DOCKER_IMAGE) bash -c "$(PYTEST) && $(COVERAGE)"
 
 ## Open a bash shell in the Docker image
 bash:
