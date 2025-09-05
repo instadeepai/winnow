@@ -20,8 +20,8 @@ ARG VENV_DIRECTORY=/app/.venv
 
 ARG VERSION=latest
 ARG LAST_COMMIT=latest
-ENV VERSION=${VERSION}
-ENV LAST_COMMIT=${LAST_COMMIT}
+ENV VERSION=$VERSION
+ENV LAST_COMMIT=$LAST_COMMIT
 
 # Avoid unnecessary writes to disk
 ENV LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
@@ -35,7 +35,7 @@ WORKDIR $HOME_DIRECTORY
 # Append the current directory to your python path
 ENV PYTHONPATH=$HOME_DIRECTORY:$PYTHONPATH
 
-# Install dependencies for Google Cloud CLI, InstaNovo GitLab repository and Make commands
+# Install dependencies for Google Cloud CLI and Make commands
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -62,21 +62,21 @@ RUN groupadd --force --gid $GID $USER && \
         --uid $UID --gid $GID --shell "/bin/bash" $USER
 
 # Create runs directory
-RUN mkdir -p ${RUNS_DIRECTORY}
-RUN mkdir -p ${VENV_DIRECTORY}
+RUN mkdir -p $RUNS_DIRECTORY
+RUN mkdir -p $VENV_DIRECTORY
 
 # Copy files into HOME_DIRECTORY
 COPY . $HOME_DIRECTORY
 
 # Makes HOME_DIRECTORY and RUNS_DIRECTORY files owned by USER
-RUN chown -R ${USER}:${GID} ${HOME_DIRECTORY}
-RUN chown -R ${USER}:${GID} ${RUNS_DIRECTORY}
-RUN chown -R ${USER}:${GID} ${VENV_DIRECTORY}
+RUN chown -R $USER:$GID $HOME_DIRECTORY
+RUN chown -R $USER:$GID $RUNS_DIRECTORY
+RUN chown -R $USER:$GID $VENV_DIRECTORY
 
 # Default user
 USER $USER
 
-ENV UV_PROJECT_ENVIRONMENT=${VENV_DIRECTORY}
+ENV UV_PROJECT_ENVIRONMENT=$VENV_DIRECTORY
 
 # Install dependencies from uv.lock file
 RUN uv sync --frozen --no-cache --dev
