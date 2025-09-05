@@ -32,9 +32,6 @@ ENV TERM=xterm-256color
 # Set application working directory
 WORKDIR $HOME_DIRECTORY
 
-# Append the current directory to your python path
-ENV PYTHONPATH=$HOME_DIRECTORY:$PYTHONPATH
-
 # Install dependencies for Google Cloud CLI and Make commands
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
@@ -76,6 +73,7 @@ RUN chown -R $USER:$GID $VENV_DIRECTORY
 # Default user
 USER $USER
 
+# Configure path for virtual environment creation
 ENV UV_PROJECT_ENVIRONMENT=$VENV_DIRECTORY
 
 # Install dependencies from uv.lock file
