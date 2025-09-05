@@ -95,7 +95,7 @@ class TestEmpiricalBayesFDRControl:
         """Test that get_confidence_cutoff requires fitting first."""
         # Should raise AttributeError if not fitted
         with pytest.raises(
-            AttributeError, match="FDR method not fitted, please call fit first"
+            AttributeError, match=r"FDR method not fitted, please call `fit\(\)` first"
         ):
             bayes_fdr_control.get_confidence_cutoff(0.05)
 
@@ -103,7 +103,7 @@ class TestEmpiricalBayesFDRControl:
         """Test that compute_fdr requires fitting first."""
         # Should raise AttributeError if not fitted
         with pytest.raises(
-            AttributeError, match="FDR method not fitted, please call fit first"
+            AttributeError, match=r"FDR method not fitted, please call `fit\(\)` first"
         ):
             bayes_fdr_control.compute_fdr(0.8)
 

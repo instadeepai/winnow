@@ -195,7 +195,7 @@ class EmpiricalBayesFDRControl(FDRControl):
         """
         # Check if the model is fitted
         if not self._fitted:
-            raise AttributeError("FDR method not fitted, please call fit first")
+            raise AttributeError("FDR method not fitted, please call `fit()` first")
 
         # Create a fine mesh of points
         mesh_points = jnp.linspace(0.0, 1.0, mesh_size)
@@ -265,7 +265,7 @@ class EmpiricalBayesFDRControl(FDRControl):
         """
         # Check if the model is fitted
         if not self._fitted:
-            raise AttributeError("FDR method not fitted, please call fit first")
+            raise AttributeError("FDR method not fitted, please call `fit()` first")
 
         # P(S >= score | incorrect) = 1 - F_incorrect(s)
         p_score_given_incorrect = 1 - jax.scipy.stats.beta.cdf(
