@@ -66,17 +66,22 @@ build-arm:
 
 .PHONY: install install-frozen install-dev
 
-## Install dependencies (may resolve and update lockfile if needed)
+## Install project dependencies (may resolve and update lockfile if needed)
+# Note that uv includes the `dev` group by default, so we need to exclude it with `--no-dev`
 install:
+	uv sync --no-dev
+
+## Install development tools (testing, linting, etc.)
+install-dev:
 	uv sync
 
-## Install dependencies exactly as specified in lockfile (fast, no resolution)
+## Install project dependencies exactly as specified in lockfile (fast, no resolution)
 install-frozen:
 	uv sync --frozen
 
-## Install dependencies including development tools (testing, linting, etc.)
-install-dev:
-	uv sync --dev
+## Install all dependencies
+install-all:
+	uv sync --all-extras
 
 #################################################################################
 ## Development commands														 	#
