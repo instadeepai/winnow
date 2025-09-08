@@ -116,7 +116,7 @@ idna==3.10
     #   yarl
 importlib-resources==6.5.2
     # via swagger-spec-validator
-instanovo @ git+ssh://git@gitlab.com/instadeep/dtu-denovo-sequencing.git@9bf515749078930118446d1896788899c1a30726
+instanovo==1.1.4
     # via winnow (pyproject.toml)
 ipython==8.34.0
     # via ipywidgets
