@@ -30,6 +30,7 @@ class NonParametricFDRControl(FDRControl):
             dataset (pd.DataFrame):
                 An array of confidence scores from the dataset.
         """
+        assert len(dataset) > 0, "Fit method requires non-empty data"
         dataset = dataset.to_numpy()
 
         # Store sorted confidence scores and their indices
@@ -62,7 +63,7 @@ class NonParametricFDRControl(FDRControl):
                 Returns 0.0 if FDR is always below threshold (all scores valid).
         """
         if self._confidence_scores is None:
-            raise ValueError("FDR control method must be fit before computing cutoffs")
+            raise AttributeError("FDR method not fitted, please call `fit()` first")
 
         # NOTE: FDR is computed as a cumulative average of errors over descending confidence scores.
         # This guarantees that FDR is a monotonically decreasing function of confidence score,
@@ -102,7 +103,7 @@ class NonParametricFDRControl(FDRControl):
             float: The FDR estimate at the given score
         """
         if self._confidence_scores is None:
-            raise ValueError("FDR control method must be fit before computing FDR")
+            raise AttributeError("FDR method not fitted, please call `fit()` first")
 
         # Find the least conservative index where scores drop below the cutoff
         idx = np.searchsorted(-self._confidence_scores, -score, side="right")
