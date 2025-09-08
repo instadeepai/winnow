@@ -45,11 +45,15 @@ class TestUtilityFunctions:
         )
 
         # Function returns fraction of matched ions (2/3) and normalised intensity
-        assert abs(match_fraction - 2 / 3) < 1e-10  # 2 matches out of 3 source ions
+        assert match_fraction == pytest.approx(
+            2 / 3, rel=1e-10, abs=1e-10
+        )  # 2 matches out of 3 source ions
         total_intensity = sum(target_intensities)  # 7000.0
         match_intensity = 1000.0 + 2000.0  # 3000.0
         expected_intensity = match_intensity / total_intensity  # 3000/7000
-        assert abs(average_intensity - expected_intensity) < 1e-10
+        assert average_intensity == pytest.approx(
+            expected_intensity, rel=1e-10, abs=1e-10
+        )
 
     def test_find_matching_ions_with_tolerance(self):
         """Test find_matching_ions with tolerance-based matching."""
@@ -138,8 +142,8 @@ class TestMassErrorFeature:
         # G + A = 57.021464 + 71.037114 = 128.058578
         # Expected mass error = 1000.0 - (128.058578 + 18.0106 + 1.007276) = 852.923546
         expected_first = 1000.0 - (128.058578 + 18.0106 + 1.007276)
-        assert (
-            abs(sample_dataset.metadata.iloc[0]["Mass Error"] - expected_first) < 1e-6
+        assert sample_dataset.metadata.iloc[0]["Mass Error"] == pytest.approx(
+            expected_first, rel=1e-6, abs=1e-6
         )
 
     def test_compute_with_invalid_peptide(self, mass_error_feature):
@@ -176,7 +180,9 @@ class TestMassErrorFeature:
 
         # Expected: 1000.0 - (100.0 + 200.0 + 18.0106 + 1.007276)
         expected = 1000.0 - (300.0 + 18.0106 + 1.007276)
-        assert abs(dataset.metadata.iloc[0]["Mass Error"] - expected) < 1e-6
+        assert dataset.metadata.iloc[0]["Mass Error"] == pytest.approx(
+            expected, rel=1e-6, abs=1e-6
+        )
 
 
 class MockScoredSequence:
@@ -291,7 +297,9 @@ class TestBeamFeatures:
         beam_features.compute(dataset)
 
         expected_margin = 0.8 - 0.6  # top_prob - second_prob
-        assert abs(dataset.metadata.iloc[0]["margin"] - expected_margin) < 1e-10
+        assert dataset.metadata.iloc[0]["margin"] == pytest.approx(
+            expected_margin, rel=1e-10, abs=1e-10
+        )
 
     def test_beam_features_with_one_sequence(self, beam_features):
         """Test beam feature calculations with single sequence."""
@@ -306,18 +314,26 @@ class TestBeamFeatures:
         # Detailed checks for single sequence:
         # top_prob = 0.8, second_prob = 0.0 (no second sequence)
         # margin = top_prob - second_prob = 0.8 - 0.0 = 0.8
-        assert abs(dataset.metadata.iloc[0]["margin"] - 0.8) < 1e-10
+        assert dataset.metadata.iloc[0]["margin"] == pytest.approx(
+            0.8, rel=1e-10, abs=1e-10
+        )
 
         # runner_up_probs = [0.0] (no runner-ups since we start from index 1)
         # median_margin = top_prob - median([0.0]) = 0.8 - 0.0 = 0.8
-        assert abs(dataset.metadata.iloc[0]["median_margin"] - 0.8) < 1e-10
+        assert dataset.metadata.iloc[0]["median_margin"] == pytest.approx(
+            0.8, rel=1e-10, abs=1e-10
+        )
 
         # entropy([0.0]) should be 0
-        assert abs(dataset.metadata.iloc[0]["entropy"] - 0.0) < 1e-10
+        assert dataset.metadata.iloc[0]["entropy"] == pytest.approx(
+            0.0, rel=1e-10, abs=1e-10
+        )
 
         # z-score with single value should be 0 (no variation)
         z_score = dataset.metadata.iloc[0]["z-score"]
-        assert abs(z_score - 0.0) < 1e-10  # std_prob = 0, so z-score = 0
+        assert z_score == pytest.approx(
+            0.0, rel=1e-10, abs=1e-10
+        )  # std_prob = 0, so z-score = 0
 
     def test_beam_features_with_two_sequences(self, beam_features):
         """Test beam feature calculations with two sequences."""
@@ -335,22 +351,30 @@ class TestBeamFeatures:
         # Detailed checks for two sequences:
         # top_prob = 0.8, second_prob = 0.6
         # margin = 0.8 - 0.6 = 0.2
-        assert abs(dataset.metadata.iloc[0]["margin"] - 0.2) < 1e-10
+        assert dataset.metadata.iloc[0]["margin"] == pytest.approx(
+            0.2, rel=1e-10, abs=1e-10
+        )
 
         # runner_up_probs = [0.6] (from index 1 onwards)
         # median_margin = top_prob - median([0.6]) = 0.8 - 0.6 = 0.2
-        assert abs(dataset.metadata.iloc[0]["median_margin"] - 0.2) < 1e-10
+        assert dataset.metadata.iloc[0]["median_margin"] == pytest.approx(
+            0.2, rel=1e-10, abs=1e-10
+        )
 
         # entropy([1.0]) where runner_up_probs are normalised
         # Since there's only one runner-up, normalised prob = [1.0]
         # entropy([1.0]) = 0 (no uncertainty)
-        assert abs(dataset.metadata.iloc[0]["entropy"] - 0.0) < 1e-10
+        assert dataset.metadata.iloc[0]["entropy"] == pytest.approx(
+            0.0, rel=1e-10, abs=1e-10
+        )
 
         # z-score: mean_prob = (0.8 + 0.6)/2 = 0.7, std_prob = sqrt(((0.8-0.7)^2 + (0.6-0.7)^2)/2)
         # std_prob = sqrt((0.01 + 0.01)/2) = sqrt(0.01) = 0.1
         # z_score = (0.8 - 0.7) / 0.1 = 1.0
         expected_z_score = 1.0
-        assert abs(dataset.metadata.iloc[0]["z-score"] - expected_z_score) < 1e-10
+        assert dataset.metadata.iloc[0]["z-score"] == pytest.approx(
+            expected_z_score, rel=1e-10, abs=1e-10
+        )
 
     def test_beam_features_with_three_sequences(self, beam_features):
         """Test beam feature calculations with three sequences."""
@@ -369,22 +393,28 @@ class TestBeamFeatures:
         # Detailed checks for three sequences:
         # top_prob = 0.7, second_prob = 0.2, third_prob = 0.1
         # margin = 0.7 - 0.2 = 0.5
-        assert abs(dataset.metadata.iloc[0]["margin"] - 0.5) < 1e-10
+        assert dataset.metadata.iloc[0]["margin"] == pytest.approx(
+            0.5, rel=1e-10, abs=1e-10
+        )
 
         # runner_up_probs = [0.2, 0.1] (from index 1 onwards)
         # median_margin = top_prob - median([0.2, 0.1]) = 0.7 - 0.15 = 0.55
-        assert abs(dataset.metadata.iloc[0]["median_margin"] - 0.55) < 1e-10
+        assert dataset.metadata.iloc[0]["median_margin"] == pytest.approx(
+            0.55, rel=1e-10, abs=1e-10
+        )
 
         # runner_up_probs normalised: [0.2, 0.1] -> [0.2/0.3, 0.1/0.3] = [2/3, 1/3]
         # entropy([2/3, 1/3]) = 0.6365141682948128
-        assert abs(dataset.metadata.iloc[0]["entropy"] - 0.6365141682948128) < 1e-10
+        assert dataset.metadata.iloc[0]["entropy"] == pytest.approx(
+            0.6365141682948128, rel=1e-10, abs=1e-10
+        )
 
         # z-score calculation with three values
         # mean_prob = (0.7 + 0.2 + 0.1)/3 = 1/3
         # std_prob = sqrt(((0.7-1/3)^2 + (0.2-1/3)^2 + (0.1-1/3)^2)/3) = 0.262466929133727
         # z_score = (0.7 - 1/3) / 0.262466929133727 = 1.3970013970020956
         z_score = dataset.metadata.iloc[0]["z-score"]
-        assert abs(z_score - 1.3970013970020956) < 1e-10
+        assert z_score == pytest.approx(1.3970013970020956, rel=1e-10, abs=1e-10)
 
     def test_beam_features_edge_case_equal_probabilities(self, beam_features):
         """Test beam features when all sequences have equal probabilities."""
@@ -408,10 +438,14 @@ class TestBeamFeatures:
         assert dataset.metadata.iloc[0]["median_margin"] == 0.0
 
         # entropy of [0.5, 0.5] (normalised) should be 0.6931471805599453
-        assert abs(dataset.metadata.iloc[0]["entropy"] - 0.6931471805599453) < 1e-10
+        assert dataset.metadata.iloc[0]["entropy"] == pytest.approx(
+            0.6931471805599453, rel=1e-10, abs=1e-10
+        )
 
         # z-score should be 0 (all values equal, so std = 0)
-        assert abs(dataset.metadata.iloc[0]["z-score"] - 0.0) < 1e-10
+        assert dataset.metadata.iloc[0]["z-score"] == pytest.approx(
+            0.0, rel=1e-10, abs=1e-10
+        )
 
 
 class TestCalibrationFeaturesInterface:
@@ -542,13 +576,12 @@ class TestRetentionTimeFeature:
 
             # Check that error is computed as absolute difference
             assert len(sample_dataset_with_rt.metadata["iRT error"]) == 5
-            assert (
-                abs(
-                    sample_dataset_with_rt.metadata["predicted iRT"]
-                    - sample_dataset_with_rt.metadata["iRT"]
-                ).max()
-                - sample_dataset_with_rt.metadata["iRT error"].max()
-            ) < 1e-10
+            max_abs_diff = abs(
+                sample_dataset_with_rt.metadata["predicted iRT"]
+                - sample_dataset_with_rt.metadata["iRT"]
+            ).max()
+            max_error = sample_dataset_with_rt.metadata["iRT error"].max()
+            assert max_abs_diff == pytest.approx(max_error, rel=1e-10, abs=1e-10)
 
             # Check that predict was called on both models
             mock_model_instance.predict.assert_called_once()
