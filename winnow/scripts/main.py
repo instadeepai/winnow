@@ -198,7 +198,7 @@ def apply_fdr_control(
     fdr_threshold: float,
     confidence_column: str,
 ) -> pd.DataFrame:
-    """Apply empirical Bayes FDR control."""
+    """Apply FDR control to a dataset."""
     if isinstance(fdr_control, NonParametricFDRControl):
         fdr_control.fit(dataset=dataset.metadata[confidence_column])
         dataset.metadata = fdr_control.add_psm_pep(dataset.metadata, confidence_column)
