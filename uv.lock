@@ -5140,11 +5140,9 @@ version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "instanovo" },
+    { name = "ipywidgets" },
     { name = "koinapy" },
-    { name = "numpy" },
-    { name = "pandas" },
-    { name = "polars" },
-    { name = "scikit-learn" },
+    { name = "tomli" },
     { name = "typer" },
 ]
 
@@ -5171,12 +5169,10 @@ notebook = [
 
 [package.metadata]
 requires-dist = [
-    { name = "instanovo", specifier = ">=1.1.1" },
+    { name = "instanovo", specifier = ">=1.1.4" },
+    { name = "ipywidgets", specifier = ">=8.1.5" },
     { name = "koinapy", specifier = ">=0.0.10" },
-    { name = "numpy", specifier = ">=2.0.2" },
-    { name = "pandas", specifier = ">=2.2.3" },
-    { name = "polars", specifier = ">=1.25.2" },
-    { name = "scikit-learn", specifier = ">=1.6.1" },
+    { name = "tomli", specifier = ">=2.2.1" },
     { name = "typer", specifier = ">=0.15.2" },
 ]
 
