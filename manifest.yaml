@@ -16,20 +16,11 @@ spec:
         provider: "github" # Optional, vscode tunnel provider. Options are "github" or "microsoft", defaults to "github"
   operator: jobset
   image: winnow
-  command: make analyze-features
-
-  tensorboard: # optional, disabled by default
-    enabled: false
+  command: make tests
 
   types:
     worker:
       count: 1
       resources:
-        cpus: 8
-        ramRatio: 9 # >= 2
-
-        accelerators:
-          gpu:
-            count: 0
-            type: gpu
-            product: NVIDIA-H100-80GB-HBM3
+        cpus: 4
+        ramRatio: 2 # >= 2

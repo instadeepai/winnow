@@ -27,9 +27,10 @@ class NonParametricFDRControl(FDRControl):
         """Fit the FDR control method to a dataset of confidence scores.
 
         Args:
-            dataset (NDArray[np.float64]):
+            dataset (pd.DataFrame):
                 An array of confidence scores from the dataset.
         """
+        assert len(dataset) > 0, "Fit method requires non-empty data"
         dataset = dataset.to_numpy()
 
         # Store sorted confidence scores and their indices
@@ -62,7 +63,12 @@ class NonParametricFDRControl(FDRControl):
                 Returns 0.0 if FDR is always below threshold (all scores valid).
         """
         if self._confidence_scores is None:
-            raise ValueError("FDR control method must be fit before computing cutoffs")
+            raise AttributeError("FDR method not fitted, please call `fit()` first")
+
+        # NOTE: FDR is computed as a cumulative average of errors over descending confidence scores.
+        # This guarantees that FDR is a monotonically decreasing function of confidence score,
+        # with strict increases for each newly included lower-confidence prediction (with a correspondingly higher error)
+        # and the same FDR value outputted for an identical confidence score.
 
         # Check edge cases first
         if np.all(self._fdr_values > threshold):
@@ -97,20 +103,22 @@ class NonParametricFDRControl(FDRControl):
             float: The FDR estimate at the given score
         """
         if self._confidence_scores is None:
-            raise ValueError("FDR control method must be fit before computing FDR")
+            raise AttributeError("FDR method not fitted, please call `fit()` first")
 
         # Find the least conservative index where scores drop below the cutoff
         idx = np.searchsorted(-self._confidence_scores, -score, side="right")
 
         if idx == len(self._confidence_scores):
             warnings.warn(
-                f"Score {score} is too low for accurate FDR control. Returning a conservative FDR estimate of 1.0 since all scores are above cutoff.",
+                f"Score {score} is below the range of fitted confidence scores (min: {self._confidence_scores[-1]:.4f}). "
+                f"Cannot compute FDR from fitted data. Returning conservative estimate of 1.0.",
                 UserWarning,
             )
             return 1.0
         elif idx == 0:
             warnings.warn(
-                f"Score {score} is too high for accurate FDR control. Returning a conservative FDR estimate since all scores are below cutoff.",
+                f"Score {score} is above the range of fitted confidence scores (max: {self._confidence_scores[0]:.4f}). "
+                f"Cannot compute FDR from fitted data. Returning conservative estimate of {self._fdr_values[0]:.4f}.",
                 UserWarning,
             )
 
