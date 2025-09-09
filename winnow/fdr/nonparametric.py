@@ -108,13 +108,15 @@ class NonParametricFDRControl(FDRControl):
         # Find the least conservative index where scores drop below the cutoff
         idx = np.searchsorted(-self._confidence_scores, -score, side="right")
 
-        if idx == len(self._confidence_scores):
+        # If the score is below the range of fitted confidence scores, return a conservative estimate of 1.0
+        if idx == len(self._confidence_scores) and score < self._confidence_scores[-1]:
             warnings.warn(
                 f"Score {score} is below the range of fitted confidence scores (min: {self._confidence_scores[-1]:.4f}). "
                 f"Cannot compute FDR from fitted data. Returning conservative estimate of 1.0.",
                 UserWarning,
             )
             return 1.0
+        # If the score is above the range of fitted confidence scores, return a conservative estimate of the FDR at the lowest score
         elif idx == 0:
             warnings.warn(
                 f"Score {score} is above the range of fitted confidence scores (max: {self._confidence_scores[0]:.4f}). "
