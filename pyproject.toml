@@ -7,26 +7,12 @@ version = "1.0.0"
 requires-python = ">=3.10"
 dependencies = [
     "instanovo>=1.1.1",
-    "ipywidgets>=8.1.5",
-    "jax>=0.5.2",
     "koinapy>=0.0.10",
-    "numpyro>=0.17.0",
-    "tensorflow-probability>=0.25.0",
-    "numba==0.60.0",
-    "tomli>=2.2.1",
     "typer>=0.15.2",
-    "seaborn>=0.13.2",
-    "plotly>=6.1.2",
-    "kaleido>=1.0.0",
-    "bio>=1.8.0",
-    "tqdm>=4.67.1",
     "pandas>=2.2.3",
     "polars>=1.25.2",
-    "shap>=0.48.0",
-    "xgboost>=3.0.2",
     "scikit-learn>=1.6.1",
     "numpy>=2.0.2",
-    "ipykernel>=6.30.0",
 ]
 
 [build-system]
@@ -37,9 +23,24 @@ build-backend = "setuptools.build_meta"
 packages = ["winnow"]
 
 [dependency-groups]
+analysis = [
+    "bio>=1.8.0",
+    "shap>=0.48.0",
+    "xgboost>=3.0.2",
+]
 dev = [
     "pre-commit>=4.1.0",
     "pytest>=8.3.5",
+]
+notebook = [
+    "huggingface-hub>=0.29.3",
+    "ipykernel>=6.30.0",
+    "ipywidgets>=8.1.5",
+    "jupyter>=1.1.1",
+    "kaleido>=1.0.0",
+    "plotly>=6.3.0",
+    "seaborn>=0.13.2",
+    "tqdm>=4.67.1",
 ]
 
 [project.scripts]
