@@ -6,15 +6,24 @@ __pycache__
 
 *.egg-info
 
+# Data
 *.txt
 *.csv
 *.parquet
 *.ipc
+*.mztab
+*.fasta
+
+# Model
 *.pkl
 *.json
+
+# Configs
 *.yaml
+
+# Plots
 *.png
 *.pdf
 
-plots/
-fasta/
+# Notebooks
+*.ipynb
