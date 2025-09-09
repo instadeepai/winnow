@@ -366,6 +366,8 @@ class TestProbabilityCalibrator:
         assert calibrator.classifier.learning_rate_init == 0.001
         assert calibrator.classifier.alpha == 0.0001
         assert calibrator.classifier.max_iter == 1000
+        assert calibrator.classifier.early_stopping
+        assert calibrator.classifier.validation_fraction == 0.1
 
     def test_scaler_initialization(self, calibrator):
         """Test that scaler is properly initialised."""
