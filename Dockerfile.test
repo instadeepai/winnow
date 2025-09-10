@@ -16,4 +16,4 @@ COPY uv.lock uv.lock
 
 # Install dependencies directly from lock file
 # This does not silently update the lock file, so will fail if the lock file is not up to date
-RUN uv sync --no-cache --only-dev --frozen
+RUN uv sync --frozen --no-cache --only-dev --no-install-project

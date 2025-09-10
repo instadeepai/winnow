@@ -77,7 +77,7 @@ USER $USER
 ENV UV_PROJECT_ENVIRONMENT=$VENV_DIRECTORY
 
 # Install dependencies from uv.lock file
-RUN uv sync --frozen --no-cache --dev
+RUN uv sync --frozen --no-cache --all-groups
 
 # Set path to virtual environment
 ENV PATH="$VENV_DIRECTORY/bin:$PATH"

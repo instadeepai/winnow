@@ -5153,6 +5153,8 @@ analysis = [
     { name = "xgboost" },
 ]
 dev = [
+    { name = "numpy" },
+    { name = "pandas" },
     { name = "pre-commit" },
     { name = "pytest" },
 ]
@@ -5183,6 +5185,8 @@ analysis = [
     { name = "xgboost", specifier = ">=3.0.2" },
 ]
 dev = [
+    { name = "numpy", specifier = ">=2.2.6" },
+    { name = "pandas", specifier = ">=2.3.2" },
     { name = "pre-commit", specifier = ">=4.1.0" },
     { name = "pytest", specifier = ">=8.3.5" },
 ]
