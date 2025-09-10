@@ -11,9 +11,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends git \
 # Set working directory
 WORKDIR /app
 
-# Copy uv.lock for reproducible dependency installation
+# Copy pyproject.toml and uv.lock for reproducible dependency installation
+COPY pyproject.toml pyproject.toml
 COPY uv.lock uv.lock
 
 # Install dependencies directly from lock file
 # This does not silently update the lock file, so will fail if the lock file is not up to date
-RUN uv sync --frozen --no-cache --only-dev --no-install-project
+RUN uv sync --frozen --no-cache --only-dev
