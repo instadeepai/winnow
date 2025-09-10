@@ -108,3 +108,25 @@ set-gcp-credentials:
 ## Set the Ceph credentials
 set-ceph-credentials:
 	uv run python scripts/set_ceph_credentials.py
+
+#################################################################################
+## Analysis commands														 	#
+#################################################################################
+
+.PHONY: analysis
+
+# Clear saved datasets
+clear-datasets:
+	rm -rf analysis/winnow-ms-datasets
+
+# Clear results
+clear-results:
+	rm -rf results
+
+# Clear models
+clear-models:
+	rm -rf models
+
+# Clear all
+clear-all:
+	rm -rf analysis/winnow-ms-datasets results models
