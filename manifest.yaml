@@ -22,5 +22,5 @@ spec:
     worker:
       count: 1
       resources:
-        cpus: 4
-        ramRatio: 2 # >= 2
+        cpus: 8
+        ramRatio: 9 # >= 2
