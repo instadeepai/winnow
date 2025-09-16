@@ -1,40 +1,30 @@
-"""Script to analyze feature importance and correlations for the calibrator.
+"""Script to analyze feature importance and correlations for a pretrained calibrator.
 
-This script provides comprehensive analysis of feature importance for the calibrator,
-including:
-- Permutation importance (robust to correlations)
-- SHAP values for detailed feature impact analysis
-- Feature correlation analysis
-- Visualization of results
+This script provides comprehensive analysis of feature importance for a pretrained calibrator:
+    - Permutation importance on test set
+    - SHAP values with training background on test set
+    - Feature correlation analysis on training data
+    - Optional visualization of results
 """
 
 from pathlib import Path
-from typing import Dict, Tuple, Annotated
+from typing import Dict, Annotated
 import logging
-
+import pickle
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.inspection import permutation_importance
-from sklearn.neural_network import MLPClassifier
-from sklearn.preprocessing import StandardScaler
 import shap
 import typer
 from typer import Typer
 from rich.console import Console
 from rich.theme import Theme
 from matplotlib.colors import LinearSegmentedColormap
-from winnow.datasets.calibration_dataset import CalibrationDataset, RESIDUE_MASSES
+from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.datasets.data_loaders import InstaNovoDatasetLoader
 from winnow.calibration.calibrator import ProbabilityCalibrator
-from winnow.calibration.calibration_features import (
-    PrositFeatures,
-    MassErrorFeature,
-    RetentionTimeFeature,
-    ChimericFeatures,
-    BeamFeatures,
-)
 
 # Color scheme from the plotting script
 COLORS = {
@@ -46,75 +36,7 @@ COLORS = {
     "navy": "#3C81AE",
 }
 
-# Configure matplotlib to match seaborn "paper" context
-sns.set_theme(style="white", context="paper")
-plt.style.use("seaborn-v0_8-paper")
-plt.rcParams.update(
-    {
-        # Figure settings
-        "figure.figsize": [12.0, 10.0],
-        "figure.facecolor": "white",
-        "figure.dpi": 100.0,
-        # Axes settings
-        "axes.labelcolor": ".15",
-        "axes.axisbelow": True,
-        "axes.grid": False,
-        "axes.facecolor": "white",
-        "axes.edgecolor": ".15",
-        "axes.linewidth": 1.0,
-        "axes.spines.left": True,
-        "axes.spines.bottom": True,
-        "axes.spines.right": True,
-        "axes.spines.top": True,
-        # Tick settings
-        "xtick.direction": "out",
-        "ytick.direction": "out",
-        "xtick.color": ".15",
-        "ytick.color": ".15",
-        "xtick.top": False,
-        "ytick.right": False,
-        "xtick.bottom": False,
-        "ytick.left": False,
-        "xtick.major.width": 1.0,
-        "ytick.major.width": 1.0,
-        "xtick.minor.width": 0.8,
-        "ytick.minor.width": 0.8,
-        "xtick.major.size": 4.8,
-        "ytick.major.size": 4.8,
-        "xtick.minor.size": 3.2,
-        "ytick.minor.size": 3.2,
-        # Grid settings
-        "grid.linestyle": "-",
-        "grid.color": ".8",
-        "grid.linewidth": 0.8,
-        # Text settings
-        "text.color": ".15",
-        "font.family": ["sans-serif"],
-        "font.sans-serif": [
-            "Arial",
-            "DejaVu Sans",
-            "Liberation Sans",
-            "Bitstream Vera Sans",
-            "sans-serif",
-        ],
-        "font.size": 9.6,
-        "axes.labelsize": 9.6,
-        "axes.titlesize": 9.6,
-        "xtick.labelsize": 8.8,
-        "ytick.labelsize": 8.8,
-        "legend.fontsize": 8.8,
-        "legend.title_fontsize": 9.6,
-        # Line and patch settings
-        "lines.linewidth": 1.2,
-        "lines.markersize": 4.8,
-        "lines.solid_capstyle": "round",
-        "patch.linewidth": 0.8,
-        "patch.edgecolor": "black",
-        "patch.force_edgecolor": True,
-        # Image settings
-        "image.cmap": "rocket",
-    }
-)
+sns.set_theme(style="white", palette="colorblind", context="paper", font_scale=1.5)
 
 
 # Create custom colormaps using the color scheme
@@ -146,9 +68,6 @@ logging.getLogger("shap").setLevel(logging.WARNING)
 
 # Constants
 SEED = 42
-DEFAULT_TRAIN_SPECTRUM_PATH = Path("")
-DEFAULT_TRAIN_PREDICTIONS_PATH = Path("")
-DEFAULT_OUTPUT_DIR = Path("")
 
 COLUMN_MAPPING = {
     "confidence": "Raw confidence",
@@ -162,15 +81,6 @@ COLUMN_MAPPING = {
     "median_margin": "Median margin",
     "entropy": "Entropy",
     "z-score": "Z-score",
-}
-
-# Example hyperparameters - you can modify these
-HYPERPARAMETERS = {
-    "hidden_layer_sizes": (50, 50),
-    "learning_rate_init": 0.001,
-    "alpha": 0.0001,
-    "max_iter": 1000,
-    "random_state": SEED,
 }
 
 # Set up custom error theme
@@ -235,35 +145,6 @@ def filter_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
         )  # Prosit-specific filtering
     )
     return filtered_dataset
-
-
-def initialize_calibrator(
-    dataset: CalibrationDataset,
-    seed: int = SEED,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Initialize calibrator and compute features.
-
-    Args:
-        dataset: The calibration dataset
-        seed: Random seed for reproducibility
-
-    Returns:
-        Tuple of (features, labels)
-    """
-    # Initialize calibrator with features
-    logger.info("Initializing calibrator.")
-    calibrator = ProbabilityCalibrator(seed=seed)
-    calibrator.add_feature(MassErrorFeature(residue_masses=RESIDUE_MASSES))
-    calibrator.add_feature(PrositFeatures(mz_tolerance=0.02))
-    calibrator.add_feature(RetentionTimeFeature(hidden_dim=10, train_fraction=0.1))
-    calibrator.add_feature(ChimericFeatures(mz_tolerance=0.02))
-    calibrator.add_feature(BeamFeatures())
-
-    # Fit calibrator and compute features
-    logger.info("Computing features.")
-    features, labels = calibrator.compute_features(dataset=dataset, labelled=True)  # type: ignore[misc]
-
-    return features, labels
 
 
 def plot_feature_importance(
@@ -339,145 +220,18 @@ def plot_feature_correlations(
     plt.close()
 
 
-@app.command()  # Register main as a command
-def main(
-    train_spectrum_path: Annotated[
-        Path,
-        typer.Option(help="Path to training spectrum data file."),
-    ],
-    train_predictions_path: Annotated[
-        Path,
-        typer.Option(help="Path to training beam predictions file."),
-    ],
-    output_dir: Annotated[
-        Path,
-        typer.Option(help="Directory to save analysis results and plots."),
-    ],
-    n_background_samples: Annotated[
-        int,
-        typer.Option(
-            help="Number of background samples to use for SHAP value computation.",
-            min=1,
-            max=10000,
-        ),
-    ] = 1000,
+def plot_shap_summary(
+    shap_values,
+    correct_class_idx: int,
+    output_dir: Path,
 ) -> None:
-    """Analyze feature importance and correlations for the calibrator.
-
-    This script performs a comprehensive analysis of feature importance for the calibrator,
-    including permutation importance, SHAP values, and feature correlations.
+    """Plot SHAP summary (beeswarm) plot.
 
     Args:
-        train_spectrum_path: Path to training spectrum data file
-        train_predictions_path: Path to training beam predictions file
-        output_dir: Directory to save results and plots
-        n_background_samples: Number of background samples for SHAP computation
+        shap_values: SHAP values object
+        correct_class_idx: Index of the correct class
+        output_dir: Directory to save plots
     """
-    # Create output directory
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Load dataset
-    logger.info("Loading dataset...")
-    dataset = InstaNovoDatasetLoader().load(
-        Path(train_spectrum_path),
-        Path(train_predictions_path),
-    )
-
-    dataset = filter_dataset(dataset)
-
-    # Compute features
-    logger.info("Computing features...")
-    features, labels = initialize_calibrator(dataset)
-
-    # Convert features to DataFrame for easier analysis
-    feature_names = [
-        "confidence",
-        "Mass Error",
-        "ion_matches",
-        "ion_match_intensity",
-        "chimeric_ion_matches",
-        "chimeric_ion_match_intensity",
-        "iRT error",
-        "margin",
-        "median_margin",
-        "entropy",
-        "z-score",
-    ]
-
-    # Apply column mapping for display names
-    display_feature_names = [COLUMN_MAPPING.get(name, name) for name in feature_names]
-
-    # Scale features for MLP
-    logger.info("Scaling features...")
-    scaler = StandardScaler()
-    features_scaled = scaler.fit_transform(features)
-
-    # Train classifier
-    logger.info("Training classifier...")
-    classifier = MLPClassifier(**HYPERPARAMETERS)
-    classifier.fit(features_scaled, labels)
-
-    # Log class mapping
-    logger.info(
-        f"Class mapping: {dict(zip(classifier.classes_, range(len(classifier.classes_))))}"
-    )
-    correct_class_idx = np.where(classifier.classes_ == 1)[0][
-        0
-    ]  # Get index of class 1 (correct)
-    logger.info(
-        f"Using SHAP values for class index {correct_class_idx} (correct predictions)"
-    )
-
-    # 1. Permutation importance
-    logger.info("Computing permutation importance...")
-    perm_importance = permutation_importance(
-        classifier,
-        features_scaled,
-        labels,
-        n_repeats=10,
-        random_state=SEED,
-        n_jobs=-1,
-    )
-    # Use display names for plotting
-    perm_importance_dict = dict(
-        zip(display_feature_names, perm_importance.importances_mean)
-    )
-    plot_feature_importance(
-        perm_importance_dict,
-        "Permutation Feature Importance",
-        output_dir / "permutation_importance",
-    )
-
-    # 2. SHAP values
-    logger.info("Computing SHAP values...")
-    # Sample background data
-    background = shap.sample(
-        features_scaled,
-        min(n_background_samples, len(features_scaled)),
-        random_state=SEED,
-    )
-
-    # Use KernelExplainer for MLP
-    explainer = shap.KernelExplainer(
-        model=classifier.predict_proba,
-        data=background,
-        seed=SEED,
-        link="identity",  # Explain probabilities directly
-    )
-
-    # Randomly sample 10,000 training spectra from the dataset
-    np.random.seed(SEED)
-    indices = np.random.choice(features_scaled.shape[0], size=10000, replace=False)
-
-    # Get SHAP values from explainer for a random subset of the training data
-    shap_values = explainer(features_scaled[indices])
-
-    # Switch to original feature space for visualization
-    # This is safe because standardization is a univariate transformation
-    shap_values.data = features[indices]
-    shap_values.feature_names = display_feature_names
-
-    # Plot SHAP summary using built-in function
     plt.figure(figsize=(8, 6))
     # Set the color for SHAP beeswarm plot
     sequential_cmap = create_sequential_colormap()
@@ -494,9 +248,25 @@ def main(
     plt.savefig(output_dir / "shap_summary.png", bbox_inches="tight", dpi=300)
     plt.close()
 
-    # Plot SHAP bar plot
+
+def plot_shap_bar(
+    shap_values,
+    test_features_scaled,
+    test_labels,
+    correct_class_idx: int,
+    output_dir: Path,
+) -> None:
+    """Plot SHAP bar plot.
+
+    Args:
+        shap_values: SHAP values object
+        test_features_scaled: Scaled test features for clustering
+        test_labels: Test labels for clustering
+        correct_class_idx: Index of the correct class
+        output_dir: Directory to save plots
+    """
     plt.figure(figsize=(8, 6))
-    clustering = shap.utils.hclust(features_scaled, labels)
+    clustering = shap.utils.hclust(test_features_scaled, test_labels)
     shap.plots.bar(
         shap_values[:, :, correct_class_idx],
         clustering=clustering,
@@ -515,11 +285,30 @@ def main(
     plt.savefig(output_dir / "shap_importance.png", bbox_inches="tight", dpi=300)
     plt.close()
 
-    # Plot SHAP dependence plots for top 3 features
+
+def plot_shap_dependence(
+    shap_values,
+    feature_names: list,
+    display_feature_names: list,
+    correct_class_idx: int,
+    output_dir: Path,
+    top_n: int = 3,
+) -> None:
+    """Plot SHAP dependence plots for top features.
+
+    Args:
+        shap_values: SHAP values object
+        feature_names: Original feature names (for filenames)
+        display_feature_names: Pretty feature names (for display)
+        correct_class_idx: Index of the correct class
+        output_dir: Directory to save plots
+        top_n: Number of top features to plot
+    """
     mean_abs_shap = np.abs(shap_values.values[:, :, correct_class_idx]).mean(
         axis=0
     )  # for correct class
-    top_features_idx = np.argsort(mean_abs_shap)[-3:][::-1]
+    top_features_idx = np.argsort(mean_abs_shap)[-top_n:][::-1]
+
     for idx in top_features_idx:
         feature_name = display_feature_names[idx]
         original_feature_name = feature_names[idx]  # For filename
@@ -532,13 +321,14 @@ def main(
         plt.title(
             "SHAP dependence plot for "
             + to_sentence_case(feature_name)
-            + r" (impact on $P(\text{correct})$)"
+            + "\n"
+            + r"(impact on $P(\text{correct})$)"
         )
 
         # Fix y-axis label to use sentence case
         ax = plt.gca()
         current_ylabel = ax.get_ylabel()
-        if "SHAP value for " in current_ylabel:
+        if "SHAP value for" in current_ylabel:
             # Replace the feature name in the y-label with sentence case version
             new_ylabel = current_ylabel.replace(
                 feature_name, to_sentence_case(feature_name)
@@ -558,7 +348,30 @@ def main(
         )
         plt.close()
 
-    # Plot SHAP interaction plots for all combinations of top 3 features
+
+def plot_shap_interactions(
+    shap_values,
+    feature_names: list,
+    display_feature_names: list,
+    correct_class_idx: int,
+    output_dir: Path,
+    top_n: int = 3,
+) -> None:
+    """Plot SHAP interaction plots for top features.
+
+    Args:
+        shap_values: SHAP values object
+        feature_names: Original feature names (for filenames)
+        display_feature_names: Pretty feature names (for display)
+        correct_class_idx: Index of the correct class
+        output_dir: Directory to save plots
+        top_n: Number of top features to use for interactions
+    """
+    mean_abs_shap = np.abs(shap_values.values[:, :, correct_class_idx]).mean(
+        axis=0
+    )  # for correct class
+    top_features_idx = np.argsort(mean_abs_shap)[-top_n:][::-1]
+
     for i, idx1 in enumerate(top_features_idx):
         feature1_display = display_feature_names[idx1]
         feature1_original = feature_names[idx1]
@@ -582,13 +395,14 @@ def main(
                     + to_sentence_case(feature1_display)
                     + " vs "
                     + to_sentence_case(feature2_display)
+                    + "\n"
                     + r" (impact on $P(\text{correct})$)"
                 )
 
                 # Fix y-axis label to use sentence case
                 ax = plt.gca()
                 current_ylabel = ax.get_ylabel()
-                if "SHAP value for " in current_ylabel:
+                if "SHAP value for" in current_ylabel:
                     # Replace the feature name in the y-label with sentence case version
                     new_ylabel = current_ylabel.replace(
                         feature1_display, to_sentence_case(feature1_display)
@@ -610,8 +424,20 @@ def main(
                 )
                 plt.close()
 
-    # Plot SHAP heatmap for top 10 features
-    plt.figure(figsize=(12, 10))
+
+def plot_shap_heatmap(
+    shap_values,
+    correct_class_idx: int,
+    output_dir: Path,
+) -> None:
+    """Plot SHAP heatmap.
+
+    Args:
+        shap_values: SHAP values object
+        correct_class_idx: Index of the correct class
+        output_dir: Directory to save plots
+    """
+    plt.figure(figsize=(8, 6))
     custom_cmap = create_custom_colormap()
     shap.plots.heatmap(
         shap_values[:, :, correct_class_idx],  # for correct class
@@ -619,38 +445,300 @@ def main(
         show=False,
         cmap=custom_cmap,
     )
-    plt.title(r"SHAP feature impact heatmap (impact on $P(\text{correct})$)")
+    plt.title("SHAP feature impact heatmap\n" + r"(impact on $P(\text{correct})$)")
 
     # Save in both formats
     plt.savefig(output_dir / "shap_heatmap.pdf", bbox_inches="tight", dpi=300)
     plt.savefig(output_dir / "shap_heatmap.png", bbox_inches="tight", dpi=300)
     plt.close()
 
-    # 3. Feature correlations
-    logger.info("Computing feature correlations...")
-    # Create a DataFrame with display names for correlation plotting
-    features_scaled_display_df = pd.DataFrame(
-        features_scaled, columns=display_feature_names
+
+def create_all_plots(
+    perm_importance_dict: Dict[str, float],
+    shap_values,
+    train_features_scaled_display_df: pd.DataFrame,
+    test_features_scaled,
+    test_labels,
+    feature_names: list,
+    display_feature_names: list,
+    correct_class_idx: int,
+    output_dir: Path,
+) -> None:
+    """Create all plots for the analysis.
+
+    Args:
+        perm_importance_dict: Permutation importance scores
+        shap_values: SHAP values object
+        train_features_scaled_display_df: Training features for correlation
+        test_features_scaled: Test features for clustering
+        test_labels: Test labels for clustering
+        feature_names: Original feature names
+        display_feature_names: Pretty feature names
+        correct_class_idx: Index of the correct class
+        output_dir: Directory to save plots
+    """
+    logger.info("Creating plots...")
+
+    # 1. Permutation importance plot
+    plot_feature_importance(
+        perm_importance_dict,
+        "Permutation Feature Importance",
+        output_dir / "permutation_importance",
     )
+
+    # 2. SHAP plots
+    plot_shap_summary(shap_values, correct_class_idx, output_dir)
+    plot_shap_bar(
+        shap_values, test_features_scaled, test_labels, correct_class_idx, output_dir
+    )
+    plot_shap_dependence(
+        shap_values, feature_names, display_feature_names, correct_class_idx, output_dir
+    )
+    plot_shap_interactions(
+        shap_values, feature_names, display_feature_names, correct_class_idx, output_dir
+    )
+    plot_shap_heatmap(shap_values, correct_class_idx, output_dir)
+
+    # 3. Feature correlations
     plot_feature_correlations(
-        features_scaled_display_df,
+        train_features_scaled_display_df,
         output_dir / "feature_correlations",
     )
 
-    # Save numerical results
-    results = pd.DataFrame(
-        {
-            "Feature": display_feature_names,
-            "Permutation Importance": [
-                perm_importance_dict[f] for f in display_feature_names
-            ],
-            "Mean |SHAP| (impact on P(correct))": np.abs(
-                shap_values.values[:, :, correct_class_idx]
-            ).mean(axis=0),  # for correct class
-        }
-    )
-    results.to_csv(output_dir / "feature_importance_results.csv", index=False)
 
+@app.command()
+def main(
+    model_path: Annotated[
+        Path,
+        typer.Option(help="Path to pretrained calibrator model directory."),
+    ],
+    train_spectrum_path: Annotated[
+        Path,
+        typer.Option(help="Path to training spectrum data file."),
+    ],
+    train_predictions_path: Annotated[
+        Path,
+        typer.Option(help="Path to training beam predictions file."),
+    ],
+    test_spectrum_path: Annotated[
+        Path,
+        typer.Option(help="Path to test spectrum data file."),
+    ],
+    test_predictions_path: Annotated[
+        Path,
+        typer.Option(help="Path to test beam predictions file."),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option(help="Directory to save analysis results and plots."),
+    ],
+    n_background_samples: Annotated[
+        int,
+        typer.Option(
+            help="Number of background samples to use for SHAP value computation.",
+            min=1,
+            max=10000,
+        ),
+    ] = 500,
+    n_test_samples: Annotated[
+        int,
+        typer.Option(
+            help="Number of test samples to use for SHAP value computation.",
+            min=1,
+            max=10000,
+        ),
+    ] = 1000,
+    create_plots: Annotated[
+        bool,
+        typer.Option(
+            "--create-plots/--no-plots",
+            help="Whether to create plots or just compute and save analysis objects.",
+        ),
+    ] = True,
+) -> None:
+    """Analyze feature importance and correlations for a pretrained calibrator.
+
+    Args:
+        model_path: Path to pretrained calibrator model directory
+        train_spectrum_path: Path to training spectrum data file
+        train_predictions_path: Path to training beam predictions file
+        test_spectrum_path: Path to test spectrum data file
+        test_predictions_path: Path to test beam predictions file
+        output_dir: Directory to save results and plots
+        n_background_samples: Number of background samples for SHAP computation
+        n_test_samples: Number of test samples to use for SHAP value computation
+        create_plots: Whether to create plots or just compute and save analysis objects
+    """
+    # Create output directory
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Load pretrained calibrator
+    logger.info("Loading pretrained calibrator...")
+    calibrator = ProbabilityCalibrator.load(model_path)
+
+    # Load training dataset
+    logger.info("Loading training dataset...")
+    train_dataset = InstaNovoDatasetLoader().load(
+        Path(train_spectrum_path),
+        Path(train_predictions_path),
+    )
+    train_dataset = filter_dataset(train_dataset)
+
+    # Load test dataset
+    logger.info("Loading test dataset...")
+    test_dataset = InstaNovoDatasetLoader().load(
+        Path(test_spectrum_path),
+        Path(test_predictions_path),
+    )
+    test_dataset = filter_dataset(test_dataset)
+
+    # Compute features for both datasets
+    logger.info("Computing features for training set...")
+    train_features, train_labels = calibrator.compute_features(
+        dataset=train_dataset, labelled=True
+    )
+
+    logger.info("Computing features for test set...")
+    test_features, test_labels = calibrator.compute_features(
+        dataset=test_dataset, labelled=True
+    )
+
+    # Apply column mapping for display names
+    feature_names = [
+        "confidence",
+        "Mass Error",
+        "ion_matches",
+        "ion_match_intensity",
+        "chimeric_ion_matches",
+        "chimeric_ion_match_intensity",
+        "iRT error",
+        "margin",
+        "median_margin",
+        "entropy",
+        "z-score",
+    ]
+    display_feature_names = [COLUMN_MAPPING.get(name, name) for name in feature_names]
+
+    # Scale features using the calibrator's fitted scaler
+    logger.info("Scaling features with pretrained scaler...")
+    train_features_scaled = calibrator.scaler.transform(train_features)
+    test_features_scaled = calibrator.scaler.transform(test_features)
+
+    # Use the pretrained classifier
+    logger.info("Using pretrained classifier...")
+    classifier = calibrator.classifier
+
+    # Log class mapping
+    logger.info(
+        f"Class mapping: {dict(zip(classifier.classes_, range(len(classifier.classes_))))}"
+    )
+    correct_class_idx = np.where(classifier.classes_ == 1)[0][
+        0
+    ]  # Get index of class 1 (correct)
+    logger.info(
+        f"Using SHAP values for class index {correct_class_idx} (correct predictions)"
+    )
+
+    # 1. Permutation importance on test set
+    logger.info("Computing permutation importance on test set...")
+    perm_importance = permutation_importance(
+        classifier,
+        test_features_scaled,
+        test_labels,
+        n_repeats=10,
+        random_state=SEED,
+        n_jobs=-1,
+    )
+    # Use display names for plotting
+    perm_importance_dict = dict(
+        zip(display_feature_names, perm_importance.importances_mean)
+    )
+
+    # 2. SHAP values with training background on test data
+    logger.info("Computing SHAP values with training background on test data...")
+    # Sample background data from training set
+    background = shap.sample(
+        train_features_scaled,
+        min(n_background_samples, len(train_features_scaled)),
+        random_state=SEED,
+    )
+
+    # Use KernelExplainer for MLP
+    explainer = shap.KernelExplainer(
+        model=classifier.predict_proba,
+        data=background,
+        seed=SEED,
+        link="identity",  # Explain probabilities directly
+    )
+
+    # Randomly sample test data for SHAP computation
+    np.random.seed(SEED)
+    n_samples = min(n_test_samples, test_features_scaled.shape[0])
+    indices = np.random.choice(
+        test_features_scaled.shape[0], size=n_samples, replace=False
+    )
+
+    # Get SHAP values from explainer for a random subset of the test data
+    shap_values = explainer(test_features_scaled[indices])
+
+    # Switch to original feature space for visualization
+    # This is safe because standardization is a univariate transformation
+    shap_values.data = test_features[indices]
+    shap_values.feature_names = display_feature_names
+
+    # 3. Feature correlations on training data
+    logger.info("Computing feature correlations on training data...")
+    # Create a DataFrame with display names for correlation plotting
+    train_features_scaled_display_df = pd.DataFrame(
+        train_features_scaled, columns=display_feature_names
+    )
+
+    # Create plots if requested
+    if create_plots:
+        create_all_plots(
+            perm_importance_dict=perm_importance_dict,
+            shap_values=shap_values,
+            train_features_scaled_display_df=train_features_scaled_display_df,
+            test_features_scaled=test_features_scaled,
+            test_labels=test_labels,
+            feature_names=feature_names,
+            display_feature_names=display_feature_names,
+            correct_class_idx=correct_class_idx,
+            output_dir=output_dir,
+        )
+
+    # Save raw objects for later analysis
+    logger.info("Saving raw analysis objects...")
+
+    # Save permutation importance object
+    with open(output_dir / "perm_importance.pkl", "wb") as f:
+        pickle.dump(perm_importance, f)
+
+    # Save SHAP values object
+    with open(output_dir / "shap_values.pkl", "wb") as f:
+        pickle.dump(shap_values, f)
+
+    logger.info("Analysis complete!")
+    logger.info(f"Results saved to {output_dir}")
+    logger.info(
+        f"Permutation Feature Importance: computed on {len(test_labels)} test samples"
+    )
+    logger.info(
+        f"SHAP values: computed on {n_samples} test samples with {len(background)} training samples as background"
+    )
+    logger.info(f"Correlation matrix: computed on {len(train_labels)} training samples")
+
+    # List all saved files
+    saved_files = [
+        "perm_importance.pkl (raw permutation importance object)",
+        "shap_values.pkl (raw SHAP values object)",
+    ]
+    if create_plots:
+        saved_files.append("All plots in PDF and PNG formats")
+    else:
+        logger.info("Plots were skipped (--no-plots flag used)")
+
+    logger.info(f"Saved files: {', '.join(saved_files)}")
     print(f"\nResults saved to {output_dir}")
 
 
