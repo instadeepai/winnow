@@ -482,7 +482,7 @@ def create_all_plots(
     # 1. Permutation importance plot
     plot_feature_importance(
         perm_importance_dict,
-        "Permutation Feature Importance",
+        "Permutation feature importance",
         output_dir / "permutation_importance",
     )
 
@@ -599,9 +599,9 @@ def main(
     )
 
     logger.info("Computing features for test set...")
-    test_features, test_labels = calibrator.compute_features(
-        dataset=test_dataset, labelled=True
-    )
+    # Note that we do not pass labelled=True to avoid training the iRT predictor
+    test_features = calibrator.compute_features(dataset=test_dataset, labelled=False)
+    test_labels = test_dataset.metadata["correct"]
 
     # Apply column mapping for display names
     feature_names = [

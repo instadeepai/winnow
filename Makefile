@@ -109,6 +109,10 @@ set-gcp-credentials:
 set-ceph-credentials:
 	uv run python scripts/set_ceph_credentials.py
 
+## Authenticate on Hugging Face
+hf-login:
+	uv run hf auth login --token $(HF_AUTH_TOKEN)
+
 #################################################################################
 ## Analysis commands														 	#
 #################################################################################
