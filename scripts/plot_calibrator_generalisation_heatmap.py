@@ -1,6 +1,7 @@
-#!/usr/bin/env python3
+"""Script to plot the calibrator generalisation heatmaps."""
 
 import matplotlib.pyplot as plt
+import polars as pl
 import pandas as pd
 import seaborn as sns
 import numpy as np
@@ -8,8 +9,9 @@ import os
 from sklearn.metrics import auc
 import argparse
 from matplotlib.colors import LinearSegmentedColormap
+import logging
+from rich.logging import RichHandler
 
-# Color scheme consistent with analyze_features.py
 COLORS = {
     "fairy": "#FFCAE9",
     "magenta": "#8E5572",
@@ -19,75 +21,14 @@ COLORS = {
     "navy": "#3C81AE",
 }
 
-# Configure matplotlib to match seaborn "paper" context
-sns.set_theme(style="white", context="paper")
-plt.style.use("seaborn-v0_8-paper")
-plt.rcParams.update(
-    {
-        # Figure settings
-        "figure.figsize": [12.0, 10.0],
-        "figure.facecolor": "white",
-        "figure.dpi": 100.0,
-        # Axes settings
-        "axes.labelcolor": ".15",
-        "axes.axisbelow": True,
-        "axes.grid": False,
-        "axes.facecolor": "white",
-        "axes.edgecolor": ".15",
-        "axes.linewidth": 1.0,
-        "axes.spines.left": True,
-        "axes.spines.bottom": True,
-        "axes.spines.right": True,
-        "axes.spines.top": True,
-        # Tick settings
-        "xtick.direction": "out",
-        "ytick.direction": "out",
-        "xtick.color": ".15",
-        "ytick.color": ".15",
-        "xtick.top": False,
-        "ytick.right": False,
-        "xtick.bottom": False,
-        "ytick.left": False,
-        "xtick.major.width": 1.0,
-        "ytick.major.width": 1.0,
-        "xtick.minor.width": 0.8,
-        "ytick.minor.width": 0.8,
-        "xtick.major.size": 4.8,
-        "ytick.major.size": 4.8,
-        "xtick.minor.size": 3.2,
-        "ytick.minor.size": 3.2,
-        # Grid settings
-        "grid.linestyle": "-",
-        "grid.color": ".8",
-        "grid.linewidth": 0.8,
-        # Text settings
-        "text.color": ".15",
-        "font.family": ["sans-serif"],
-        "font.sans-serif": [
-            "Arial",
-            "DejaVu Sans",
-            "Liberation Sans",
-            "Bitstream Vera Sans",
-            "sans-serif",
-        ],
-        "font.size": 9.6,
-        "axes.labelsize": 9.6,
-        "axes.titlesize": 9.6,
-        "xtick.labelsize": 8.8,
-        "ytick.labelsize": 8.8,
-        "legend.fontsize": 8.8,
-        "legend.title_fontsize": 9.6,
-        # Line and patch settings
-        "lines.linewidth": 1.2,
-        "lines.markersize": 4.8,
-        "lines.solid_capstyle": "round",
-        "patch.linewidth": 0.8,
-        "patch.edgecolor": "black",
-        "patch.force_edgecolor": True,
-        # Image settings
-        "image.cmap": "rocket",
-    }
-)
+sns.set_theme(style="white", palette="colorblind", context="paper", font_scale=2)
+
+
+# --- Logging Setup ---
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+logger.addHandler(logging.StreamHandler())
+logger.addHandler(RichHandler())
 
 
 def create_custom_diverging_colormap():
@@ -110,7 +51,7 @@ SPECIES_NAME_MAPPING = {
     "snakevenoms": "Snake venomics",
     "woundfluids": "Wound exudates",
     "sbrodae": "Scalindua brodae",
-    "immuno": "Immunopeptidomics",
+    "immuno": "Immunopeptidomics-1",
     "PXD019483": "HepG2",
 }
 
@@ -157,17 +98,17 @@ def compute_pr_auc(
 def load_and_process_results(
     results_path: str, confidence_column: str = "calibrated_confidence"
 ) -> pd.DataFrame:
-    """Load calibrator generalisation results and compute AUC matrix.
+    """Load calibrator generalisation results and compute PR-AUC matrix.
 
     Args:
         results_path: Path to the calibrator_generalisation_results.csv file
-        confidence_column: Name of the confidence column to use for AUC computation
+        confidence_column: Name of the confidence column to use for PR-AUC computation
 
     Returns:
-        DataFrame with AUC values for each trained/test dataset combination
+        DataFrame with PR-AUC values for each trained/test dataset combination
     """
     # Load results
-    results = pd.read_csv(results_path, low_memory=False)
+    results = pl.scan_csv(results_path)
 
     # Check required columns
     required_columns = [
@@ -181,23 +122,27 @@ def load_and_process_results(
         raise ValueError(f"Missing required columns: {missing_columns}")
 
     # Get unique datasets
-    trained_datasets = sorted(results["trained_on_dataset"].unique())
-    test_datasets = sorted(results["test_dataset"].unique())
+    trained_datasets = sorted(results.select("trained_on_dataset").unique().collect())
+    test_datasets = sorted(results.select("test_dataset").unique().collect())
 
-    # Initialize AUC matrix
+    # Initialize PR-AUC matrix
     auc_matrix = []
 
     for trained_dataset in trained_datasets:
         auc_row = []
         for test_dataset in test_datasets:
             # Filter data for this combination
-            subset = results[
-                (results["trained_on_dataset"] == trained_dataset)
-                & (results["test_dataset"] == test_dataset)
-            ].copy()
+            subset = (
+                results.filter(
+                    (pl.col("trained_on_dataset") == trained_dataset)
+                    & (pl.col("test_dataset") == test_dataset)
+                )
+                .collect()
+                .to_pandas()
+            )
 
             if len(subset) > 0:
-                # Compute AUC for specified confidence column
+                # Compute PR-AUC for specified confidence column
                 auc_value = compute_pr_auc(subset, confidence_column, "correct")
                 auc_row.append(auc_value)
             else:
@@ -220,10 +165,10 @@ def create_auc_heatmap(
     output_path: str,
     title: str = "Calibrator generalisation: PR-AUC heatmap",
 ) -> None:
-    """Create and save a heatmap of AUC values.
+    """Create and save a heatmap of PR-AUC values.
 
     Args:
-        auc_df: DataFrame with AUC values (trained datasets as rows, test datasets as columns)
+        auc_df: DataFrame with PR-AUC values (trained datasets as rows, test datasets as columns)
         output_path: Path to save the plot
         title: Title for the heatmap
     """
@@ -260,24 +205,37 @@ def create_auc_heatmap(
 
 
 def create_comparison_heatmaps(results_path: str, output_dir: str) -> None:
-    """Create heatmaps comparing raw vs calibrated confidence AUC values.
+    """Create heatmaps comparing raw vs calibrated confidence PR-AUC values.
 
     Args:
         results_path: Path to the calibrator_generalisation_results.csv file
         output_dir: Directory to save the plots
     """
     # Load results
-    results = pd.read_csv(results_path, low_memory=False)
+    logger.info("Scanning results")
+    results = pl.scan_csv(results_path)
 
     # Get unique datasets
-    trained_datasets = sorted(results["trained_on_dataset"].unique())
-    test_datasets = sorted(results["test_dataset"].unique())
+    logger.info("Collecting unique datasets")
+    trained_datasets = sorted(
+        results.select(pl.col("trained_on_dataset"))
+        .unique()
+        .collect()
+        .to_series()
+        .to_list()
+    )
+    test_datasets = sorted(
+        results.select(pl.col("test_dataset")).unique().collect().to_series().to_list()
+    )
+    logger.info(f"Trained datasets: {trained_datasets}")
+    logger.info(f"Test datasets: {test_datasets}")
 
     # Map dataset names to nicer labels
     trained_labels = [SPECIES_NAME_MAPPING.get(ds, ds) for ds in trained_datasets]
     test_labels = [SPECIES_NAME_MAPPING.get(ds, ds) for ds in test_datasets]
 
-    # Compute AUC matrices for both confidence types
+    # Compute PR-AUC matrices for both confidence types
+    logger.info("Computing PR-AUC matrices")
     auc_matrices = {}
 
     for conf_type in ["confidence", "calibrated_confidence"]:
@@ -286,14 +244,21 @@ def create_comparison_heatmaps(results_path: str, output_dir: str) -> None:
         for trained_dataset in trained_datasets:
             auc_row = []
             for test_dataset in test_datasets:
+                logger.info(
+                    f"Computing PR-AUC for {trained_dataset} and {test_dataset}"
+                )
                 # Filter data for this combination
-                subset = results[
-                    (results["trained_on_dataset"] == trained_dataset)
-                    & (results["test_dataset"] == test_dataset)
-                ].copy()
+                subset = (
+                    results.filter(
+                        (pl.col("trained_on_dataset") == trained_dataset)
+                        & (pl.col("test_dataset") == test_dataset)
+                    )
+                    .collect()
+                    .to_pandas()
+                )
 
                 if len(subset) > 0:
-                    # Compute AUC
+                    # Compute PR-AUC
                     auc_value = compute_pr_auc(subset, conf_type, "correct")
                     auc_row.append(auc_value)
                 else:
@@ -307,7 +272,7 @@ def create_comparison_heatmaps(results_path: str, output_dir: str) -> None:
 
     # Create individual heatmaps
     for conf_type, auc_df in auc_matrices.items():
-        conf_name = conf_type.replace("_", " ").title()
+        conf_name = conf_type.replace("_", " ").title().lower()
         output_path = os.path.join(
             output_dir, f"calibrator_generalisation_{conf_type}_auc_heatmap.png"
         )
@@ -328,12 +293,12 @@ def create_comparison_heatmaps(results_path: str, output_dir: str) -> None:
         fmt=".3f",
         cmap=custom_diverging_cmap,
         center=0,
-        cbar_kws={"label": r"AUC difference $(\text{calibrated} - \text{raw})$"},
+        cbar_kws={"label": r"PR-AUC difference $(\text{calibrated} - \text{raw})$"},
         square=True,
         linewidths=0.5,
     )
 
-    plt.title("Calibrator generalisation: AUC improvement")
+    plt.title("Calibrator generalisation: PR-AUC improvement")
     plt.xlabel("Test dataset")
     plt.ylabel("Train dataset")
     plt.xticks(rotation=45, ha="right")
@@ -349,18 +314,18 @@ def create_comparison_heatmaps(results_path: str, output_dir: str) -> None:
 def main():
     """Main function to create calibrator generalisation heatmaps."""
     parser = argparse.ArgumentParser(
-        description="Create AUC heatmaps for calibrator generalisation results"
+        description="Create PR-AUC heatmaps for calibrator generalisation results"
     )
     parser.add_argument(
         "--results-path",
         type=str,
-        default="calibrator_generalisation_results/calibrator_generalisation_results.csv",
+        required=True,
         help="Path to the calibrator generalisation results CSV file",
     )
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="calibrator_generalisation_results/plots",
+        required=True,
         help="Directory to save the plots",
     )
 
@@ -373,8 +338,8 @@ def main():
     if not os.path.exists(args.results_path):
         raise FileNotFoundError(f"Results file not found: {args.results_path}")
 
-    print(f"Loading results from: {args.results_path}")
-    print(f"Saving plots to: {args.output_dir}")
+    logger.info(f"Loading results from: {args.results_path}")
+    logger.info(f"Saving plots to: {args.output_dir}")
 
     # Create comparison heatmaps (raw vs calibrated confidence)
     create_comparison_heatmaps(args.results_path, args.output_dir)

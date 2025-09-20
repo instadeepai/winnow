@@ -16,6 +16,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.inspection import permutation_importance
+from huggingface_hub import snapshot_download
 import shap
 import typer
 from typer import Typer
@@ -37,6 +38,28 @@ COLORS = {
 }
 
 sns.set_theme(style="white", palette="colorblind", context="paper", font_scale=1.5)
+
+
+def download_dataset(repo_id: str, local_dir: str, pattern: list[str]) -> None:
+    """Download the dataset from the Hugging Face Hub."""
+    logger.info(f"Downloading dataset {repo_id} to {local_dir}.")
+    snapshot_download(
+        repo_id=repo_id,
+        local_dir=local_dir,
+        allow_patterns=pattern,
+        repo_type="dataset",
+    )
+
+
+def download_model(repo_id: str, local_dir: str) -> None:
+    """Download the model from the Hugging Face Hub."""
+    logger.info(f"Downloading model {repo_id} to {local_dir}.")
+    snapshot_download(
+        repo_id=repo_id,
+        local_dir=local_dir,
+        repo_type="model",
+        allow_patterns="*.pkl",
+    )
 
 
 # Create custom colormaps using the color scheme
@@ -512,21 +535,9 @@ def main(
         Path,
         typer.Option(help="Path to pretrained calibrator model directory."),
     ],
-    train_spectrum_path: Annotated[
+    data_dir: Annotated[
         Path,
-        typer.Option(help="Path to training spectrum data file."),
-    ],
-    train_predictions_path: Annotated[
-        Path,
-        typer.Option(help="Path to training beam predictions file."),
-    ],
-    test_spectrum_path: Annotated[
-        Path,
-        typer.Option(help="Path to test spectrum data file."),
-    ],
-    test_predictions_path: Annotated[
-        Path,
-        typer.Option(help="Path to test beam predictions file."),
+        typer.Option(help="Directory to save training and test datasets."),
     ],
     output_dir: Annotated[
         Path,
@@ -560,10 +571,7 @@ def main(
 
     Args:
         model_path: Path to pretrained calibrator model directory
-        train_spectrum_path: Path to training spectrum data file
-        train_predictions_path: Path to training beam predictions file
-        test_spectrum_path: Path to test spectrum data file
-        test_predictions_path: Path to test beam predictions file
+        data_dir: Directory to save training and test datasets
         output_dir: Directory to save results and plots
         n_background_samples: Number of background samples for SHAP computation
         n_test_samples: Number of test samples to use for SHAP value computation
@@ -572,6 +580,21 @@ def main(
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Download the dataset from the Hugging Face Hub
+    logger.info("Downloading dataset from the Hugging Face Hub...")
+    download_dataset(
+        repo_id="instadeepai/winnow-ms-datasets",
+        local_dir=str(data_dir),
+        pattern=["general_train*", "general_test*"],
+    )
+
+    # Download the model from the Hugging Face Hub
+    logger.info("Downloading model from the Hugging Face Hub...")
+    download_model(
+        repo_id="instadeepai/winnow-general-model",
+        local_dir=str(model_path),
+    )
+
     # Load pretrained calibrator
     logger.info("Loading pretrained calibrator...")
     calibrator = ProbabilityCalibrator.load(model_path)
@@ -579,16 +602,16 @@ def main(
     # Load training dataset
     logger.info("Loading training dataset...")
     train_dataset = InstaNovoDatasetLoader().load(
-        Path(train_spectrum_path),
-        Path(train_predictions_path),
+        data_dir / "general_train.parquet",
+        data_dir / "general_train_beams.csv",
     )
     train_dataset = filter_dataset(train_dataset)
 
     # Load test dataset
     logger.info("Loading test dataset...")
     test_dataset = InstaNovoDatasetLoader().load(
-        Path(test_spectrum_path),
-        Path(test_predictions_path),
+        data_dir / "general_test.parquet",
+        data_dir / "general_test_beams.csv",
     )
     test_dataset = filter_dataset(test_dataset)
 
