@@ -109,6 +109,13 @@ class CalibrationDataset:
     metadata: pd.DataFrame
     predictions: List[Optional[List[ScoredSequence]]]
 
+    def __post_init__(self):
+        """Validate that metadata and predictions have matching lengths."""
+        # Allow empty predictions list (no predictions available)
+        # But if predictions are provided, they must match metadata length
+        if self.predictions and len(self.metadata) != len(self.predictions):
+            raise AssertionError("Length of metadata and predictions must match")
+
     def save(self, data_dir: Path) -> None:
         """Save a `CalibrationDataset` to a directory.
 
@@ -712,7 +719,7 @@ class CalibrationDataset:
             predictions_predicate (Callable[[Any], bool], optional): A function that takes a beam (prediction) and returns a boolean indicating whether the prediction should be kept. Defaults to a predicate that always returns False, keeping all predictions.
 
         Returns:
-            CalibrationDataset: A new instance of `CalibrationDataset` containing only the entries that satisfy the conditions specified by the predicates.
+            CalibrationDataset: A new instance of `CalibrationDataset` containing only the entries for which the conditions specified by the predicates are False.
         """
         filter_idxs = []
 
