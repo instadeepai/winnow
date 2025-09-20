@@ -55,14 +55,22 @@ RESIDUE_REMAPPING: dict[str, str] = {
 }
 
 CASANOVO_RESIDUE_REMAPPING: dict[str, str] = {
-    "M+15.995": "M[UNIMOD:35]",  # Oxidation
-    "Q+0.984": "Q[UNIMOD:7]",  # Deamidation
-    "N+0.984": "N[UNIMOD:7]",  # Deamidation
-    "+42.011": "[UNIMOD:1]",  # Acetylation
-    "+43.006": "[UNIMOD:5]",  # Carbamylation
-    "-17.027": "[UNIMOD:385]",  # Loss of ammonia
-    "C+57.021": "C[UNIMOD:4]",  # Carboxyamidomethylation
+    "M+15.995": "M[UNIMOD:35]",     # Oxidation
+    "Q+0.984": "Q[UNIMOD:7]",       # Deamidation
+    "N+0.984": "N[UNIMOD:7]",       # Deamidation
+    "+42.011": "[UNIMOD:1]",        # Acetylation
+    "+43.006": "[UNIMOD:5]",        # Carbamylation
+    "-17.027": "[UNIMOD:385]",      # Loss of ammonia
+    "C+57.021": "C[UNIMOD:4]",      # Carboxyamidomethylation
     # "+43.006-17.027": "[UNIMOD:5][UNIMOD:385]",  # Carbamylation and Loss of ammonia
+    "M[Oxidation]": "M[UNIMOD:35]", # Met oxidation:   131.040485 + 15.994915
+    "N[Deamidated]": "N[UNIMOD:7]", # Asn deamidation: 114.042927 +  0.984016
+    "Q[Deamidated]": "Q[UNIMOD:7]", # Gln deamidation: 128.058578 +  0.984016
+    # N-terminal modifications.
+    "[Acetyl]-": "[UNIMOD:1]",      # Acetylation
+    "[Carbamyl]-": "[UNIMOD:5]",    # Carbamylation
+    "[Ammonia-loss]-": "[UNIMOD:385]"# Ammonia loss
+    #"[+25.980265]-": 25.980265     # Carbamylation and ammonia loss
 }
 
 INVALID_PROSIT_TOKENS: list = [

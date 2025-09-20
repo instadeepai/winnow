@@ -7,7 +7,6 @@ version = "1.0.0"
 requires-python = ">=3.10"
 dependencies = [
     "instanovo",
-    "ipywidgets>=8.1.5",
     "jax>=0.5.2",
     "koinapy>=0.0.10",
     "numpyro>=0.17.0",
@@ -35,3 +34,13 @@ dev = [
 
 [project.scripts]
 winnow='winnow.scripts.main:app'
+
+[project.optional-dependencies]
+notebook = [
+    "huggingface-hub>=0.29.3",
+    "ipykernel>=6.29.5",
+    "ipywidgets>=8.1.7",
+    "jupyter>=1.1.1",
+    "seaborn>=0.13.2",
+    "tqdm>=4.67.1",
+]
