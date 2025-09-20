@@ -38,6 +38,7 @@ class EmpiricalBayesFDRControl(FDRControl):
             incorrect_alpha=jnp.array(1.0),
             incorrect_beta=jnp.array(1.0),
         )
+        self._fitted = False
 
     @staticmethod
     def model(data: Float[jax.Array, "batch"]) -> None:  # noqa: F821
@@ -126,9 +127,12 @@ class EmpiricalBayesFDRControl(FDRControl):
             n_steps (int, optional):
                 Number of optimisation steps for training. Defaults to 5000.
         """
+        assert len(dataset) > 0, "Fit method requires non-empty data"
+
         self.mixture_parameters = self.train(
             examples=jnp.clip(jnp.array(dataset), EPS, 1 - EPS), lr=lr, n_steps=n_steps
         )
+        self._fitted = True
 
     def train(
         self,
@@ -189,6 +193,10 @@ class EmpiricalBayesFDRControl(FDRControl):
                 Returns 1.0 if FDR is always above threshold (no valid cutoff).
                 Returns 0.0 if FDR is always below threshold (all scores valid).
         """
+        # Check if the model is fitted
+        if not self._fitted:
+            raise AttributeError("FDR method not fitted, please call `fit()` first")
+
         # Create a fine mesh of points
         mesh_points = jnp.linspace(0.0, 1.0, mesh_size)
 
@@ -255,6 +263,10 @@ class EmpiricalBayesFDRControl(FDRControl):
         Returns:
             float: The FDR estimate
         """
+        # Check if the model is fitted
+        if not self._fitted:
+            raise AttributeError("FDR method not fitted, please call `fit()` first")
+
         # P(S >= score | incorrect) = 1 - F_incorrect(s)
         p_score_given_incorrect = 1 - jax.scipy.stats.beta.cdf(
             a=self.mixture_parameters.incorrect_alpha,
