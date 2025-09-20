@@ -544,10 +544,10 @@ class BeamFeatures(CalibrationFeatures):
         # Ensure dataset.predictions is not None
         _raise_value_error(dataset.predictions, "dataset.predictions")
 
-        count = sum(len(prediction) < 3 for prediction in dataset.predictions)  # type: ignore
+        count = sum(len(prediction) < 2 for prediction in dataset.predictions)  # type: ignore
         if count > 0:
             warnings.warn(
-                f"{count} beam search results have fewer than three sequences. "
+                f"{count} beam search results have fewer than two sequences. "
                 "This may affect the efficacy of computed beam features."
             )
 
@@ -565,7 +565,7 @@ class BeamFeatures(CalibrationFeatures):
         ]
         runner_up_probs = [
             [exp(item.sequence_log_probability) for item in prediction[1:]]  # type: ignore
-            if len(prediction) >= 3  # type: ignore
+            if len(prediction) >= 2  # type: ignore
             else [0.0]
             for prediction in dataset.predictions
         ]
