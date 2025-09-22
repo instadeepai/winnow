@@ -106,15 +106,19 @@ class FDRControl(metaclass=ABCMeta):
         return self._confidence_scores[idx]
 
     def compute_fdr(self, score: float) -> float:
-        """Compute FDR estimate at a given confidence cutoff.
+        """Computes the false discovery rate (FDR) for all PSMs with a confidence score >= `score`.
 
-        P(incorrect | S >= s)
+        This method calculates the FDR as the probability of a PSM being incorrect given
+        that its confidence score is greater than or equal to the given cutoff `score`.
+        It is formally defined as: `P(incorrect | S >= s)`.
+        It is important to note that FDR, like q-values, depends upon the entire dataset,
+        whereas posterior error probability (PEP) depends only on the single given PSM's confidence score.
 
         Args:
-            score (float): The confidence cutoff, where 0 < score < 1.
+            score (float): The confidence score cutoff, where 0 < score < 1.
 
         Returns:
-            float: The FDR estimate at the given confidence score
+            float: The estimated FDR for all PSMs at or above the given score.
         """
         if self._confidence_scores is None or self._fdr_values is None:
             raise AttributeError("FDR method not fitted, please call `fit()` first")
