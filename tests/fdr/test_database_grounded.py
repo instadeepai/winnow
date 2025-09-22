@@ -29,10 +29,8 @@ class TestDatabaseGroundedFDRControl:
     def test_initialization(self, db_fdr_control):
         """Test DatabaseGroundedFDRControl initialization."""
         assert db_fdr_control.confidence_feature == "confidence"
-        assert isinstance(db_fdr_control.fdr_thresholds, list)
-        assert isinstance(db_fdr_control.confidence_scores, list)
-        assert len(db_fdr_control.fdr_thresholds) == 0
-        assert len(db_fdr_control.confidence_scores) == 0
+        assert db_fdr_control._fdr_values is None
+        assert db_fdr_control._confidence_scores is None
 
     @patch("winnow.fdr.database_grounded.Metrics")
     def test_fit_basic(self, mock_metrics, db_fdr_control, sample_dataset_df):

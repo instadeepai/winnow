@@ -78,8 +78,11 @@ class ProbabilityCalibrator:
         with calibrator_classifier_path.open(mode="wb") as f:
             pickle.dump(calibrator.classifier, f)
 
-        with irt_predictor_path.open(mode="wb") as f:
-            pickle.dump(calibrator.feature_dict["Prosit iRT Features"].irt_predictor, f)  # type: ignore
+        if "Prosit iRT Features" in calibrator.feature_dict:
+            with irt_predictor_path.open(mode="wb") as f:
+                pickle.dump(
+                    calibrator.feature_dict["Prosit iRT Features"].irt_predictor, f
+                )
 
         with scaler_path.open(mode="wb") as f:
             pickle.dump(calibrator.scaler, f)
