@@ -104,21 +104,17 @@ class FDRControl(metaclass=ABCMeta):
         q_values: list[float] = []
         fdr_min = float("inf")
 
-        # Traverse from lowest score to highest (reverse order)
-        for i in range(len(sorted_data) - 1, -1, -1):
-            current_fdr = sorted_data.iloc[i]["fdr"]
-
-            if current_fdr > fdr_min:
-                # Retain FDRmin
-                q_values.insert(
-                    0, fdr_min
-                )  # Insert at beginning since we're traversing in reverse order
-            else:
-                # q-value = FDR value and FDRmin = FDR value
-                q_values.insert(
-                    0, current_fdr
-                )  # Insert at beginning since we're traversing in reverse order
+        # We sort FDR values in descending order and append to end of list,
+        #   then reverse to get original order.
+        # This better leverages the underlying list data structure
+        for current_fdr in reversed(sorted_data["fdr"].tolist()):
+            if current_fdr > fdr_min:  # Retain FDRmin
+                q_values.append(fdr_min)
+            else:  # q-value = FDR value and FDRmin = FDR value
+                q_values.append(current_fdr)
                 fdr_min = current_fdr
+
+        q_values.reverse()  # Reverse again to align order with confidence scores
 
         # Add q-values to the sorted dataframe
         sorted_data["psm_qvalue"] = q_values
