@@ -1,22 +1,20 @@
-import bisect
 from typing import Tuple
 import pandas as pd
-import warnings
 import numpy as np
 from instanovo.utils.metrics import Metrics
+
 from winnow.fdr.base import FDRControl
 from winnow.datasets.calibration_dataset import residue_set
 
 
 class DatabaseGroundedFDRControl(FDRControl):
-    """Performs False Discovery Rate (FDR) control by grounding predictions against a reference database.
+    """Performs false discovery rate (FDR) control by grounding predictions against a reference database.
 
     This method estimates FDR thresholds by comparing model-predicted peptides to ground-truth peptides from a database.
     """
 
     def __init__(self, confidence_feature: str) -> None:
-        self.fdr_thresholds: list[float] = []
-        self.confidence_scores: list[float] = []
+        super().__init__()
         self.confidence_feature = confidence_feature
 
     def fit(  # type: ignore
@@ -72,65 +70,5 @@ class DatabaseGroundedFDRControl(FDRControl):
         precision = np.cumsum(dataset["correct"]) / np.arange(1, len(dataset) + 1)
         confidence = np.array(dataset[self.confidence_feature])
 
-        self.fdr_thresholds = list(1.0 - precision[drop:])
-        self.confidence_scores = list(confidence[drop:])
-
-        self.reversed_fdr_thresholds = list(reversed(self.fdr_thresholds))
-        self.reversed_confidence_scores = list(reversed(self.confidence_scores))
-
-    def get_confidence_cutoff(self, threshold: float) -> float:
-        """Compute the confidence score cutoff for a given FDR threshold.
-
-        This function determines the confidence score above which PSMs should be retained
-        to maintain the desired FDR level.
-
-        Args:
-            threshold (float):
-                The target FDR threshold, where 0 < threshold < 1.
-
-        Returns:
-            float:
-                The confidence score cutoff corresponding to the specified FDR level.
-        """
-        if not hasattr(self, "fdr_thresholds") or len(self.fdr_thresholds) == 0:
-            raise AttributeError("FDR method not fitted, please call `fit()` first")
-
-        idx = bisect.bisect_right(self.fdr_thresholds, threshold) - 1
-
-        if idx < 0:
-            return np.nan
-
-        return self.confidence_scores[idx].item()  # type: ignore
-
-    def compute_fdr(self, score: float) -> float:
-        """Compute FDR estimate at a given confidence cutoff.
-
-        Args:
-            score (float): The confidence cutoff.
-
-        Returns:
-            float: The FDR estimate
-        """
-        if (
-            not hasattr(self, "reversed_confidence_scores")
-            or len(self.reversed_confidence_scores) == 0
-        ):
-            raise AttributeError("FDR method not fitted, please call `fit()` first")
-
-        # Find the index where this score would be inserted in the sorted confidence scores
-        idx = bisect.bisect_right(self.reversed_confidence_scores, score)
-
-        if (
-            idx >= len(self.reversed_confidence_scores)
-            and self.reversed_fdr_thresholds[-1] == 0
-        ):
-            return 0
-
-        elif idx >= len(self.reversed_fdr_thresholds):
-            warnings.warn(
-                f"Score {score} is too high for FDR control. Decreasing the drop parameter during fitting may improve results."
-            )
-            return np.nan
-
-        # Return the FDR threshold at this index
-        return self.reversed_fdr_thresholds[idx]
+        self._fdr_values = np.array(1 - precision[drop:])
+        self._confidence_scores = confidence[drop:]
