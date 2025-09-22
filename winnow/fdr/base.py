@@ -72,10 +72,11 @@ class FDRControl(metaclass=ABCMeta):
         if self._confidence_scores is None or self._fdr_values is None:
             raise AttributeError("FDR method not fitted, please call `fit()` first")
 
-        # NOTE: FDR is computed as a cumulative average of errors over descending confidence scores.
-        # This guarantees that FDR is a monotonically decreasing function of confidence score,
-        # with strict increases for each newly included lower-confidence prediction (with a correspondingly higher error)
-        # and the same FDR value outputted for an identical confidence score.
+        # NOTE: The false discovery rate (FDR) is computed as the cumulative average across predictions
+        # ranked in descending order of confidence. This guarantees that FDR is a monotonically decreasing
+        # function of confidence score: it exhibits strict increases when lower-confidence predictions with
+        # higher error rates are incorporated, while remaining constant for predictions that share the same
+        # confidence score.
 
         # Find the least conservative index where FDR is at or below threshold
         idx = np.searchsorted(self._fdr_values, threshold, side="right") - 1
@@ -90,9 +91,11 @@ class FDRControl(metaclass=ABCMeta):
             )
             return np.nan
 
-        # If the threshold is above the range of fitted FDR thresholds, this means that all scores meet the FDR requirement.
+        # If the threshold is above the range of fitted FDR thresholds, this means that all scores
+        # meet the FDR requirement.
         # In this case, return a conservative estimate of the lowest fitted confidence score.
-        # We do not automatically return a confidence score of 0.0 because we cannot guarantee that FDR would not increase above the threshold for scores below the minimum fitted confidence score.
+        # We do not automatically return a confidence score of 0.0 because we cannot guarantee that FDR
+        # would not increase above the threshold for scores below the minimum fitted confidence score.
         elif idx == len(self._fdr_values) - 1 and threshold > self._fdr_values[-1]:
             warnings.warn(
                 f"FDR threshold {threshold} is above the range of fitted FDR thresholds (max: {self._fdr_values[-1]:.4f}). "
