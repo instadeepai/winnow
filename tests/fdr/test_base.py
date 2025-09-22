@@ -97,6 +97,18 @@ class TestFDRControlBase:
         expected_fdrs = [0.01, 0.02, 0.05, 0.1, 0.2]
         assert list(result_df["psm_fdr"]) == expected_fdrs
 
+    def test_add_psm_q_value(self, fdr_control, sample_dataframe):
+        """Test adding PSM-specific q-values to DataFrame."""
+        result_df = fdr_control.add_psm_q_value(sample_dataframe, "confidence")
+
+        # Check that psm_q_value column was added
+        assert "psm_q_value" in result_df.columns
+        assert len(result_df) == len(sample_dataframe)
+
+        # Check expected q-values based on our concrete implementation
+        expected_q_values = [0.01, 0.02, 0.05, 0.1, 0.2]
+        assert list(result_df["psm_q_value"]) == expected_q_values
+
     def test_get_confidence_curve(self, fdr_control):
         """Test getting confidence curve for FDR thresholds."""
         fdr_thresholds, confidence_scores = fdr_control.get_confidence_curve(
