@@ -3,11 +3,13 @@
 from abc import ABCMeta
 from abc import abstractmethod
 from typing import Iterable, Tuple, TypeVar
+import warnings
 
 import numpy as np
 import pandas as pd
 
 from jaxtyping import Float
+from numpy.typing import NDArray
 
 from winnow.datasets.psm_dataset import PSMDataset
 
@@ -17,9 +19,15 @@ T = TypeVar("T", bound=Iterable)
 class FDRControl(metaclass=ABCMeta):
     """The interface for FDR control classes."""
 
+    def __init__(self) -> None:
+        self._fdr_values: NDArray[np.float64] | None = None
+        self._confidence_scores: NDArray[np.float64] | None = None
+
     @abstractmethod
     def fit(self, dataset: T) -> None:
         """Fit parameters of FDR control method to a dataset.
+
+        This method should use the `self._fdr_values` and `self._confidence_scores` attributes to store the FDR values and confidence scores.
 
         Args:
             dataset (T):
@@ -50,24 +58,91 @@ class FDRControl(metaclass=ABCMeta):
             ]
         )
 
-    @abstractmethod
     def get_confidence_cutoff(self, threshold: float) -> float:
-        """Return the confidence cutoff corresponding to a given FDR threshold.
+        """Compute the confidence score cutoff for a given FDR threshold.
 
         Args:
             threshold (float):
-                The target FDR threshold. Must satisfy 0 < `threshold` < 1.
+                The target FDR threshold, where 0 < threshold < 1.
 
         Returns:
             float:
-                The confidence cutoff corresponding to the target FDR threshold.
+                The confidence score cutoff corresponding to the specified FDR level.
         """
-        pass
+        if self._confidence_scores is None or self._fdr_values is None:
+            raise AttributeError("FDR method not fitted, please call `fit()` first")
 
-    @abstractmethod
+        # NOTE: The false discovery rate (FDR) is computed as the cumulative average across predictions
+        # ranked in descending order of confidence. This guarantees that FDR is a monotonically decreasing
+        # function of confidence score: it exhibits strict increases when lower-confidence predictions with
+        # higher error rates are incorporated, while remaining constant for predictions that share the same
+        # confidence score.
+
+        # Find the least conservative index where FDR is at or below threshold
+        idx = np.searchsorted(self._fdr_values, threshold, side="right") - 1
+
+        # If all observed PSM-specific FDR thresholds are above the threshold, this means that no scores meet the FDR requirement.
+        # In this case, we do not return a confidence score cutoff.
+        if idx == -1:
+            warnings.warn(
+                f"FDR threshold {threshold} is below the range of fitted FDR thresholds (min: {self._fdr_values[0]:.4f}). "
+                f"Cannot compute an accurate FDR estimate from fitted data. Returning NaN.",
+                UserWarning,
+            )
+            return np.nan
+
+        # If the threshold is above the range of fitted FDR thresholds, this means that all scores
+        # meet the FDR requirement.
+        # In this case, return a conservative estimate of the lowest fitted confidence score.
+        # We do not automatically return a confidence score of 0.0 because we cannot guarantee that FDR
+        # would not increase above the threshold for scores below the minimum fitted confidence score.
+        elif idx == len(self._fdr_values) - 1 and threshold > self._fdr_values[-1]:
+            warnings.warn(
+                f"FDR threshold {threshold} is above the range of fitted FDR thresholds (max: {self._fdr_values[-1]:.4f}). "
+                f"Cannot compute an accurate FDR estimate from fitted data. Returning conservative estimate of {self._confidence_scores[idx]:.4f}.",
+                UserWarning,
+            )
+
+        return self._confidence_scores[idx]
+
     def compute_fdr(self, score: float) -> float:
-        """Compute FDR for a given confidence score."""
-        pass
+        """Computes the false discovery rate (FDR) for all PSMs with a confidence score >= `score`.
+
+        This method calculates the FDR as the probability of a PSM being incorrect given
+        that its confidence score is greater than or equal to the given cutoff `score`.
+        It is formally defined as: `P(incorrect | S >= s)`.
+        It is important to note that FDR, like q-values, depends upon the entire dataset,
+        whereas posterior error probability (PEP) depends only on the single given PSM's confidence score.
+
+        Args:
+            score (float): The confidence score cutoff, where 0 < score < 1.
+
+        Returns:
+            float: The estimated FDR for all PSMs at or above the given score.
+        """
+        if self._confidence_scores is None or self._fdr_values is None:
+            raise AttributeError("FDR method not fitted, please call `fit()` first")
+
+        # Find the least conservative index where confidence scores are at or above the cutoff
+        idx = np.searchsorted(-self._confidence_scores, -score, side="left")
+
+        # If the score is below the range of fitted confidence scores, return a conservative estimate of 1.0
+        if idx == len(self._confidence_scores) and score < self._confidence_scores[-1]:
+            warnings.warn(
+                f"Score {score} is below the range of fitted confidence scores (min: {self._confidence_scores[-1]:.4f}). "
+                f"Cannot compute FDR from fitted data. Returning conservative estimate of 1.0.",
+                UserWarning,
+            )
+            return 1.0
+        # If the score is above the range of fitted confidence scores, return a conservative estimate of the FDR at the lowest score
+        elif idx == 0 and score > self._confidence_scores[0]:
+            warnings.warn(
+                f"Score {score} is above the range of fitted confidence scores (max: {self._confidence_scores[0]:.4f}). "
+                f"Cannot compute FDR from fitted data. Returning conservative estimate of {self._fdr_values[0]:.4f}.",
+                UserWarning,
+            )
+
+        return self._fdr_values[idx]
 
     def add_psm_fdr(
         self, dataset_metadata: pd.DataFrame, confidence_col: str

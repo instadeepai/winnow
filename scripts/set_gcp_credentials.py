@@ -1,0 +1,48 @@
+"""Set Google Storage credentials."""
+
+from __future__ import annotations
+
+import base64
+import json
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+def to_base64(json_path: Path | str) -> str:
+    """Convert a JSON file with GS credentials to a base64 encoded string."""
+    with open(json_path) as f:
+        credentials = f.read()
+    return base64.b64encode(credentials.encode("ascii")).decode()
+
+
+def set_credentials() -> None:
+    """Set the GS credentials.
+
+    - To access GCP buckets, the credentials are stored in a json file.
+    - For runs on AIchor we only have access to the encoded string which should be decoded and saved
+
+    Raises:
+        OSError: if 'GS_CREDENTIALS_ENCODED' is not set.
+    """
+    try:
+        gcp_credentials_encoded = os.environ["GS_CREDENTIALS_ENCODED"]
+    except KeyError:
+        msg = (
+            "If the json file 'GOOGLE_APPLICATION_CREDENTIALS' does not exist, "
+            "you must set 'GS_CREDENTIALS_ENCODED' as the base64 encoded json file."
+        )
+        raise OSError(msg) from None
+
+    credentials = json.loads(base64.b64decode(gcp_credentials_encoded).decode())
+    gcp_credentials_path = Path("ext-dtu-denovo-sequencing-gcp.json")
+    with open(gcp_credentials_path, "w") as f:
+        json.dump(credentials, f)
+    print(f"Created {gcp_credentials_path}")
+
+
+if __name__ == "__main__":
+    set_credentials()
