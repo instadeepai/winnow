@@ -79,7 +79,7 @@ class FDRControl(metaclass=ABCMeta):
         )
         return dataset_metadata
 
-    def add_psm_qvalue(
+    def add_psm_q_value(
         self, dataset_metadata: pd.DataFrame, confidence_col: str
     ) -> pd.DataFrame:
         """Add PSM-specific q-values as a new column to the dataset.
@@ -117,11 +117,11 @@ class FDRControl(metaclass=ABCMeta):
         q_values.reverse()  # Reverse again to align order with confidence scores
 
         # Add q-values to the sorted dataframe
-        sorted_data["psm_qvalue"] = q_values
+        sorted_data["psm_q_value"] = q_values
 
         # Restore original order by merging back with original dataframe
         result = dataset_metadata.merge(
-            sorted_data[["psm_qvalue"]], left_index=True, right_index=True, how="left"
+            sorted_data[["psm_q_value"]], left_index=True, right_index=True, how="left"
         )
 
         return result
