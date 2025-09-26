@@ -555,6 +555,8 @@ class MZTabDatasetLoader(DatasetLoader):
         Returns:
             DataFrame with only valid predictions, filtering out entire spectra if either of the first two predictions contain invalid tokens
         """
+        invalid_prosit_regex = "|".join(INVALID_PROSIT_TOKENS)
+
         # Find spectra with invalid predictions (checks each amino acid in tokenised sequences)
         invalid_spectra = (
             predictions.group_by("spectra_ref")
@@ -562,9 +564,7 @@ class MZTabDatasetLoader(DatasetLoader):
                 [
                     # Check for invalid PTMs using list.eval to examine each amino acid token
                     pl.col("prediction")
-                    .list.eval(
-                        pl.element().str.contains("|".join(INVALID_PROSIT_TOKENS))
-                    )
+                    .list.eval(pl.element().str.contains(invalid_prosit_regex))
                     .list.any()
                     # NOTE: we only care about valid mods in the first 2 predictions per spectrum for chimeric beam features, since they use Prosit models
                     .slice(0, 2)
