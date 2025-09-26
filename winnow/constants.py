@@ -52,7 +52,7 @@ RESIDUE_REMAPPING: dict[str, str] = {
     "N(+0.98)": "N[UNIMOD:7]",
     "Q(+.98)": "Q[UNIMOD:7]",
     "N(+.98)": "N[UNIMOD:7]",
-    "C(+57.02)": "C[UNIMOD:4]",  # Carboxyamidomethylation
+    "C(+57.02)": "C[UNIMOD:4]",  # Carbamidomethylation
     "(+42.01)": "[UNIMOD:1]",  # Acetylation
     "(+43.01)": "[UNIMOD:5]",  # Carbamylation
     "(-17.03)": "[UNIMOD:385]",  # Loss of ammonia
@@ -65,7 +65,7 @@ CASANOVO_RESIDUE_REMAPPING: dict[str, str] = {
     "+42.011": "[UNIMOD:1]",  # Acetylation
     "+43.006": "[UNIMOD:5]",  # Carbamylation
     "-17.027": "[UNIMOD:385]",  # Loss of ammonia
-    "C+57.021": "C[UNIMOD:4]",  # Carboxyamidomethylation
+    "C+57.021": "C[UNIMOD:4]",  # Carbamidomethylation
     # "+43.006-17.027": "[UNIMOD:5][UNIMOD:385]",  # Carbamylation and Loss of ammonia
     "C[Carbamidomethyl]": "C[UNIMOD:4]",  # Carbamidomethylation
     "M[Oxidation]": "M[UNIMOD:35]",  # Met oxidation:   131.040485 + 15.994915
