@@ -440,7 +440,9 @@ class MZTabDatasetLoader(DatasetLoader):
         # Load and process predictions
         predictions = self._load_dataset(predictions_path)
         predictions = self._process_predictions(predictions)
-        predictions = self._tokenize_predictions(predictions)
+        predictions = self._tokenize(
+            predictions, "prediction_untokenised", "prediction"
+        )
 
         # Filter out invalid Prosit tokens before getting top predictions
         predictions = self._filter_invalid_prosit_tokens(predictions)
@@ -512,29 +514,32 @@ class MZTabDatasetLoader(DatasetLoader):
 
         return predictions.with_columns(columns_to_add).drop(columns_to_drop)
 
-    def _tokenize_predictions(self, predictions: pl.DataFrame) -> pl.DataFrame:
-        """Tokenize peptide predictions and map modifications.
+    def _tokenize(
+        self,
+        predictions: pl.DataFrame,
+        untokenised_column: str,
+        tokenised_column: str,
+    ) -> pl.DataFrame:
+        """Tokenize peptide strings into lists of amino acids and map modifications.
 
         Args:
-            predictions: Processed predictions
+            predictions: Processed predictions or sequence labels
+            untokenised_column: Name of the column containing the untokenised sequence
+            tokenised_column: Name of the column to name the tokenised sequence
 
         Returns:
             Predictions with tokenized sequences
         """
         return predictions.with_columns(
-            [
-                # Map modifications to UNIMOD format (e.g., "M+15.995" -> "M[UNIMOD:35]")
-                pl.col("prediction_untokenised")
-                .map_elements(self._map_modifications, return_dtype=pl.Utf8)
-                .alias("prediction"),
-            ]
+            # Map modifications to UNIMOD format (e.g., "M+15.995" -> "M[UNIMOD:35]")
+            pl.col(untokenised_column)
+            .map_elements(self._map_modifications, return_dtype=pl.Utf8)
+            .alias(tokenised_column)
         ).with_columns(
-            [
-                # Split sequence string into list of amino acid tokens
-                pl.col("prediction")
-                .map_elements(metrics._split_peptide, return_dtype=pl.List(pl.Utf8))
-                .alias("prediction"),
-            ]
+            # Split sequence string into list of amino acid tokens
+            pl.col(tokenised_column)
+            .map_elements(metrics._split_peptide, return_dtype=pl.List(pl.Utf8))
+            .alias(tokenised_column)
         )
 
     def _filter_invalid_prosit_tokens(self, predictions: pl.DataFrame) -> pl.DataFrame:
@@ -648,11 +653,10 @@ class MZTabDatasetLoader(DatasetLoader):
                 # Replace L with I
                 pl.col("sequence").str.replace("L", "I").alias("sequence_untokenised")
             )
-            spectrum_data = spectrum_data.with_columns(
-                pl.col("sequence_untokenised")
-                .map_elements(metrics._split_peptide, return_dtype=pl.List(pl.Utf8))
-                .alias("sequence")
+            spectrum_data = self._tokenize(
+                spectrum_data, "sequence_untokenised", "sequence"
             )
+
         return spectrum_data
 
     def _merge_data(
