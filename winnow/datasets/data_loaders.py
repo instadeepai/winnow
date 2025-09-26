@@ -196,7 +196,9 @@ class InstaNovoDatasetLoader(DatasetLoader):
         elif spectrum_path.suffix == ".ipc":
             df = pl.read_ipc(spectrum_path)
         else:
-            raise ValueError(f"Unsupported file format: {spectrum_path.suffix}")
+            raise ValueError(
+                f"Unsupported file format: {spectrum_path.suffix}. Supported formats are .parquet and .ipc."
+            )
 
         if "sequence" in df.columns:
             has_labels = True
@@ -407,7 +409,9 @@ class MZTabDatasetLoader(DatasetLoader):
         elif spectrum_path.suffix == ".ipc":
             df = pl.read_ipc(spectrum_path)
         else:
-            raise ValueError(f"Unsupported file format: {spectrum_path.suffix}")
+            raise ValueError(
+                f"Unsupported file format: {spectrum_path.suffix}. Supported formats are .parquet and .ipc."
+            )
 
         if "sequence" in df.columns:
             has_labels = True
