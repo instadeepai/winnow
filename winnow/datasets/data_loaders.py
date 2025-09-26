@@ -694,7 +694,9 @@ class MZTabDatasetLoader(DatasetLoader):
         metadata = metadata.with_columns(
             [
                 pl.col("prediction")
-                .map_elements(lambda x: isinstance(x, list), return_dtype=pl.Boolean)
+                .map_elements(
+                    lambda x: isinstance(x, pl.Series), return_dtype=pl.Boolean
+                )
                 .alias("valid_prediction"),
             ]
         )
@@ -704,7 +706,7 @@ class MZTabDatasetLoader(DatasetLoader):
                 [
                     pl.col("sequence")
                     .map_elements(
-                        lambda x: isinstance(x, list), return_dtype=pl.Boolean
+                        lambda x: isinstance(x, pl.Series), return_dtype=pl.Boolean
                     )
                     .alias("valid_peptide"),
                 ]
