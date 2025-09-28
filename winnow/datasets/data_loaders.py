@@ -516,7 +516,14 @@ class MZTabDatasetLoader(DatasetLoader):
             )
             columns_to_drop = ["search_engine_score[1]", "sequence"]
 
-        return predictions.with_columns(columns_to_add).drop(columns_to_drop)
+        predictions = predictions.with_columns(columns_to_add).drop(columns_to_drop)
+
+        # Sort predictions by index and confidence to ensure correct ordering
+        predictions = predictions.sort(
+            ["index", "confidence"], descending=[False, True]
+        )
+
+        return predictions
 
     def _tokenize(
         self,
@@ -557,34 +564,40 @@ class MZTabDatasetLoader(DatasetLoader):
         """
         invalid_prosit_regex = "|".join(INVALID_PROSIT_TOKENS)
 
-        # Find spectra with invalid predictions (checks each amino acid in tokenised sequences)
-        invalid_spectra = (
-            predictions.group_by("spectra_ref")
-            .agg(
-                [
-                    # Check for invalid PTMs using list.eval to examine each amino acid token
-                    pl.col("prediction")
-                    .list.eval(pl.element().str.contains(invalid_prosit_regex))
-                    .list.any()
-                    # NOTE: we only care about valid mods in the first 2 predictions per spectrum for chimeric beam features, since they use Prosit models
-                    .slice(0, 2)
-                    .any()
-                    .alias("has_invalid_tokens"),
-                    # Check for unmodified Cysteine
-                    pl.col("prediction")
-                    .list.eval(pl.element().eq("C"))
-                    .list.any()
-                    .slice(0, 2)
-                    .any()
-                    .alias("has_unmodified_cys"),
-                ]
+        # Identify the first two predictions for each spectrum using a window function.
+        # This assumes predictions are correctly ordered within each "index" group.
+        is_top_2 = pl.int_range(0, pl.len()).over("index") < 2
+
+        # For the top 2 predictions, check for either of the two invalid conditions:
+        # 1. The token list contains an invalid Prosit token.
+        # 2. The token list contains an unmodified Cysteine ("C").
+        # For rows that are not in the top 2, this expression returns False.
+        has_issue_in_row = (
+            pl.when(is_top_2)
+            .then(
+                pl.col("prediction")
+                .list.eval(
+                    pl.element().str.contains(invalid_prosit_regex)
+                    | pl.element().eq("C")
+                )
+                .list.any()
             )
-            .filter(pl.col("has_invalid_tokens") | pl.col("has_unmodified_cys"))
-            .select("spectra_ref")
+            .otherwise(False)
+        )
+        predictions = predictions.with_columns(
+            has_issue_in_row.alias("has_issue_in_row")
         )
 
-        # Remove all predictions for spectra with any invalid predictions using anti-join
-        return predictions.join(invalid_spectra, on="spectra_ref", how="anti")
+        # Use another window function to check if *any* row for a given spectrum has an issue.
+        # This broadcasts the boolean result to all rows within the same "spectra_ref" group.
+        predictions = predictions.with_columns(
+            pl.col("has_issue_in_row").max().over("index").alias("spectrum_has_issue")
+        )
+
+        # Filter the DataFrame to keep only the spectra that have no issues.
+        return predictions.filter(~pl.col("spectrum_has_issue")).drop(
+            ["has_issue_in_row", "spectrum_has_issue"]
+        )
 
     def _create_beam_predictions(
         self, predictions: pl.DataFrame, valid_spectra_indices: List[int]
@@ -631,15 +644,14 @@ class MZTabDatasetLoader(DatasetLoader):
         """Get highest scoring prediction for each spectrum.
 
         Args:
-            predictions: Tokenized predictions
+            predictions: Tokenized predictions (pre-sorted by confidence within each spectrum)
 
         Returns:
             DataFrame containing only the highest scoring prediction per spectrum
         """
-        return predictions.group_by("spectra_ref").agg(
-            # For each spectrum, sort all predictions by confidence and take the first (highest)
-            pl.col("*").sort_by("confidence", descending=True).first()
-        )
+        # Since predictions are already sorted by confidence within each spectrum,
+        # we can simply take the first row for each spectrum using a window function
+        return predictions.filter(pl.int_range(0, pl.len()).over("spectra_ref") == 0)
 
     def _process_spectrum_data(
         self, spectrum_data: pl.DataFrame, has_labels: bool
