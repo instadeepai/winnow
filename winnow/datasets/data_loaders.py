@@ -304,26 +304,27 @@ class InstaNovoDatasetLoader(DatasetLoader):
             )
         return dataset
 
-    def load(self, *args: Path, **kwargs: Any) -> CalibrationDataset:
+    def load(
+        self, *, data_path: Path, predictions_path: Optional[Path] = None, **kwargs: Any
+    ) -> CalibrationDataset:
         """Load a CalibrationDataset from InstaNovo CSV predictions.
 
         Args:
-            *args: Should contain spectrum_path and beam_predictions_path in that order
+            data_path: Path to the spectrum data file
+            predictions_path: Path to the IPC or parquet beam predictions file
             **kwargs: Not used
 
         Returns:
             CalibrationDataset: An instance of the CalibrationDataset class containing metadata and predictions.
 
         Raises:
-            ValueError: If incorrect number of positional arguments provided
+            ValueError: If predictions_path is None
         """
-        if len(args) != 2:
-            raise ValueError(
-                "Expected exactly 2 positional arguments: spectrum_path and beam_predictions_path"
-            )
-        spectrum_path, beam_predictions_path = args
+        if predictions_path is None:
+            raise ValueError("predictions_path is required for InstaNovoDatasetLoader")
 
-        inputs, has_labels = self._load_spectrum_data(spectrum_path)
+        beam_predictions_path = predictions_path
+        inputs, has_labels = self._load_spectrum_data(data_path)
         inputs = self._process_spectrum_data(inputs, has_labels)
 
         predictions, beams = self._load_beam_preds(beam_predictions_path)
@@ -418,27 +419,26 @@ class MZTabDatasetLoader(DatasetLoader):
 
         return df, has_labels
 
-    def load(self, *args: Path, **kwargs: Any) -> CalibrationDataset:
+    def load(
+        self, *, data_path: Path, predictions_path: Optional[Path] = None, **kwargs: Any
+    ) -> CalibrationDataset:
         """Load a calibration dataset from MZTab predictions.
 
         Args:
-            *args: Should contain spectrum_path and predictions_path in that order
+            data_path: Path to the spectrum data file
+            predictions_path: Path to the MZTab predictions file
             **kwargs: Not used
 
         Returns:
             CalibrationDataset: An instance of the CalibrationDataset class containing metadata and predictions.
 
         Raises:
-            ValueError: If incorrect number of positional arguments provided
+            ValueError: If predictions_path is None
         """
-        if len(args) != 2:
-            raise ValueError(
-                "Expected exactly 2 positional arguments: spectrum_path and predictions_path"
-            )
-        spectrum_path, predictions_path = args
-
+        if predictions_path is None:
+            raise ValueError("predictions_path is required for MZTabDatasetLoader")
         # Load and process spectrum data
-        spectrum_data, has_labels = self._load_spectrum_data(spectrum_path)
+        spectrum_data, has_labels = self._load_spectrum_data(data_path)
         spectrum_data = self._process_spectrum_data(spectrum_data, has_labels)
 
         # Load and process predictions
@@ -768,11 +768,14 @@ class PointNovoDatasetLoader(DatasetLoader):
     Note: This loader is not yet implemented.
     """
 
-    def load(self, *args: Path, **kwargs: Any) -> CalibrationDataset:
+    def load(
+        self, *, data_path: Path, predictions_path: Optional[Path] = None, **kwargs: Any
+    ) -> CalibrationDataset:
         """Load a calibration dataset from PointNovo predictions.
 
         Args:
-            *args: Should contain mgf_path and predictions_path in that order
+            data_path: Path to the spectrum data file
+            predictions_path: Path to the predictions file
             **kwargs: Not used
 
         Returns:
@@ -780,12 +783,8 @@ class PointNovoDatasetLoader(DatasetLoader):
 
         Raises:
             NotImplementedError: This loader is not yet implemented.
-            ValueError: If incorrect number of positional arguments provided
+            ValueError: If predictions_path is None
         """
-        if len(args) != 2:
-            raise ValueError(
-                "Expected exactly 2 positional arguments: mgf_path and predictions_path"
-            )
         raise NotImplementedError("PointNovoDatasetLoader is not yet implemented")
 
         # -- Load MGF file
@@ -872,24 +871,23 @@ class PointNovoDatasetLoader(DatasetLoader):
 class WinnowDatasetLoader(DatasetLoader):
     """Loader for previously saved CalibrationDataset instances."""
 
-    def load(self, *args: Path, **kwargs: Any) -> CalibrationDataset:
+    def load(
+        self, *, data_path: Path, predictions_path: Optional[Path] = None, **kwargs: Any
+    ) -> CalibrationDataset:
         """Load a previously saved CalibrationDataset.
 
         Args:
-            *args: Should contain exactly one argument: data_dir
+            data_path: Path to the directory containing the dataset
+            predictions_path: Not used (for compatibility with DatasetLoader interface)
             **kwargs: Not used
 
         Returns:
             CalibrationDataset: The loaded dataset.
-
-        Raises:
-            ValueError: If incorrect number of positional arguments provided
         """
-        if len(args) != 1:
-            raise ValueError("Expected exactly 1 positional argument: data_dir")
-        data_dir = args[0]
+        if predictions_path is not None:
+            raise ValueError("predictions_path is not used for WinnowDatasetLoader")
 
-        with (data_dir / "metadata.csv").open(mode="r") as metadata_file:
+        with (data_path / "metadata.csv").open(mode="r") as metadata_file:
             metadata = pd.read_csv(metadata_file)
             if "sequence" in metadata.columns:
                 metadata["sequence"] = metadata["sequence"].apply(
@@ -913,7 +911,7 @@ class WinnowDatasetLoader(DatasetLoader):
                 )
             )
 
-        predictions_path = data_dir / "predictions.pkl"
+        predictions_path = data_path / "predictions.pkl"
         if predictions_path.exists():
             with predictions_path.open(mode="rb") as predictions_file:
                 predictions = pickle.load(predictions_file)
