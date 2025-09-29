@@ -589,7 +589,7 @@ class MZTabDatasetLoader(DatasetLoader):
         )
 
         # Use another window function to check if *any* row for a given spectrum has an issue.
-        # This broadcasts the boolean result to all rows within the same "spectra_ref" group.
+        # This broadcasts the boolean result to all rows within the same "index" group.
         predictions = predictions.with_columns(
             pl.col("has_issue_in_row").max().over("index").alias("spectrum_has_issue")
         )
@@ -651,7 +651,7 @@ class MZTabDatasetLoader(DatasetLoader):
         """
         # Since predictions are already sorted by confidence within each spectrum,
         # we can simply take the first row for each spectrum using a window function
-        return predictions.filter(pl.int_range(0, pl.len()).over("spectra_ref") == 0)
+        return predictions.filter(pl.int_range(0, pl.len()).over("index") == 0)
 
     def _process_spectrum_data(
         self, spectrum_data: pl.DataFrame, has_labels: bool
