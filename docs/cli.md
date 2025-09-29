@@ -9,7 +9,7 @@ After installing winnow, the `winnow` command becomes available:
 ```bash
 pip install https://github.com/instadeepai/winnow
 # or
-uv pip install https://github.com/instadeepai/winnow
+uv pip install "git+https://github.com/instadeepai/winnow.git"
 ```
 
 ## Commands
