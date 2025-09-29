@@ -13,7 +13,7 @@ from winnow.calibration import ProbabilityCalibrator
 from winnow.calibration.calibration_features import (
     MassErrorFeature, PrositFeatures, BeamFeatures
 )
-from winnow.datasets import CalibrationDataset
+from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.constants import RESIDUE_MASSES
 
 # Create and configure calibrator

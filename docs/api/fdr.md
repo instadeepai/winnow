@@ -31,7 +31,7 @@ Implements database-grounded FDR control using database search results as ground
 
 ```python
 from winnow.fdr import DatabaseGroundedFDRControl
-from winnow.datasets.calibration_dataset import RESIDUE_MASSES
+from winnow.constants import RESIDUE_MASSES
 
 # Create FDR controller
 fdr_control = DatabaseGroundedFDRControl(confidence_feature="confidence")
@@ -164,7 +164,7 @@ plt.ylabel("Confidence Cutoff")
 Filter PSM datasets at target FDR levels:
 
 ```python
-from winnow.datasets import PSMDataset
+from winnow.datasets.psm_dataset import PSMDataset
 
 # Filter PSMDataset at 1% FDR
 filtered_psms = fdr_control.filter_entries(
