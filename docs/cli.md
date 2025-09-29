@@ -74,8 +74,8 @@ spectrum_path: "/path/to/spectra.csv"
 
 **Required files:**
 
+- **Spectrum file**: Parquet/IPC file containing spectral metadata and features
 - **Predictions CSV**: Contains beam search results with columns like `preds`, `preds_beam_1`, confidence scores
-- **Spectra CSV**: Contains spectral metadata and features
 
 ### MZTab Configuration
 
