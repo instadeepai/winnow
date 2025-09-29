@@ -27,10 +27,6 @@ dev = [
     "pytest>=8.3.5",
 ]
 
-[project.scripts]
-winnow='winnow.scripts.main:app'
-
-[project.optional-dependencies]
 notebook = [
     "huggingface-hub>=0.29.3",
     "ipykernel>=6.29.5",
@@ -39,3 +35,6 @@ notebook = [
     "seaborn>=0.13.2",
     "tqdm>=4.67.1",
 ]
+
+[project.scripts]
+winnow='winnow.scripts.main:app'
