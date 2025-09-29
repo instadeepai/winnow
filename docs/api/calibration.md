@@ -14,6 +14,7 @@ from winnow.calibration.calibration_features import (
     MassErrorFeature, PrositFeatures, BeamFeatures
 )
 from winnow.datasets import CalibrationDataset
+from winnow.constants import RESIDUE_MASSES
 
 # Create and configure calibrator
 calibrator = ProbabilityCalibrator(seed=42)
@@ -90,6 +91,7 @@ Calculates the difference between observed precursor mass and theoretical mass b
 
 ```python
 from winnow.calibration.calibration_features import MassErrorFeature
+from winnow.constants import RESIDUE_MASSES
 
 feature = MassErrorFeature(residue_masses=RESIDUE_MASSES)
 ```
