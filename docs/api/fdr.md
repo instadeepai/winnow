@@ -188,4 +188,4 @@ print(f"Retained {len(filtered_psms)} PSMs at 1% FDR")
 - Working with *de novo* sequencing outputs
 - Require additional PSM-specific evaluation metrics such as posterior error probabilities
 
-For detailed examples and usage patterns, refer to the [examples notebook](https://github.com/instadeepai/winnow/blob/main/examples/fdr_plots.ipynb).
+For detailed examples and usage patterns, refer to the [examples notebook](https://github.com/instadeepai/winnow/blob/main/examples/getting_started_with_winnow.ipynb).

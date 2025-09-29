@@ -170,4 +170,4 @@ The system automatically handles feature dependencies:
 - **Automatic Computation**: Dependencies computed before features
 - **Memory Efficiency**: Shared dependencies computed once
 
-For detailed examples and usage patterns, refer to the [examples notebook](https://github.com/instadeepai/winnow/blob/main/examples/fdr_plots.ipynb).
+For detailed examples and usage patterns, refer to the [examples notebook](https://github.com/instadeepai/winnow/blob/main/examples/getting_started_with_winnow.ipynb).

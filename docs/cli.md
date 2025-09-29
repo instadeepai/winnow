@@ -266,4 +266,4 @@ The CLI automatically filters out:
 - Precursor charges above 6 (Prosit limitation)
 - Invalid modifications and tokens
 
-For more advanced usage and customisation, refer to the [Python API documentation](api/calibration.md) and [examples notebook](https://github.com/instadeepai/winnow/blob/main/examples/fdr_plots.ipynb).
+For more advanced usage and customisation, refer to the [Python API documentation](api/calibration.md) and [examples notebook](https://github.com/instadeepai/winnow/blob/main/examples/getting_started_with_winnow.ipynb).

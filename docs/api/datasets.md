@@ -144,4 +144,4 @@ psm1 >= psm2  # True if psm1 has higher or equal confidence
 - **Confidence Comparison**: Built-in comparison operators
 - **Type Safety**: Structured dataclass with defined fields
 
-For detailed examples and usage patterns, refer to the [examples notebook](https://github.com/instadeepai/winnow/blob/main/examples/fdr_plots.ipynb).
+For detailed examples and usage patterns, refer to the [examples notebook](https://github.com/instadeepai/winnow/blob/main/examples/getting_started_with_winnow.ipynb).
