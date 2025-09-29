@@ -129,7 +129,7 @@ The `winnow` package is organized into three sub-modules:
     - `DatabaseGroundedFDRControl` (for database-grounded FDR control)
     - `NonParametricFDRControl` (uses a non-parametric and label-free method for FDR estimation)
 
-For an example, check out the [example notebook](https://github.com/instadeepai/winnow/blob/main/examples/fdr_plots.ipynb).
+For an example, check out the [example notebook](https://github.com/instadeepai/winnow/blob/main/examples/getting_started_with_winnow.ipynb).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
