@@ -115,11 +115,11 @@ For prediction (`winnow predict`), you need:
 
 ### Winnow Method (`--method winnow`)
 
-Uses empirical Bayesian mixture model:
+Uses non-parametric FDR estimation procedure:
 
 - **No ground truth required**: Works with confidence scores alone
-- **Beta mixture model**: Models correct/incorrect score distributions
-- **Multiple metrics**: Provides FDR, PEP, p-values and expect score
+- **No correct/incorrect distribution modelling**: Process directly estimates FDR using calibrated confidence scores
+- **Multiple metrics**: Provides FDR, PEP and q-values.
 
 ```bash
 winnow predict \
@@ -166,8 +166,8 @@ Prediction produces a CSV file (`--output-path`) containing:
 - **Original columns**: All input data columns
 - **`calibrated_confidence`**: Calibrated confidence scores
 - **`psm_fdr`**: PSM-specific FDR estimates
+- **`psm_q_value`**: Q-values
 - **`psm_pep`**: Posterior error probabilities (winnow method only)
-- **`psm_p_value`**: P-values (winnow method only)
 - **Filtered rows**: Only PSMs passing the FDR threshold
 
 ## Example Workflows

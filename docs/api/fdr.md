@@ -1,6 +1,6 @@
 # FDR Control API
 
-The `winnow.fdr` module implements false discovery rate (FDR) estimation and control methods for *de novo* peptide sequencing using both database-grounded and empirical Bayesian approaches.
+The `winnow.fdr` module implements false discovery rate (FDR) estimation and control methods for *de novo* peptide sequencing using both database-grounded and non-parametric approaches.
 
 ## Base Interface
 
@@ -52,6 +52,9 @@ filtered_data = dataset[dataset["confidence"] >= confidence_cutoff]
 
 # Add PSM-specific FDR values
 dataset_with_fdr = fdr_control.add_psm_fdr(dataset, "confidence")
+
+# Add PSM-specific q-values
+dataset_with_q_values = fdr_control.add_psm_q_value(dataset, "confidence")
 ```
 
 **Key Features:**
@@ -67,30 +70,21 @@ dataset_with_fdr = fdr_control.add_psm_fdr(dataset, "confidence")
 - Predicted peptide sequences (`prediction` column)
 - Confidence scores (configurable column name)
 
-### EmpiricalBayesFDRControl
+### NonParametricFDRControl
 
-Uses an empirical Bayesian mixture model for FDR estimation, specifically designed for scenarios where database ground truth is unavailable.
+Uses a label-free, non-parametric method for FDR estimation, specifically designed for scenarios where database ground truth is unavailable.
 
 ```python
-from winnow.fdr import EmpiricalBayesFDRControl
-import jax.numpy as jnp
+from winnow.fdr import NonParametricFDRControl
 
-# Create Bayesian FDR controller
-fdr_control = EmpiricalBayesFDRControl()
+# Create non-parametric FDR controller
+fdr_control = NonParametricFDRControl()
 
-# Fit mixture model to confidence scores
-confidence_scores = jnp.array(dataset["confidence"].values)
-fdr_control.fit(
-    dataset=confidence_scores,
-    lr=0.005,        # Learning rate for optimisation
-    n_steps=5000     # Number of training steps
-)
+# Fit estimation method to confidence scores
+fdr_control.fit(dataset=dataset["confidence"])
 
 # Get confidence cutoff for 5% FDR
-confidence_cutoff = fdr_control.get_confidence_cutoff(
-    threshold=0.05,
-    mesh_size=1000  # Resolution for root finding
-)
+confidence_cutoff = fdr_control.get_confidence_cutoff(threshold=0.05)
 
 # Compute FDR for specific score
 fdr_estimate = fdr_control.compute_fdr(score=0.8)
@@ -100,24 +94,19 @@ pep = fdr_control.compute_posterior_probability(score=0.8)
 
 # Add PSM-specific FDR values
 dataset_with_fdr = fdr_control.add_psm_fdr(dataset, "confidence")
+
+# Add PSM-specific q-values
+dataset_with_q_values = fdr_control.add_psm_q_value(dataset, "confidence")
 ```
 
 **Key Features:**
 
-- **Beta Mixture Model**: Models score distributions as mixture of correct/incorrect PSMs
-- **Variational Inference**: Uses stochastic variational inference for parameter estimation
-- **Multiple Metrics**: Computes FDR, posterior error probability, p-values and expect score
+- **Non-parametric estimation**: Estimates FDR directly by assuming PSM confidences are calibrated
+- **Multiple Metrics**: Computes FDR, q-values, posterior error probability
     - **FDR**: `compute_fdr(score)` - False discovery rate at cutoff
     - **PEP**: `compute_posterior_probability(score)` - Posterior error probability
-    - **P-value**: `compute_p_value(score)` - Statistical significance test
-    - **Expect-score**: `compute_expect_score(score, total_matches)` - Expected number of false positives at score
+    - **Q-value**: `compute_q_value(score)` - Minimum FDR for significance
 - **No Ground Truth Required**: Works with confidence scores alone
-
-**Model Components:**
-
-- **Proportion Parameter**: Fraction of correct PSMs in the dataset
-- **Beta Distributions**: Separate distributions for correct and incorrect PSMs
-- **JAX Integration**: Fast computation using JAX and NumPyro
 
 ## Additional Features
 
@@ -134,6 +123,21 @@ dataset_with_fdr = fdr_control.add_psm_fdr(
 
 # Access PSM-specific FDR values
 psm_fdr_values = dataset_with_fdr["psm_fdr"]
+```
+
+### Q-values
+
+Both methods support q-value computation, the minimum FDR threshold at which a given PSM is significant.
+
+```python
+# Add q-values for each PSM
+dataset_with_q_values = fdr_control.add_psm_q_value(
+    dataset_metadata=dataset,
+    confidence_col="confidence"
+)
+
+# Access PSM-specific FDR values
+psm_q_values = dataset_with_q_values["psm_q_value"]
 ```
 
 ### Confidence Curves
@@ -171,23 +175,6 @@ filtered_psms = fdr_control.filter_entries(
 print(f"Retained {len(filtered_psms)} PSMs at 1% FDR")
 ```
 
-## Bayesian Model Details
-
-### BetaMixtureParameters
-
-The empirical Bayesian method uses a beta mixture model with parameters:
-
-```python
-from winnow.fdr.bayes import BetaMixtureParameters
-
-# Model parameters after fitting
-params = fdr_control.mixture_parameters
-
-print(f"Proportion correct: {params.proportion}")
-print(f"Correct distribution: Beta({params.correct_alpha}, {params.correct_beta})")
-print(f"Incorrect distribution: Beta({params.incorrect_alpha}, {params.incorrect_beta})")
-```
-
 ### FDR Estimation Method Selection
 
 **Use DatabaseGroundedFDRControl when:**
@@ -195,10 +182,10 @@ print(f"Incorrect distribution: Beta({params.incorrect_alpha}, {params.incorrect
 - High-quality database search results available
 - Not restricted to *de novo* sequencing outputs
 
-**Use EmpiricalBayesFDRControl when:**
+**Use NonParametricFDRControl when:**
 
 - No database ground truth available
 - Working with *de novo* sequencing outputs
-- Require additional PSM evaluation metrics, such as p-values or posterior error probabilities
+- Require additional PSM-specific evaluation metrics such as posterior error probabilities
 
 For detailed examples and usage patterns, refer to the [examples notebook](https://github.com/instadeepai/winnow/blob/main/examples/fdr_plots.ipynb).
