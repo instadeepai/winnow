@@ -26,6 +26,12 @@ dev = [
     "pre-commit>=4.1.0",
     "pytest>=8.3.5",
 ]
+docs = [
+    "markdown-include>=0.8.1",
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.6.18",
+    "pymdown-extensions>=10.16.1",
+]
 
 notebook = [
     "huggingface-hub>=0.29.3",
