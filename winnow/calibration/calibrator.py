@@ -36,6 +36,8 @@ class ProbabilityCalibrator:
             learning_rate_init=0.001,
             alpha=0.0001,
             max_iter=1000,
+            early_stopping=True,
+            validation_fraction=0.1,
         )
         self.scaler = StandardScaler()
 
