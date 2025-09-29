@@ -6,6 +6,8 @@ __pycache__
 
 *.egg-info
 
+docs_public
+
 *.txt
 *.csv
 *.parquet
