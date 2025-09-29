@@ -28,7 +28,7 @@ winnow train \
 
 **Arguments:**
 
-- `--data-source`: Type of dataset (`instanovo`, `winnow`)
+- `--data-source`: Type of dataset (`instanovo`, `mztab`, `winnow`)
 - `--dataset-config-path`: Path to YAML configuration file
 - `--model-output-folder`: Directory to save trained calibrator
 - `--dataset-output-path`: Path to save training results CSV
@@ -50,7 +50,7 @@ winnow predict \
 
 **Arguments:**
 
-- `--data-source`: Type of dataset (`instanovo`, `winnow`, `pointnovo`, `mztab`)
+- `--data-source`: Type of dataset (`instanovo`, `winnow`, `mztab`)
 - `--dataset-config-path`: Path to YAML configuration file
 - `--model-folder`: Directory containing trained calibrator
 - `--method`: FDR estimation method (`winnow` or `database-ground`)
