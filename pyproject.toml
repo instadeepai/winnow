@@ -6,7 +6,8 @@ readme = "README.md"
 version = "1.0.0"
 requires-python = ">=3.10"
 dependencies = [
-    "ipywidgets>=8.1.5",
+    "instanovo",
+    "jax>=0.5.2",
     "koinapy>=0.0.10",
     "tomli>=2.2.1",
     "typer>=0.15.2",
@@ -30,6 +31,15 @@ docs = [
     "mkdocs>=1.6.1",
     "mkdocs-material>=9.6.18",
     "pymdown-extensions>=10.16.1",
+]
+
+notebook = [
+    "huggingface-hub>=0.29.3",
+    "ipykernel>=6.29.5",
+    "ipywidgets>=8.1.7",
+    "jupyter>=1.1.1",
+    "seaborn>=0.13.2",
+    "tqdm>=4.67.1",
 ]
 
 [project.scripts]

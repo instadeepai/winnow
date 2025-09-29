@@ -15,3 +15,7 @@ docs_public
 *.pkl
 *.json
 *.yaml
+
+examples/winnow-general-model
+examples/winnow-ms-datasets
+examples/output
