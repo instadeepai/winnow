@@ -77,6 +77,21 @@ spectrum_path: "/path/to/spectra.csv"
 - **Predictions CSV**: Contains beam search results with columns like `preds`, `preds_beam_1`, confidence scores
 - **Spectra CSV**: Contains spectral metadata and features
 
+### MZTab Configuration
+
+For MZTab format datasets (traditional search engines and Casanovo outputs):
+
+```yaml
+# mztab_config.yaml
+spectrum_path: "/path/to/spectra.parquet"
+predictions_path: "/path/to/predictions.mztab"
+```
+
+**Required files:**
+
+- **Spectrum file**: Parquet/IPC file with spectrum metadata and row indices matching MZTab spectra_ref
+- **MZTab file**: Standard MZTab format containing predictions
+
 ### Winnow Internal Configuration
 
 For winnow's internal format:
