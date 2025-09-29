@@ -9,11 +9,9 @@ dependencies = [
     "instanovo",
     "jax>=0.5.2",
     "koinapy>=0.0.10",
-    "numpyro>=0.17.0",
-    "tensorflow-probability>=0.25.0",
-    "numba==0.60.0",
     "tomli>=2.2.1",
     "typer>=0.15.2",
+    "instanovo>=1.1.4",
 ]
 
 [build-system]
@@ -22,9 +20,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["winnow"]
-
-[tool.uv.sources]
-instanovo = { git = "ssh://git@gitlab.com/instadeep/dtu-denovo-sequencing.git" }
 
 [dependency-groups]
 dev = [
