@@ -15,7 +15,8 @@ from winnow.calibration.calibration_features import (
     find_matching_ions,
     _raise_value_error,
 )
-from winnow.datasets.calibration_dataset import CalibrationDataset, RESIDUE_MASSES
+from winnow.datasets.calibration_dataset import CalibrationDataset
+from winnow.constants import RESIDUE_MASSES
 
 
 class TestUtilityFunctions:
