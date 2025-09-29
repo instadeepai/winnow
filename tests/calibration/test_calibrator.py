@@ -76,15 +76,20 @@ class TestProbabilityCalibrator:
     @pytest.fixture()
     def labelled_dataset(self):
         """Create a dataset with labels for supervised learning."""
+        # Create a larger dataset to support early stopping with validation_fraction=0.1
+        # Need at least 40 samples to have 4+ validation samples for stratified split
+        n_samples = 50
+        np.random.seed(42)  # For reproducible test data
+
         metadata = pd.DataFrame(
             {
-                "confidence": [0.9, 0.8, 0.7, 0.6, 0.5],
-                "correct": [1, 1, 0, 1, 0],
-                "feature1": [1.0, 2.0, 3.0, 4.0, 5.0],
-                "feature2": [0.1, 0.2, 0.3, 0.4, 0.5],
+                "confidence": np.random.uniform(0.1, 0.99, n_samples),
+                "correct": np.random.choice([0, 1], n_samples),
+                "feature1": np.random.uniform(1.0, 10.0, n_samples),
+                "feature2": np.random.uniform(0.1, 1.0, n_samples),
             }
         )
-        return CalibrationDataset(metadata=metadata, predictions=[None] * 5)
+        return CalibrationDataset(metadata=metadata, predictions=[None] * n_samples)
 
     def test_initialization(self, calibrator):
         """Test ProbabilityCalibrator initialisation."""

@@ -4,7 +4,7 @@ import numpy as np
 from instanovo.utils.metrics import Metrics
 
 from winnow.fdr.base import FDRControl
-from winnow.datasets.calibration_dataset import residue_set
+from winnow.constants import residue_set
 
 
 class DatabaseGroundedFDRControl(FDRControl):
