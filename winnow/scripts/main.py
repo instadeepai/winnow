@@ -65,8 +65,7 @@ class InstaNovoDatasetConfig:
 class MZTabDatasetConfig:
     """Config for calibration datasets saved in MZTab format."""
 
-    labelled_path: Path
-    mgf_path: Path
+    spectrum_path: Path
     predictions_path: Path
 
 
@@ -121,31 +120,32 @@ def load_dataset(
             winnow_dataset_config = WinnowDatasetConfig(
                 **yaml.safe_load(dataset_config_file)
             )
-            dataset = WinnowDatasetLoader().load(Path(winnow_dataset_config.data_dir))
+            dataset = WinnowDatasetLoader().load(
+                data_path=Path(winnow_dataset_config.data_dir)
+            )
         elif data_source is DataSource.instanovo:
             instanovo_dataset_config = InstaNovoDatasetConfig(
                 **yaml.safe_load(dataset_config_file)
             )
             dataset = InstaNovoDatasetLoader().load(
-                Path(instanovo_dataset_config.spectrum_path),
-                Path(instanovo_dataset_config.beam_predictions_path),
+                data_path=Path(instanovo_dataset_config.spectrum_path),
+                predictions_path=Path(instanovo_dataset_config.beam_predictions_path),
             )
         elif data_source is DataSource.mztab:
             mztab_dataset_config = MZTabDatasetConfig(
                 **yaml.safe_load(dataset_config_file)
             )
             dataset = MZTabDatasetLoader().load(
-                Path(mztab_dataset_config.labelled_path),
-                Path(mztab_dataset_config.mgf_path),
-                Path(mztab_dataset_config.predictions_path),
+                data_path=Path(mztab_dataset_config.spectrum_path),
+                predictions_path=Path(mztab_dataset_config.predictions_path),
             )
         elif data_source is DataSource.pointnovo:
             pointnovo_dataset_config = PointNovoDatasetConfig(
                 **yaml.safe_load(dataset_config_file)
             )
             dataset = PointNovoDatasetLoader().load(
-                Path(pointnovo_dataset_config.mgf_path),
-                Path(pointnovo_dataset_config.predictions_path),
+                data_path=Path(pointnovo_dataset_config.mgf_path),
+                predictions_path=Path(pointnovo_dataset_config.predictions_path),
             )
         else:
             raise TypeError(
