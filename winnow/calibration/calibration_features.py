@@ -1,7 +1,7 @@
 from abc import ABCMeta, abstractmethod
 import bisect
 from math import exp, isnan
-from typing import Dict, List, Tuple, Iterator
+from typing import Dict, List, Tuple, Iterator, Optional
 import warnings
 
 import pandas as pd
@@ -69,6 +69,8 @@ class FeatureDependency(metaclass=ABCMeta):
 
 class CalibrationFeatures(metaclass=ABCMeta):
     """The abstract interface for features for the calibration classifier."""
+
+    irt_predictor: Optional[MLPRegressor] = None
 
     @property
     @abstractmethod
@@ -542,10 +544,10 @@ class BeamFeatures(CalibrationFeatures):
         # Ensure dataset.predictions is not None
         _raise_value_error(dataset.predictions, "dataset.predictions")
 
-        count = sum(len(prediction) < 3 for prediction in dataset.predictions)  # type: ignore
+        count = sum(len(prediction) < 2 for prediction in dataset.predictions)  # type: ignore
         if count > 0:
             warnings.warn(
-                f"{count} beam search results have fewer than three sequences. "
+                f"{count} beam search results have fewer than two sequences. "
                 "This may affect the efficacy of computed beam features."
             )
 
@@ -563,7 +565,7 @@ class BeamFeatures(CalibrationFeatures):
         ]
         runner_up_probs = [
             [exp(item.sequence_log_probability) for item in prediction[1:]]  # type: ignore
-            if len(prediction) >= 3  # type: ignore
+            if len(prediction) >= 2  # type: ignore
             else [0.0]
             for prediction in dataset.predictions
         ]
@@ -607,11 +609,15 @@ class RetentionTimeFeature(CalibrationFeatures):
     This feature uses the Prosit model to predict indexed retention times (iRT) for peptides and trains a regression model to calibrate predictions based on observed retention times.
     """
 
+    irt_predictor: MLPRegressor
+
     def __init__(self, hidden_dim: int, train_fraction: float) -> None:
         self.train_fraction = train_fraction
         self.hidden_dim = hidden_dim
         self.prosit_model = koinapy.Koina("Prosit_2019_irt", "koina.wilhelmlab.org:443")
-        self.irt_predictor = MLPRegressor(hidden_layer_sizes=[hidden_dim])
+        self.irt_predictor = MLPRegressor(
+            hidden_layer_sizes=[hidden_dim], random_state=42
+        )
 
     @property
     def dependencies(self) -> List[FeatureDependency]:

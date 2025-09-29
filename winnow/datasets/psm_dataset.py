@@ -55,7 +55,15 @@ class PSMDataset:
 
         Returns:
             PSMDataset: A dataset containing the constructed PSMs.
+
+        Raises:
+            ValueError: If the input sequences don't have the same length.
         """
+        # Validate that all sequences have the same length
+        lengths = [len(spectra), len(peptides), len(confidence_scores)]
+        if len(set(lengths)) > 1:
+            raise ValueError("All sequences must have the same length")
+
         return cls(
             [
                 PeptideSpectrumMatch(

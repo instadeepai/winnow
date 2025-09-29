@@ -131,7 +131,7 @@ The `winnow` package is organized into three sub-modules:
     - `CalibrationFeature` (an extensible interface for defining calibration features)
 3. `winnow.fdr` – Implements FDR estimation methods:
     - `DatabaseGroundedFDRControl` (for database-grounded FDR control)
-    - `EmpiricalBayesFDRControl` (uses an empirical Bayesian mixture model for FDR estimation)
+    - `NonParametricFDRControl` (uses a non-parametric and label-free method for FDR estimation)
 
 For an example, check out the [example notebook](https://github.com/instadeepai/winnow/blob/main/examples/fdr_plots.ipynb).
 
