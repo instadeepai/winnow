@@ -9,13 +9,27 @@ The `winnow.datasets` module handles data loading and saving for peptide-spectru
 The main class for storing and processing calibration datasets for peptide sequencing. It integrates metadata, predictions and spectra data to support various operations such as filtering, merging and evaluating peptide sequence predictions against spectra.
 
 ```python
-from winnow.datasets import CalibrationDataset
+from winnow.datasets.calibration_dataset import CalibrationDataset
+from winnow.datasets.data_loaders import InstaNovoDatasetLoader, MZTabDatasetLoader, WinnowDatasetLoader
+from pathlib import Path
 
-# Load from CSV files
-dataset = CalibrationDataset.from_predictions_csv(
-    spectrum_path="path/to/spectrum_data.csv",
-    beam_predictions_path="path/to/predictions.csv"
+# Load using InstaNovo data loader
+loader = InstaNovoDatasetLoader()
+dataset = loader.load(
+    data_path=Path("spectrum_data.parquet"),
+    predictions_path=Path("predictions.csv")
 )
+
+# Load using MZTab data loader
+mztab_loader = MZTabDatasetLoader()
+dataset = mztab_loader.load(
+    data_path=Path("spectrum_data.parquet"),
+    predictions_path=Path("predictions.mztab")
+)
+
+# Load previously saved dataset
+winnow_loader = WinnowDatasetLoader()
+dataset = winnow_loader.load(data_path=Path("saved_dataset_directory"))
 
 # Save dataset (winnow's internal format)
 dataset.save(Path("output_directory"))
@@ -23,17 +37,65 @@ dataset.save(Path("output_directory"))
 
 **Key Features:**
 
-- **CSV Input**: Load predictions and spectra from CSV files
+- **Multiple Format Support**: Load data using specialized loaders for different file formats
 - **Data Integration**: Combines spectral data with prediction metadata
 - **Filtering**: Removes invalid tokens and unsupported modifications
 - **Evaluation**: Computes correctness labels when ground truth available
+
+### Data Loaders
+
+The datasets module provides several data loaders that implement the `DatasetLoader` protocol:
+
+#### InstaNovoDatasetLoader
+
+Loads InstaNovo predictions from CSV format along with spectrum data from Parquet/IPC files.
+
+```python
+from winnow.datasets.data_loaders import InstaNovoDatasetLoader
+
+loader = InstaNovoDatasetLoader()
+dataset = loader.load(
+    data_path=Path("spectrum_data.parquet"),  # Spectrum metadata
+    predictions_path=Path("instanovo_predictions.csv")  # InstaNovo beam predictions
+)
+```
+
+#### MZTabDatasetLoader
+
+Loads predictions from MZTab format, supporting both traditional search engines and Casanovo outputs.
+
+```python
+from winnow.datasets.data_loaders import MZTabDatasetLoader
+
+# Default loader (uses Casanovo residue mapping)
+loader = MZTabDatasetLoader()
+dataset = loader.load(
+    data_path=Path("spectrum_data.parquet"),
+    predictions_path=Path("search_results.mztab")
+)
+
+# Custom residue mapping
+custom_mapping = {"M+15.995": "M[UNIMOD:35]"}
+loader = MZTabDatasetLoader(residue_remapping=custom_mapping)
+```
+
+#### WinnowDatasetLoader
+
+Loads previously saved CalibrationDataset instances from winnow's internal format.
+
+```python
+from winnow.datasets.data_loaders import WinnowDatasetLoader
+
+loader = WinnowDatasetLoader()
+dataset = loader.load(data_path=Path("saved_dataset_directory"))
+```
 
 ### PSMDataset
 
 A dataset containing multiple peptide-spectrum matches (PSMs). Provides a container for managing collections of PSMs with iteration and indexing support.
 
 ```python
-from winnow.datasets import PSMDataset, PeptideSpectrumMatch
+from winnow.datasets.psm_dataset import PSMDataset, PeptideSpectrumMatch
 
 # Create from separate sequences
 dataset = PSMDataset.from_dataset(
@@ -62,7 +124,7 @@ for psm in dataset:
 Represents a single peptide-spectrum match returned by a peptide sequencing method. Associates a mass spectrum with a candidate peptide sequence and confidence score.
 
 ```python
-from winnow.datasets import PeptideSpectrumMatch
+from winnow.datasets.psm_dataset import PeptideSpectrumMatch
 from winnow.data_types import Spectrum, Peptide
 
 # Create a PSM
