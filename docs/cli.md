@@ -7,9 +7,9 @@ The winnow CLI provides a simple interface for confidence calibration and FDR co
 After installing winnow, the `winnow` command becomes available:
 
 ```bash
-pip install winnow_fdr
+pip install winnow-fdr
 # or
-uv pip install winnow_fdr
+uv pip install winnow-fdr
 ```
 
 ## Commands
