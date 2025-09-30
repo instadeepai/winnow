@@ -2,17 +2,28 @@
 name = "winnow"
 authors = [{name="InstaDeep"}]
 description = "Score calibration and false discovery estimation for de novo peptide sequencing."
+keywords = ["proteomics","mass spectrometry", "de novo peptide sequencing", "false discovery rate",
+            "false discovery estimation", "peptide filtering"]
 readme = "README.md"
 version = "1.0.0"
 requires-python = ">=3.10"
+license = "Apache-2.0"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
 dependencies = [
-    "instanovo",
     "jax>=0.5.2",
     "koinapy>=0.0.10",
     "tomli>=2.2.1",
     "typer>=0.15.2",
     "instanovo>=1.1.4",
 ]
+
+[project.urls]
+Homepage = "https://github.com/instadeepai/winnow"
+Issues = "https://github.com/instadeepai/winnow/issues"
+documentation = "https://instadeepai.github.io/winnow/"
 
 [build-system]
 requires = ["setuptools"]
@@ -32,7 +43,6 @@ docs = [
     "mkdocs-material>=9.6.18",
     "pymdown-extensions>=10.16.1",
 ]
-
 notebook = [
     "huggingface-hub>=0.29.3",
     "ipykernel>=6.29.5",
