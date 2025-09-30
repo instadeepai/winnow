@@ -1,40 +1,48 @@
-# This workflow will upload a Python Package using Twine when a release is created
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python#publishing-to-package-registries
-
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
 
 name: Publish Python 🐍 distributions 📦 to PyPI
 
-on:
-  release:
-    types: [published]
-  workflow_dispatch:
 
-permissions:
-  contents: read
+on:
+  push:
+    tags:
+      - "v*"   # Only run when a tag like v0.1.0 is pushed
+  workflow_dispatch:  # allow manual runs
 
 jobs:
-  deploy:
+  pypi-publish:
+    name: Upload release to PyPI
     runs-on: ubuntu-latest
-
+    environment:
+      name: pypi
+      url: https://pypi.org/p/winnow_fdr
+    permissions:
+      id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
     steps:
       - uses: actions/checkout@v5
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.x"
           cache: "pip" # caching pip dependencies
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install build
+
+      - name: Ensure version does not already exist on PyPI
+        run: |
+          VERSION="${GITHUB_REF_NAME}"   # tag name, e.g. v0.1.0
+          VERSION="${VERSION#v}"         # strip leading "v"
+          echo "Checking if version $VERSION already exists on PyPI..."
+          if pip index versions winnow-fdr | grep -q " $VERSION$"; then
+            echo "❌ Version $VERSION already exists on PyPI. Aborting."
+            exit 1
+          fi
+
       - name: Build package
         run: python -m build
-      - name: Publish package
-        uses: pypa/gh-action-pypi-publish@v1
-        with:
-          user: __token__
-          password: ${{ secrets.PYPI_API_TOKEN }}
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
