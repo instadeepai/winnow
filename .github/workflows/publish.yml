@@ -2,9 +2,8 @@ name: Publish Python 🐍 distributions 📦 to PyPI
 
 
 on:
-  push:
-    tags:
-      - "v*"   # Only run when a tag like v0.1.0 is pushed
+  release:
+    types: [published]
   workflow_dispatch:  # allow manual runs
 
 jobs:
