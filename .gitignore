@@ -19,3 +19,5 @@ docs_public
 examples/winnow-general-model
 examples/winnow-ms-datasets
 examples/output
+
+build/

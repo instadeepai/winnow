@@ -94,11 +94,11 @@ For database search-based peptide sequencing, PSM rescoring and target-decoy com
 
 `winnow` is available as a Python package and can be installed using `pip` or a `pip`-compatible command (e.g., `uv pip install`):
 ```
-pip install https://github.com/instadeepai/winnow
+pip install winnow_fdr
 ```
 or
 ```
-uv pip install https://github.com/instadeepai/winnow
+uv pip install winnow_fdr
 ```
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 

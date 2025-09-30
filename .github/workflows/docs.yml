@@ -20,9 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v6
         with:
           version: "latest"
       - name: Install dependencies
@@ -32,7 +32,7 @@ jobs:
         # Avoid installing the project dependencies, which happens by default when executing `uv run` inside a project
         run: uv run --no-project mkdocs build --clean
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: ./docs_public
 

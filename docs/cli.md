@@ -7,9 +7,9 @@ The winnow CLI provides a simple interface for confidence calibration and FDR co
 After installing winnow, the `winnow` command becomes available:
 
 ```bash
-pip install git+https://github.com/instadeepai/winnow.git
+pip install winnow_fdr
 # or
-uv pip install "git+https://github.com/instadeepai/winnow.git"
+uv pip install winnow_fdr
 ```
 
 ## Commands
