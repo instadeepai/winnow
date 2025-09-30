@@ -156,3 +156,21 @@ If you have ideas for enhancements, you can:
 Don't forget to give the project a star! Thanks again! :star:
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+### BibTeX entry and citation info
+
+If you use `winnow` in your research, please cite the following preprint:
+
+```bibtex
+@article{mabona2025novopeptidesequencingrescoring,
+      title={De novo peptide sequencing rescoring and FDR estimation with Winnow},
+      author={Amandla Mabona and Jemma Daniel and Henrik Servais Janssen Knudsen and Rachel Catzel
+      and Kevin Michael Eloff and Erwin M. Schoof and Nicolas Lopez Carranza and Timothy P. Jenkins
+      and Jeroen Van Goey and Konstantinos Kalogeropoulos},
+      year={2025},
+      eprint={2509.24952},
+      archivePrefix={arXiv},
+      primaryClass={q-bio.QM},
+      url={https://arxiv.org/abs/2509.24952},
+}
+```

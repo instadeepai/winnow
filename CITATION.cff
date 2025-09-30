@@ -1,0 +1,57 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: Winnow
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Amandla
+    family-names: Mabona
+    orcid: 'https://orcid.org/0009-0009-7514-677X'
+  - given-names: Jemma
+    family-names: Daniel
+    orcid: 'https://orcid.org/0000-0002-1964-3976'
+  - given-names: Henrik
+    family-names: Servais Janssen Knudsen
+    orcid: 'https://orcid.org/0009-0006-6039-7339'
+  - given-names: Rachel
+    family-names: Catzel
+    orcid: 'https://orcid.org/0000-0002-2983-9833'
+  - given-names: Kevin
+    family-names: Eloff
+    orcid: 'https://orcid.org/0000-0003-1355-8743'
+  - given-names: Erwin
+    family-names: Schoof
+    orcid: 'https://orcid.org/0000-0002-3117-7832'
+  - given-names: Nicolas
+    family-names: Lopez Carranza
+    orcid: 'https://orcid.org/0000-0003-2235-5753'
+  - orcid: 'https://orcid.org/0000-0003-2979-5663'
+    given-names: Timothy
+    family-names: Jenkins
+  - given-names: Jeroen
+    family-names: Van Goey
+    orcid: 'https://orcid.org/0000-0003-4480-5567'
+  - given-names: Konstantinos
+    family-names: Kalogeropoulos
+    orcid: 'https://orcid.org/0000-0003-3907-9281'
+identifiers:
+  - type: url
+    value: 'https://arxiv.org/abs/2509.24952'
+repository-code: 'https://github.com/instadeepai/winnow'
+url: 'https://instadeepai.github.io/winnow/'
+abstract: >-
+  Confidence calibration and FDR control for de novo peptide
+  sequencing
+keywords:
+  - proteomics
+  - mass spectrometry
+  - de novo peptide sequencing
+  - false discovery rate
+  - false discovery estimation
+  - peptide filtering
+license: Apache-2.0
+version: 1.0.0
