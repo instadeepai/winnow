@@ -65,7 +65,7 @@
 
 <!-- WORKFLOW DIAGRAM -->
 <div align="center">
-  <img src="https://raw.githubusercontent.com/instadeepai/winnow/docs/assets/winnow_workflow.png" alt="Winnow Workflow" style="max-width:100%;">
+  <img src="https://raw.githubusercontent.com/instadeepai/winnow/main/docs/assets/winnow_workflow.png" alt="Winnow Workflow" style="max-width:100%;">
   <p>Winnow workflow for confidence calibration and FDR control in <em>de novo</em> peptide sequencing</p>
 </div>
 
