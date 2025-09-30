@@ -1,5 +1,5 @@
 [project]
-name = "winnow"
+name = "winnow_fdr"
 authors = [{name="InstaDeep"}]
 description = "Score calibration and false discovery estimation for de novo peptide sequencing."
 keywords = ["proteomics","mass spectrometry", "de novo peptide sequencing", "false discovery rate",
