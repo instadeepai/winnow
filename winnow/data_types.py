@@ -1,6 +1,6 @@
-from jaxtyping import Float, Integer
 import numpy as np
+from numpy.typing import NDArray
 
 
-Peptide = Integer[np.ndarray, "token"]
-Spectrum = Float[np.ndarray, "peak 2"]
+Peptide = NDArray[np.int64]
+Spectrum = NDArray[np.float64]
