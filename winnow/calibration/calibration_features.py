@@ -198,9 +198,7 @@ class PrositFeatures(CalibrationFeatures):
 
     def __init__(self, mz_tolerance: float) -> None:
         self.mz_tolerance = mz_tolerance
-        self.model = koinapy.Koina(
-            "Prosit_2020_intensity_HCD", "koina.wilhelmlab.org:443"
-        )
+        self.prosit_intensity_model_name = "Prosit_2020_intensity_HCD"
 
     @property
     def dependencies(self) -> List[FeatureDependency]:
@@ -263,7 +261,8 @@ class PrositFeatures(CalibrationFeatures):
         inputs["precursor_charges"] = np.array(dataset.metadata["precursor_charge"])
         inputs["collision_energies"] = np.array(len(dataset.metadata) * [25])
 
-        predictions: pd.DataFrame = self.model.predict(inputs, debug=True)
+        model = koinapy.Koina(self.prosit_intensity_model_name)
+        predictions: pd.DataFrame = model.predict(inputs, debug=True)
         predictions["Index"] = predictions.index
 
         grouped_predictions = predictions.groupby(by="Index").agg(
@@ -306,6 +305,7 @@ class ChimericFeatures(CalibrationFeatures):
 
     def __init__(self, mz_tolerance: float) -> None:
         self.mz_tolerance = mz_tolerance
+        self.prosit_intensity_model_name = "Prosit_2020_intensity_HCD"
 
     @property
     def dependencies(self) -> List[FeatureDependency]:
@@ -375,7 +375,7 @@ class ChimericFeatures(CalibrationFeatures):
         )
         inputs["precursor_charges"] = np.array(dataset.metadata["precursor_charge"])
         inputs["collision_energies"] = np.array(len(dataset.metadata) * [25])
-        model = koinapy.Koina("Prosit_2020_intensity_HCD", "koina.wilhelmlab.org:443")
+        model = koinapy.Koina(self.prosit_intensity_model_name)
         predictions: pd.DataFrame = model.predict(inputs)
         predictions["Index"] = predictions.index
 
@@ -614,7 +614,7 @@ class RetentionTimeFeature(CalibrationFeatures):
     def __init__(self, hidden_dim: int, train_fraction: float) -> None:
         self.train_fraction = train_fraction
         self.hidden_dim = hidden_dim
-        self.prosit_model = koinapy.Koina("Prosit_2019_irt", "koina.wilhelmlab.org:443")
+        self.prosit_irt_model_name = "Prosit_2019_irt"
         self.irt_predictor = MLPRegressor(
             hidden_layer_sizes=[hidden_dim], random_state=42
         )
@@ -675,7 +675,8 @@ class RetentionTimeFeature(CalibrationFeatures):
             ]
         )
         inputs = inputs.set_index(train_data.index)
-        predictions = self.prosit_model.predict(inputs)
+        prosit_model = koinapy.Koina(self.prosit_irt_model_name)
+        predictions = prosit_model.predict(inputs)
         train_data["iRT"] = predictions["irt"]
 
         # -- Fit model
@@ -701,7 +702,8 @@ class RetentionTimeFeature(CalibrationFeatures):
                 for peptide in dataset.metadata["prediction"].apply(map_modification)
             ]
         )
-        predictions = self.prosit_model.predict(inputs)
+        prosit_model = koinapy.Koina(self.prosit_irt_model_name)
+        predictions = prosit_model.predict(inputs)
         dataset.metadata["iRT"] = predictions["irt"]
 
         # - Predict iRT
