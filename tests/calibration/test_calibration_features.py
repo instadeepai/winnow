@@ -495,7 +495,7 @@ class TestRetentionTimeFeature:
         feature = RetentionTimeFeature(hidden_dim=10, train_fraction=0.8)
         assert feature.hidden_dim == 10
         assert feature.train_fraction == 0.8
-        assert hasattr(feature, "prosit_model")
+        assert feature.prosit_irt_model_name == "Prosit_2019_irt"
         assert hasattr(feature, "irt_predictor")
 
     @patch("winnow.calibration.calibration_features.koinapy.Koina")
@@ -513,9 +513,6 @@ class TestRetentionTimeFeature:
                 "irt": [35.1, 20.7, 28.1, 25.5]  # 4 values for 80% of 5 samples
             }
         )
-
-        # Override the model in the feature
-        retention_time_feature.prosit_model = mock_model_instance
 
         # Mock the MLPRegressor fit method
         with patch.object(retention_time_feature.irt_predictor, "fit") as mock_fit:
@@ -558,9 +555,6 @@ class TestRetentionTimeFeature:
         mock_model_instance.predict.return_value = pd.DataFrame(
             {"irt": [25.5, 30.2, 35.1, 20.7, 28.1]}
         )
-
-        # Override the model in the feature
-        retention_time_feature.prosit_model = mock_model_instance
 
         # Mock the MLPRegressor predict method
         with patch.object(
@@ -657,7 +651,7 @@ class TestPrositFeatures:
         """Test initialization with custom tolerance."""
         feature = PrositFeatures(mz_tolerance=0.01)
         assert feature.mz_tolerance == 0.01
-        assert hasattr(feature, "model")
+        assert feature.prosit_intensity_model_name == "Prosit_2020_intensity_HCD"
 
     def test_prepare_does_nothing(self, prosit_features, sample_dataset_with_spectra):
         """Test that prepare method does nothing."""
@@ -750,9 +744,6 @@ class TestPrositFeatures:
             index=[0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2],
         )
         mock_model_instance.predict.return_value = mock_predictions
-
-        # Override the model in the feature
-        prosit_features.model = mock_model_instance
 
         # Mock ion identification computation
         mock_compute_ions.return_value = ([0.5, 0.6, 0.7], [0.4, 0.5, 0.6])
