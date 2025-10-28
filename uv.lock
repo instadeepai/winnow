@@ -5256,6 +5256,7 @@ name = "winnow-fdr"
 version = "1.0.3"
 source = { editable = "." }
 dependencies = [
+    { name = "huggingface-hub" },
     { name = "instanovo" },
     { name = "jax", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "jax", version = "0.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -5286,6 +5287,7 @@ notebook = [
 
 [package.metadata]
 requires-dist = [
+    { name = "huggingface-hub", specifier = ">=0.35.3" },
     { name = "instanovo", specifier = ">=1.1.4" },
     { name = "jax", specifier = ">=0.5.2" },
     { name = "koinapy", specifier = ">=0.0.10" },

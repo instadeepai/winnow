@@ -1,13 +1,13 @@
 """Contains classes and functions for probability recalibration."""
 
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Tuple, Union, Optional
 from pathlib import Path
 import pickle
 import numpy as np
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 from jaxtyping import Float
-
+from huggingface_hub import snapshot_download
 from winnow.calibration.calibration_features import (
     CalibrationFeatures,
     FeatureDependency,
@@ -90,15 +90,35 @@ class ProbabilityCalibrator:
             pickle.dump(calibrator.scaler, f)
 
     @classmethod
-    def load(cls, path: Path) -> "ProbabilityCalibrator":
-        """Load the calibrator from a file.
+    def load(
+        cls,
+        pretrained_model_name_or_path: Union[
+            Path, str
+        ] = "InstaDeepAI/winnow-general-model",
+        cache_dir: Optional[Path] = None,
+    ) -> "ProbabilityCalibrator":
+        """Load a pretrained calibrator from a local path or HuggingFace repository. If the path is a local path, it will be used directly. If it is a HuggingFace repository identifier, it will be downloaded from HuggingFace.
 
         Args:
-            path (Path): The path to load the calibrator from.
-
-        Returns:
-            ProbabilityCalibrator: A new instance of the calibrator loaded from the file.
+            pretrained_model_name_or_path (Union[Path, str]): The local directory path (e.g., Path("./my-model-directory")) or the HuggingFace repository identifier (e.g., "InstaDeepAI/winnow-general-model").
+            cache_dir (Optional[Path]): Directory to cache the HuggingFace model.
         """
+        # Local path if a Path object is provided
+        if isinstance(pretrained_model_name_or_path, Path):
+            path = pretrained_model_name_or_path
+        # HuggingFace repository identifier if a string is provided
+        elif isinstance(pretrained_model_name_or_path, str):
+            if cache_dir is None:
+                cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
+            # Download from HuggingFace
+            path = Path(
+                snapshot_download(
+                    repo_id=pretrained_model_name_or_path,
+                    repo_type="model",
+                    cache_dir=cache_dir,
+                )
+            )
+
         calibrator = cls()
 
         # Initialise the features that were used when saving
