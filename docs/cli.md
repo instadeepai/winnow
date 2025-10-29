@@ -35,13 +35,33 @@ winnow train \
 
 ### `winnow predict`
 
-Apply calibration and FDR control to new data using a trained model.
+Apply calibration and FDR control to new data using a trained model. By default, uses a pretrained general model from HuggingFace Hub.
 
 ```bash
+# Use default pretrained model from HuggingFace (recommended for getting started)
 winnow predict \
     --data-source instanovo \
     --dataset-config-path test_config.yaml \
-    --model-folder ./calibrator_model \
+    --method winnow \
+    --fdr-threshold 0.01 \
+    --confidence-column confidence \
+    --output-path ./predictions.csv
+
+# Use a custom HuggingFace model
+winnow predict \
+    --data-source instanovo \
+    --dataset-config-path test_config.yaml \
+    --huggingface-model-name my-org/my-custom-model \
+    --method winnow \
+    --fdr-threshold 0.01 \
+    --confidence-column confidence \
+    --output-path ./predictions.csv
+
+# Use a local model
+winnow predict \
+    --data-source instanovo \
+    --dataset-config-path test_config.yaml \
+    --local-model-folder ./calibrator_model \
     --method winnow \
     --fdr-threshold 0.01 \
     --confidence-column confidence \
@@ -52,11 +72,14 @@ winnow predict \
 
 - `--data-source`: Type of dataset (`instanovo`, `winnow`, `mztab`)
 - `--dataset-config-path`: Path to YAML configuration file
-- `--model-folder`: Directory containing trained calibrator
+- `--huggingface-model-name`: HuggingFace model identifier (defaults to `InstaDeepAI/winnow-general-model`). Use this to load models from HuggingFace Hub.
+- `--local-model-folder`: Directory containing trained calibrator. Use this to load local models instead of HuggingFace models.
 - `--method`: FDR estimation method (`winnow` or `database-ground`)
 - `--fdr-threshold`: Target FDR threshold (e.g., 0.01 for 1%)
 - `--confidence-column`: Name of confidence score column
 - `--output-path`: Path to save filtered results
+
+**Note:** If neither `--local-model-folder` nor `--huggingface-model-name` are provided, the default pretrained general model from HuggingFace (`InstaDeepAI/winnow-general-model`) will be loaded automatically.
 
 ## Configuration Files
 
@@ -197,15 +220,24 @@ winnow train \
     --model-output-folder models/my_calibrator \
     --dataset-output-path results/training_output.csv
 
-# Step 2: Apply to new data with FDR control
+# Step 2: Apply to new data with FDR control (using default pretrained model)
 winnow predict \
     --data-source instanovo \
-    --dataset-config-path `configs/test_data.yaml` \
-    --model-folder `models/my_calibrator` \
+    --dataset-config-path configs/test_data.yaml \
     --method winnow \
     --fdr-threshold 0.01 \
     --confidence-column confidence \
-    --output-path `results/filtered_predictions.csv`
+    --output-path results/filtered_predictions.csv
+
+# Alternative: Use the locally trained model
+winnow predict \
+    --data-source instanovo \
+    --dataset-config-path configs/test_data.yaml \
+    --local-model-folder models/my_calibrator \
+    --method winnow \
+    --fdr-threshold 0.01 \
+    --confidence-column confidence \
+    --output-path results/filtered_predictions.csv
 ```
 
 ### Configuration File Examples
