@@ -207,9 +207,6 @@ def apply_fdr_control(
     if isinstance(fdr_control, NonParametricFDRControl):
         fdr_control.fit(dataset=dataset.metadata[confidence_column])
         dataset.metadata = fdr_control.add_psm_pep(dataset.metadata, confidence_column)
-        dataset.metadata = fdr_control.add_psm_q_value(
-            dataset.metadata, confidence_column
-        )
     else:
         fdr_control.fit(
             dataset=dataset.metadata[confidence_column],
@@ -307,7 +304,9 @@ def predict(
     confidence_column: Annotated[
         str, typer.Option(help="Name of the column with confidence scores.")
     ],
-    output_path: Annotated[Path, typer.Option(help="The path to write the output to.")],
+    output_folder: Annotated[
+        Path, typer.Option(help="The folder path to write the outputs to.")
+    ],
     huggingface_model_name: Annotated[
         str,
         typer.Option(
@@ -329,7 +328,7 @@ def predict(
         method (Annotated[ FDRMethod, typer.Option, optional): Method to use for FDR estimation.
         fdr_threshold (Annotated[ float, typer.Option, optional): The target FDR threshold (e.g. 0.01 for 1%, 0.05 for 5% etc.).
         confidence_column (Annotated[ str, typer.Option, optional): Name of the column with confidence scores.
-        output_path (Annotated[ Path, typer.Option, optional): The path to write the output to.
+        output_folder (Annotated[ Path, typer.Option, optional): The folder path to write the outputs to: `metadata.csv` and `preds_and_fdr_metrics.csv`.
         huggingface_model_name (Annotated[str, typer.Option, optional): HuggingFace model identifier.
         local_model_folder (Annotated[Path, typer.Option, optional): Path to local calibrator directory (e.g., Path("./my-model-directory")).
 
@@ -375,5 +374,21 @@ def predict(
 
     # -- Write output
     logger.info("Writing output.")
-    dataset_metadata.to_csv(output_path)
-    logger.info(f"Outputs saved: {output_path}")
+    # Separate out metadata from prediction and FDR metrics
+    preds_and_fdr_metrics_cols = [
+        "spectrum_id",
+        confidence_column,
+        "prediction",
+        "psm_fdr",
+        "psm_q_value",
+    ]
+    if "sequence" in dataset_metadata.columns:
+        preds_and_fdr_metrics_cols.append("sequence")
+    if method is FDRMethod.winnow:
+        preds_and_fdr_metrics_cols.append("psm_pep")
+    dataset_preds_and_fdr_metrics = dataset_metadata[preds_and_fdr_metrics_cols]
+    dataset_metadata = dataset_metadata.drop(columns=preds_and_fdr_metrics_cols)
+    # Write outputs
+    dataset_metadata.to_csv(output_folder / "metadata.csv")
+    dataset_preds_and_fdr_metrics.to_csv(output_folder / "preds_and_fdr_metrics.csv")
+    logger.info(f"Outputs saved: {output_folder}")
