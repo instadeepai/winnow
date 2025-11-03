@@ -45,7 +45,7 @@ winnow predict \
     --method winnow \
     --fdr-threshold 0.01 \
     --confidence-column confidence \
-    --output-path ./predictions.csv
+    --output-folder ./predictions
 ```
 
 **Arguments:**
@@ -56,7 +56,7 @@ winnow predict \
 - `--method`: FDR estimation method (`winnow` or `database-ground`)
 - `--fdr-threshold`: Target FDR threshold (e.g., 0.01 for 1%)
 - `--confidence-column`: Name of confidence score column
-- `--output-path`: Path to save filtered results
+- `--output-folder`: Folder path to write output files to (creates `metadata.csv` and `preds_and_fdr_metrics.csv`)
 
 ## Configuration Files
 
@@ -176,14 +176,24 @@ Training produces:
 
 ### Prediction Output
 
-Prediction produces a CSV file (`--output-path`) containing:
+Prediction produces two CSV files in the `--output-folder` directory:
 
-- **Original columns**: All input data columns
-- **`calibrated_confidence`**: Calibrated confidence scores
-- **`psm_fdr`**: PSM-specific FDR estimates
-- **`psm_q_value`**: Q-values
-- **`psm_pep`**: Posterior error probabilities (winnow method only)
-- **Filtered rows**: Only PSMs passing the FDR threshold
+1. **`metadata.csv`**: Contains all metadata and feature columns from the input dataset
+   - Original metadata columns (spectrum information, precursors, etc.)
+   - All feature columns used for calibration
+   - Filtered to only include PSMs passing the FDR threshold
+
+2. **`preds_and_fdr_metrics.csv`**: Contains predictions and error metrics
+   - `spectrum_id`: Unique spectrum identifier
+   - `calibrated_confidence` (or specified confidence column): Calibrated confidence scores
+   - `prediction`: Predicted peptide sequences
+   - `psm_fdr`: PSM-specific FDR estimates
+   - `psm_q_value`: Q-values
+   - `psm_pep`: Posterior error probabilities (winnow method only)
+   - `sequence`: Ground truth sequences (if available, for database-ground method)
+   - Filtered to only include PSMs passing the FDR threshold
+
+This separation allows users to work with metadata and features separately from predictions and error metrics, making downstream analysis more convenient.
 
 ## Example Workflows
 
@@ -205,7 +215,7 @@ winnow predict \
     --method winnow \
     --fdr-threshold 0.01 \
     --confidence-column confidence \
-    --output-path `results/filtered_predictions.csv`
+    --output-folder `results/predictions`
 ```
 
 ### Configuration File Examples
