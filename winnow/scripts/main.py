@@ -310,13 +310,13 @@ def predict(
     huggingface_model_name: Annotated[
         str,
         typer.Option(
-            help="HuggingFace model identifier. If neither this nor `--local-model-folder` are inputted, loads default model from HuggingFace.",
+            help="HuggingFace model identifier. If neither this nor `--local-model-folder` are provided, loads default model from HuggingFace.",
         ),
     ] = "InstaDeepAI/winnow-general-model",
     local_model_folder: Annotated[
         Optional[Path],
         typer.Option(
-            help="Path to local calibrator directory. If neither this nor `--huggingface-model-name` are inputted, loads default pretrained model from HuggingFace.",
+            help="Path to local calibrator directory. If neither this nor `--huggingface-model-name` are provided, loads default pretrained model from HuggingFace.",
         ),
     ] = None,
 ):
