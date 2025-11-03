@@ -79,8 +79,31 @@ class ProbabilityCalibrator:
         Returns:
             ProbabilityCalibrator: A new instance of the calibrator loaded from the file.
         """
-        calibrator = pickle.load(open(dir_path / "calibrator.pkl", "rb"))
-        return calibrator
+        calibrator_path = dir_path / "calibrator.pkl"
+
+        # Load the calibrator
+        loaded_obj = pickle.load(open(calibrator_path, "rb"))
+
+        # Check if this is a legacy checkpoint (MLPClassifier instead of ProbabilityCalibrator)
+        if isinstance(loaded_obj, MLPClassifier):
+            error_msg = (
+                "Legacy checkpoint format detected. The checkpoint directory contains "
+                "an old format where calibrator.pkl contains only the MLPClassifier "
+                "instead of the full ProbabilityCalibrator object.\n"
+                "Legacy checkpoints cannot be automatically migrated because they lack "
+                "the feature and dependency information required by the current version. "
+                "We cannot correctly infer the trained feature set with old versions.\n"
+                "To resolve this, retrain the calibrator using the current version with your training dataset. "
+                "The new format will save the complete ProbabilityCalibrator object including all features and dependencies."
+            )
+            raise ValueError(error_msg)
+
+        elif not isinstance(loaded_obj, ProbabilityCalibrator):
+            raise ValueError(
+                f"Loaded object is of type {type(loaded_obj).__name__}, expected ProbabilityCalibrator."
+            )
+        else:
+            return loaded_obj
 
     def add_feature(self, feature: CalibrationFeatures) -> None:
         """Add a feature for the classifier used for calibration.

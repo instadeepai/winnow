@@ -1,5 +1,6 @@
 """Unit tests for winnow ProbabilityCalibrator."""
 
+import pickle
 import numpy as np
 import pandas as pd
 import pytest
@@ -347,3 +348,29 @@ class TestProbabilityCalibrator:
         # Should handle empty dataset gracefully
         features = calibrator.compute_features(empty_dataset, labelled=False)
         assert features.shape[0] == 0
+
+    def test_load_legacy_checkpoint_mlpclassifier_raises_error(self, tmp_path):
+        """Test that loading a legacy checkpoint (MLPClassifier) raises a clear error."""
+        # Create a legacy checkpoint: calibrator.pkl containing only MLPClassifier
+        legacy_path = tmp_path / "legacy_checkpoint"
+        legacy_path.mkdir(parents=True)
+
+        from sklearn.neural_network import MLPClassifier
+
+        # Save MLPClassifier directly (legacy format)
+        legacy_classifier = MLPClassifier(random_state=42)
+        pickle.dump(legacy_classifier, open(legacy_path / "calibrator.pkl", "wb"))
+
+        # Attempt to load - should raise ValueError with helpful message
+        with pytest.raises(ValueError, match="Legacy checkpoint format detected"):
+            ProbabilityCalibrator.load(legacy_path)
+
+        # Verify the error message contains helpful information
+        try:
+            ProbabilityCalibrator.load(legacy_path)
+        except ValueError as e:
+            error_msg = str(e)
+            assert "Legacy checkpoint format detected" in error_msg
+            assert "MLPClassifier" in error_msg
+            assert "cannot correctly infer the trained feature set" in error_msg
+            assert "retrain" in error_msg.lower() or "retraining" in error_msg.lower()
