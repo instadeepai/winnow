@@ -103,11 +103,15 @@ class ProbabilityCalibrator:
             pretrained_model_name_or_path (Union[Path, str]): The local directory path (e.g., Path("./my-model-directory")) or the HuggingFace repository identifier (e.g., "InstaDeepAI/winnow-general-model").
             cache_dir (Optional[Path]): Directory to cache the HuggingFace model.
         """
-        # Local path if a Path object is provided
-        if isinstance(pretrained_model_name_or_path, Path):
-            path = pretrained_model_name_or_path
-        # HuggingFace repository identifier if a string is provided
-        elif isinstance(pretrained_model_name_or_path, str):
+        path = Path(pretrained_model_name_or_path)
+
+        # If the path exists locally, use it directly.
+        if path.exists():
+            # Resolve relative paths to absolute, canonical paths
+            path = path.resolve()
+        # Otherwise download it from HuggingFace.
+        else:
+            # If no cache directory is provided, use the default cache directory.
             if cache_dir is None:
                 cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
             # Download from HuggingFace

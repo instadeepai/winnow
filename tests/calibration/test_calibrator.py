@@ -3,7 +3,6 @@
 import numpy as np
 import pandas as pd
 import pytest
-from pathlib import Path
 from unittest.mock import patch
 from winnow.calibration.calibrator import ProbabilityCalibrator
 from winnow.calibration.calibration_features import (
@@ -292,11 +291,6 @@ class TestProbabilityCalibrator:
         assert (save_path / "calibrator.pkl").exists()
         assert (save_path / "scaler.pkl").exists()
         assert (save_path / "irt_predictor.pkl").exists()
-
-    def test_load_nonexistent_path_raises_error(self):
-        """Test that loading from nonexistent path raises error."""
-        with pytest.raises(FileNotFoundError):
-            ProbabilityCalibrator.load(Path("/nonexistent/path"))
 
     def test_classifier_parameters(self):
         """Test that classifier is initialised with correct parameters."""
