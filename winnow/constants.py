@@ -86,6 +86,14 @@ INVALID_PROSIT_TOKENS: list = [
     "UNIMOD:5",
     "UNIMOD:385",
     # Each C is also treated as Cysteine with carbamidomethylation in Prosit.
+    "\\+0.984",
+    "\\+42.011",
+    "\\+43.006",
+    "\\-17.027",
+    "Ammonia",
+    "Carbamyl",
+    "Acetyl",
+    "Deamidated",
 ]
 
 
