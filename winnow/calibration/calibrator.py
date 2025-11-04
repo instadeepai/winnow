@@ -11,14 +11,8 @@ from jaxtyping import Float
 from winnow.calibration.calibration_features import (
     CalibrationFeatures,
     FeatureDependency,
-    PrositFeatures,
-    MassErrorFeature,
-    RetentionTimeFeature,
-    ChimericFeatures,
-    BeamFeatures,
 )
 from winnow.datasets.calibration_dataset import CalibrationDataset
-from winnow.constants import RESIDUE_MASSES
 
 
 class ProbabilityCalibrator:
@@ -65,85 +59,51 @@ class ProbabilityCalibrator:
         return list(self.feature_dict.keys())
 
     @classmethod
-    def save(cls, calibrator: "ProbabilityCalibrator", path: Path) -> None:
+    def save(cls, calibrator: "ProbabilityCalibrator", dir_path: Path) -> None:
         """Save the calibrator to a file.
 
         Args:
             calibrator (ProbabilityCalibrator): The calibrator to save.
-            path (Path): The path to save the calibrator to.
+            dir_path (Path): The path to the directory where the calibrator checkpoint will be saved.
         """
-        path.mkdir(parents=True)
-        calibrator_classifier_path = path / "calibrator.pkl"
-        irt_predictor_path = path / "irt_predictor.pkl"
-        scaler_path = path / "scaler.pkl"
-
-        with calibrator_classifier_path.open(mode="wb") as f:
-            pickle.dump(calibrator.classifier, f)
-
-        if "Prosit iRT Features" in calibrator.feature_dict:
-            with irt_predictor_path.open(mode="wb") as f:
-                pickle.dump(
-                    calibrator.feature_dict["Prosit iRT Features"].irt_predictor, f
-                )
-
-        with scaler_path.open(mode="wb") as f:
-            pickle.dump(calibrator.scaler, f)
+        dir_path.mkdir(parents=True)
+        pickle.dump(calibrator, open(dir_path / "calibrator.pkl", "wb"))
 
     @classmethod
-    def load(cls, path: Path) -> "ProbabilityCalibrator":
+    def load(cls, dir_path: Path) -> "ProbabilityCalibrator":
         """Load the calibrator from a file.
 
         Args:
-            path (Path): The path to load the calibrator from.
+            dir_path (Path): The path to the directory containing the calibrator checkpoint.
 
         Returns:
             ProbabilityCalibrator: A new instance of the calibrator loaded from the file.
         """
-        calibrator = cls()
+        calibrator_path = dir_path / "calibrator.pkl"
 
-        # Initialise the features that were used when saving
-        calibrator.add_feature(MassErrorFeature(residue_masses=RESIDUE_MASSES))
-        calibrator.add_feature(
-            PrositFeatures(mz_tolerance=0.02)
-        )  # Default value, should match training
-        calibrator.add_feature(
-            RetentionTimeFeature(hidden_dim=10, train_fraction=0.1)
-        )  # Default values
-        calibrator.add_feature(ChimericFeatures(mz_tolerance=0.02))  # Default value
-        calibrator.add_feature(BeamFeatures())
+        # Load the calibrator
+        loaded_obj = pickle.load(open(calibrator_path, "rb"))
 
-        # Now load the saved data
-        calibrator.load_classifier(path / "calibrator.pkl")
-        calibrator.load_irt_predictor(path / "irt_predictor.pkl")
-        calibrator.load_scaler(path / "scaler.pkl")
-        return calibrator
+        # Check if this is a legacy checkpoint (MLPClassifier instead of ProbabilityCalibrator)
+        if isinstance(loaded_obj, MLPClassifier):
+            error_msg = (
+                "Legacy checkpoint format detected. The checkpoint directory contains "
+                "an old format where calibrator.pkl contains only the MLPClassifier "
+                "instead of the full ProbabilityCalibrator object.\n"
+                "Legacy checkpoints cannot be automatically migrated because they lack "
+                "the feature and dependency information required by the current version. "
+                "We cannot correctly infer the trained feature set with old versions.\n"
+                "To resolve this, retrain the calibrator using the current version with your training dataset. "
+                "The new format will save the complete ProbabilityCalibrator object including all features and dependencies."
+            )
+            raise ValueError(error_msg)
 
-    def load_classifier(self, path: Path) -> None:
-        """Load the classifier from a file.
-
-        Args:
-            path (Path): The path to load the classifier from.
-        """
-        with path.open(mode="rb") as f:
-            self.classifier = pickle.load(f)
-
-    def load_irt_predictor(self, path: Path) -> None:
-        """Load the iRT predictor from a file.
-
-        Args:
-            path (Path): The path to load the iRT predictor from.
-        """
-        with path.open(mode="rb") as f:
-            self.feature_dict["Prosit iRT Features"].irt_predictor = pickle.load(f)  # type: ignore
-
-    def load_scaler(self, path: Path) -> None:
-        """Load the scaler from a file.
-
-        Args:
-            path (Path): The path to load the scaler from.
-        """
-        with path.open(mode="rb") as f:
-            self.scaler = pickle.load(f)
+        elif not isinstance(loaded_obj, ProbabilityCalibrator):
+            raise ValueError(
+                f"Loaded object is of type {type(loaded_obj).__name__}, expected ProbabilityCalibrator."
+            )
+        else:
+            return loaded_obj
 
     def add_feature(self, feature: CalibrationFeatures) -> None:
         """Add a feature for the classifier used for calibration.
