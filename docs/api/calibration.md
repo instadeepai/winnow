@@ -41,7 +41,7 @@ loaded_calibrator = ProbabilityCalibrator.load()
 loaded_calibrator = ProbabilityCalibrator.load("my-org/my-custom-model")
 
 # 3. Load from local directory
-loaded_calibrator = ProbabilityCalibrator.load(Path("calibrator_checkpoint"))
+loaded_calibrator = ProbabilityCalibrator.load("calibrator_checkpoint")
 ```
 
 **Key Features:**
@@ -61,7 +61,7 @@ loaded_calibrator = ProbabilityCalibrator.load(Path("calibrator_checkpoint"))
 - `load(pretrained_model_name_or_path, cache_dir)`: Load trained model from HuggingFace Hub or local directory
   - Default: Loads `"InstaDeepAI/winnow-general-model"` from HuggingFace
   - HuggingFace: Pass a repository ID string (e.g., `"my-org/my-model"`)
-  - Local: Pass a `Path` object pointing to model directory
+  - Local: Pass a `str` or `Path` object pointing to a model directory
   - Models from HuggingFace are automatically cached in `~/.cache/huggingface/hub`
 
 ### CalibrationFeatures
@@ -179,7 +179,7 @@ feature = RetentionTimeFeature(hidden_dim=10, train_fraction=0.1)
    calibrator = ProbabilityCalibrator.load("my-org/my-custom-model")
 
    # Option 3: Use local model
-   calibrator = ProbabilityCalibrator.load(Path("./my_calibrator"))
+   calibrator = ProbabilityCalibrator.load("./my_calibrator")
    ```
 2. **Predict**: Call `predict()` with unlabelled `CalibrationDataset`
 3. **Access Results**: Calibrated scores stored in dataset's "calibrated_confidence" column

@@ -80,7 +80,7 @@ class ProbabilityCalibrator:
         """Load a pretrained calibrator from a local path or HuggingFace repository. If the path is a local directory path, it will be used directly. If it is a HuggingFace repository identifier, it will be downloaded from HuggingFace.
 
         Args:
-            pretrained_model_name_or_path (Union[Path, str]): The local directory path (e.g., Path("./my-model-directory")) or the HuggingFace repository identifier (e.g., "InstaDeepAI/winnow-general-model").
+            pretrained_model_name_or_path (Union[Path, str]): The local directory path (e.g., "./my-model-directory") or the HuggingFace repository identifier (e.g., "InstaDeepAI/winnow-general-model").
             cache_dir (Optional[Path]): Directory to cache the HuggingFace model.
         """
         dir_path = Path(pretrained_model_name_or_path)
