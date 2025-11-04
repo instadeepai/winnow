@@ -239,8 +239,11 @@ def train(
             help="The path to the config with the specification of the calibration dataset."
         ),
     ],
-    model_output_folder: Annotated[
-        Path, typer.Option(help="The path to write the fitted model checkpoints to.")
+    model_output_dir: Annotated[
+        Path,
+        typer.Option(
+            help="The path to the directory where the fitted model checkpoint will be saved."
+        ),
     ],
     dataset_output_path: Annotated[
         Path, typer.Option(help="The path to write the output to.")
@@ -251,7 +254,7 @@ def train(
     Args:
         data_source (Annotated[ DataSource, typer.Option, optional): The type of PSM dataset to be calibrated.
         dataset_config_path (Annotated[ Path, typer.Option, optional): The path to the config with the specification of the calibration dataset.
-        model_output_folder (Annotated[Path, typer.Option, optional]): The path to write the fitted model checkpoints to.
+        model_output_dir (Annotated[Path, typer.Option, optional]): The path to the directory where the fitted model checkpoint will be saved.
         dataset_output_path (Annotated[Path, typer.Option, optional): The path to write the output to.
     """
     # -- Load dataset
@@ -269,8 +272,8 @@ def train(
     calibrator.fit(annotated_dataset)
 
     # -- Write model checkpoints
-    logger.info(f"Saving model to {model_output_folder}")
-    ProbabilityCalibrator.save(calibrator, model_output_folder)
+    logger.info(f"Saving model to {model_output_dir}")
+    ProbabilityCalibrator.save(calibrator, model_output_dir)
 
     # -- Write output
     logger.info("Writing output.")

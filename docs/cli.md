@@ -190,9 +190,7 @@ winnow predict \
 Training produces:
 
 1. **Model checkpoints** (in `--model-output-folder`):
-   - `calibrator.pkl`: Trained neural network classifier
-   - `irt_predictor.pkl`: Retention time predictor
-   - `scaler.pkl`: Feature scaler
+   - `calibrator.pkl`: Complete trained calibrator with all features and parameters
 
 2. **Training results** (`--dataset-output-path`):
    - CSV with calibrated scores and evaluation metrics
