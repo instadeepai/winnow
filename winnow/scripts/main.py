@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from enum import Enum
 import typer
 from typing_extensions import Annotated
-from typing import Union
+from typing import Union, Optional
 import logging
 from rich.logging import RichHandler
 from pathlib import Path
@@ -87,8 +87,10 @@ class FDRMethod(Enum):
 # --- Logging Setup ---
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-logger.addHandler(logging.StreamHandler())
-logger.addHandler(RichHandler())
+# Prevent duplicate messages by disabling propagation and using only RichHandler
+logger.propagate = False
+if not logger.handlers:
+    logger.addHandler(RichHandler())
 
 app = typer.Typer(
     name="winnow",
@@ -293,12 +295,6 @@ def predict(
             help="The path to the config with the specification of the calibration dataset."
         ),
     ],
-    model_dir_path: Annotated[
-        Path,
-        typer.Option(
-            help="The path to the directory containing the calibrator checkpoint."
-        ),
-    ],
     method: Annotated[
         FDRMethod, typer.Option(help="Method to use for FDR estimation.")
     ],
@@ -314,17 +310,33 @@ def predict(
     output_folder: Annotated[
         Path, typer.Option(help="The folder path to write the outputs to.")
     ],
+    huggingface_model_name: Annotated[
+        str,
+        typer.Option(
+            help="HuggingFace model identifier. If neither this nor `--local-model-folder` are provided, loads default model from HuggingFace.",
+        ),
+    ] = "InstaDeepAI/winnow-general-model",
+    local_model_folder: Annotated[
+        Optional[Path],
+        typer.Option(
+            help="Path to local calibrator directory. If neither this nor `--huggingface-model-name` are provided, loads default pretrained model from HuggingFace.",
+        ),
+    ] = None,
 ):
     """Calibrate model scores, estimate FDR and filter for a threshold.
 
     Args:
         data_source (Annotated[ DataSource, typer.Option, optional): The type of PSM dataset to be calibrated.
         dataset_config_path (Annotated[ Path, typer.Option, optional): The path to the config with the specification of the dataset.
-        model_dir_path (Annotated[ Path, typer.Option, optional): The path to the directory containing the calibrator checkpoint.
         method (Annotated[ FDRMethod, typer.Option, optional): Method to use for FDR estimation.
         fdr_threshold (Annotated[ float, typer.Option, optional): The target FDR threshold (e.g. 0.01 for 1%, 0.05 for 5% etc.).
         confidence_column (Annotated[ str, typer.Option, optional): Name of the column with confidence scores.
         output_folder (Annotated[ Path, typer.Option, optional): The folder path to write the outputs to: `metadata.csv` and `preds_and_fdr_metrics.csv`.
+        huggingface_model_name (Annotated[str, typer.Option, optional): HuggingFace model identifier.
+        local_model_folder (Annotated[Path, typer.Option, optional): Path to local calibrator directory (e.g., Path("./my-model-directory")).
+
+    Note that either `local_model_folder` or `huggingface-model-name` may be overwritten, but not both.
+    If neither `local_model_folder` nor `huggingface-model-name` are provided, the general model from HuggingFace will be loaded by default (i.e., `InstaDeepAI/winnow-general-model`).
     """
     # -- Load dataset
     logger.info("Loading datasets.")
@@ -336,8 +348,14 @@ def predict(
     dataset = filter_dataset(dataset)
 
     # Predict
-    logger.info("Loading calibrator.")
-    calibrator = ProbabilityCalibrator.load(model_dir_path)
+    # If local_model_folder is an empty string, load the HuggingFace model
+    if local_model_folder is None:
+        logger.info(f"Loading HuggingFace model: {huggingface_model_name}")
+        calibrator = ProbabilityCalibrator.load(huggingface_model_name)
+    # Otherwise, load the model from the local folder path
+    else:
+        logger.info(f"Loading local model from: {local_model_folder}")
+        calibrator = ProbabilityCalibrator.load(local_model_folder)
 
     logger.info("Calibrating scores.")
     calibrator.predict(dataset)

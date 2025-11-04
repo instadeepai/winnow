@@ -1,13 +1,13 @@
 """Contains classes and functions for probability recalibration."""
 
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Tuple, Union, Optional
 from pathlib import Path
 import pickle
 import numpy as np
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 from jaxtyping import Float
-
+from huggingface_hub import snapshot_download
 from winnow.calibration.calibration_features import (
     CalibrationFeatures,
     FeatureDependency,
@@ -70,19 +70,41 @@ class ProbabilityCalibrator:
         pickle.dump(calibrator, open(dir_path / "calibrator.pkl", "wb"))
 
     @classmethod
-    def load(cls, dir_path: Path) -> "ProbabilityCalibrator":
-        """Load the calibrator from a file.
+    def load(
+        cls,
+        pretrained_model_name_or_path: Union[
+            Path, str
+        ] = "InstaDeepAI/winnow-general-model",
+        cache_dir: Optional[Path] = None,
+    ) -> "ProbabilityCalibrator":
+        """Load a pretrained calibrator from a local path or HuggingFace repository. If the path is a local directory path, it will be used directly. If it is a HuggingFace repository identifier, it will be downloaded from HuggingFace.
 
         Args:
-            dir_path (Path): The path to the directory containing the calibrator checkpoint.
-
-        Returns:
-            ProbabilityCalibrator: A new instance of the calibrator loaded from the file.
+            pretrained_model_name_or_path (Union[Path, str]): The local directory path (e.g., "./my-model-directory") or the HuggingFace repository identifier (e.g., "InstaDeepAI/winnow-general-model").
+            cache_dir (Optional[Path]): Directory to cache the HuggingFace model.
         """
-        calibrator_path = dir_path / "calibrator.pkl"
+        dir_path = Path(pretrained_model_name_or_path)
 
-        # Load the calibrator
-        loaded_obj = pickle.load(open(calibrator_path, "rb"))
+        # If the path exists locally, use it directly.
+        if dir_path.exists():
+            # Resolve relative paths to absolute, canonical paths
+            dir_path = dir_path.resolve()
+        # Otherwise download it from HuggingFace.
+        else:
+            # If no cache directory is provided, use the default cache directory.
+            if cache_dir is None:
+                cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
+            # Download from HuggingFace
+            dir_path = Path(
+                snapshot_download(
+                    repo_id=pretrained_model_name_or_path,
+                    repo_type="model",
+                    cache_dir=cache_dir,
+                )
+            )
+
+        # Load the calibrator object
+        loaded_obj = pickle.load(open(dir_path / "calibrator.pkl", "rb"))
 
         # Check if this is a legacy checkpoint (MLPClassifier instead of ProbabilityCalibrator)
         if isinstance(loaded_obj, MLPClassifier):

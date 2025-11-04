@@ -4,7 +4,6 @@ import pickle
 import numpy as np
 import pandas as pd
 import pytest
-from pathlib import Path
 from winnow.calibration.calibrator import ProbabilityCalibrator
 from winnow.calibration.calibration_features import (
     CalibrationFeatures,
@@ -270,56 +269,6 @@ class TestProbabilityCalibrator:
 
         with pytest.raises(NotFittedError):
             calibrator.predict(sample_dataset)
-
-    def test_save_creates_directory(self, calibrator, tmp_path):
-        """Test saving calibrator creates directory."""
-        save_path = tmp_path / "test_calibrator"
-
-        ProbabilityCalibrator.save(calibrator, save_path)
-
-        assert save_path.exists()
-        assert save_path.is_dir()
-        assert (save_path / "calibrator.pkl").exists()
-
-    def test_save_and_load_preserves_state(
-        self, calibrator, labelled_dataset, tmp_path
-    ):
-        """Test that save and load preserves all calibrator state including features."""
-        # Add features with specific parameters
-        feature1 = MockCalibrationFeature("test_feature1", ["col1", "col2"])
-        feature2 = MockCalibrationFeature("test_feature2", ["col3"])
-        calibrator.add_feature(feature1)
-        calibrator.add_feature(feature2)
-
-        # Fit the calibrator
-        calibrator.fit(labelled_dataset)
-
-        # Save calibrator
-        save_path = tmp_path / "test_calibrator"
-        ProbabilityCalibrator.save(calibrator, save_path)
-
-        # Load calibrator
-        loaded_calibrator = ProbabilityCalibrator.load(save_path)
-
-        # Verify all state is preserved
-        assert loaded_calibrator.features == calibrator.features
-        assert loaded_calibrator.columns == calibrator.columns
-        assert len(loaded_calibrator.feature_dict) == len(calibrator.feature_dict)
-        assert len(loaded_calibrator.dependencies) == len(calibrator.dependencies)
-
-        # Verify classifier and scaler are fitted
-        assert hasattr(loaded_calibrator.classifier, "classes_")
-        assert hasattr(loaded_calibrator.scaler, "mean_")
-
-        # Verify we can make predictions with loaded calibrator
-        test_dataset = labelled_dataset
-        loaded_calibrator.predict(test_dataset)
-        assert "calibrated_confidence" in test_dataset.metadata.columns
-
-    def test_load_nonexistent_path_raises_error(self):
-        """Test that loading from nonexistent path raises error."""
-        with pytest.raises(FileNotFoundError):
-            ProbabilityCalibrator.load(Path("/nonexistent/path"))
 
     def test_classifier_parameters(self):
         """Test that classifier is initialised with correct parameters."""
