@@ -78,22 +78,22 @@ CASANOVO_RESIDUE_REMAPPING: dict[str, str] = {
     # "[+25.980265]-": 25.980265     # Carbamylation and ammonia loss
 }
 
+# Each C is also treated as Cysteine with carbamidomethylation in Prosit.
 INVALID_PROSIT_TOKENS: list = [
-    "\\+25.98",
-    "UNIMOD:7",
-    "UNIMOD:21",
-    "UNIMOD:1",
-    "UNIMOD:5",
-    "UNIMOD:385",
-    # Each C is also treated as Cysteine with carbamidomethylation in Prosit.
-    "\\+0.984",
-    "\\+42.011",
-    "\\+43.006",
-    "\\-17.027",
-    "Ammonia",
-    "Carbamyl",
-    "Acetyl",
-    "Deamidated",
+    "(+25.98)",
+    "[UNIMOD:7]",
+    "[UNIMOD:21]",
+    "[UNIMOD:1]",
+    "[UNIMOD:5]",
+    "[UNIMOD:385]",
+    "+0.984",
+    "+42.011",
+    "+43.006",
+    "-17.027",
+    "[Ammonia-loss]-",
+    "[Carbamyl]-",
+    "[Acetyl]-",
+    "[Deamidated]",
 ]
 
 
