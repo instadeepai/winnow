@@ -53,10 +53,10 @@ class CalibrationDataset:
             output_metadata = self.metadata.copy(deep=True)
             if "sequence" in output_metadata.columns:
                 output_metadata["sequence"] = output_metadata["sequence"].apply(
-                    lambda peptide_list: "".join(peptide_list)
+                    lambda peptide_list: "".join(peptide_list) if peptide_list else None
                 )
             output_metadata["prediction"] = output_metadata["prediction"].apply(
-                lambda peptide_list: "".join(peptide_list)
+                lambda peptide_list: "".join(peptide_list) if peptide_list else None
             )
             output_metadata.to_csv(metadata_file, index=False)
 
@@ -98,11 +98,15 @@ class CalibrationDataset:
         filter_idxs.extend(metadata_filter_idxs.tolist())
 
         # -- Get filter indices for predictions condition
-        predictions_filter_idxs = [
-            idx
-            for idx, beam in enumerate(self.predictions)
-            if predictions_predicate(beam)
-        ]
+        predictions_filter_idxs = []
+        for idx, beam in enumerate(self.predictions):
+            try:
+                # Pass None or empty beams as-is to the predicate, allowing it to handle them
+                if predictions_predicate(beam):
+                    predictions_filter_idxs.append(idx)
+            except (IndexError, AttributeError, TypeError) as e:
+                # Provide helpful error message if predicate crashes on None/empty/short beams
+                raise self._create_predicate_error_message(e, beam, idx) from e
         filter_idxs.extend(predictions_filter_idxs)
 
         filter_idxs_set = set(filter_idxs)
@@ -138,6 +142,68 @@ class CalibrationDataset:
             path (str): Path to the output parquet file.
         """
         self.metadata.to_parquet(path)
+
+    def _create_predicate_error_message(
+        self, error: Exception, beam: Optional[List[ScoredSequence]], idx: int
+    ) -> ValueError:
+        """Create a helpful error message when predicate evaluation fails.
+
+        Args:
+            error: The exception that was raised.
+            beam: The beam that caused the error (may be None or empty).
+            idx: The index of the entry that caused the error.
+
+        Returns:
+            ValueError with a helpful error message.
+        """
+        if beam is None:
+            beam_status = "None"
+            suggestion = (
+                "Please handle None beams explicitly in your predicate, "
+                "e.g., 'lambda beam: beam is None or (beam is not None and ...)'"
+            )
+        elif isinstance(error, IndexError):
+            # IndexError means beam is too short for the accessed index
+            # Could be empty (len == 0) or just too short (len < accessed_index)
+            try:
+                beam_length = len(beam)
+                if beam_length == 0:
+                    beam_status = "empty"
+                    suggestion = (
+                        "Please handle empty beams explicitly in your predicate, "
+                        "e.g., 'lambda beam: len(beam) == 0 or (len(beam) > 0 and ...)'"
+                    )
+                else:
+                    beam_status = f"too short (length {beam_length})"
+                    suggestion = (
+                        f"The beam has length {beam_length} but the predicate tried to access "
+                        f"an index beyond this. Please check the beam length before accessing "
+                        f"specific indices, e.g., 'lambda beam: len(beam) > 0 and beam[0]....' "
+                        f"or 'lambda beam: len(beam) > 1 and beam[1]....'"
+                    )
+            except TypeError:
+                # If len() fails, beam is likely None (shouldn't happen due to first check)
+                beam_status = "None or invalid"
+                suggestion = (
+                    "Please handle None beams explicitly in your predicate, "
+                    "e.g., 'lambda beam: beam is None or (beam is not None and ...)'"
+                )
+        else:
+            # AttributeError or TypeError (other than from len())
+            try:
+                beam_length = len(beam)
+                if beam_length == 0:
+                    beam_status = "empty"
+                else:
+                    beam_status = f"non-empty (length {beam_length})"
+            except TypeError:
+                beam_status = "None or invalid"
+            suggestion = "Please check the beam structure before accessing attributes or indices."
+
+        return ValueError(
+            f"Error evaluating predictions_predicate on entry {idx}: {error}. "
+            f"The beam is {beam_status}. {suggestion}"
+        )
 
     def __len__(self) -> int:
         """Returns the number of entries in the dataset."""
