@@ -87,6 +87,10 @@ class CalibrationDataset:
         """
         filter_idxs = []
 
+        # If the dataset is empty, return it unchanged.
+        if len(self.metadata) == 0:
+            return self
+
         # -- Get filter indices for metadata condition
         (metadata_filter_idxs,) = np.where(
             self.metadata.apply(metadata_predicate, axis=1).values
