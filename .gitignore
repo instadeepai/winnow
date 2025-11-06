@@ -15,9 +15,18 @@ docs_public
 *.pkl
 *.json
 *.yaml
+*.fasta
+*.mztab
+*.mgf
+*.png
+*.pdf
+
+*.ipynb
 
 examples/winnow-general-model
 examples/winnow-ms-datasets
 examples/output
 
 build/
+
+.coverage
