@@ -221,15 +221,43 @@ def filter_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
     return filtered_dataset
 
 
-def initialise_calibrator() -> ProbabilityCalibrator:
-    """Set up the probability calibrator with features."""
+def initialise_calibrator(
+    learn_prosit_missing: bool = True,
+    learn_chimeric_missing: bool = True,
+    learn_retention_missing: bool = True,
+) -> ProbabilityCalibrator:
+    """Set up the probability calibrator with features.
+
+    Args:
+        learn_prosit_missing: Whether to learn from missing Prosit features. If False,
+            errors will be raised when invalid spectra are encountered.
+        learn_chimeric_missing: Whether to learn from missing chimeric features. If False,
+            errors will be raised when invalid spectra are encountered.
+        learn_retention_missing: Whether to learn from missing retention time features. If False,
+            errors will be raised when invalid spectra are encountered.
+
+    Returns:
+        ProbabilityCalibrator: Configured calibrator with specified features.
+    """
     calibrator = ProbabilityCalibrator(SEED)
     calibrator.add_feature(MassErrorFeature(residue_masses=RESIDUE_MASSES))
-    calibrator.add_feature(PrositFeatures(mz_tolerance=MZ_TOLERANCE))
     calibrator.add_feature(
-        RetentionTimeFeature(hidden_dim=HIDDEN_DIM, train_fraction=TRAIN_FRACTION)
+        PrositFeatures(
+            mz_tolerance=MZ_TOLERANCE, learn_from_missing=learn_prosit_missing
+        )
     )
-    calibrator.add_feature(ChimericFeatures(mz_tolerance=MZ_TOLERANCE))
+    calibrator.add_feature(
+        RetentionTimeFeature(
+            hidden_dim=HIDDEN_DIM,
+            train_fraction=TRAIN_FRACTION,
+            learn_from_missing=learn_retention_missing,
+        )
+    )
+    calibrator.add_feature(
+        ChimericFeatures(
+            mz_tolerance=MZ_TOLERANCE, learn_from_missing=learn_chimeric_missing
+        )
+    )
     calibrator.add_feature(BeamFeatures())
     return calibrator
 
@@ -285,6 +313,24 @@ def train(
     dataset_output_path: Annotated[
         Path, typer.Option(help="The path to write the output to.")
     ],
+    learn_prosit_missing: Annotated[
+        bool,
+        typer.Option(
+            help="Whether to learn from missing Prosit features. If False, training will fail if any spectra have invalid Prosit predictions."
+        ),
+    ] = True,
+    learn_chimeric_missing: Annotated[
+        bool,
+        typer.Option(
+            help="Whether to learn from missing chimeric features. If False, training will fail if any spectra have invalid predictions for chimeric feature computation."
+        ),
+    ] = True,
+    learn_retention_missing: Annotated[
+        bool,
+        typer.Option(
+            help="Whether to learn from missing retention time features. If False, training will fail if any spectra have invalid retention time predictions."
+        ),
+    ] = True,
 ):
     """Fit the calibration model.
 
@@ -305,7 +351,11 @@ def train(
 
     # Train
     logger.info("Training calibrator.")
-    calibrator = initialise_calibrator()
+    calibrator = initialise_calibrator(
+        learn_prosit_missing=learn_prosit_missing,
+        learn_chimeric_missing=learn_chimeric_missing,
+        learn_retention_missing=learn_retention_missing,
+    )
     calibrator.fit(annotated_dataset)
 
     # -- Write model checkpoints
