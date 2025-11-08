@@ -5,6 +5,7 @@ from winnow.calibration.calibration_features import (
     RetentionTimeFeature,
     ChimericFeatures,
     BeamFeatures,
+    DiffusionBeamFeatures,
 )
 from winnow.calibration.calibrator import ProbabilityCalibrator
 from winnow.datasets.calibration_dataset import CalibrationDataset
@@ -187,6 +188,7 @@ def initialise_calibrator() -> ProbabilityCalibrator:
     )
     calibrator.add_feature(ChimericFeatures(mz_tolerance=MZ_TOLERANCE))
     calibrator.add_feature(BeamFeatures())
+    calibrator.add_feature(DiffusionBeamFeatures())
     return calibrator
 
 
