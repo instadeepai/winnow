@@ -374,7 +374,6 @@ def predict(
     logger.info("Writing output.")
     # Separate out metadata from prediction and FDR metrics
     preds_and_fdr_metrics_cols = [
-        "spectrum_id",
         confidence_column,
         "prediction",
         "psm_fdr",
@@ -384,9 +383,16 @@ def predict(
         preds_and_fdr_metrics_cols.append("sequence")
     if method is FDRMethod.winnow:
         preds_and_fdr_metrics_cols.append("psm_pep")
-    dataset_preds_and_fdr_metrics = dataset_metadata[preds_and_fdr_metrics_cols]
+    dataset_preds_and_fdr_metrics = dataset_metadata[
+        preds_and_fdr_metrics_cols + ["spectrum_id"]
+    ]
     dataset_metadata = dataset_metadata.drop(columns=preds_and_fdr_metrics_cols)
     # Write outputs
+    output_folder.mkdir(parents=True)
     dataset_metadata.to_csv(output_folder / "metadata.csv")
     dataset_preds_and_fdr_metrics.to_csv(output_folder / "preds_and_fdr_metrics.csv")
     logger.info(f"Outputs saved: {output_folder}")
+
+
+if __name__ == "__main__":
+    app()
