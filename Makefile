@@ -124,7 +124,7 @@ download-beams:
 		winnow-ms-datasets
 
 train-general-model:
-	winnow train --data-source instanovo --dataset-config-path configs/train_general_model.yaml --model-output-dir general_model --dataset-output-path general_training_data
+	winnow train --data-source instanovo --dataset-config-path configs/train_general_model.yaml --model-output-dir general_model --dataset-output-path general_training_data.csv
 
 upload-training-results:
 	gsutil -m cp \
