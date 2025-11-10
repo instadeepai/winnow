@@ -41,7 +41,11 @@ class InstaNovoDatasetLoader(DatasetLoader):
         """
         df = pl.read_csv(predictions_path)
         # Use polars column selectors to split dataframe
-        beam_df = df.select(cs.contains("instanovo_predictions_beam"))
+        beam_df = df.select(
+            cs.contains(
+                "instanovo_predictions_beam", "instanovo_log_probabilities_beam"
+            )
+        )
         preds_df = df.select(
             ~cs.contains(
                 ["instanovo_predictions_beam", "instanovo_log_probabilities_beam"]
