@@ -772,15 +772,7 @@ class DiffusionBeamFeatures(CalibrationFeatures):
     computing the same metrics as BeamFeatures but for diffusion-refined predictions.
     The diffusion beam data should be stored in the metadata columns with names:
     diffusion_predictions_beam_0, diffusion_log_probabilities_beam_0, etc.
-
-    Attributes:
-        diffusion_predictions (List[Optional[List[ScoredSequence]]]): Structured list of
-            diffusion beam predictions, parsed from metadata columns.
     """
-
-    def __init__(self):
-        """Initialize the DiffusionBeamFeatures class."""
-        self.diffusion_predictions: List[Optional[List[ScoredSequence]]] = []
 
     @property
     def dependencies(self) -> List[FeatureDependency]:
@@ -821,15 +813,78 @@ class DiffusionBeamFeatures(CalibrationFeatures):
     def prepare(self, dataset: CalibrationDataset) -> None:
         """Prepares the dataset before feature computation.
 
-        This method parses diffusion beam predictions from metadata columns and
-        converts them into a structured List[List[ScoredSequence]] format, similar
-        to how regular beam predictions are stored in dataset.predictions.
-
         Args:
             dataset (CalibrationDataset): The dataset to prepare.
         """
-        from instanovo.inference.beam_search import ScoredSequence
+        return
 
+    def compute(self, dataset: CalibrationDataset) -> None:
+        """Computes margin, median margin and entropy for diffusion beam search runners-up.
+
+        - Diffusion Margin: Difference between the highest probability sequence and the second-best sequence.
+        - Diffusion Median Margin: Difference between the highest probability sequence and the median probability of the runner-ups.
+        - Diffusion Entropy: Shannon entropy of the normalised probabilities of the runner-up sequences.
+        - Diffusion Z-score: Distance between the top beam score and the population mean over all beam results for that spectra in units of the standard deviation.
+
+        These metrics help assess the confidence of the top diffusion-refined prediction relative to lower-ranked candidates.
+
+        Args:
+            dataset (CalibrationDataset): The dataset containing diffusion beam search predictions in metadata columns.
+        """
+        # Parse diffusion predictions from metadata on-the-fly
+        diffusion_predictions = self._parse_diffusion_predictions(dataset)
+
+        # Check if predictions were successfully parsed
+        if not diffusion_predictions or all(
+            pred is None for pred in diffusion_predictions
+        ):
+            warnings.warn(
+                "No diffusion predictions available. Filling diffusion beam features with zeros."
+            )
+            self._fill_default_features(dataset)
+            return
+
+        # Count beams with fewer than 2 sequences
+        count = sum(
+            1
+            for prediction in diffusion_predictions
+            if prediction is None or len(prediction) < 2
+        )
+        if count > 0:
+            warnings.warn(
+                f"{count} diffusion beam search results have fewer than two sequences. "
+                "This may affect the efficacy of computed diffusion beam features."
+            )
+
+        # Compute features using extracted helper methods
+        top_probs, second_probs = self._compute_probabilities(diffusion_predictions)
+        second_margin = [
+            top_prob - second_prob
+            for top_prob, second_prob in zip(top_probs, second_probs)
+        ]
+
+        runner_up_entropy, median_margin = self._compute_runner_up_features(
+            top_probs, diffusion_predictions
+        )
+        z_score = self._compute_z_scores(diffusion_predictions)
+
+        # Store computed features in dataset metadata
+        dataset.metadata["diffusion_margin"] = second_margin
+        dataset.metadata["diffusion_median_margin"] = median_margin
+        dataset.metadata["diffusion_entropy"] = runner_up_entropy
+        dataset.metadata["diffusion_z-score"] = z_score
+
+    def _parse_diffusion_predictions(
+        self, dataset: CalibrationDataset
+    ) -> List[Optional[List]]:
+        """Parse diffusion beam predictions from dataset metadata.
+
+        Args:
+            dataset (CalibrationDataset): The dataset containing diffusion metadata columns.
+
+        Returns:
+            List[Optional[List]]: Parsed diffusion predictions as ScoredSequence objects.
+        """
         # Find all diffusion beam columns
         diffusion_pred_cols = [
             col
@@ -843,13 +898,7 @@ class DiffusionBeamFeatures(CalibrationFeatures):
         ]
 
         if not diffusion_pred_cols or not diffusion_logprob_cols:
-            warnings.warn(
-                "No diffusion beam columns found in metadata. "
-                "Expected columns like 'diffusion_predictions_beam_0', 'diffusion_log_probabilities_beam_0', etc."
-            )
-            # Create empty predictions list
-            self.diffusion_predictions = [None] * len(dataset.metadata)
-            return
+            return [None] * len(dataset.metadata)
 
         # Sort columns by beam index
         diffusion_pred_cols = sorted(
@@ -860,7 +909,7 @@ class DiffusionBeamFeatures(CalibrationFeatures):
         )
 
         # Parse each row's diffusion beams into ScoredSequence objects
-        self.diffusion_predictions = []
+        diffusion_predictions = []
         for _, row in dataset.metadata.iterrows():
             beam_list = []
             for pred_col, logprob_col in zip(
@@ -885,56 +934,9 @@ class DiffusionBeamFeatures(CalibrationFeatures):
                     beam_list.append(scored_seq)
 
             # Add the beam list (or None if empty)
-            self.diffusion_predictions.append(beam_list if beam_list else None)
+            diffusion_predictions.append(beam_list if beam_list else None)
 
-    def compute(self, dataset: CalibrationDataset) -> None:
-        """Computes margin, median margin and entropy for diffusion beam search runners-up.
-
-        - Diffusion Margin: Difference between the highest probability sequence and the second-best sequence.
-        - Diffusion Median Margin: Difference between the highest probability sequence and the median probability of the runner-ups.
-        - Diffusion Entropy: Shannon entropy of the normalised probabilities of the runner-up sequences.
-        - Diffusion Z-score: Distance between the top beam score and the population mean over all beam results for that spectra in units of the standard deviation.
-
-        These metrics help assess the confidence of the top diffusion-refined prediction relative to lower-ranked candidates.
-
-        Args:
-            dataset (CalibrationDataset): The dataset containing diffusion beam search predictions in metadata columns.
-        """
-        # Ensure diffusion_predictions has been prepared
-        if not self.diffusion_predictions:
-            warnings.warn(
-                "No diffusion predictions available. Filling diffusion beam features with zeros."
-            )
-            self._fill_default_features(dataset)
-            return
-
-        # Count beams with fewer than 2 sequences
-        count = sum(
-            1
-            for prediction in self.diffusion_predictions
-            if prediction is None or len(prediction) < 2
-        )
-        if count > 0:
-            warnings.warn(
-                f"{count} diffusion beam search results have fewer than two sequences. "
-                "This may affect the efficacy of computed diffusion beam features."
-            )
-
-        # Compute features using extracted helper methods
-        top_probs, second_probs = self._compute_probabilities()
-        second_margin = [
-            top_prob - second_prob
-            for top_prob, second_prob in zip(top_probs, second_probs)
-        ]
-
-        runner_up_entropy, median_margin = self._compute_runner_up_features(top_probs)
-        z_score = self._compute_z_scores()
-
-        # Store computed features in dataset metadata
-        dataset.metadata["diffusion_margin"] = second_margin
-        dataset.metadata["diffusion_median_margin"] = median_margin
-        dataset.metadata["diffusion_entropy"] = runner_up_entropy
-        dataset.metadata["diffusion_z-score"] = z_score
+        return diffusion_predictions
 
     def _parse_sequence_string(self, seq_str: str) -> List[str]:
         """Parse a string-formatted sequence into a list of residues.
@@ -963,8 +965,13 @@ class DiffusionBeamFeatures(CalibrationFeatures):
         dataset.metadata["diffusion_entropy"] = 0.0
         dataset.metadata["diffusion_z-score"] = 0.0
 
-    def _compute_probabilities(self) -> Tuple[List[float], List[float]]:
+    def _compute_probabilities(
+        self, diffusion_predictions: List[Optional[List]]
+    ) -> Tuple[List[float], List[float]]:
         """Extract top and second probabilities from diffusion predictions.
+
+        Args:
+            diffusion_predictions (List[Optional[List]]): Parsed diffusion predictions.
 
         Returns:
             Tuple[List[float], List[float]]: Top probabilities and second probabilities.
@@ -973,23 +980,24 @@ class DiffusionBeamFeatures(CalibrationFeatures):
             exp(prediction[0].sequence_log_probability)
             if prediction and len(prediction) >= 1
             else 0.0
-            for prediction in self.diffusion_predictions
+            for prediction in diffusion_predictions
         ]
         second_probs = [
             exp(prediction[1].sequence_log_probability)
             if prediction and len(prediction) >= 2
             else 0.0
-            for prediction in self.diffusion_predictions
+            for prediction in diffusion_predictions
         ]
         return top_probs, second_probs
 
     def _compute_runner_up_features(
-        self, top_probs: List[float]
+        self, top_probs: List[float], diffusion_predictions: List[Optional[List]]
     ) -> Tuple[List[float], List[float]]:
         """Compute entropy and median margin from runner-up probabilities.
 
         Args:
             top_probs (List[float]): List of top beam probabilities.
+            diffusion_predictions (List[Optional[List]]): Parsed diffusion predictions.
 
         Returns:
             Tuple[List[float], List[float]]: Runner-up entropy and median margin values.
@@ -998,7 +1006,7 @@ class DiffusionBeamFeatures(CalibrationFeatures):
             [exp(item.sequence_log_probability) for item in prediction[1:]]
             if prediction and len(prediction) >= 2
             else [0.0]
-            for prediction in self.diffusion_predictions
+            for prediction in diffusion_predictions
         ]
 
         normalised_runner_up_probs = [
@@ -1021,8 +1029,13 @@ class DiffusionBeamFeatures(CalibrationFeatures):
 
         return runner_up_entropy, median_margin
 
-    def _compute_z_scores(self) -> List[float]:
+    def _compute_z_scores(
+        self, diffusion_predictions: List[Optional[List]]
+    ) -> List[float]:
         """Compute z-scores for each diffusion beam prediction.
+
+        Args:
+            diffusion_predictions (List[Optional[List]]): Parsed diffusion predictions.
 
         Returns:
             List[float]: Z-score values for each prediction.
@@ -1038,9 +1051,7 @@ class DiffusionBeamFeatures(CalibrationFeatures):
                 return 0.0
             return (probabilities[0] - mean_prob) / std_prob
 
-        return [
-            row_beam_z_score(prediction) for prediction in self.diffusion_predictions
-        ]
+        return [row_beam_z_score(prediction) for prediction in diffusion_predictions]
 
 
 class RetentionTimeFeature(CalibrationFeatures):
