@@ -22,9 +22,9 @@ class TestCalibrationDataset:
         """Create sample metadata DataFrame."""
         return pd.DataFrame(
             {
-                "confidence": [0.9, 0.8, 0.7, 0.6, 0.5],
-                "prediction": [["A", "G"], ["G", "A"], ["S", "P"], ["V"], ["K"]],
-                "sequence": [["A", "G"], ["G", "A"], ["A", "P"], ["V"], ["Q"]],
+                "confidence": [0.9, 0.8, 0.7, 0.6, 0.0],
+                "prediction": [["A", "G"], ["G", "A"], ["S", "P"], ["V"], None],
+                "sequence": [["A", "G"], ["G", "A"], ["A", "P"], ["V"], ["P"]],
                 "precursor_mass": [200.0, 200.0, 250.0, 150.0, 180.0],
                 "correct": [True, True, False, True, False],
             }
@@ -42,8 +42,8 @@ class TestCalibrationDataset:
                 MockScoredSequence(["G", "A"], np.log(0.7)),
                 MockScoredSequence(["A", "G"], np.log(0.5)),
             ],
-            [MockScoredSequence(["S", "P"], np.log(0.6))],
-            [MockScoredSequence(["V"], np.log(0.9))],
+            [MockScoredSequence(["S", "P"], np.log(0.6))],  # One sequence in prediction
+            [MockScoredSequence(["V"], np.log(0.9))],  # One sequence in prediction
             None,  # No predictions for this entry
         ]
 
@@ -161,14 +161,16 @@ class TestCalibrationDataset:
 
     def test_filter_entries_predictions(self, calibration_dataset):
         """Test filtering based on predictions."""
-        # Filter out entries with predictions having less than 2 sequences or None
+        # Filter out entries with predictions having less than 2 sequences and confidence <= 0.7
         filtered = calibration_dataset.filter_entries(
-            predictions_predicate=lambda beam: beam is None or len(beam) < 2
+            predictions_predicate=lambda beam: (
+                beam is None
+                or len(beam) < 2
+                or beam[0].sequence_log_probability <= np.log(0.7)
+            )
         )
 
-        assert (
-            len(filtered) == 2
-        )  # Should keep only first 2 entries (which have >= 2 sequences)
+        assert len(filtered) == 1  # Should keep only first entry
 
     def test_filter_entries_combined(self, calibration_dataset):
         """Test filtering with both metadata and predictions predicates."""
@@ -202,6 +204,83 @@ class TestCalibrationDataset:
         )  # Use default predicates (always False)
 
         assert len(filtered) == len(calibration_dataset)
+
+    def test_filter_preserves_index_reset(self, calibration_dataset):
+        """Test that filtering resets the DataFrame index."""
+        # Filter out specific confidence values to get non-contiguous remaining indices
+        filtered = calibration_dataset.filter_entries(
+            metadata_predicate=lambda row: row["confidence"]
+            in [0.8, 0.6]  # Remove indices 1, 3
+        )
+
+        # Check that the index was reset to be contiguous
+        # Should keep indices 0, 2, 4 (confidence 0.9, 0.7, 0.5) which become 0, 1, 2
+        assert list(filtered.metadata.index) == [0, 1, 2]
+
+    def test_filter_entries_predictions_len_predicate_handles_none(
+        self, calibration_dataset
+    ):
+        """Ensure len(beam) predicate handles None beams explicitly."""
+        # Entries with None beam or <2 items are filtered out, leaving only those with >=2
+        filtered = calibration_dataset.filter_entries(
+            predictions_predicate=lambda beam: beam is None or len(beam) < 2
+        )
+
+        assert len(filtered) == 2
+
+    def test_filter_entries_predictions_raises_error_on_none_beam(
+        self, calibration_dataset
+    ):
+        """Test that accessing beam[0] on None beam raises helpful error."""
+        with pytest.raises(ValueError, match="beam is None"):
+            calibration_dataset.filter_entries(
+                predictions_predicate=lambda beam: beam[0].sequence_log_probability
+                <= np.log(0.7)
+            )
+
+    def test_filter_entries_predictions_raises_error_on_none_len(
+        self, calibration_dataset
+    ):
+        """Test that calling len() on None beam raises helpful error."""
+        with pytest.raises(ValueError, match="beam is None"):
+            calibration_dataset.filter_entries(
+                predictions_predicate=lambda beam: len(beam) < 2
+            )
+
+    def test_filter_entries_predictions_raises_error_on_empty_beam(
+        self, calibration_dataset
+    ):
+        """Test that accessing beam[0] on empty beam raises helpful error."""
+        # Create a dataset with an empty beam (empty list instead of None)
+        empty_beam_dataset = CalibrationDataset(
+            metadata=pd.DataFrame({"confidence": [0.5]}), predictions=[[]]
+        )
+        with pytest.raises(ValueError, match="beam is empty"):
+            empty_beam_dataset.filter_entries(
+                predictions_predicate=lambda beam: beam[0].sequence_log_probability
+                <= np.log(0.7)
+            )
+
+    def test_filter_entries_predictions_raises_error_on_too_short_beam(
+        self, calibration_dataset
+    ):
+        """Test that accessing beam[1] when beam has only 1 element raises helpful error."""
+        # Create a dataset with a beam that has only 1 element
+        short_beam_dataset = CalibrationDataset(
+            metadata=pd.DataFrame({"confidence": [0.5]}),
+            predictions=[[MockScoredSequence(["A"], np.log(0.8))]],
+        )
+        with pytest.raises(ValueError, match="too short"):
+            short_beam_dataset.filter_entries(
+                predictions_predicate=lambda beam: beam[1].sequence_log_probability
+                <= np.log(0.7)
+            )
+
+    def test_filter_entries_handles_empty_dataset(self):
+        """Test that filtering an empty dataset returns an empty dataset."""
+        empty_dataset = CalibrationDataset(metadata=pd.DataFrame(), predictions=[])
+        filtered = empty_dataset.filter_entries(lambda row: True)
+        assert len(filtered) == 0
 
     def test_to_csv(self, calibration_dataset, tmp_path):
         """Test saving metadata to CSV."""
@@ -278,24 +357,12 @@ class TestCalibrationDataset:
         assert dataset.metadata["string_col"].dtype == object
         assert dataset.metadata["bool_col"].dtype == bool
 
-    def test_filter_preserves_index_reset(self, calibration_dataset):
-        """Test that filtering resets the DataFrame index."""
-        # Filter out specific confidence values to get non-contiguous remaining indices
-        filtered = calibration_dataset.filter_entries(
-            metadata_predicate=lambda row: row["confidence"]
-            in [0.8, 0.6]  # Remove indices 1, 3
-        )
-
-        # Check that the index was reset to be contiguous
-        # Should keep indices 0, 2, 4 (confidence 0.9, 0.7, 0.5) which become 0, 1, 2
-        assert list(filtered.metadata.index) == [0, 1, 2]
-
     def test_getitem_negative_index(self, calibration_dataset):
         """Test __getitem__ with negative index."""
         # Get last item
         metadata_row, prediction = calibration_dataset[-1]
 
-        assert metadata_row["confidence"] == 0.5
+        assert metadata_row["confidence"] == 0.0
         assert prediction is None
 
     def test_save_creates_parent_directories(self, calibration_dataset, tmp_path):

@@ -262,7 +262,7 @@ class PrositFeatures(CalibrationFeatures):
         inputs["collision_energies"] = np.array(len(dataset.metadata) * [25])
 
         model = koinapy.Koina(self.prosit_intensity_model_name)
-        predictions: pd.DataFrame = model.predict(inputs, debug=True)
+        predictions: pd.DataFrame = model.predict(inputs)
         predictions["Index"] = predictions.index
 
         grouped_predictions = predictions.groupby(by="Index").agg(
