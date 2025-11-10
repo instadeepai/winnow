@@ -133,7 +133,7 @@ class CalibrationDataset:
         Args:
             path (str): Path to the output CSV file.
         """
-        self.metadata.to_csv(path)
+        self.metadata.to_csv(path, index=False)
 
     def to_parquet(self, path: str) -> None:
         """Saves the dataset metadata to a parquet file.
