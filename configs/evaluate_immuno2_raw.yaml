@@ -1,0 +1,2 @@
+spectrum_path: winnow-ms-datasets/immuno2_raw.parquet
+beam_predictions_path: winnow-ms-datasets/immuno2_raw_beams.csv

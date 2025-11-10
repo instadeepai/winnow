@@ -108,3 +108,42 @@ set-gcp-credentials:
 ## Set the Ceph credentials
 set-ceph-credentials:
 	uv run python scripts/set_ceph_credentials.py
+
+download-spectra:
+	uv run scripts/download_spectra.py
+
+download-beams:
+	gsutil -m cp \
+		"gs://winnow-fdr/winnow-ms-datasets-new-outputs/celegans_labelled_beams.csv" \
+		"gs://winnow-fdr/winnow-ms-datasets-new-outputs/celegans_raw_beams.csv" \
+		"gs://winnow-fdr/winnow-ms-datasets-new-outputs/general_test_beams.csv" \
+		"gs://winnow-fdr/winnow-ms-datasets-new-outputs/general_train_beams.csv" \
+		"gs://winnow-fdr/winnow-ms-datasets-new-outputs/general_val_beams.csv" \
+		"gs://winnow-fdr/winnow-ms-datasets-new-outputs/immuno2_labelled_beams.csv" \
+		"gs://winnow-fdr/winnow-ms-datasets-new-outputs/immuno2_raw_beams.csv" \
+		winnow-ms-datasets
+
+train-general-model:
+	winnow train --data-source instanovo --dataset-config-path configs/train_general_model.yaml --model-output-dir general_model --dataset-output-path general_training_data
+
+upload-training-results:
+	gsutil -m cp \
+		general_training_data/* \
+		gs://winnow-fdr/winnow-ms-datasets-new-outputs/general_training_data/
+
+upload-model:
+	gsutil -m cp \
+		general_model/calibrator.pkl \
+		gs://winnow-fdr/winnow-ms-datasets-new-outputs/general_model/calibrator.pkl
+
+evaluate-general-model:
+	winnow predict --data-source instanovo --dataset-config-path configs/evaluate_test_set.yaml --method winnow --fdr-threshold 1.0 --confidence-column calibrated_confidence --output-folder general_test_data/test_set --local-model-folder general_model
+	winnow predict --data-source instanovo --dataset-config-path configs/evaluate_celegans_labelled.yaml --method winnow --fdr-threshold 1.0 --confidence-column calibrated_confidence --output-folder general_test_data/celegans_labelled --local-model-folder general_model
+	winnow predict --data-source instanovo --dataset-config-path configs/evaluate_immuno2_labelled.yaml --method winnow --fdr-threshold 1.0 --confidence-column calibrated_confidence --output-folder general_test_data/immuno2_labelled --local-model-folder general_model
+	winnow predict --data-source instanovo --dataset-config-path configs/celegans_raw.yaml --method winnow --fdr-threshold 1.0 --confidence-column calibrated_confidence --output-folder general_test_data/celegans_raw --local-model-folder general_model
+	winnow predict --data-source instanovo --dataset-config-path configs/immuno2_raw.yaml --method winnow --fdr-threshold 1.0 --confidence-column calibrated_confidence --output-folder general_test_data/immuno2_raw --local-model-folder general_model
+
+upload-evaluation-results:
+	gsutil -m cp \
+		general_test_data/* \
+		gs://winnow-fdr/winnow-ms-datasets-new-outputs/general_test_data/

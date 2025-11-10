@@ -1,0 +1,2 @@
+spectrum_path: winnow-ms-datasets/general_test.parquet
+beam_predictions_path: winnow-ms-datasets/general_test_beams.csv

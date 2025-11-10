@@ -1,0 +1,2 @@
+spectrum_path: winnow-ms-datasets/celegans_raw.parquet
+beam_predictions_path: winnow-ms-datasets/celegans_raw_beams.csv
