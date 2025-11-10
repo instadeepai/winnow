@@ -197,8 +197,17 @@ def compute_ion_identifications(
 class PrositFeatures(CalibrationFeatures):
     """A class for extracting features related to Prosit: a machine learning-based intensity prediction tool for peptide fragmentation."""
 
-    def __init__(self, mz_tolerance: float) -> None:
+    def __init__(self, mz_tolerance: float, learn_from_missing: bool = True) -> None:
+        """Initialize PrositFeatures.
+
+        Args:
+            mz_tolerance (float): The mass-to-charge tolerance for ion matching.
+            learn_from_missing (bool): Whether to learn from missing data by including a missingness indicator column.
+                If False, an error will be raised when invalid spectra are encountered.
+                Defaults to True.
+        """
         self.mz_tolerance = mz_tolerance
+        self.learn_from_missing = learn_from_missing
         self.prosit_intensity_model_name = "Prosit_2020_intensity_HCD"
 
     @property
@@ -230,9 +239,13 @@ class PrositFeatures(CalibrationFeatures):
         The columns include ion matches and the corresponding ion match intensities.
 
         Returns:
-            List[str]: A list of column names: ["ion_matches", "ion_match_intensity"].
+            List[str]: A list of column names: ["ion_matches", "ion_match_intensity"] and optionally
+                "is_missing_prosit_features" if learn_from_missing is True.
         """
-        return ["ion_matches", "ion_match_intensity", "is_missing_prosit_features"]
+        columns = ["ion_matches", "ion_match_intensity"]
+        if self.learn_from_missing:
+            columns.append("is_missing_prosit_features")
+        return columns
 
     def check_valid_prosit_prediction(self, dataset: CalibrationDataset) -> pd.Series:
         """Check which predictions are valid for Prosit intensity prediction.
@@ -291,10 +304,27 @@ class PrositFeatures(CalibrationFeatures):
 
         Args:
             dataset (CalibrationDataset): The dataset containing metadata required for predictions.
+
+        Raises:
+            ValueError: If learn_from_missing is False and invalid spectra are found in the dataset.
         """
         # Check which predictions are valid for Prosit intensity prediction
         is_valid_prosit_prediction = self.check_valid_prosit_prediction(dataset)
         dataset.metadata["is_missing_prosit_features"] = ~is_valid_prosit_prediction
+
+        # If not learning from missing data, raise error when invalid spectra are found
+        if not self.learn_from_missing:
+            n_invalid = (~is_valid_prosit_prediction).sum()
+            if n_invalid > 0:
+                raise ValueError(
+                    f"Found {n_invalid} spectra with missing Prosit features. "
+                    f"When learn_from_missing=False, all spectra must be valid for Prosit prediction. "
+                    f"Please filter your dataset to remove:\n"
+                    f"  - Peptides longer than 30 amino acids\n"
+                    f"  - Precursor charges greater than 6\n"
+                    f"  - Peptides with unsupported modifications (e.g., {', '.join(INVALID_PROSIT_TOKENS[:3])}...)\n"
+                    f"Or set learn_from_missing=True to handle missing data automatically."
+                )
 
         original_indices = dataset.metadata.index
 
@@ -383,8 +413,17 @@ class ChimericFeatures(CalibrationFeatures):
     are stored in the dataset metadata.
     """
 
-    def __init__(self, mz_tolerance: float) -> None:
+    def __init__(self, mz_tolerance: float, learn_from_missing: bool = True) -> None:
+        """Initialize ChimericFeatures.
+
+        Args:
+            mz_tolerance (float): The mass-to-charge tolerance for ion matching.
+            learn_from_missing (bool): Whether to learn from missing data by including a missingness indicator column.
+                If False, an error will be raised when invalid spectra are encountered.
+                Defaults to True.
+        """
         self.mz_tolerance = mz_tolerance
+        self.learn_from_missing = learn_from_missing
         self.prosit_intensity_model_name = "Prosit_2020_intensity_HCD"
 
     @property
@@ -414,13 +453,16 @@ class ChimericFeatures(CalibrationFeatures):
         """Returns the column names for the computed features.
 
         Returns:
-            List[str]: A list of column names: ["chimeric_ion_matches", "chimeric_ion_match_intensity"].
+            List[str]: A list of column names: ["chimeric_ion_matches", "chimeric_ion_match_intensity"]
+                and optionally "is_missing_chimeric_features" if learn_from_missing is True.
         """
-        return [
+        columns = [
             "chimeric_ion_matches",
             "chimeric_ion_match_intensity",
-            "is_missing_chimeric_features",
         ]
+        if self.learn_from_missing:
+            columns.append("is_missing_chimeric_features")
+        return columns
 
     def check_valid_chimeric_prosit_prediction(
         self, dataset: CalibrationDataset
@@ -484,6 +526,9 @@ class ChimericFeatures(CalibrationFeatures):
 
         Args:
             dataset (CalibrationDataset): The dataset containing metadata for predictions.
+
+        Raises:
+            ValueError: If learn_from_missing is False and invalid spectra are found in the dataset.
         """
         # Ensure dataset.predictions is not None
         _raise_value_error(dataset.predictions, "dataset.predictions")
@@ -495,6 +540,21 @@ class ChimericFeatures(CalibrationFeatures):
         dataset.metadata[
             "is_missing_chimeric_features"
         ] = ~is_valid_chimeric_prosit_prediction
+
+        # If not learning from missing data, raise error when invalid spectra are found
+        if not self.learn_from_missing:
+            n_invalid = (~is_valid_chimeric_prosit_prediction).sum()
+            if n_invalid > 0:
+                raise ValueError(
+                    f"Found {n_invalid} spectra with missing chimeric features. "
+                    f"When learn_from_missing=False, all spectra must have valid runner-up sequences for Prosit prediction. "
+                    f"Please filter your dataset to remove:\n"
+                    f"  - Spectra without runner-up sequences (beam search required)\n"
+                    f"  - Runner-up peptides longer than 30 amino acids\n"
+                    f"  - Runner-up peptides with precursor charges greater than 6\n"
+                    f"  - Runner-up peptides with unsupported modifications (e.g., {', '.join(INVALID_PROSIT_TOKENS[:3])}...)\n"
+                    f"Or set learn_from_missing=True to handle missing data automatically."
+                )
 
         original_indices = dataset.metadata.index
 
@@ -1062,9 +1122,21 @@ class RetentionTimeFeature(CalibrationFeatures):
 
     irt_predictor: MLPRegressor
 
-    def __init__(self, hidden_dim: int, train_fraction: float) -> None:
+    def __init__(
+        self, hidden_dim: int, train_fraction: float, learn_from_missing: bool = True
+    ) -> None:
+        """Initialize RetentionTimeFeature.
+
+        Args:
+            hidden_dim (int): Hidden dimension size for the MLP regressor.
+            train_fraction (float): Fraction of data to use for training the iRT calibrator.
+            learn_from_missing (bool): Whether to learn from missing data by including a missingness indicator column.
+                If False, an error will be raised when invalid spectra are encountered.
+                Defaults to True.
+        """
         self.train_fraction = train_fraction
         self.hidden_dim = hidden_dim
+        self.learn_from_missing = learn_from_missing
         self.prosit_irt_model_name = "Prosit_2019_irt"
         self.irt_predictor = MLPRegressor(
             hidden_layer_sizes=[hidden_dim], random_state=42
@@ -1097,9 +1169,13 @@ class RetentionTimeFeature(CalibrationFeatures):
         """Defines the column names for the computed features.
 
         Returns:
-            List[str]: A list containing "iRT error".
+            List[str]: A list containing "iRT error" and optionally "is_missing_irt_error"
+                if learn_from_missing is True.
         """
-        return ["iRT error", "is_missing_irt_error"]
+        columns = ["iRT error"]
+        if self.learn_from_missing:
+            columns.append("is_missing_irt_error")
+        return columns
 
     def check_valid_irt_prediction(self, dataset: CalibrationDataset) -> pd.Series:
         """Check which predictions are valid for iRT prediction.
@@ -1197,10 +1273,28 @@ class RetentionTimeFeature(CalibrationFeatures):
 
         Args:
             dataset (CalibrationDataset): The dataset containing peptide sequences and retention times.
+
+        Raises:
+            ValueError: If learn_from_missing is False and invalid spectra are found in the dataset.
         """
         # Check which predictions are valid for Prosit iRT prediction
         is_valid_irt_prediction = self.check_valid_irt_prediction(dataset)
         dataset.metadata["is_missing_irt_error"] = ~is_valid_irt_prediction
+
+        # If not learning from missing data, raise error when invalid spectra are found
+        if not self.learn_from_missing:
+            n_invalid = (~is_valid_irt_prediction).sum()
+            if n_invalid > 0:
+                raise ValueError(
+                    f"Found {n_invalid} spectra with missing retention time features. "
+                    f"When learn_from_missing=False, all spectra must be valid for iRT prediction. "
+                    f"Please filter your dataset to remove:\n"
+                    f"  - Spectra without retention time data\n"
+                    f"  - Peptides longer than 30 amino acids\n"
+                    f"  - Precursor charges greater than 6\n"
+                    f"  - Peptides with unsupported modifications (e.g., {', '.join(INVALID_PROSIT_TOKENS[:3])}...)\n"
+                    f"Or set learn_from_missing=True to handle missing data automatically."
+                )
 
         original_indices = dataset.metadata.index
 

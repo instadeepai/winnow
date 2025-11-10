@@ -32,6 +32,28 @@ winnow train \
 - `--dataset-config-path`: Path to YAML configuration file
 - `--model-output-folder`: Directory to save trained calibrator
 - `--dataset-output-path`: Path to save training results CSV
+- `--learn-prosit-missing` / `--no-learn-prosit-missing`: Whether to learn from missing Prosit features (default: True)
+- `--learn-chimeric-missing` / `--no-learn-chimeric-missing`: Whether to learn from missing chimeric features (default: True)
+- `--learn-retention-missing` / `--no-learn-retention-missing`: Whether to learn from missing retention time features (default: True)
+
+**Missingness Handling:**
+
+By default, the calibrator learns from missing data by including missingness indicators as features.
+
+If you wish to train only on complete data (training will fail if invalid spectra are found):
+
+```bash
+winnow train \
+    --data-source instanovo \
+    --dataset-config-path train_config.yaml \
+    --model-output-folder ./calibrator_model \
+    --dataset-output-path ./training_results.csv \
+    --no-learn-prosit-missing \
+    --no-learn-chimeric-missing \
+    --no-learn-retention-missing
+```
+
+See the [Handling Missing Features](api/calibration.md#handling-missing-features) section for more details.
 
 ### `winnow predict`
 
