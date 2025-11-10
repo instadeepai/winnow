@@ -26,3 +26,6 @@
 
 # To parse the number of GPUs
 !manifest.yaml
+
+# To run training and evaluation commands
+!configs
