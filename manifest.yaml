@@ -16,7 +16,7 @@ spec:
         provider: "github" # Optional, vscode tunnel provider. Options are "github" or "microsoft", defaults to "github"
   operator: jobset
   image: winnow
-  command: make set-gcp-credentials && make download-beams && make download-spectra && make train-general-model && make upload-model && make upload-training-results && make evaluate-general-model && make upload-evaluation-results
+  command: make set-gcp-credentials && make download-spectra && make download-beams && make train-general-model && make upload-model && make upload-training-results && make evaluate-general-model && make upload-evaluation-results
 
   types:
     worker:
