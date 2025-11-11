@@ -109,9 +109,11 @@ set-gcp-credentials:
 set-ceph-credentials:
 	uv run python scripts/set_ceph_credentials.py
 
+# Download spectra from HuggingFace
 download-spectra:
 	uv run scripts/download_spectra.py
 
+# Download beams from GCP
 download-beams:
 	gsutil -m cp \
 		"gs://winnow-fdr/winnow-ms-datasets-new-outputs/celegans_labelled_beams.csv" \
@@ -123,19 +125,23 @@ download-beams:
 		"gs://winnow-fdr/winnow-ms-datasets-new-outputs/immuno2_raw_beams.csv" \
 		winnow-ms-datasets
 
+# Train the general model
 train-general-model:
 	winnow train --data-source instanovo --dataset-config-path configs/train_general_model.yaml --model-output-dir general_model --dataset-output-path general_training_data.csv
 
+# Upload the training results to GCP
 upload-training-results:
 	gsutil -m cp \
 		general_training_data/* \
 		gs://winnow-fdr/winnow-ms-datasets-new-outputs/general_training_data/
 
+# Upload the model to GCP
 upload-model:
 	gsutil -m cp \
 		general_model/calibrator.pkl \
 		gs://winnow-fdr/winnow-ms-datasets-new-outputs/general_model/calibrator.pkl
 
+# Evaluate the general model
 evaluate-general-model:
 	winnow predict --data-source instanovo --dataset-config-path configs/evaluate_test_set.yaml --method winnow --fdr-threshold 1.0 --confidence-column calibrated_confidence --output-folder general_test_data/test_set --local-model-folder general_model
 	winnow predict --data-source instanovo --dataset-config-path configs/evaluate_celegans_labelled.yaml --method winnow --fdr-threshold 1.0 --confidence-column calibrated_confidence --output-folder general_test_data/celegans_labelled --local-model-folder general_model
@@ -143,6 +149,7 @@ evaluate-general-model:
 	winnow predict --data-source instanovo --dataset-config-path configs/celegans_raw.yaml --method winnow --fdr-threshold 1.0 --confidence-column calibrated_confidence --output-folder general_test_data/celegans_raw --local-model-folder general_model
 	winnow predict --data-source instanovo --dataset-config-path configs/immuno2_raw.yaml --method winnow --fdr-threshold 1.0 --confidence-column calibrated_confidence --output-folder general_test_data/immuno2_raw --local-model-folder general_model
 
+# Upload the evaluation results to GCP
 upload-evaluation-results:
 	gsutil -m cp \
 		general_test_data/* \
