@@ -159,6 +159,73 @@ feature = RetentionTimeFeature(hidden_dim=10, train_fraction=0.1)
 
 **Purpose**: Incorporates chromatographic information for confidence calibration.
 
+## Handling Missing Features
+
+Prosit-dependent features (PrositFeatures, ChimericFeatures, RetentionTimeFeature) may not be computable for all peptides due to limitations like:
+
+- Peptides longer than 30 amino acids (Prosit limitation)
+- Precursor charges greater than 6 (Prosit limitation)
+- Unsupported modifications (Prosit limitation)
+- Lack of runner-up sequences for chimeric features
+
+Winnow provides two strategies for handling such cases:
+
+### Learn Strategy (Default, `learn_from_missing=True`)
+
+**Recommended for most use cases.**
+
+- Includes `is_missing_*` indicator columns as features
+- Calibrator learns patterns associated with missing data
+- Uses all available data, maximising recall
+- More robust across diverse datasets
+
+### Filter Strategy (`learn_from_missing=False`)
+
+**Use when you want strict data quality requirements.**
+
+- Raises an error immediately when invalid spectra are encountered
+- Forces users to pre-filter datasets before training/prediction
+- Cleaner feature space with no missingness indicators
+
+### Configuration
+
+Configure via CLI flags during training:
+
+```bash
+# Default: Learn from missingness
+winnow train \
+    --data-source instanovo \
+    --dataset-config-path config.yaml \
+    --model-output-folder ./model \
+    --dataset-output-path ./results.csv
+
+# Strict: Require clean data
+winnow train \
+    --data-source instanovo \
+    --dataset-config-path config.yaml \
+    --model-output-folder ./model \
+    --dataset-output-path ./results.csv \
+    --no-learn-prosit-missing \
+    --no-learn-chimeric-missing \
+    --no-learn-retention-missing
+```
+
+Or configure programmatically:
+
+```python
+from winnow.calibration.calibration_features import PrositFeatures, ChimericFeatures, RetentionTimeFeature
+
+# Learn from missingness (default)
+prosit_feat = PrositFeatures(mz_tolerance=0.02, learn_from_missing=True)
+chimeric_feat = ChimericFeatures(mz_tolerance=0.02, learn_from_missing=True)
+rt_feat = RetentionTimeFeature(hidden_dim=10, train_fraction=0.1, learn_from_missing=True)
+
+# Require clean data (strict mode)
+prosit_feat = PrositFeatures(mz_tolerance=0.02, learn_from_missing=False)
+chimeric_feat = ChimericFeatures(mz_tolerance=0.02, learn_from_missing=False)
+rt_feat = RetentionTimeFeature(hidden_dim=10, train_fraction=0.1, learn_from_missing=False)
+```
+
 ## Workflow
 
 ### Training Workflow

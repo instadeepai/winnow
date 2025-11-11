@@ -16,7 +16,7 @@ from winnow.datasets.data_loaders import (
 )
 from winnow.fdr.nonparametric import NonParametricFDRControl
 from winnow.fdr.database_grounded import DatabaseGroundedFDRControl
-from winnow.constants import RESIDUE_MASSES, INVALID_PROSIT_TOKENS
+from winnow.constants import RESIDUE_MASSES
 
 from dataclasses import dataclass
 from enum import Enum
@@ -173,63 +173,47 @@ def filter_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
         )
         # Filter out empty predictions
         .filter_entries(metadata_predicate=lambda row: not row["prediction"])
-        # Filter out entries without a runner-up beam result, since we use the second-best beam result for chimeric feature computation
-        .filter_entries(predictions_predicate=lambda beam: len(beam) < 2)
-        # Filter out spectra with charge > 6 (Prosit-specific, see https://github.com/Nesvilab/FragPipe/issues/1775)
-        .filter_entries(metadata_predicate=lambda row: row["precursor_charge"] > 6)
-        # Filter out spectra with predicted peptide length > 30 (Prosit-specific)
-        .filter_entries(metadata_predicate=lambda row: len(row["prediction"]) > 30)
-        # Filter out spectra with runner-up predicted peptide length > 30 (Prosit-specific)
-        .filter_entries(
-            predictions_predicate=lambda beam: len(beam) > 1
-            and len(beam[1].sequence) > 30
-        )
-        # Filter out spectra with invalid residue tokens in prediction (Prosit-specific)
-        .filter_entries(
-            metadata_predicate=lambda row: (
-                any(
-                    token in row["prediction_untokenised"]
-                    for token in INVALID_PROSIT_TOKENS
-                )
-            )
-        )
-        # Filter out spectra with invalid residue tokens in runner-up predicted peptide (Prosit-specific)
-        .filter_entries(
-            predictions_predicate=lambda beam: (
-                len(beam) > 1
-                and any(
-                    token in "".join(beam[1].sequence)
-                    for token in INVALID_PROSIT_TOKENS
-                )
-            )
-        )
-        # Filter out non-carbamidomethylated cysteine in prediction (Prosit-specific)
-        # We will map carbamidomethylation to "C" on passing to Prosit model
-        # Check if any token is exactly "C" (not "C[UNIMOD:4]" or other variants)
-        .filter_entries(
-            metadata_predicate=lambda row: (
-                any(token == "C" for token in row["prediction"])
-            )
-        )
-        # Filter out non-carbamidomethylated cysteine in runner-up prediction
-        .filter_entries(
-            predictions_predicate=lambda beam: (
-                len(beam) > 1 and any(token == "C" for token in beam[1].sequence)
-            )
-        )
     )
     return filtered_dataset
 
 
-def initialise_calibrator() -> ProbabilityCalibrator:
-    """Set up the probability calibrator with features."""
+def initialise_calibrator(
+    learn_prosit_missing: bool = True,
+    learn_chimeric_missing: bool = True,
+    learn_retention_missing: bool = True,
+) -> ProbabilityCalibrator:
+    """Set up the probability calibrator with features.
+
+    Args:
+        learn_prosit_missing: Whether to learn from missing Prosit features. If False,
+            errors will be raised when invalid spectra are encountered.
+        learn_chimeric_missing: Whether to learn from missing chimeric features. If False,
+            errors will be raised when invalid spectra are encountered.
+        learn_retention_missing: Whether to learn from missing retention time features. If False,
+            errors will be raised when invalid spectra are encountered.
+
+    Returns:
+        ProbabilityCalibrator: Configured calibrator with specified features.
+    """
     calibrator = ProbabilityCalibrator(SEED)
     calibrator.add_feature(MassErrorFeature(residue_masses=RESIDUE_MASSES))
-    calibrator.add_feature(PrositFeatures(mz_tolerance=MZ_TOLERANCE))
     calibrator.add_feature(
-        RetentionTimeFeature(hidden_dim=HIDDEN_DIM, train_fraction=TRAIN_FRACTION)
+        PrositFeatures(
+            mz_tolerance=MZ_TOLERANCE, learn_from_missing=learn_prosit_missing
+        )
     )
-    calibrator.add_feature(ChimericFeatures(mz_tolerance=MZ_TOLERANCE))
+    calibrator.add_feature(
+        RetentionTimeFeature(
+            hidden_dim=HIDDEN_DIM,
+            train_fraction=TRAIN_FRACTION,
+            learn_from_missing=learn_retention_missing,
+        )
+    )
+    calibrator.add_feature(
+        ChimericFeatures(
+            mz_tolerance=MZ_TOLERANCE, learn_from_missing=learn_chimeric_missing
+        )
+    )
     calibrator.add_feature(BeamFeatures())
     return calibrator
 
@@ -285,6 +269,24 @@ def train(
     dataset_output_path: Annotated[
         Path, typer.Option(help="The path to write the output to.")
     ],
+    learn_prosit_missing: Annotated[
+        bool,
+        typer.Option(
+            help="Whether to learn from missing Prosit features. If False, training will fail if any spectra have invalid Prosit predictions."
+        ),
+    ] = True,
+    learn_chimeric_missing: Annotated[
+        bool,
+        typer.Option(
+            help="Whether to learn from missing chimeric features. If False, training will fail if any spectra have invalid predictions for chimeric feature computation."
+        ),
+    ] = True,
+    learn_retention_missing: Annotated[
+        bool,
+        typer.Option(
+            help="Whether to learn from missing retention time features. If False, training will fail if any spectra have invalid retention time predictions."
+        ),
+    ] = True,
 ):
     """Fit the calibration model.
 
@@ -305,7 +307,11 @@ def train(
 
     # Train
     logger.info("Training calibrator.")
-    calibrator = initialise_calibrator()
+    calibrator = initialise_calibrator(
+        learn_prosit_missing=learn_prosit_missing,
+        learn_chimeric_missing=learn_chimeric_missing,
+        learn_retention_missing=learn_retention_missing,
+    )
     calibrator.fit(annotated_dataset)
 
     # -- Write model checkpoints
