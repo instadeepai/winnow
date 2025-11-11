@@ -121,17 +121,36 @@ class InstaNovoDatasetLoader(DatasetLoader):
         Returns:
             pd.DataFrame: The processed dataframe.
         """
+
+        def parse_stringified_list(stringified_list: str) -> list:
+            """Parse a stringified Python list into an actual Python list.
+
+            Args:
+                stringified_list: A string representation of a Python list, e.g.,
+                                "['[UNIMOD:385]', 'G', 'A', 'T', 'D', 'K', 'T']"
+
+            Returns:
+                A Python list containing the parsed elements.
+
+            Example:
+                >>> parse_stringified_list("['[UNIMOD:385]', 'G', 'A', 'T']")
+                ['[UNIMOD:385]', 'G', 'A', 'T']
+            """
+            return ast.literal_eval(stringified_list)
+
         rename_dict = {
-            "predictions": "prediction_untokenised",
-            "predictions_tokenised": "prediction",
-            "log_probs": "confidence",
+            "instanovo_predictions_beam_0": "prediction_untokenised",
+            "instanovo_predictions": "prediction",
+            "instanovo_log_probabilities": "confidence",
         }
         if has_labels:
             rename_dict["sequence"] = "sequence_untokenised"
         dataset.rename(rename_dict, axis=1, inplace=True)
 
         dataset["prediction"] = dataset["prediction"].apply(
-            lambda peptide: peptide.split(", ") if isinstance(peptide, str) else peptide
+            lambda peptide: parse_stringified_list(peptide)
+            if isinstance(peptide, str)
+            else peptide
         )
 
         dataset.loc[dataset["confidence"] == -1.0, "confidence"] = float("-inf")
