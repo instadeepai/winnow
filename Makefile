@@ -133,13 +133,13 @@ train-general-model:
 upload-training-results:
 	gsutil -m cp \
 		general_training_data.csv \
-		gs://winnow-fdr/winnow-ms-datasets-new-outputs/transformer_only_outputs/general_training_data.csv
+		gs://winnow-fdr/winnow-ms-datasets-new-outputs/outputs/general_training_data.csv
 
 # Upload the model to GCP
 upload-model:
 	gsutil -m cp \
 		general_model/calibrator.pkl \
-		gs://winnow-fdr/winnow-ms-datasets-new-outputs/transformer_only_general_model/calibrator.pkl
+		gs://winnow-fdr/winnow-ms-datasets-new-outputs/general_model/calibrator.pkl
 
 # Evaluate the general model
 evaluate-general-model:
@@ -152,5 +152,5 @@ evaluate-general-model:
 # Upload the evaluation results to GCP
 upload-evaluation-results:
 	gsutil -m cp \
-		general_test_data/* \
-		gs://winnow-fdr/winnow-ms-datasets-new-outputs/transformer_only_outputs/
+		general_test_data/**/* \
+		gs://winnow-fdr/winnow-ms-datasets-new-outputs/outputs/
