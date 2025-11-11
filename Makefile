@@ -132,25 +132,25 @@ train-general-model:
 # Upload the training results to GCP
 upload-training-results:
 	gsutil -m cp \
-		general_training_data/* \
-		gs://winnow-fdr/winnow-ms-datasets-new-outputs/general_training_data/
+		general_training_data.csv \
+		gs://winnow-fdr/winnow-ms-datasets-new-outputs/transformer_only_outputs/general_training_data.csv
 
 # Upload the model to GCP
 upload-model:
 	gsutil -m cp \
 		general_model/calibrator.pkl \
-		gs://winnow-fdr/winnow-ms-datasets-new-outputs/general_model/calibrator.pkl
+		gs://winnow-fdr/winnow-ms-datasets-new-outputs/transformer_only_general_model/calibrator.pkl
 
 # Evaluate the general model
 evaluate-general-model:
 	winnow predict --data-source instanovo --dataset-config-path configs/evaluate_test_set.yaml --method winnow --fdr-threshold 1.0 --confidence-column calibrated_confidence --output-folder general_test_data/test_set --local-model-folder general_model
 	winnow predict --data-source instanovo --dataset-config-path configs/evaluate_celegans_labelled.yaml --method winnow --fdr-threshold 1.0 --confidence-column calibrated_confidence --output-folder general_test_data/celegans_labelled --local-model-folder general_model
 	winnow predict --data-source instanovo --dataset-config-path configs/evaluate_immuno2_labelled.yaml --method winnow --fdr-threshold 1.0 --confidence-column calibrated_confidence --output-folder general_test_data/immuno2_labelled --local-model-folder general_model
-	winnow predict --data-source instanovo --dataset-config-path configs/celegans_raw.yaml --method winnow --fdr-threshold 1.0 --confidence-column calibrated_confidence --output-folder general_test_data/celegans_raw --local-model-folder general_model
-	winnow predict --data-source instanovo --dataset-config-path configs/immuno2_raw.yaml --method winnow --fdr-threshold 1.0 --confidence-column calibrated_confidence --output-folder general_test_data/immuno2_raw --local-model-folder general_model
+	winnow predict --data-source instanovo --dataset-config-path configs/evaluate_celegans_raw.yaml --method winnow --fdr-threshold 1.0 --confidence-column calibrated_confidence --output-folder general_test_data/celegans_raw --local-model-folder general_model
+	winnow predict --data-source instanovo --dataset-config-path configs/evaluate_immuno2_raw.yaml --method winnow --fdr-threshold 1.0 --confidence-column calibrated_confidence --output-folder general_test_data/immuno2_raw --local-model-folder general_model
 
 # Upload the evaluation results to GCP
 upload-evaluation-results:
 	gsutil -m cp \
 		general_test_data/* \
-		gs://winnow-fdr/winnow-ms-datasets-new-outputs/general_test_data/
+		gs://winnow-fdr/winnow-ms-datasets-new-outputs/transformer_only_outputs/
