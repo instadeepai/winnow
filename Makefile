@@ -151,6 +151,6 @@ evaluate-general-model:
 
 # Upload the evaluation results to GCP
 upload-evaluation-results:
-	gsutil -m cp \
-		general_test_data/**/* \
+	gsutil -m cp -r \
+		general_test_data/* \
 		gs://winnow-fdr/winnow-ms-datasets-new-outputs/outputs/
