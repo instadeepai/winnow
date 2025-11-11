@@ -898,11 +898,11 @@ class DiffusionBeamFeatures(CalibrationFeatures):
         if not diffusion_predictions or all(
             pred is None for pred in diffusion_predictions
         ):
-            warnings.warn(
-                "No diffusion predictions available. Filling diffusion beam features with zeros."
+            raise ValueError(
+                "No diffusion beam columns found in metadata. "
+                "Expected columns like 'diffusion_predictions_beam_0' and 'diffusion_log_probabilities_beam_0'. "
+                "Please ensure diffusion beam search results are included in your dataset."
             )
-            self._fill_default_features(dataset)
-            return
 
         # Count beams with fewer than 2 sequences
         count = sum(
@@ -1013,17 +1013,6 @@ class DiffusionBeamFeatures(CalibrationFeatures):
             return ast.literal_eval(seq_str)
         except (ValueError, SyntaxError):
             return []
-
-    def _fill_default_features(self, dataset: CalibrationDataset) -> None:
-        """Fill diffusion beam features with default zero values.
-
-        Args:
-            dataset (CalibrationDataset): The dataset to fill with default values.
-        """
-        dataset.metadata["diffusion_margin"] = 0.0
-        dataset.metadata["diffusion_median_margin"] = 0.0
-        dataset.metadata["diffusion_entropy"] = 0.0
-        dataset.metadata["diffusion_z-score"] = 0.0
 
     def _compute_probabilities(
         self, diffusion_predictions: List[Optional[List]]
