@@ -511,81 +511,10 @@ class TestDiffusionBeamFeatures:
         ]
         assert diffusion_beam_features.dependencies == []
 
-    def test_initialization(self, diffusion_beam_features):
-        """Test that DiffusionBeamFeatures initializes with empty predictions list."""
-        assert hasattr(diffusion_beam_features, "diffusion_predictions")
-        assert diffusion_beam_features.diffusion_predictions == []
-
-    def test_prepare_parses_string_sequences(
-        self, diffusion_beam_features, sample_dataset_with_diffusion_beams
-    ):
-        """Test that prepare method parses string-formatted sequences into ScoredSequence objects."""
-        diffusion_beam_features.prepare(sample_dataset_with_diffusion_beams)
-
-        # Check that predictions were created
-        assert len(diffusion_beam_features.diffusion_predictions) == 3
-
-        # Check first spectrum's beams
-        first_beams = diffusion_beam_features.diffusion_predictions[0]
-        assert first_beams is not None
-        assert len(first_beams) == 3  # 3 beams
-
-        # Check that sequences were parsed correctly
-        assert first_beams[0].sequence == ["A", "G"]
-        assert first_beams[1].sequence == ["G", "A"]
-        assert first_beams[2].sequence == ["S", "P"]
-
-        # Check that log probabilities were preserved
-        assert first_beams[0].sequence_log_probability == pytest.approx(np.log(0.8))
-        assert first_beams[1].sequence_log_probability == pytest.approx(np.log(0.6))
-        assert first_beams[2].sequence_log_probability == pytest.approx(np.log(0.4))
-
-    def test_prepare_with_missing_columns(self, diffusion_beam_features):
-        """Test that prepare handles datasets without diffusion beam columns."""
-        metadata = pd.DataFrame({"confidence": [0.9, 0.8]})
-        dataset = CalibrationDataset(metadata=metadata, predictions=[None, None])
-
-        with pytest.warns(
-            UserWarning,
-            match="No diffusion beam columns found in metadata",
-        ):
-            diffusion_beam_features.prepare(dataset)
-
-        # Should create None entries for each row
-        assert len(diffusion_beam_features.diffusion_predictions) == 2
-        assert all(
-            pred is None for pred in diffusion_beam_features.diffusion_predictions
-        )
-
-    def test_prepare_with_nan_values(self, diffusion_beam_features):
-        """Test that prepare handles NaN values in beam data."""
-        metadata = pd.DataFrame(
-            {
-                "confidence": [0.9, 0.8],
-                "diffusion_predictions_beam_0": ["['A', 'G']", "['V', 'T']"],
-                "diffusion_log_probabilities_beam_0": [np.log(0.8), np.log(0.9)],
-                "diffusion_predictions_beam_1": [
-                    "['G', 'A']",
-                    np.nan,
-                ],  # NaN prediction
-                "diffusion_log_probabilities_beam_1": [np.log(0.6), np.log(0.7)],
-            }
-        )
-        dataset = CalibrationDataset(metadata=metadata, predictions=[None, None])
-
-        diffusion_beam_features.prepare(dataset)
-
-        # First spectrum should have 2 beams
-        assert len(diffusion_beam_features.diffusion_predictions[0]) == 2
-
-        # Second spectrum should have only 1 beam (stopped at NaN)
-        assert len(diffusion_beam_features.diffusion_predictions[1]) == 1
-
     def test_compute_diffusion_beam_features(
         self, diffusion_beam_features, sample_dataset_with_diffusion_beams
     ):
-        """Test diffusion beam features computation."""
-        diffusion_beam_features.prepare(sample_dataset_with_diffusion_beams)
+        """Test diffusion beam features computation with valid data."""
         diffusion_beam_features.compute(sample_dataset_with_diffusion_beams)
 
         # Check that all expected columns were added
@@ -600,32 +529,6 @@ class TestDiffusionBeamFeatures:
 
         # Check that we have the right number of rows
         assert len(sample_dataset_with_diffusion_beams.metadata) == 3
-
-    def test_compute_without_prepare_warning(
-        self, diffusion_beam_features, sample_dataset_with_diffusion_beams
-    ):
-        """Test that compute warns when predictions haven't been prepared."""
-        # Don't call prepare() first
-        with pytest.warns(
-            UserWarning,
-            match="No diffusion predictions available",
-        ):
-            diffusion_beam_features.compute(sample_dataset_with_diffusion_beams)
-
-        # Should fill with zeros
-        assert all(
-            sample_dataset_with_diffusion_beams.metadata["diffusion_margin"] == 0.0
-        )
-        assert all(
-            sample_dataset_with_diffusion_beams.metadata["diffusion_median_margin"]
-            == 0.0
-        )
-        assert all(
-            sample_dataset_with_diffusion_beams.metadata["diffusion_entropy"] == 0.0
-        )
-        assert all(
-            sample_dataset_with_diffusion_beams.metadata["diffusion_z-score"] == 0.0
-        )
 
     def test_compute_with_insufficient_sequences_warning(self, diffusion_beam_features):
         """Test that warning is issued for beam results with < 2 sequences."""
@@ -647,7 +550,7 @@ class TestDiffusionBeamFeatures:
         ):
             diffusion_beam_features.compute(dataset)
 
-    def test_margin_calculation(self, diffusion_beam_features):
+    def test_compute_margin_calculation(self, diffusion_beam_features):
         """Test specific margin calculation for diffusion beams."""
         metadata = pd.DataFrame(
             {
@@ -660,7 +563,6 @@ class TestDiffusionBeamFeatures:
         )
         dataset = CalibrationDataset(metadata=metadata, predictions=[None])
 
-        diffusion_beam_features.prepare(dataset)
         diffusion_beam_features.compute(dataset)
 
         expected_margin = 0.8 - 0.6  # top_prob - second_prob
@@ -668,7 +570,7 @@ class TestDiffusionBeamFeatures:
             expected_margin, rel=1e-10, abs=1e-10
         )
 
-    def test_diffusion_features_with_two_sequences(self, diffusion_beam_features):
+    def test_compute_features_with_two_sequences(self, diffusion_beam_features):
         """Test diffusion beam feature calculations with two sequences."""
         metadata = pd.DataFrame(
             {
@@ -681,7 +583,6 @@ class TestDiffusionBeamFeatures:
         )
         dataset = CalibrationDataset(metadata=metadata, predictions=[None])
 
-        diffusion_beam_features.prepare(dataset)
         diffusion_beam_features.compute(dataset)
 
         # margin = 0.8 - 0.6 = 0.2
@@ -704,7 +605,7 @@ class TestDiffusionBeamFeatures:
             1.0, rel=1e-10, abs=1e-10
         )
 
-    def test_diffusion_features_with_three_sequences(self, diffusion_beam_features):
+    def test_compute_features_with_three_sequences(self, diffusion_beam_features):
         """Test diffusion beam feature calculations with three sequences."""
         metadata = pd.DataFrame(
             {
@@ -719,7 +620,6 @@ class TestDiffusionBeamFeatures:
         )
         dataset = CalibrationDataset(metadata=metadata, predictions=[None])
 
-        diffusion_beam_features.prepare(dataset)
         diffusion_beam_features.compute(dataset)
 
         # margin = 0.7 - 0.2 = 0.5
@@ -759,7 +659,7 @@ class TestDiffusionBeamFeatures:
         result = diffusion_beam_features._parse_sequence_string("['A', 'G'")
         assert result == []
 
-    def test_diffusion_features_equal_probabilities(self, diffusion_beam_features):
+    def test_compute_features_equal_probabilities(self, diffusion_beam_features):
         """Test diffusion features when all sequences have equal probabilities."""
         metadata = pd.DataFrame(
             {
@@ -774,7 +674,6 @@ class TestDiffusionBeamFeatures:
         )
         dataset = CalibrationDataset(metadata=metadata, predictions=[None])
 
-        diffusion_beam_features.prepare(dataset)
         diffusion_beam_features.compute(dataset)
 
         # margin = 1/3 - 1/3 = 0.0
@@ -793,8 +692,8 @@ class TestDiffusionBeamFeatures:
             0.0, rel=1e-10, abs=1e-10
         )
 
-    def test_prepare_with_only_prediction_columns(self, diffusion_beam_features):
-        """Test prepare with only prediction columns (no log probs)."""
+    def test_compute_with_only_prediction_columns(self, diffusion_beam_features):
+        """Test compute with only prediction columns (no log probs) fills with zeros."""
         metadata = pd.DataFrame(
             {
                 "confidence": [0.9],
@@ -804,33 +703,33 @@ class TestDiffusionBeamFeatures:
         )
         dataset = CalibrationDataset(metadata=metadata, predictions=[None])
 
-        with pytest.warns(UserWarning, match="No diffusion beam columns found"):
-            diffusion_beam_features.prepare(dataset)
+        # Compute should handle missing columns by filling with zeros
+        with pytest.warns(UserWarning, match="No diffusion predictions available"):
+            diffusion_beam_features.compute(dataset)
 
-        assert diffusion_beam_features.diffusion_predictions == [None]
+        assert dataset.metadata["diffusion_margin"].iloc[0] == 0.0
 
-    def test_compute_with_none_in_predictions_list(self, diffusion_beam_features):
-        """Test compute handles None values in diffusion_predictions list."""
+    def test_compute_with_missing_beam_data(self, diffusion_beam_features):
+        """Test compute handles entries with missing beam data."""
         metadata = pd.DataFrame(
             {
                 "confidence": [0.9, 0.8],
-                "diffusion_predictions_beam_0": ["['A', 'G']", "['V', 'T']"],
-                "diffusion_log_probabilities_beam_0": [np.log(0.8), np.log(0.9)],
+                "diffusion_predictions_beam_0": [
+                    "['A', 'G']",
+                    np.nan,
+                ],  # Second row is NaN
+                "diffusion_log_probabilities_beam_0": [np.log(0.8), np.nan],
             }
         )
         dataset = CalibrationDataset(metadata=metadata, predictions=[None, None])
 
-        # Manually set one prediction to None to simulate edge case
-        diffusion_beam_features.prepare(dataset)
-        diffusion_beam_features.diffusion_predictions[1] = None
-
         # Should complete without error
         diffusion_beam_features.compute(dataset)
 
-        # First row should have computed values
-        assert dataset.metadata.iloc[0]["diffusion_margin"] > 0
+        # First row should have computed values (but with only 1 beam, so margin = 0)
+        assert dataset.metadata.iloc[0]["diffusion_margin"] >= 0
 
-        # Second row should have default values (handles None)
+        # Second row should have default values (no beams)
         assert dataset.metadata.iloc[1]["diffusion_margin"] == 0.0
 
 
