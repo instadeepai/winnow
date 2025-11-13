@@ -11,12 +11,12 @@ builder:
 spec:
   debug:
       vscode:
-        enabled: false # required
+        enabled: true # required
         path: "/aichor/code" # Optional, defaults to "code". Refer the absolute path of the binary if not findable in $PATH
         provider: "github" # Optional, vscode tunnel provider. Options are "github" or "microsoft", defaults to "github"
   operator: jobset
   image: winnow
-  command: make set-gcp-credentials && make download-spectra && make download-beams && make train-general-model && make upload-model && make upload-training-results && make evaluate-general-model && make upload-evaluation-results
+  command: make set-gcp-credentials && make set-foundation-model-ceph-credentials && make download_marco_dataset && make download_marco_beams && make download-model
 
   types:
     worker:

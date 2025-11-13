@@ -154,3 +154,121 @@ upload-evaluation-results:
 	gsutil -m cp -r \
 		general_test_data/* \
 		gs://winnow-fdr/winnow-ms-datasets-new-outputs/outputs/
+
+download-transformer-only-general-model:
+	gsutil -m cp gs://winnow-fdr/winnow-ms-datasets-new-outputs/transformer_only_general_model/calibrator.pkl transformer_only_general_model/calibrator.pkl
+
+download-general-model:
+	gsutil -m cp gs://winnow-fdr/winnow-ms-datasets-new-outputs/general_model/calibrator.pkl general_model/calibrator.pkl
+
+download-transformer-only-evaluation-outputs:
+	mkdir transformer_only_outputs
+	gsutil -m cp -r \
+		"gs://winnow-fdr/winnow-ms-datasets-new-outputs/transformer_only_outputs/celegans_labelled" \
+		"gs://winnow-fdr/winnow-ms-datasets-new-outputs/transformer_only_outputs/celegans_raw" \
+		"gs://winnow-fdr/winnow-ms-datasets-new-outputs/transformer_only_outputs/general_training_data.csv" \
+		"gs://winnow-fdr/winnow-ms-datasets-new-outputs/transformer_only_outputs/immuno2_labelled" \
+		"gs://winnow-fdr/winnow-ms-datasets-new-outputs/transformer_only_outputs/immuno2_raw" \
+		"gs://winnow-fdr/winnow-ms-datasets-new-outputs/transformer_only_outputs/test_set" \
+		transformer_only_outputs
+
+download-evaluation-outputs:
+	mkdir outputs
+	gsutil -m cp -r \
+		"gs://winnow-fdr/winnow-ms-datasets-new-outputs/outputs/celegans_labelled" \
+		"gs://winnow-fdr/winnow-ms-datasets-new-outputs/outputs/celegans_raw" \
+		"gs://winnow-fdr/winnow-ms-datasets-new-outputs/outputs/general_training_data.csv" \
+		"gs://winnow-fdr/winnow-ms-datasets-new-outputs/outputs/immuno2_labelled" \
+		"gs://winnow-fdr/winnow-ms-datasets-new-outputs/outputs/immuno2_raw" \
+		"gs://winnow-fdr/winnow-ms-datasets-new-outputs/outputs/test_set" \
+		outputs
+
+#################################################################################
+## Merco commands														 	#
+#################################################################################
+
+MARCO_FOLDERS = PA NB8 NB6 NB5 NB4 NB3 NB2 NB13 NB12 NB10 NB1 MA3 MA2 MA1 BSA BIND17 BIND16 BIND15
+
+# Generate phony targets for all individual folder commands
+MARCO_DOWNLOAD_TARGETS = $(addprefix download_marco_dataset_,$(MARCO_FOLDERS))
+MARCO_EVALUATE_TARGETS = $(addprefix evaluate_marco_dataset_,$(MARCO_FOLDERS))
+MARCO_TRANSFER_TARGETS = $(addprefix transfer_marco_dataset_,$(MARCO_FOLDERS))
+MARCO_EVALUATE_TRANSFORMER_ONLY_TARGETS = $(addprefix evaluate_marco_transformer_only_dataset_,$(MARCO_FOLDERS))
+MARCO_TRANSFER_TRANSFORMER_ONLY_TARGETS = $(addprefix transfer_marco_transformer_only_dataset_,$(MARCO_FOLDERS))
+
+.PHONY: download_marco_dataset evaluate_marco_dataset transfer_marco_dataset evaluate_marco_transformer_only_dataset transfer_marco_transformer_only_dataset set-foundation-model-ceph-credentials download-model
+.PHONY: $(MARCO_DOWNLOAD_TARGETS) $(MARCO_EVALUATE_TARGETS) $(MARCO_TRANSFER_TARGETS) $(MARCO_EVALUATE_TRANSFORMER_ONLY_TARGETS) $(MARCO_TRANSFER_TRANSFORMER_ONLY_TARGETS)
+
+## Set the Foundation Model Ceph credentials
+set-foundation-model-ceph-credentials:
+	uv run python scripts/set_foundation_model_ceph_credentials.py
+
+## Download all Marco dataset folders
+download_marco_dataset:
+	aws s3 cp s3://mass-spec-foundation-model-8f55w/to_run/marco_instanovo_outputs/ marco_instanovo_outputs --recursive --profile foundation_model --recursive --profile foundation_model
+
+## Download all Marco InstaNovo outputs
+download_marco_beams:
+	aws s3 cp s3://mass-spec-foundation-model-8f55w/to_run/marco_instanovo_outputs/ marco_beams --recursive --profile foundation_model
+
+## Download the general (diffusion) model
+download-model:
+	gsutil -m cp gs://winnow-fdr/winnow-ms-datasets-new-outputs/general_model/calibrator.pkl general_model/calibrator.pkl
+
+# Download the transformer only model
+download-model:
+	gsutil -m cp gs://winnow-fdr/winnow-ms-datasets-new-outputs/transformer_only_general_model/calibrator.pkl transformer_only_general_model/calibrator.pkl
+
+## Evaluate all Marco dataset folders
+evaluate_marco_dataset:
+	$(foreach folder,$(MARCO_FOLDERS),$(MAKE) evaluate_marco_dataset_$(folder);)
+
+## Evaluate all Marco dataset folders using the transformer only model
+evaluate_marco_transformer_only_dataset:
+	$(foreach folder,$(MARCO_FOLDERS),$(MAKE) evaluate_marco_transformer_only_dataset_$(folder);)
+
+## Transfer all Marco Winnow outputs
+transfer_marco_dataset:
+	$(foreach folder,$(MARCO_FOLDERS),$(MAKE) transfer_marco_dataset_$(folder);)
+
+## Transfer all Marco Transformer Only Winnow outputs
+transfer_marco_transformer_only_dataset:
+	$(foreach folder,$(MARCO_FOLDERS),$(MAKE) transfer_marco_transformer_only_dataset_$(folder);)
+
+# Generate explicit rules for each folder
+define MARCO_DOWNLOAD_RULE
+download_marco_dataset_$(1):
+	@mkdir -p marco
+	aws s3 cp s3://mass-spec-foundation-model-8f55w/to_run/marco/$(1)/ marco/$(1)/ --recursive --profile foundation_model
+	aws s3 cp s3://mass-spec-foundation-model-8f55w/to_run/marco_instanovo_outputs/$(1)_beams.csv marco_beams/$(1)_beams.csv --profile foundation_model
+endef
+
+# Evalaute using the general diffusion model
+define MARCO_EVALUATE_RULE
+evaluate_marco_dataset_$(1):
+	winnow predict --data-source configs/marco/$(1).yaml --method winnow --fdr-threshold 1.0 --confidence-column calibrated_confidence --output-folder marco_winnow_outputs/$(1) --local-model-folder general_model
+endef
+
+# Evaluate using the transformer only model
+define MARCO_EVALUATE_TRANSFORMER_ONLY_RULE
+evaluate_marco_transformer_only_dataset_$(1):
+	winnow predict --data-source configs/marco/$(1).yaml --method winnow --fdr-threshold 1.0 --confidence-column calibrated_confidence --output-folder marco_transformer_only_winnow_outputs/$(1) --local-model-folder transformer_only_general_model
+endef
+
+# Transfer winnow outputs to the foundation model bucket
+define MARCO_TRANSFER_RULE
+transfer_marco_dataset_$(1):
+	aws s3 cp marco_winnow_outputs/$(1)/ s3://mass-spec-foundation-model-8f55w/to_run/marco_winnow_outputs/$(1)/ --recursive --profile foundation_model
+endef
+
+# Transfer transformer only outputs to the foundation model bucket
+define MARCO_TRANSFER_TRANSFORMER_ONLY_RULE
+transfer_marco_transformer_only_dataset_$(1):
+	aws s3 cp transformer_only_outputs/$(1)/ s3://mass-spec-foundation-model-8f55w/to_run/marco_transformer_only_winnow_outputs/$(1)/ --recursive --profile foundation_model
+endef
+
+$(foreach folder,$(MARCO_FOLDERS),$(eval $(call MARCO_DOWNLOAD_RULE,$(folder))))
+$(foreach folder,$(MARCO_FOLDERS),$(eval $(call MARCO_EVALUATE_RULE,$(folder))))
+$(foreach folder,$(MARCO_FOLDERS),$(eval $(call MARCO_EVALUATE_TRANSFORMER_ONLY_RULE,$(folder))))
+$(foreach folder,$(MARCO_FOLDERS),$(eval $(call MARCO_TRANSFER_RULE,$(folder))))
+$(foreach folder,$(MARCO_FOLDERS),$(eval $(call MARCO_TRANSFER_TRANSFORMER_ONLY_RULE,$(folder))))

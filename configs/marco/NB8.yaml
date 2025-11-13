@@ -1,0 +1,2 @@
+spectrum_path: marco/NB8/combined_spectra.parquet
+predictions_path: marco_instanovo_outputs/NB8_beams.csv

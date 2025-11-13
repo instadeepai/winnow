@@ -1,0 +1,2 @@
+spectrum_path: marco/NB3/combined_spectra.parquet
+predictions_path: marco_instanovo_outputs/NB3_beams.csv
