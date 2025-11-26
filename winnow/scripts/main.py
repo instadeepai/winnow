@@ -11,6 +11,7 @@ from winnow.calibration.calibrator import ProbabilityCalibrator
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.fdr.nonparametric import NonParametricFDRControl
 from winnow.fdr.database_grounded import DatabaseGroundedFDRControl
+from winnow.scripts.config_formatter import ConfigFormatter
 
 # Logging setup
 logger = logging.getLogger(__name__)
@@ -27,6 +28,24 @@ app = typer.Typer(
     help="""Confidence calibration and FDR estimation for de novo peptide sequencing.""",
     rich_markup_mode="rich",
 )
+
+# Config command group
+config_app = typer.Typer(
+    name="config",
+    help="Configuration utilities for inspecting resolved settings.",
+    rich_markup_mode="rich",
+)
+app.add_typer(config_app)
+
+
+def print_config(cfg) -> None:
+    """Print configuration with hierarchical colour-coding based on nesting depth.
+
+    Args:
+        cfg: OmegaConf configuration object to print
+    """
+    formatter = ConfigFormatter()
+    formatter.print_config(cfg)
 
 
 def filter_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
@@ -111,16 +130,23 @@ def separate_metadata_and_predictions(
     return dataset_metadata, dataset_preds_and_fdr_metrics
 
 
-def train_entry_point(overrides: Optional[List[str]] = None) -> None:
+def train_entry_point(
+    overrides: Optional[List[str]] = None, execute: bool = True
+) -> None:
     """The main training pipeline entry point.
 
     Args:
         overrides: Optional list of config overrides.
+        execute: If False, only print the configuration and return without executing the pipeline.
     """
     with initialize(
         config_path="../../config", version_base="1.3", job_name="winnow_train"
     ):
         cfg = compose(config_name="train", overrides=overrides)
+
+    if not execute:
+        print_config(cfg)
+        return
 
     logger.info("Starting training pipeline.")
     logger.info(f"Training configuration: {cfg}")
@@ -159,16 +185,23 @@ def train_entry_point(overrides: Optional[List[str]] = None) -> None:
     logger.info("Training pipeline completed successfully.")
 
 
-def predict_entry_point(overrides: Optional[List[str]] = None) -> None:
+def predict_entry_point(
+    overrides: Optional[List[str]] = None, execute: bool = True
+) -> None:
     """The main prediction pipeline entry point.
 
     Args:
         overrides: Optional list of config overrides.
+        execute: If False, only print the configuration and return without executing the pipeline.
     """
     with initialize(
         config_path="../../config", version_base="1.3", job_name="winnow_predict"
     ):
         cfg = compose(config_name="predict", overrides=overrides)
+
+    if not execute:
+        print_config(cfg)
+        return
 
     logger.info("Starting prediction pipeline.")
     logger.info(f"Prediction configuration: {cfg}")
@@ -283,6 +316,44 @@ def predict(ctx: typer.Context) -> None:
     # Capture extra arguments as Hydra overrides
     overrides = ctx.args if ctx.args else None
     predict_entry_point(overrides)
+
+
+@config_app.command(
+    name="train",
+    help=(
+        "Display the resolved training configuration without running the pipeline.\n\n"
+        "This is useful for inspecting the final configuration after all defaults "
+        "and overrides have been applied.\n\n"
+        "[bold cyan]Usage:[/bold cyan]\n"
+        "  [dim]winnow config train[/dim]  # Show default config\n"
+        "  [dim]winnow config train data_loader=mztab[/dim]  # Show config with overrides\n"
+        "  [dim]winnow config train calibrator.seed=42[/dim]  # Check override application"
+    ),
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def config_train(ctx: typer.Context) -> None:
+    """Display the resolved training configuration."""
+    overrides = ctx.args if ctx.args else None
+    train_entry_point(overrides, execute=False)
+
+
+@config_app.command(
+    name="predict",
+    help=(
+        "Display the resolved prediction configuration without running the pipeline.\n\n"
+        "This is useful for inspecting the final configuration after all defaults "
+        "and overrides have been applied.\n\n"
+        "[bold cyan]Usage:[/bold cyan]\n"
+        "  [dim]winnow config predict[/dim]  # Show default config\n"
+        "  [dim]winnow config predict fdr_method=database_grounded[/dim]  # Show config with overrides\n"
+        "  [dim]winnow config predict fdr_control.fdr_threshold=0.01[/dim]  # Check override application"
+    ),
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def config_predict(ctx: typer.Context) -> None:
+    """Display the resolved prediction configuration."""
+    overrides = ctx.args if ctx.args else None
+    predict_entry_point(overrides, execute=False)
 
 
 if __name__ == "__main__":
