@@ -60,12 +60,14 @@ plugins:
 
 nav:
   - Home: index.md
-  - API Reference:
+  - User guide:
+    - CLI reference: cli.md
+    - Configuration guide: configuration.md
+    - Examples: examples.md
+  - API reference:
     - Datasets: api/datasets.md
     - Calibration: api/calibration.md
     - FDR: api/fdr.md
-  - CLI Guide: cli.md
-  - Examples: examples.md
   - Contributing: contributing.md
   - License: license.md
 
