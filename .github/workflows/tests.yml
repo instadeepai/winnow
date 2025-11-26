@@ -7,6 +7,8 @@ on:
 jobs:
   tests:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Check out code
         uses: actions/checkout@v5
@@ -16,5 +18,9 @@ jobs:
           version: "0.6.6"
       - name: Install dependencies
         run: uv sync
-      - name: Run tests
-        run: uv run pytest tests
+      - name: Run tests with coverage
+        run: uv run pytest tests --cov=winnow --cov-report=html --cov-fail-under=0
+      - name: Update coverage badge
+        run: ./scripts/update_coverage_badge.sh
+      - name: Commit updated badge
+        run: ./scripts/commit_coverage_badge.sh
