@@ -2,7 +2,7 @@
 
 For a comprehensive example demonstrating the full winnow workflow, see our example notebook:
 
-📓 **[FDR Plots Example Notebook](https://github.com/instadeepai/winnow/blob/main/examples/getting_started_with_winnow.ipynb)**
+📓 **[FDR plots example notebook](https://github.com/instadeepai/winnow/blob/main/examples/getting_started_with_winnow.ipynb)**
 
 This notebook shows you how to:
 

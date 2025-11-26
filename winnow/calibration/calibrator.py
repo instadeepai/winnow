@@ -8,6 +8,8 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 from jaxtyping import Float
 from huggingface_hub import snapshot_download
+from omegaconf import DictConfig
+
 from winnow.calibration.calibration_features import (
     CalibrationFeatures,
     FeatureDependency,
@@ -21,20 +23,53 @@ class ProbabilityCalibrator:
     This class provides functionality to recalibrate predicted probabilities by fitting a logistic regression model using various features computed from a calibration dataset.
     """
 
-    def __init__(self, seed: int = 42) -> None:
+    def __init__(
+        self,
+        seed: int = 42,
+        features: Optional[
+            Union[List[CalibrationFeatures], Dict[str, CalibrationFeatures], DictConfig]
+        ] = None,
+        hidden_layer_sizes: Tuple[int, ...] = (50, 50),
+        learning_rate_init: float = 0.001,
+        alpha: float = 0.0001,
+        max_iter: int = 1000,
+        early_stopping: bool = True,
+        validation_fraction: float = 0.1,
+    ) -> None:
+        """Initialise the probability calibrator.
+
+        Args:
+            seed (int): Random seed for the classifier. Defaults to 42.
+            features (Optional[Union[List[CalibrationFeatures], Dict[str, CalibrationFeatures], DictConfig]]):
+                Features to add to the calibrator. Can be a list or dict of CalibrationFeatures objects.
+                If None, no features are added. Defaults to None.
+            hidden_layer_sizes (Tuple[int, ...]): The number of neurons in each hidden layer. Defaults to (50, 50).
+            learning_rate_init (float): The initial learning rate. Defaults to 0.001.
+            alpha (float): L2 regularisation parameter. Defaults to 0.0001.
+            max_iter (int): Maximum number of training iterations. Defaults to 1000.
+            early_stopping (bool): Whether to use early stopping to terminate training. Defaults to True.
+            validation_fraction (float): Proportion of training data to use for early stopping validation. Defaults to 0.1.
+        """
         self.feature_dict: Dict[str, CalibrationFeatures] = {}
         self.dependencies: Dict[str, FeatureDependency] = {}
         self.dependency_reference_counter: Dict[str, int] = {}
         self.classifier = MLPClassifier(
             random_state=seed,
-            hidden_layer_sizes=(50, 50),
-            learning_rate_init=0.001,
-            alpha=0.0001,
-            max_iter=1000,
-            early_stopping=True,
-            validation_fraction=0.1,
+            hidden_layer_sizes=hidden_layer_sizes,
+            learning_rate_init=learning_rate_init,
+            alpha=alpha,
+            max_iter=max_iter,
+            early_stopping=early_stopping,
+            validation_fraction=validation_fraction,
         )
         self.scaler = StandardScaler()
+
+        # Add features if provided
+        if features is not None:
+            if isinstance(features, (dict, DictConfig)):
+                self.add_features(list(features.values()))
+            else:
+                self.add_features(list(features))
 
     @property
     def columns(self) -> List[str]:
@@ -59,14 +94,18 @@ class ProbabilityCalibrator:
         return list(self.feature_dict.keys())
 
     @classmethod
-    def save(cls, calibrator: "ProbabilityCalibrator", dir_path: Path) -> None:
+    def save(
+        cls, calibrator: "ProbabilityCalibrator", dir_path: Union[Path, str]
+    ) -> None:
         """Save the calibrator to a file.
 
         Args:
             calibrator (ProbabilityCalibrator): The calibrator to save.
             dir_path (Path): The path to the directory where the calibrator checkpoint will be saved.
         """
-        dir_path.mkdir(parents=True)
+        if isinstance(dir_path, str):
+            dir_path = Path(dir_path)
+        dir_path.mkdir(parents=True, exist_ok=True)
         pickle.dump(calibrator, open(dir_path / "calibrator.pkl", "wb"))
 
     @classmethod
