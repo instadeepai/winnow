@@ -18,7 +18,7 @@ from winnow.datasets.calibration_dataset import CalibrationDataset
 class ProbabilityCalibrator:
     """A class for recalibrating probabilities for a de novo peptide sequencing method.
 
-    This class provides functionality to recalibrate predicted probabilities by fitting a logistic regression model using various features computed from a calibration dataset.
+    This class provides functionality to recalibrate predicted probabilities by fitting an MLP classifier using various features computed from a calibration dataset.
     """
 
     def __init__(self, seed: int = 42) -> None:
@@ -171,9 +171,9 @@ class ProbabilityCalibrator:
                 self.dependencies.pop(dependency.name)
 
     def fit(self, dataset: CalibrationDataset) -> None:
-        """Fit the logistic regression model using the given calibration dataset.
+        """Fit the MLP classifier using the given calibration dataset.
 
-        This method computes the features from the dataset, prepares the labels, and trains a logistic regression model for recalibrating probabilities.
+        This method computes the features from the dataset, prepares the labels, and trains an MLP classifier for recalibrating probabilities.
 
         Args:
             dataset (CalibrationDataset): The dataset used for training the classifier.
