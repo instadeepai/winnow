@@ -12,12 +12,21 @@ docs_public
 *.csv
 *.parquet
 *.ipc
+*.mztab
+*.fasta
+*.mgf
 *.pkl
 *.json
 *.yaml
+*.pdf
+*.png
+
+*.ipynb
 
 examples/winnow-general-model
 examples/winnow-ms-datasets
 examples/output
 
 build/
+
+.cursorrules
