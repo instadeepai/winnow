@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from enum import Enum
 import typer
 from typing_extensions import Annotated
-from typing import Union
+from typing import Union, Optional
 import logging
 from rich.logging import RichHandler
 from pathlib import Path
@@ -87,8 +87,10 @@ class FDRMethod(Enum):
 # --- Logging Setup ---
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-logger.addHandler(logging.StreamHandler())
-logger.addHandler(RichHandler())
+# Prevent duplicate messages by disabling propagation and using only RichHandler
+logger.propagate = False
+if not logger.handlers:
+    logger.addHandler(RichHandler())
 
 app = typer.Typer(
     name="winnow",
@@ -166,31 +168,52 @@ def filter_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
     logger.info("Filtering dataset.")
     filtered_dataset = (
         dataset.filter_entries(
-            metadata_predicate=lambda row: not isinstance(row["prediction"], list)
+            # Filter out non-list predictions
+            metadata_predicate=lambda row: not isinstance(row["prediction"], list),
         )
+        # Filter out empty predictions
         .filter_entries(metadata_predicate=lambda row: not row["prediction"])
-        .filter_entries(
-            metadata_predicate=lambda row: row["precursor_charge"] > 6
-        )  # Prosit-specific filtering, see https://github.com/Nesvilab/FragPipe/issues/1775
-        .filter_entries(
-            predictions_predicate=lambda row: len(row[0].sequence) > 30
-        )  # Prosit-specific filtering
-        .filter_entries(
-            predictions_predicate=lambda row: len(row[1].sequence) > 30
-        )  # Prosit-specific filtering
     )
     return filtered_dataset
 
 
-def initialise_calibrator() -> ProbabilityCalibrator:
-    """Set up the probability calibrator with features."""
+def initialise_calibrator(
+    learn_prosit_missing: bool = True,
+    learn_chimeric_missing: bool = True,
+    learn_retention_missing: bool = True,
+) -> ProbabilityCalibrator:
+    """Set up the probability calibrator with features.
+
+    Args:
+        learn_prosit_missing: Whether to learn from missing Prosit features. If False,
+            errors will be raised when invalid spectra are encountered.
+        learn_chimeric_missing: Whether to learn from missing chimeric features. If False,
+            errors will be raised when invalid spectra are encountered.
+        learn_retention_missing: Whether to learn from missing retention time features. If False,
+            errors will be raised when invalid spectra are encountered.
+
+    Returns:
+        ProbabilityCalibrator: Configured calibrator with specified features.
+    """
     calibrator = ProbabilityCalibrator(SEED)
     calibrator.add_feature(MassErrorFeature(residue_masses=RESIDUE_MASSES))
-    calibrator.add_feature(PrositFeatures(mz_tolerance=MZ_TOLERANCE))
     calibrator.add_feature(
-        RetentionTimeFeature(hidden_dim=HIDDEN_DIM, train_fraction=TRAIN_FRACTION)
+        PrositFeatures(
+            mz_tolerance=MZ_TOLERANCE, learn_from_missing=learn_prosit_missing
+        )
     )
-    calibrator.add_feature(ChimericFeatures(mz_tolerance=MZ_TOLERANCE))
+    calibrator.add_feature(
+        RetentionTimeFeature(
+            hidden_dim=HIDDEN_DIM,
+            train_fraction=TRAIN_FRACTION,
+            learn_from_missing=learn_retention_missing,
+        )
+    )
+    calibrator.add_feature(
+        ChimericFeatures(
+            mz_tolerance=MZ_TOLERANCE, learn_from_missing=learn_chimeric_missing
+        )
+    )
     calibrator.add_feature(BeamFeatures())
     return calibrator
 
@@ -205,9 +228,6 @@ def apply_fdr_control(
     if isinstance(fdr_control, NonParametricFDRControl):
         fdr_control.fit(dataset=dataset.metadata[confidence_column])
         dataset.metadata = fdr_control.add_psm_pep(dataset.metadata, confidence_column)
-        dataset.metadata = fdr_control.add_psm_q_value(
-            dataset.metadata, confidence_column
-        )
     else:
         fdr_control.fit(
             dataset=dataset.metadata[confidence_column],
@@ -240,19 +260,40 @@ def train(
             help="The path to the config with the specification of the calibration dataset."
         ),
     ],
-    model_output_folder: Annotated[
-        Path, typer.Option(help="The path to write the fitted model checkpoints to.")
+    model_output_dir: Annotated[
+        Path,
+        typer.Option(
+            help="The path to the directory where the fitted model checkpoint will be saved."
+        ),
     ],
     dataset_output_path: Annotated[
         Path, typer.Option(help="The path to write the output to.")
     ],
+    learn_prosit_missing: Annotated[
+        bool,
+        typer.Option(
+            help="Whether to learn from missing Prosit features. If False, training will fail if any spectra have invalid Prosit predictions."
+        ),
+    ] = True,
+    learn_chimeric_missing: Annotated[
+        bool,
+        typer.Option(
+            help="Whether to learn from missing chimeric features. If False, training will fail if any spectra have invalid predictions for chimeric feature computation."
+        ),
+    ] = True,
+    learn_retention_missing: Annotated[
+        bool,
+        typer.Option(
+            help="Whether to learn from missing retention time features. If False, training will fail if any spectra have invalid retention time predictions."
+        ),
+    ] = True,
 ):
     """Fit the calibration model.
 
     Args:
         data_source (Annotated[ DataSource, typer.Option, optional): The type of PSM dataset to be calibrated.
         dataset_config_path (Annotated[ Path, typer.Option, optional): The path to the config with the specification of the calibration dataset.
-        model_output_folder (Annotated[Path, typer.Option, optional]): The path to write the fitted model checkpoints to.
+        model_output_dir (Annotated[Path, typer.Option, optional]): The path to the directory where the fitted model checkpoint will be saved.
         dataset_output_path (Annotated[Path, typer.Option, optional): The path to write the output to.
     """
     # -- Load dataset
@@ -266,12 +307,16 @@ def train(
 
     # Train
     logger.info("Training calibrator.")
-    calibrator = initialise_calibrator()
+    calibrator = initialise_calibrator(
+        learn_prosit_missing=learn_prosit_missing,
+        learn_chimeric_missing=learn_chimeric_missing,
+        learn_retention_missing=learn_retention_missing,
+    )
     calibrator.fit(annotated_dataset)
 
     # -- Write model checkpoints
-    logger.info(f"Saving model to {model_output_folder}")
-    ProbabilityCalibrator.save(calibrator, model_output_folder)
+    logger.info(f"Saving model to {model_output_dir}")
+    ProbabilityCalibrator.save(calibrator, model_output_dir)
 
     # -- Write output
     logger.info("Writing output.")
@@ -293,9 +338,6 @@ def predict(
             help="The path to the config with the specification of the calibration dataset."
         ),
     ],
-    model_folder: Annotated[
-        Path, typer.Option(help="The path to calibrator checkpoints.")
-    ],
     method: Annotated[
         FDRMethod, typer.Option(help="Method to use for FDR estimation.")
     ],
@@ -308,18 +350,36 @@ def predict(
     confidence_column: Annotated[
         str, typer.Option(help="Name of the column with confidence scores.")
     ],
-    output_path: Annotated[Path, typer.Option(help="The path to write the output to.")],
+    output_folder: Annotated[
+        Path, typer.Option(help="The folder path to write the outputs to.")
+    ],
+    huggingface_model_name: Annotated[
+        str,
+        typer.Option(
+            help="HuggingFace model identifier. If neither this nor `--local-model-folder` are provided, loads default model from HuggingFace.",
+        ),
+    ] = "InstaDeepAI/winnow-general-model",
+    local_model_folder: Annotated[
+        Optional[Path],
+        typer.Option(
+            help="Path to local calibrator directory. If neither this nor `--huggingface-model-name` are provided, loads default pretrained model from HuggingFace.",
+        ),
+    ] = None,
 ):
     """Calibrate model scores, estimate FDR and filter for a threshold.
 
     Args:
         data_source (Annotated[ DataSource, typer.Option, optional): The type of PSM dataset to be calibrated.
         dataset_config_path (Annotated[ Path, typer.Option, optional): The path to the config with the specification of the dataset.
-        model_folder (Annotated[ Path, typer.Option, optional): The path to calibrator checkpoints.
         method (Annotated[ FDRMethod, typer.Option, optional): Method to use for FDR estimation.
         fdr_threshold (Annotated[ float, typer.Option, optional): The target FDR threshold (e.g. 0.01 for 1%, 0.05 for 5% etc.).
         confidence_column (Annotated[ str, typer.Option, optional): Name of the column with confidence scores.
-        output_path (Annotated[ Path, typer.Option, optional): The path to write the output to.
+        output_folder (Annotated[ Path, typer.Option, optional): The folder path to write the outputs to: `metadata.csv` and `preds_and_fdr_metrics.csv`.
+        huggingface_model_name (Annotated[str, typer.Option, optional): HuggingFace model identifier.
+        local_model_folder (Annotated[Path, typer.Option, optional): Path to local calibrator directory (e.g., Path("./my-model-directory")).
+
+    Note that either `local_model_folder` or `huggingface-model-name` may be overwritten, but not both.
+    If neither `local_model_folder` nor `huggingface-model-name` are provided, the general model from HuggingFace will be loaded by default (i.e., `InstaDeepAI/winnow-general-model`).
     """
     # -- Load dataset
     logger.info("Loading datasets.")
@@ -331,8 +391,14 @@ def predict(
     dataset = filter_dataset(dataset)
 
     # Predict
-    logger.info("Loading calibrator.")
-    calibrator = ProbabilityCalibrator.load(model_folder)
+    # If local_model_folder is an empty string, load the HuggingFace model
+    if local_model_folder is None:
+        logger.info(f"Loading HuggingFace model: {huggingface_model_name}")
+        calibrator = ProbabilityCalibrator.load(huggingface_model_name)
+    # Otherwise, load the model from the local folder path
+    else:
+        logger.info(f"Loading local model from: {local_model_folder}")
+        calibrator = ProbabilityCalibrator.load(local_model_folder)
 
     logger.info("Calibrating scores.")
     calibrator.predict(dataset)
@@ -354,5 +420,27 @@ def predict(
 
     # -- Write output
     logger.info("Writing output.")
-    dataset_metadata.to_csv(output_path)
-    logger.info(f"Outputs saved: {output_path}")
+    # Separate out metadata from prediction and FDR metrics
+    preds_and_fdr_metrics_cols = [
+        confidence_column,
+        "prediction",
+        "psm_fdr",
+        "psm_q_value",
+    ]
+    if "sequence" in dataset_metadata.columns:
+        preds_and_fdr_metrics_cols.append("sequence")
+    if method is FDRMethod.winnow:
+        preds_and_fdr_metrics_cols.append("psm_pep")
+    dataset_preds_and_fdr_metrics = dataset_metadata[
+        preds_and_fdr_metrics_cols + ["spectrum_id"]
+    ]
+    dataset_metadata = dataset_metadata.drop(columns=preds_and_fdr_metrics_cols)
+    # Write outputs
+    output_folder.mkdir(parents=True)
+    dataset_metadata.to_csv(output_folder / "metadata.csv")
+    dataset_preds_and_fdr_metrics.to_csv(output_folder / "preds_and_fdr_metrics.csv")
+    logger.info(f"Outputs saved: {output_folder}")
+
+
+if __name__ == "__main__":
+    app()

@@ -21,7 +21,7 @@ from winnow.datasets.calibration_dataset import (
     CalibrationDataset,
     ScoredSequence,
 )
-from winnow.constants import metrics, INVALID_PROSIT_TOKENS, CASANOVO_RESIDUE_REMAPPING
+from winnow.constants import metrics, CASANOVO_RESIDUE_REMAPPING
 
 
 class InstaNovoDatasetLoader(DatasetLoader):
@@ -39,36 +39,18 @@ class InstaNovoDatasetLoader(DatasetLoader):
         Returns:
             Tuple[pl.DataFrame, pl.DataFrame]: A tuple containing the predictions and beams dataframes.
         """
-
-        def _filter_dataset_for_prosit(df: pl.DataFrame) -> pl.DataFrame:
-            """Applies filters to remove unsupported modifications."""
-            print("Applying dataset filters...")
-
-            # Filter out invalid tokens (~ negates condition in polars)
-            for token in INVALID_PROSIT_TOKENS:
-                df = df.filter(~df["preds"].str.contains(token))
-                df = df.filter(~df["preds_beam_1"].str.contains(token))
-
-            # Filter out unmodified cysteine using polars string operations
-            df = df.filter(~df["preds_tokenised"].str.contains("C,"))
-
-            # Filter out unmodified cysteine using regex for negative lookahead
-            # NOTE: This is a workaround for the fact that polars does not support negative lookahead in its string operations
-            pattern = re.compile(r"C(?!\[)")
-            indexes_to_drop = [
-                idx
-                for idx, row in enumerate(df.iter_rows(named=True))
-                if pattern.search(row["preds_beam_1"])
-            ]
-            df = df.filter(~pl.Series(range(len(df))).is_in(indexes_to_drop))
-
-            return df
-
         df = pl.read_csv(predictions_path)
-        df = _filter_dataset_for_prosit(df)
         # Use polars column selectors to split dataframe
-        beam_df = df.select(cs.contains("_beam_"))
-        preds_df = df.select(~cs.contains(["_beam_", "_log_probs_"]))
+        beam_df = df.select(
+            cs.contains(
+                "instanovo_predictions_beam", "instanovo_log_probabilities_beam"
+            )
+        )
+        preds_df = df.select(
+            ~cs.contains(
+                ["instanovo_predictions_beam", "instanovo_log_probabilities_beam"]
+            )
+        )
         return preds_df, beam_df
 
     @staticmethod
@@ -90,9 +72,9 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
             for beam in range(num_beams):
                 seq_col, log_prob_col, token_log_prob_col = (
-                    f"preds_beam_{beam}",
-                    f"log_probs_beam_{beam}",
-                    f"token_log_probs_{beam}",
+                    f"instanovo_predictions_beam_{beam}",
+                    f"instanovo_log_probabilities_beam_{beam}",
+                    f"token_log_probabilities_beam_{beam}",
                 )
                 sequence, log_prob, token_log_prob = (
                     row.get(seq_col),
@@ -117,7 +99,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
             [
                 pl.col(col).str.replace_all("L", "I")
                 for col in beam_df.columns
-                if "preds_beam" in col
+                if "instanovo_predictions_beam" in col
             ]
         )
 
@@ -140,8 +122,8 @@ class InstaNovoDatasetLoader(DatasetLoader):
             pd.DataFrame: The processed dataframe.
         """
         rename_dict = {
-            "preds": "prediction_untokenised",
-            "preds_tokenised": "prediction",
+            "predictions": "prediction_untokenised",
+            "predictions_tokenised": "prediction",
             "log_probs": "confidence",
         }
         if has_labels:
@@ -149,7 +131,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
         dataset.rename(rename_dict, axis=1, inplace=True)
 
         dataset["prediction"] = dataset["prediction"].apply(
-            lambda peptide: peptide.split(", ")
+            lambda peptide: peptide.split(", ") if isinstance(peptide, str) else peptide
         )
 
         dataset.loc[dataset["confidence"] == -1.0, "confidence"] = float("-inf")
@@ -448,9 +430,6 @@ class MZTabDatasetLoader(DatasetLoader):
             predictions, "prediction_untokenised", "prediction"
         )
 
-        # Filter out invalid Prosit tokens before getting top predictions
-        predictions = self._filter_invalid_prosit_tokens(predictions)
-
         # Get top predictions for metadata
         top_predictions = self._get_top_predictions(predictions)
 
@@ -551,52 +530,6 @@ class MZTabDatasetLoader(DatasetLoader):
             pl.col(tokenised_column)
             .map_elements(metrics._split_peptide, return_dtype=pl.List(pl.Utf8))
             .alias(tokenised_column)
-        )
-
-    def _filter_invalid_prosit_tokens(self, predictions: pl.DataFrame) -> pl.DataFrame:
-        """Filter out predictions containing invalid Prosit tokens.
-
-        Args:
-            predictions: DataFrame containing predictions
-
-        Returns:
-            DataFrame with only valid predictions, filtering out entire spectra if either of the first two predictions contain invalid tokens
-        """
-        invalid_prosit_regex = "|".join(INVALID_PROSIT_TOKENS)
-
-        # Identify the first two predictions for each spectrum using a window function.
-        # This assumes predictions are correctly ordered within each "index" group.
-        is_top_2 = pl.int_range(0, pl.len()).over("index") < 2
-
-        # For the top 2 predictions, check for either of the two invalid conditions:
-        # 1. The token list contains an invalid Prosit token.
-        # 2. The token list contains an unmodified Cysteine ("C").
-        # For rows that are not in the top 2, this expression returns False.
-        has_issue_in_row = (
-            pl.when(is_top_2)
-            .then(
-                pl.col("prediction")
-                .list.eval(
-                    pl.element().str.contains(invalid_prosit_regex)
-                    | pl.element().eq("C")
-                )
-                .list.any()
-            )
-            .otherwise(False)
-        )
-        predictions = predictions.with_columns(
-            has_issue_in_row.alias("has_issue_in_row")
-        )
-
-        # Use another window function to check if *any* row for a given spectrum has an issue.
-        # This broadcasts the boolean result to all rows within the same "index" group.
-        predictions = predictions.with_columns(
-            pl.col("has_issue_in_row").max().over("index").alias("spectrum_has_issue")
-        )
-
-        # Filter the DataFrame to keep only the spectra that have no issues.
-        return predictions.filter(~pl.col("spectrum_has_issue")).drop(
-            ["has_issue_in_row", "spectrum_has_issue"]
         )
 
     def _create_beam_predictions(

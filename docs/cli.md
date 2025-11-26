@@ -32,31 +32,76 @@ winnow train \
 - `--dataset-config-path`: Path to YAML configuration file
 - `--model-output-folder`: Directory to save trained calibrator
 - `--dataset-output-path`: Path to save training results CSV
+- `--learn-prosit-missing` / `--no-learn-prosit-missing`: Whether to learn from missing Prosit features (default: True)
+- `--learn-chimeric-missing` / `--no-learn-chimeric-missing`: Whether to learn from missing chimeric features (default: True)
+- `--learn-retention-missing` / `--no-learn-retention-missing`: Whether to learn from missing retention time features (default: True)
+
+**Missingness Handling:**
+
+By default, the calibrator learns from missing data by including missingness indicators as features.
+
+If you wish to train only on complete data (training will fail if invalid spectra are found):
+
+```bash
+winnow train \
+    --data-source instanovo \
+    --dataset-config-path train_config.yaml \
+    --model-output-folder ./calibrator_model \
+    --dataset-output-path ./training_results.csv \
+    --no-learn-prosit-missing \
+    --no-learn-chimeric-missing \
+    --no-learn-retention-missing
+```
+
+See the [Handling Missing Features](api/calibration.md#handling-missing-features) section for more details.
 
 ### `winnow predict`
 
-Apply calibration and FDR control to new data using a trained model.
+Apply calibration and FDR control to new data using a trained model. By default, uses a pretrained general model from HuggingFace Hub.
 
 ```bash
+# Use default pretrained model from HuggingFace (recommended for getting started)
 winnow predict \
     --data-source instanovo \
     --dataset-config-path test_config.yaml \
-    --model-folder ./calibrator_model \
     --method winnow \
     --fdr-threshold 0.01 \
     --confidence-column confidence \
-    --output-path ./predictions.csv
+    --output-folder ./predictions
+
+# Use a custom HuggingFace model
+winnow predict \
+    --data-source instanovo \
+    --dataset-config-path test_config.yaml \
+    --huggingface-model-name my-org/my-custom-model \
+    --method winnow \
+    --fdr-threshold 0.01 \
+    --confidence-column confidence \
+    --output-folder ./predictions
+
+# Use a local model
+winnow predict \
+    --data-source instanovo \
+    --dataset-config-path test_config.yaml \
+    --local-model-folder ./calibrator_model \
+    --method winnow \
+    --fdr-threshold 0.01 \
+    --confidence-column confidence \
+    --output-folder ./predictions
 ```
 
 **Arguments:**
 
 - `--data-source`: Type of dataset (`instanovo`, `winnow`, `mztab`)
 - `--dataset-config-path`: Path to YAML configuration file
-- `--model-folder`: Directory containing trained calibrator
+- `--huggingface-model-name`: HuggingFace model identifier (defaults to `InstaDeepAI/winnow-general-model`). Use this to load models from HuggingFace Hub.
+- `--local-model-folder`: Directory containing trained calibrator. Use this to load local models instead of HuggingFace models.
 - `--method`: FDR estimation method (`winnow` or `database-ground`)
 - `--fdr-threshold`: Target FDR threshold (e.g., 0.01 for 1%)
 - `--confidence-column`: Name of confidence score column
-- `--output-path`: Path to save filtered results
+- `--output-folder`: Folder path to write output files to (creates `metadata.csv` and `preds_and_fdr_metrics.csv`)
+
+**Note:** If neither `--local-model-folder` nor `--huggingface-model-name` are provided, the default pretrained general model from HuggingFace (`InstaDeepAI/winnow-general-model`) will be loaded automatically.
 
 ## Configuration Files
 
@@ -167,23 +212,31 @@ winnow predict \
 Training produces:
 
 1. **Model checkpoints** (in `--model-output-folder`):
-   - `calibrator.pkl`: Trained neural network classifier
-   - `irt_predictor.pkl`: Retention time predictor
-   - `scaler.pkl`: Feature scaler
+   - `calibrator.pkl`: Complete trained calibrator with all features and parameters
 
 2. **Training results** (`--dataset-output-path`):
    - CSV with calibrated scores and evaluation metrics
 
 ### Prediction Output
 
-Prediction produces a CSV file (`--output-path`) containing:
+Prediction produces two CSV files in the `--output-folder` directory:
 
-- **Original columns**: All input data columns
-- **`calibrated_confidence`**: Calibrated confidence scores
-- **`psm_fdr`**: PSM-specific FDR estimates
-- **`psm_q_value`**: Q-values
-- **`psm_pep`**: Posterior error probabilities (winnow method only)
-- **Filtered rows**: Only PSMs passing the FDR threshold
+1. **`metadata.csv`**: Contains all metadata and feature columns from the input dataset
+   - Original metadata columns (spectrum information, precursors, etc.)
+   - All feature columns used for calibration
+   - Filtered to only include PSMs passing the FDR threshold
+
+2. **`preds_and_fdr_metrics.csv`**: Contains predictions and error metrics
+   - `spectrum_id`: Unique spectrum identifier
+   - `calibrated_confidence` (or specified confidence column): Calibrated confidence scores
+   - `prediction`: Predicted peptide sequences
+   - `psm_fdr`: PSM-specific FDR estimates
+   - `psm_q_value`: Q-values
+   - `psm_pep`: Posterior error probabilities (winnow method only)
+   - `sequence`: Ground truth sequences (if available, for database-ground method)
+   - Filtered to only include PSMs passing the FDR threshold
+
+This separation allows users to work with metadata and features separately from predictions and error metrics, making downstream analysis more convenient.
 
 ## Example Workflows
 
@@ -195,17 +248,26 @@ winnow train \
     --data-source instanovo \
     --dataset-config-path configs/train_data.yaml \
     --model-output-folder models/my_calibrator \
-    --dataset-output-path results/training_output.csv
+    --dataset-output-folder results/training_output.csv
 
-# Step 2: Apply to new data with FDR control
+# Step 2: Apply to new data with FDR control (using default pretrained model)
 winnow predict \
     --data-source instanovo \
-    --dataset-config-path `configs/test_data.yaml` \
-    --model-folder `models/my_calibrator` \
+    --dataset-config-path configs/test_data.yaml \
     --method winnow \
     --fdr-threshold 0.01 \
     --confidence-column confidence \
-    --output-path `results/filtered_predictions.csv`
+    --output-folder results/predictions
+
+# Alternative: Use the locally trained model
+winnow predict \
+    --data-source instanovo \
+    --dataset-config-path configs/test_data.yaml \
+    --local-model-folder models/my_calibrator \
+    --method winnow \
+    --fdr-threshold 0.01 \
+    --confidence-column confidence \
+    --output-folder results/predictions
 ```
 
 ### Configuration File Examples

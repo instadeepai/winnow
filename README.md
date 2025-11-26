@@ -117,7 +117,9 @@ uv pip install winnow-fdr
 Installing `winnow` provides the `winnow` command with two sub-commands:
 
 1. `winnow train` – Performs confidence calibration on a dataset of annotated PSMs, outputting the fitted model checkpoint.
-2. `winnow predict` – Performs confidence calibration using a fitted model checkpoint, estimates and controls FDR using the calibrated confidence scores.
+2. `winnow predict` – Performs confidence calibration using a fitted model checkpoint (defaults to a pretrained general model from HuggingFace), estimates and controls FDR using the calibrated confidence scores.
+
+By default, `winnow predict` uses a pretrained general model (`InstaDeepAI/winnow-general-model`) hosted on HuggingFace Hub, allowing you to get started immediately without training. You can also specify custom HuggingFace models or use locally trained models.
 
 Refer to the documentation for details on command-line arguments and usage examples.
 

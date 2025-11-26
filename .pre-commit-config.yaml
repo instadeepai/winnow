@@ -62,7 +62,7 @@ repos:
       - id: codespell
         name: codespell
         description: Checks for common misspellings in text files.
-        entry: codespell --skip="*.js,*.html,*.css, *.svg" -L fo,nd,mey,whe,ue,bu,nd,noo,bu,3nd,te,yhe,thi,als
+        entry: codespell --skip="*.js,*.html,*.css, *.svg" -I .codespell-ignore.txt
         language: python
         types: [text]
 

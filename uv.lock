@@ -5090,6 +5090,7 @@ name = "winnow-fdr"
 version = "1.0.3"
 source = { editable = "." }
 dependencies = [
+    { name = "huggingface-hub" },
     { name = "instanovo" },
     { name = "koinapy" },
     { name = "tomli" },
@@ -5118,6 +5119,7 @@ notebook = [
 
 [package.metadata]
 requires-dist = [
+    { name = "huggingface-hub", specifier = ">=0.35.3" },
     { name = "instanovo", specifier = ">=1.1.4" },
     { name = "koinapy", specifier = ">=0.0.10" },
     { name = "tomli", specifier = ">=2.2.1" },

@@ -32,7 +32,16 @@ calibrator.predict(test_dataset)
 
 # Save/load trained models
 ProbabilityCalibrator.save(calibrator, Path("calibrator_checkpoint"))
-loaded_calibrator = ProbabilityCalibrator.load(Path("calibrator_checkpoint"))
+
+# Load models - supports multiple sources
+# 1. Load default pretrained model from HuggingFace
+loaded_calibrator = ProbabilityCalibrator.load()
+
+# 2. Load a custom HuggingFace model
+loaded_calibrator = ProbabilityCalibrator.load("my-org/my-custom-model")
+
+# 3. Load from local directory
+loaded_calibrator = ProbabilityCalibrator.load("calibrator_checkpoint")
 ```
 
 **Key Features:**
@@ -49,7 +58,11 @@ loaded_calibrator = ProbabilityCalibrator.load(Path("calibrator_checkpoint"))
 - `fit(dataset)`: Train the calibrator on a labelled dataset
 - `predict(dataset)`: Generate calibrated confidence scores
 - `save(calibrator, path)`: Save trained model to disk
-- `load(path)`: Load trained model from disk
+- `load(pretrained_model_name_or_path, cache_dir)`: Load trained model from HuggingFace Hub or local directory
+  - Default: Loads `"InstaDeepAI/winnow-general-model"` from HuggingFace
+  - HuggingFace: Pass a repository ID string (e.g., `"my-org/my-model"`)
+  - Local: Pass a `str` or `Path` object pointing to a model directory
+  - Models from HuggingFace are automatically cached in `~/.cache/huggingface/hub`
 
 ### CalibrationFeatures
 
@@ -146,6 +159,73 @@ feature = RetentionTimeFeature(hidden_dim=10, train_fraction=0.1)
 
 **Purpose**: Incorporates chromatographic information for confidence calibration.
 
+## Handling Missing Features
+
+Prosit-dependent features (PrositFeatures, ChimericFeatures, RetentionTimeFeature) may not be computable for all peptides due to limitations like:
+
+- Peptides longer than 30 amino acids (Prosit limitation)
+- Precursor charges greater than 6 (Prosit limitation)
+- Unsupported modifications (Prosit limitation)
+- Lack of runner-up sequences for chimeric features
+
+Winnow provides two strategies for handling such cases:
+
+### Learn Strategy (Default, `learn_from_missing=True`)
+
+**Recommended for most use cases.**
+
+- Includes `is_missing_*` indicator columns as features
+- Calibrator learns patterns associated with missing data
+- Uses all available data, maximising recall
+- More robust across diverse datasets
+
+### Filter Strategy (`learn_from_missing=False`)
+
+**Use when you want strict data quality requirements.**
+
+- Raises an error immediately when invalid spectra are encountered
+- Forces users to pre-filter datasets before training/prediction
+- Cleaner feature space with no missingness indicators
+
+### Configuration
+
+Configure via CLI flags during training:
+
+```bash
+# Default: Learn from missingness
+winnow train \
+    --data-source instanovo \
+    --dataset-config-path config.yaml \
+    --model-output-folder ./model \
+    --dataset-output-path ./results.csv
+
+# Strict: Require clean data
+winnow train \
+    --data-source instanovo \
+    --dataset-config-path config.yaml \
+    --model-output-folder ./model \
+    --dataset-output-path ./results.csv \
+    --no-learn-prosit-missing \
+    --no-learn-chimeric-missing \
+    --no-learn-retention-missing
+```
+
+Or configure programmatically:
+
+```python
+from winnow.calibration.calibration_features import PrositFeatures, ChimericFeatures, RetentionTimeFeature
+
+# Learn from missingness (default)
+prosit_feat = PrositFeatures(mz_tolerance=0.02, learn_from_missing=True)
+chimeric_feat = ChimericFeatures(mz_tolerance=0.02, learn_from_missing=True)
+rt_feat = RetentionTimeFeature(hidden_dim=10, train_fraction=0.1, learn_from_missing=True)
+
+# Require clean data (strict mode)
+prosit_feat = PrositFeatures(mz_tolerance=0.02, learn_from_missing=False)
+chimeric_feat = ChimericFeatures(mz_tolerance=0.02, learn_from_missing=False)
+rt_feat = RetentionTimeFeature(hidden_dim=10, train_fraction=0.1, learn_from_missing=False)
+```
+
 ## Workflow
 
 ### Training Workflow
@@ -157,7 +237,17 @@ feature = RetentionTimeFeature(hidden_dim=10, train_fraction=0.1)
 
 ### Prediction Workflow
 
-1. **Load Calibrator**: Use `load()` to restore trained model
+1. **Load Calibrator**: Use `load()` to restore trained model from a HuggingFace repository or a local directory
+   ```python
+   # Option 1: Use default pretrained model
+   calibrator = ProbabilityCalibrator.load()
+
+   # Option 2: Use custom HuggingFace model
+   calibrator = ProbabilityCalibrator.load("my-org/my-custom-model")
+
+   # Option 3: Use local model
+   calibrator = ProbabilityCalibrator.load("./my_calibrator")
+   ```
 2. **Predict**: Call `predict()` with unlabelled `CalibrationDataset`
 3. **Access Results**: Calibrated scores stored in dataset's "calibrated_confidence" column
 
