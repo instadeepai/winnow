@@ -1,17 +1,24 @@
-from typing import Union, Tuple, Optional, List
+"""CLI entry point for winnow.
+
+Note: This module uses lazy imports to minimise CLI startup time.
+Heavy dependencies (PyTorch, InstaNovo, etc.) are imported only when
+needed, significantly reducing --help and config command times.
+"""
+
+from __future__ import annotations
+
+from typing import Union, Tuple, Optional, List, TYPE_CHECKING
 import typer
 import logging
 from rich.logging import RichHandler
-import pandas as pd
-from hydra import initialize, compose
 from pathlib import Path
-from hydra.utils import instantiate
 
-from winnow.calibration.calibrator import ProbabilityCalibrator
-from winnow.datasets.calibration_dataset import CalibrationDataset
-from winnow.fdr.nonparametric import NonParametricFDRControl
-from winnow.fdr.database_grounded import DatabaseGroundedFDRControl
-from winnow.scripts.config_formatter import ConfigFormatter
+# Lazy imports for heavy dependencies - only imported when actually needed
+if TYPE_CHECKING:
+    import pandas as pd
+    from winnow.datasets.calibration_dataset import CalibrationDataset
+    from winnow.fdr.nonparametric import NonParametricFDRControl
+    from winnow.fdr.database_grounded import DatabaseGroundedFDRControl
 
 # Logging setup
 logger = logging.getLogger(__name__)
@@ -44,6 +51,8 @@ def print_config(cfg) -> None:
     Args:
         cfg: OmegaConf configuration object to print
     """
+    from winnow.scripts.config_formatter import ConfigFormatter
+
     formatter = ConfigFormatter()
     formatter.print_config(cfg)
 
@@ -75,6 +84,8 @@ def apply_fdr_control(
     confidence_column: str,
 ) -> pd.DataFrame:
     """Apply FDR control to a dataset."""
+    from winnow.fdr.nonparametric import NonParametricFDRControl
+
     if isinstance(fdr_control, NonParametricFDRControl):
         fdr_control.fit(dataset=dataset.metadata[confidence_column])
         dataset.metadata = fdr_control.add_psm_pep(dataset.metadata, confidence_column)
@@ -112,6 +123,8 @@ def separate_metadata_and_predictions(
     Returns:
         Tuple[pd.DataFrame, pd.DataFrame]: A tuple containing the metadata dataframe and the prediction and FDR metrics dataframe.
     """
+    from winnow.fdr.nonparametric import NonParametricFDRControl
+
     # Separate out metadata from prediction and FDR metrics
     preds_and_fdr_metrics_cols = [
         "spectrum_id",
@@ -139,6 +152,9 @@ def train_entry_point(
         overrides: Optional list of config overrides.
         execute: If False, only print the configuration and return without executing the pipeline.
     """
+    from hydra import initialize, compose
+    from hydra.utils import instantiate
+
     with initialize(
         config_path="../../config", version_base="1.3", job_name="winnow_train"
     ):
@@ -147,6 +163,8 @@ def train_entry_point(
     if not execute:
         print_config(cfg)
         return
+
+    from winnow.calibration.calibrator import ProbabilityCalibrator
 
     logger.info("Starting training pipeline.")
     logger.info(f"Training configuration: {cfg}")
@@ -194,6 +212,9 @@ def predict_entry_point(
         overrides: Optional list of config overrides.
         execute: If False, only print the configuration and return without executing the pipeline.
     """
+    from hydra import initialize, compose
+    from hydra.utils import instantiate
+
     with initialize(
         config_path="../../config", version_base="1.3", job_name="winnow_predict"
     ):
@@ -202,6 +223,9 @@ def predict_entry_point(
     if not execute:
         print_config(cfg)
         return
+
+    from winnow.calibration.calibrator import ProbabilityCalibrator
+    from winnow.fdr.database_grounded import DatabaseGroundedFDRControl
 
     logger.info("Starting prediction pipeline.")
     logger.info(f"Prediction configuration: {cfg}")
