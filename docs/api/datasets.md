@@ -37,12 +37,12 @@ dataset.save(Path("output_directory"))
 
 **Key Features:**
 
-- **Multiple Format Support**: Load data using specialized loaders for different file formats
+- **Multiple Format Support**: Load data using specialised loaders for different file formats
 - **Data Integration**: Combines spectral data with prediction metadata
 - **Filtering**: Removes invalid tokens and unsupported modifications
 - **Evaluation**: Computes correctness labels when ground truth available
 
-### Data Loaders
+### Data loaders
 
 The datasets module provides several data loaders that implement the `DatasetLoader` protocol:
 
