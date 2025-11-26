@@ -127,7 +127,6 @@ def separate_metadata_and_predictions(
 
     # Separate out metadata from prediction and FDR metrics
     preds_and_fdr_metrics_cols = [
-        "spectrum_id",
         confidence_column,
         "prediction",
         "psm_fdr",
@@ -138,7 +137,9 @@ def separate_metadata_and_predictions(
     # NonParametricFDRControl adds psm_pep column
     if isinstance(fdr_control, NonParametricFDRControl):
         preds_and_fdr_metrics_cols.append("psm_pep")
-    dataset_preds_and_fdr_metrics = dataset_metadata[preds_and_fdr_metrics_cols]
+    dataset_preds_and_fdr_metrics = dataset_metadata[
+        preds_and_fdr_metrics_cols + ["spectrum_id"]
+    ]
     dataset_metadata = dataset_metadata.drop(columns=preds_and_fdr_metrics_cols)
     return dataset_metadata, dataset_preds_and_fdr_metrics
 

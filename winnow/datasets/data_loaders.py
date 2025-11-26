@@ -65,8 +65,16 @@ class InstaNovoDatasetLoader(DatasetLoader):
             )
         df = pl.read_csv(predictions_path)
         # Use polars column selectors to split dataframe
-        beam_df = df.select(cs.contains("_beam_"))
-        preds_df = df.select(~cs.contains(["_beam_", "_log_probs_"]))
+        beam_df = df.select(
+            cs.contains(
+                "instanovo_predictions_beam", "instanovo_log_probabilities_beam"
+            )
+        )
+        preds_df = df.select(
+            ~cs.contains(
+                ["instanovo_predictions_beam", "instanovo_log_probabilities_beam"]
+            )
+        )
         return preds_df, beam_df
 
     @staticmethod
@@ -184,9 +192,9 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
             for beam in range(num_beams):
                 seq_col, log_prob_col, token_log_prob_col = (
-                    f"preds_beam_{beam}",
-                    f"log_probs_beam_{beam}",
-                    f"token_log_probs_{beam}",
+                    f"instanovo_predictions_beam_{beam}",
+                    f"instanovo_log_probabilities_beam_{beam}",
+                    f"token_log_probabilities_beam_{beam}",
                 )
                 sequence, log_prob, token_log_prob = (
                     row.get(seq_col),
@@ -211,7 +219,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
             [
                 pl.col(col).str.replace_all("L", "I")
                 for col in beam_df.columns
-                if "preds_beam" in col
+                if "instanovo_predictions_beam" in col
             ]
         )
 
@@ -261,8 +269,8 @@ class InstaNovoDatasetLoader(DatasetLoader):
             pd.DataFrame: The processed dataframe.
         """
         rename_dict = {
-            "preds": "prediction_untokenised",
-            "preds_tokenised": "prediction",
+            "predictions": "prediction_untokenised",
+            "predictions_tokenised": "prediction",
             "log_probs": "confidence",
         }
         if has_labels:
