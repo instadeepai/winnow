@@ -9,23 +9,43 @@ import pickle
 import re
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
-
 import numpy as np
 import pandas as pd
 import polars as pl
 import polars.selectors as cs
 from pyteomics import mztab
+from instanovo.utils.residues import ResidueSet
+from instanovo.utils.metrics import Metrics
 
 from winnow.datasets.interfaces import DatasetLoader
 from winnow.datasets.calibration_dataset import (
     CalibrationDataset,
     ScoredSequence,
 )
-from winnow.constants import metrics, CASANOVO_RESIDUE_REMAPPING
 
 
 class InstaNovoDatasetLoader(DatasetLoader):
     """Loader for InstaNovo predictions in CSV format."""
+
+    def __init__(
+        self,
+        residue_masses: dict[str, float],
+        residue_remapping: dict[str, str],
+        isotope_error_range: Tuple[int, int] = (0, 1),
+    ) -> None:
+        """Initialise the InstaNovoDatasetLoader.
+
+        Args:
+            residue_masses: The mapping of residue masses to UNIMOD tokens.
+            residue_remapping: The mapping of residue notations to UNIMOD tokens.
+            isotope_error_range: The range of isotope errors to consider when matching peptides.
+        """
+        self.metrics = Metrics(
+            residue_set=ResidueSet(
+                residue_masses=residue_masses, residue_remapping=residue_remapping
+            ),
+            isotope_error_range=isotope_error_range,
+        )
 
     @staticmethod
     def _load_beam_preds(
@@ -39,119 +59,15 @@ class InstaNovoDatasetLoader(DatasetLoader):
         Returns:
             Tuple[pl.DataFrame, pl.DataFrame]: A tuple containing the predictions and beams dataframes.
         """
+        if predictions_path.suffix != ".csv":
+            raise ValueError(
+                f"Unsupported file format for InstaNovo beam predictions: {predictions_path.suffix}. Supported format is .csv."
+            )
         df = pl.read_csv(predictions_path)
         # Use polars column selectors to split dataframe
         beam_df = df.select(cs.contains("_beam_"))
         preds_df = df.select(~cs.contains(["_beam_", "_log_probs_"]))
         return preds_df, beam_df
-
-    @staticmethod
-    def _process_beams(beam_df: pl.DataFrame) -> List[Optional[List[ScoredSequence]]]:
-        """Processes beam predictions into scored sequences.
-
-        Args:
-            beam_df (pl.DataFrame): The dataframe containing the beam predictions.
-
-        Returns:
-            List[Optional[List[ScoredSequence]]]: A list of scored sequences for each row in the dataframe.
-        """
-
-        def convert_row_to_scored_sequences(
-            row: dict,
-        ) -> Optional[List[ScoredSequence]]:
-            scored_sequences = []
-            num_beams = len(row) // 2
-
-            for beam in range(num_beams):
-                seq_col, log_prob_col, token_log_prob_col = (
-                    f"preds_beam_{beam}",
-                    f"log_probs_beam_{beam}",
-                    f"token_log_probs_{beam}",
-                )
-                sequence, log_prob, token_log_prob = (
-                    row.get(seq_col),
-                    row.get(log_prob_col, float("-inf")),
-                    row.get(token_log_prob_col),
-                )
-
-                if sequence and log_prob > float("-inf"):
-                    scored_sequences.append(
-                        ScoredSequence(
-                            sequence=metrics._split_peptide(sequence),
-                            mass_error=None,
-                            sequence_log_probability=log_prob,
-                            token_log_probabilities=token_log_prob,
-                        )
-                    )
-
-            return scored_sequences or None
-
-        # Apply L -> I transformation to multiple columns using polars with_columns
-        beam_df = beam_df.with_columns(
-            [
-                pl.col(col).str.replace_all("L", "I")
-                for col in beam_df.columns
-                if "preds_beam" in col
-            ]
-        )
-
-        # Converts each row of the polars dataframe to a list of scored sequences representing the beam predictions for that row/spectrum.
-        # All the beams are then stored in a list representing the entire dataset.
-        return [
-            convert_row_to_scored_sequences(row)
-            for row in beam_df.iter_rows(named=True)
-        ]
-
-    @staticmethod
-    def _process_predictions(dataset: pd.DataFrame, has_labels: bool) -> pd.DataFrame:
-        """Processes the predictions obtained from saved beams.
-
-        Args:
-            dataset (pd.DataFrame): The dataframe containing the predictions.
-            has_labels (bool): Whether the dataset has ground truth labels.
-
-        Returns:
-            pd.DataFrame: The processed dataframe.
-        """
-        rename_dict = {
-            "preds": "prediction_untokenised",
-            "preds_tokenised": "prediction",
-            "log_probs": "confidence",
-        }
-        if has_labels:
-            rename_dict["sequence"] = "sequence_untokenised"
-        dataset.rename(rename_dict, axis=1, inplace=True)
-
-        dataset["prediction"] = dataset["prediction"].apply(
-            lambda peptide: peptide.split(", ") if isinstance(peptide, str) else peptide
-        )
-
-        dataset.loc[dataset["confidence"] == -1.0, "confidence"] = float("-inf")
-        dataset["confidence"] = dataset["confidence"].apply(np.exp)
-
-        if has_labels:
-            dataset["sequence_untokenised"] = dataset["sequence_untokenised"].apply(
-                lambda peptide: peptide.replace("L", "I")
-                if isinstance(peptide, str)
-                else peptide
-            )
-            dataset["sequence"] = dataset["sequence_untokenised"].apply(
-                metrics._split_peptide
-            )
-        dataset["prediction"] = dataset["prediction"].apply(
-            lambda peptide: [
-                "I" if amino_acid == "L" else amino_acid for amino_acid in peptide
-            ]
-            if isinstance(peptide, list)
-            else peptide
-        )
-        dataset["prediction_untokenised"] = dataset["prediction_untokenised"].apply(
-            lambda peptide: peptide.replace("L", "I")
-            if isinstance(peptide, str)
-            else peptide
-        )
-
-        return dataset
 
     @staticmethod
     def _load_spectrum_data(spectrum_path: Path | str) -> Tuple[pl.DataFrame, bool]:
@@ -171,7 +87,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
             df = pl.read_ipc(spectrum_path)
         else:
             raise ValueError(
-                f"Unsupported file format: {spectrum_path.suffix}. Supported formats are .parquet and .ipc."
+                f"Unsupported file format for spectrum data: {spectrum_path.suffix}. Supported formats are .parquet and .ipc."
             )
 
         if "sequence" in df.columns:
@@ -180,31 +96,6 @@ class InstaNovoDatasetLoader(DatasetLoader):
             has_labels = False
 
         return df, has_labels
-
-    @staticmethod
-    def _process_spectrum_data(df: pl.DataFrame, has_labels: bool) -> pd.DataFrame:
-        """Processes the input data from the de novo sequencing model.
-
-        Args:
-            df (pl.DataFrame): The dataframe containing the spectrum data.
-            has_labels (bool): Whether the dataset has ground truth labels.
-
-        Returns:
-            pd.DataFrame: The processed dataframe.
-        """
-        # Convert to pandas for downstream compatibility
-        df = df.to_pandas()
-        if has_labels:
-            df["sequence"] = (
-                df["sequence"]
-                .apply(
-                    lambda peptide: peptide.replace("L", "I")
-                    if isinstance(peptide, str)
-                    else peptide
-                )
-                .apply(metrics._split_peptide)
-            )
-        return df
 
     @staticmethod
     def _merge_spectrum_data(
@@ -241,43 +132,6 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
         return merged_df
 
-    @staticmethod
-    def _evaluate_predictions(dataset: pd.DataFrame, has_labels: bool) -> pd.DataFrame:
-        """Evaluates predictions in a dataset by checking validity and accuracy.
-
-        Args:
-            dataset (pd.DataFrame): The dataframe containing the predictions.
-            has_labels (bool): Whether the dataset has ground truth labels.
-
-        Returns:
-            pd.DataFrame: The processed dataframe.
-        """
-        if has_labels:
-            dataset["valid_peptide"] = dataset["sequence"].apply(
-                lambda peptide: isinstance(peptide, list)
-            )
-        dataset["valid_prediction"] = dataset["prediction"].apply(
-            lambda peptide: isinstance(peptide, list)
-        )
-        if has_labels:
-            dataset["num_matches"] = dataset.apply(
-                lambda row: metrics._novor_match(row["sequence"], row["prediction"])
-                if isinstance(row["sequence"], list)
-                and isinstance(row["prediction"], list)
-                else 0,
-                axis=1,
-            )
-            dataset["correct"] = dataset.apply(
-                lambda row: (
-                    row["num_matches"] == len(row["sequence"]) == len(row["prediction"])
-                    if isinstance(row["sequence"], list)
-                    and isinstance(row["prediction"], list)
-                    else False
-                ),
-                axis=1,
-            )
-        return dataset
-
     def load(
         self, *, data_path: Path, predictions_path: Optional[Path] = None, **kwargs: Any
     ) -> CalibrationDataset:
@@ -310,6 +164,182 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
         return CalibrationDataset(metadata=predictions, predictions=beams)
 
+    def _process_beams(
+        self, beam_df: pl.DataFrame
+    ) -> List[Optional[List[ScoredSequence]]]:
+        """Processes beam predictions into scored sequences.
+
+        Args:
+            beam_df (pl.DataFrame): The dataframe containing the beam predictions.
+
+        Returns:
+            List[Optional[List[ScoredSequence]]]: A list of scored sequences for each row in the dataframe.
+        """
+
+        def convert_row_to_scored_sequences(
+            row: dict,
+        ) -> Optional[List[ScoredSequence]]:
+            scored_sequences = []
+            num_beams = len(row) // 2
+
+            for beam in range(num_beams):
+                seq_col, log_prob_col, token_log_prob_col = (
+                    f"preds_beam_{beam}",
+                    f"log_probs_beam_{beam}",
+                    f"token_log_probs_{beam}",
+                )
+                sequence, log_prob, token_log_prob = (
+                    row.get(seq_col),
+                    row.get(log_prob_col, float("-inf")),
+                    row.get(token_log_prob_col),
+                )
+
+                if sequence and log_prob > float("-inf"):
+                    scored_sequences.append(
+                        ScoredSequence(
+                            sequence=self.metrics._split_peptide(sequence),
+                            mass_error=None,
+                            sequence_log_probability=log_prob,
+                            token_log_probabilities=token_log_prob,
+                        )
+                    )
+
+            return scored_sequences or None
+
+        # Apply L -> I transformation to multiple columns using polars with_columns
+        beam_df = beam_df.with_columns(
+            [
+                pl.col(col).str.replace_all("L", "I")
+                for col in beam_df.columns
+                if "preds_beam" in col
+            ]
+        )
+
+        # Converts each row of the polars dataframe to a list of scored sequences representing the beam predictions for that row/spectrum.
+        # All the beams are then stored in a list representing the entire dataset.
+        return [
+            convert_row_to_scored_sequences(row)
+            for row in beam_df.iter_rows(named=True)
+        ]
+
+    def _process_spectrum_data(
+        self, df: pl.DataFrame, has_labels: bool
+    ) -> pd.DataFrame:
+        """Processes the input data from the de novo sequencing model.
+
+        Args:
+            df (pl.DataFrame): The dataframe containing the spectrum data.
+            has_labels (bool): Whether the dataset has ground truth labels.
+
+        Returns:
+            pd.DataFrame: The processed dataframe.
+        """
+        # Convert to pandas for downstream compatibility
+        df = df.to_pandas()
+        if has_labels:
+            df["sequence"] = (
+                df["sequence"]
+                .apply(
+                    lambda peptide: peptide.replace("L", "I")
+                    if isinstance(peptide, str)
+                    else peptide
+                )
+                .apply(self.metrics._split_peptide)
+            )
+        return df
+
+    def _process_predictions(
+        self, dataset: pd.DataFrame, has_labels: bool
+    ) -> pd.DataFrame:
+        """Processes the predictions obtained from saved beams.
+
+        Args:
+            dataset (pd.DataFrame): The dataframe containing the predictions.
+            has_labels (bool): Whether the dataset has ground truth labels.
+
+        Returns:
+            pd.DataFrame: The processed dataframe.
+        """
+        rename_dict = {
+            "preds": "prediction_untokenised",
+            "preds_tokenised": "prediction",
+            "log_probs": "confidence",
+        }
+        if has_labels:
+            rename_dict["sequence"] = "sequence_untokenised"
+        dataset.rename(rename_dict, axis=1, inplace=True)
+
+        dataset["prediction"] = dataset["prediction"].apply(
+            lambda peptide: peptide.split(", ") if isinstance(peptide, str) else peptide
+        )
+
+        dataset.loc[dataset["confidence"] == -1.0, "confidence"] = float("-inf")
+        dataset["confidence"] = dataset["confidence"].apply(np.exp)
+
+        if has_labels:
+            dataset["sequence_untokenised"] = dataset["sequence_untokenised"].apply(
+                lambda peptide: peptide.replace("L", "I")
+                if isinstance(peptide, str)
+                else peptide
+            )
+            dataset["sequence"] = dataset["sequence_untokenised"].apply(
+                self.metrics._split_peptide
+            )
+        dataset["prediction"] = dataset["prediction"].apply(
+            lambda peptide: [
+                "I" if amino_acid == "L" else amino_acid for amino_acid in peptide
+            ]
+            if isinstance(peptide, list)
+            else peptide
+        )
+        dataset["prediction_untokenised"] = dataset["prediction_untokenised"].apply(
+            lambda peptide: peptide.replace("L", "I")
+            if isinstance(peptide, str)
+            else peptide
+        )
+
+        return dataset
+
+    def _evaluate_predictions(
+        self, dataset: pd.DataFrame, has_labels: bool
+    ) -> pd.DataFrame:
+        """Evaluates predictions in a dataset by checking validity and accuracy.
+
+        Args:
+            dataset (pd.DataFrame): The dataframe containing the predictions.
+            has_labels (bool): Whether the dataset has ground truth labels.
+
+        Returns:
+            pd.DataFrame: The processed dataframe.
+        """
+        if has_labels:
+            dataset["valid_peptide"] = dataset["sequence"].apply(
+                lambda peptide: isinstance(peptide, list)
+            )
+        dataset["valid_prediction"] = dataset["prediction"].apply(
+            lambda peptide: isinstance(peptide, list)
+        )
+        if has_labels:
+            dataset["num_matches"] = dataset.apply(
+                lambda row: self.metrics._novor_match(
+                    row["sequence"], row["prediction"]
+                )
+                if isinstance(row["sequence"], list)
+                and isinstance(row["prediction"], list)
+                else 0,
+                axis=1,
+            )
+            dataset["correct"] = dataset.apply(
+                lambda row: (
+                    row["num_matches"] == len(row["sequence"]) == len(row["prediction"])
+                    if isinstance(row["sequence"], list)
+                    and isinstance(row["prediction"], list)
+                    else False
+                ),
+                axis=1,
+            )
+        return dataset
+
 
 class MZTabDatasetLoader(DatasetLoader):
     """Loader for MZTab predictions from both traditional search engines and Casanovo outputs.
@@ -336,35 +366,24 @@ class MZTabDatasetLoader(DatasetLoader):
     """
 
     def __init__(
-        self, residue_remapping: dict[str, str] | None = None, *args: Any, **kwargs: Any
+        self,
+        residue_masses: dict[str, float],
+        residue_remapping: dict[str, str],
+        isotope_error_range: Tuple[int, int] = (0, 1),
     ) -> None:
         """Initialise the MZTabDatasetLoader.
 
         Args:
-            residue_remapping: Optional dictionary mapping modification strings to UNIMOD format.
-                If None, uses the default CASANOVO_RESIDUE_REMAPPING.
-            *args: Additional positional arguments for parent class
-            **kwargs: Additional keyword arguments for parent class
+            residue_masses: The mapping of residue masses to UNIMOD tokens.
+            residue_remapping: The mapping of residue notations to UNIMOD tokens.
+            isotope_error_range: The range of isotope errors to consider when matching peptides.
         """
-        super().__init__(*args, **kwargs)
-        self.residue_remapping = (
-            residue_remapping
-            if residue_remapping is not None
-            else CASANOVO_RESIDUE_REMAPPING
+        self.metrics = Metrics(
+            residue_set=ResidueSet(
+                residue_masses=residue_masses, residue_remapping=residue_remapping
+            ),
+            isotope_error_range=isotope_error_range,
         )
-
-    @staticmethod
-    def _load_dataset(predictions_path: Path) -> pl.DataFrame:
-        """Load predictions from mzTab file.
-
-        Args:
-            predictions_path: Path to mzTab file containing predictions
-
-        Returns:
-            DataFrame containing predictions
-        """
-        predictions = mztab.MzTab(str(predictions_path)).spectrum_match_table
-        return pl.DataFrame(predictions)
 
     @staticmethod
     def _load_spectrum_data(spectrum_path: Path | str) -> Tuple[pl.DataFrame, bool]:
@@ -385,13 +404,30 @@ class MZTabDatasetLoader(DatasetLoader):
             df = pl.read_ipc(spectrum_path)
         else:
             raise ValueError(
-                f"Unsupported file format: {spectrum_path.suffix}. Supported formats are .parquet and .ipc."
+                f"Unsupported file format for spectrum data: {spectrum_path.suffix}. Supported formats are .parquet and .ipc."
             )
 
         if "sequence" in df.columns:
             has_labels = True
 
         return df, has_labels
+
+    @staticmethod
+    def _load_dataset(predictions_path: Path) -> pl.DataFrame:
+        """Load predictions from mzTab file.
+
+        Args:
+            predictions_path: Path to mzTab file containing predictions
+
+        Returns:
+            DataFrame containing predictions
+        """
+        if predictions_path.suffix != ".mztab":
+            raise ValueError(
+                f"Unsupported file format for MZTab predictions: {predictions_path.suffix}. Supported format is .mztab."
+            )
+        predictions = mztab.MzTab(str(predictions_path)).spectrum_match_table
+        return pl.DataFrame(predictions)
 
     def load(
         self, *, data_path: Path, predictions_path: Optional[Path] = None, **kwargs: Any
@@ -520,7 +556,7 @@ class MZTabDatasetLoader(DatasetLoader):
         ).with_columns(
             # Split sequence string into list of amino acid tokens
             pl.col(tokenised_column)
-            .map_elements(metrics._split_peptide, return_dtype=pl.List(pl.Utf8))
+            .map_elements(self.metrics._split_peptide, return_dtype=pl.List(pl.Utf8))
             .alias(tokenised_column)
         )
 
@@ -561,7 +597,7 @@ class MZTabDatasetLoader(DatasetLoader):
 
     def _map_modifications(self, sequence: str) -> str:
         """Map modifications to UNIMOD."""
-        for mod, unimod in self.residue_remapping.items():
+        for mod, unimod in self.metrics.residue_remapping.items():
             sequence = sequence.replace(mod, unimod)
         return sequence
 
@@ -659,7 +695,9 @@ class MZTabDatasetLoader(DatasetLoader):
                 # Count matching amino acids between prediction and ground truth
                 pl.struct(["sequence", "prediction"])
                 .map_elements(
-                    lambda row: metrics._novor_match(row["sequence"], row["prediction"])
+                    lambda row: self.metrics._novor_match(
+                        row["sequence"], row["prediction"]
+                    )
                     if isinstance(row["sequence"], list)
                     and isinstance(row["prediction"], list)
                     else 0,
@@ -716,6 +754,26 @@ class PointNovoDatasetLoader(DatasetLoader):
 class WinnowDatasetLoader(DatasetLoader):
     """Loader for previously saved CalibrationDataset instances."""
 
+    def __init__(
+        self,
+        residue_masses: dict[str, float],
+        residue_remapping: dict[str, str],
+        isotope_error_range: Tuple[int, int] = (0, 1),
+    ) -> None:
+        """Initialise the WinnowDatasetLoader.
+
+        Args:
+            residue_masses: The mapping of residue masses to UNIMOD tokens.
+            residue_remapping: The mapping of residue notations to UNIMOD tokens.
+            isotope_error_range: The range of isotope errors to consider when matching peptides.
+        """
+        self.metrics = Metrics(
+            residue_set=ResidueSet(
+                residue_masses=residue_masses, residue_remapping=residue_remapping
+            ),
+            isotope_error_range=isotope_error_range,
+        )
+
     def load(
         self, *, data_path: Path, predictions_path: Optional[Path] = None, **kwargs: Any
     ) -> CalibrationDataset:
@@ -732,34 +790,52 @@ class WinnowDatasetLoader(DatasetLoader):
         if predictions_path is not None:
             raise ValueError("predictions_path is not used for WinnowDatasetLoader")
 
-        with (data_path / "metadata.csv").open(mode="r") as metadata_file:
-            metadata = pd.read_csv(metadata_file)
-            if "sequence" in metadata.columns:
-                metadata["sequence"] = metadata["sequence"].apply(
-                    metrics._split_peptide
-                )
-            metadata["prediction"] = metadata["prediction"].apply(
-                metrics._split_peptide
-            )
-            metadata["mz_array"] = metadata["mz_array"].apply(
-                lambda s: ast.literal_eval(s)
-                if "," in s
-                else ast.literal_eval(
-                    re.sub(r"(\n?)(\s+)", ", ", re.sub(r"\[\s+", "[", s))
-                )
-            )
-            metadata["intensity_array"] = metadata["intensity_array"].apply(
-                lambda s: ast.literal_eval(s)
-                if "," in s
-                else ast.literal_eval(
-                    re.sub(r"(\n?)(\s+)", ", ", re.sub(r"\[\s+", "[", s))
-                )
+        metadata_csv_path = data_path / "metadata.csv"
+        if not metadata_csv_path.exists():
+            raise FileNotFoundError(
+                f"Winnow dataset loader expects a CSV file containing metadata at {metadata_csv_path}. "
+                f"The specified directory {data_path} should contain a 'metadata.csv' file "
+                f"with PSM metadata from a previously saved Winnow dataset."
             )
 
-        predictions_path = data_path / "predictions.pkl"
-        if predictions_path.exists():
-            with predictions_path.open(mode="rb") as predictions_file:
-                predictions = pickle.load(predictions_file)
+        try:
+            with metadata_csv_path.open(mode="r") as metadata_file:
+                metadata = pd.read_csv(metadata_file)
+        except Exception as e:
+            raise ValueError(
+                f"Failed to read metadata.csv from Winnow dataset directory {data_path}. "
+                f"The file should be a valid CSV containing PSM metadata. Error: {e}"
+            ) from e
+
+        if "sequence" in metadata.columns:
+            metadata["sequence"] = metadata["sequence"].apply(
+                self.metrics._split_peptide
+            )
+        metadata["prediction"] = metadata["prediction"].apply(
+            self.metrics._split_peptide
+        )
+        metadata["mz_array"] = metadata["mz_array"].apply(
+            lambda s: ast.literal_eval(s)
+            if "," in s
+            else ast.literal_eval(re.sub(r"(\n?)(\s+)", ", ", re.sub(r"\[\s+", "[", s)))
+        )
+        metadata["intensity_array"] = metadata["intensity_array"].apply(
+            lambda s: ast.literal_eval(s)
+            if "," in s
+            else ast.literal_eval(re.sub(r"(\n?)(\s+)", ", ", re.sub(r"\[\s+", "[", s)))
+        )
+
+        predictions_pkl_path = data_path / "predictions.pkl"
+        if predictions_pkl_path.exists():
+            try:
+                with predictions_pkl_path.open(mode="rb") as predictions_file:
+                    predictions = pickle.load(predictions_file)
+            except Exception as e:
+                raise ValueError(
+                    f"Failed to load predictions.pkl from Winnow dataset directory {data_path}. "
+                    f"The file should be a pickled beam predictions object from a previously saved Winnow dataset. "
+                    f"Error: {e}"
+                ) from e
         else:
             predictions = None
         return CalibrationDataset(metadata=metadata, predictions=predictions)

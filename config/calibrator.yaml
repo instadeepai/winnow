@@ -1,0 +1,48 @@
+# --- Calibrator configuration ---
+
+calibrator:
+  _target_: winnow.calibration.calibrator.ProbabilityCalibrator
+
+  seed: 42
+  hidden_layer_sizes: [50, 50]  # The number of neurons in each hidden layer of the MLP classifier.
+  learning_rate_init: 0.001  # The initial learning rate for the MLP classifier.
+  alpha: 0.0001  # L2 regularisation parameter for the MLP classifier.
+  max_iter: 1000  # Maximum number of training iterations for the MLP classifier.
+  early_stopping: true  # Whether to use early stopping to terminate training.
+  validation_fraction: 0.1  # Proportion of training data to use for early stopping validation.
+
+  features:
+    mass_error:
+      _target_: winnow.calibration.calibration_features.MassErrorFeature
+      residue_masses: ${residue_masses}  # The residue masses to use for the mass error feature.
+
+    prosit_features:
+      _target_: winnow.calibration.calibration_features.PrositFeatures
+      mz_tolerance: 0.02
+      learn_from_missing: true  # Whether to learn from missing Prosit features. If False, errors will be raised when invalid spectra are encountered.
+      invalid_prosit_tokens: ${invalid_prosit_tokens}  # The tokens to consider as invalid for Prosit features.
+      prosit_intensity_model_name: Prosit_2020_intensity_HCD  # The name of the Prosit intensity model to use.
+
+    retention_time_feature:
+      _target_: winnow.calibration.calibration_features.RetentionTimeFeature
+      hidden_dim: 10  # The hidden dimension size for the MLP regressor used to predict iRT from observed retention times.
+      train_fraction: 0.1  # The fraction of the data to use for training the iRT predictor.
+      learn_from_missing: true  # Whether to learn from missing retention time features. If False, errors will be raised when invalid spectra are encountered.
+      seed: 42  # Random seed for the MLP regressor.
+      learning_rate_init: 0.001  # The initial learning rate for the MLP regressor.
+      alpha: 0.0001  # L2 regularisation parameter for the MLP regressor.
+      max_iter: 200  # Maximum number of training iterations for the MLP regressor.
+      early_stopping: false  # Whether to use early stopping for the MLP regressor.
+      validation_fraction: 0.1  # Proportion of training data to use for early stopping validation.
+      invalid_prosit_tokens: ${invalid_prosit_tokens}  # The tokens to consider as invalid for Prosit iRT features.
+      prosit_irt_model_name: Prosit_2019_irt  # The name of the Prosit iRT model to use.
+
+    chimeric_features:
+      _target_: winnow.calibration.calibration_features.ChimericFeatures
+      mz_tolerance: 0.02
+      learn_from_missing: true  # Whether to learn from missing chimeric features. If False, errors will be raised when invalid spectra are encountered.
+      invalid_prosit_tokens: ${invalid_prosit_tokens}  # The tokens to consider as invalid for Prosit chimeric intensity features.
+      prosit_intensity_model_name: Prosit_2020_intensity_HCD  # The name of the Prosit intensity model to use.
+
+    beam_features:
+      _target_: winnow.calibration.calibration_features.BeamFeatures

@@ -1,0 +1,3 @@
+# --- Non-parametric FDR control configuration ---
+
+_target_: winnow.fdr.nonparametric.NonParametricFDRControl
