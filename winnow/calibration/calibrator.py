@@ -6,7 +6,7 @@ import pickle
 import numpy as np
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
-from jaxtyping import Float
+from numpy.typing import NDArray
 from huggingface_hub import snapshot_download
 from winnow.calibration.calibration_features import (
     CalibrationFeatures,
@@ -186,8 +186,8 @@ class ProbabilityCalibrator:
     def compute_features(
         self, dataset: CalibrationDataset, labelled: bool
     ) -> Union[
-        Float[np.ndarray, "batch feature"],
-        Tuple[Float[np.ndarray, "batch feature"], Float[np.ndarray, "batch"]],  # noqa: F821
+        NDArray[np.float64],
+        Tuple[NDArray[np.float64], NDArray[np.float64]],
     ]:
         """Compute the features for the dataset, including any dependencies and feature calculations.
 
@@ -199,8 +199,8 @@ class ProbabilityCalibrator:
 
         Returns:
             Union[
-                Float[np.ndarray, "batch feature"],
-                Tuple[Float[np.ndarray, "batch feature"], Float[np.ndarray, "batch"]]
+                NDArray[np.float64],
+                Tuple[NDArray[np.float64], NDArray[np.float64]]
             ]:
                 - If `labelled` is True: A tuple containing the computed feature matrix and the corresponding labels.
                 - If `labelled` is False: Only the computed feature matrix.
