@@ -2,7 +2,7 @@
 
 Contributions are what make the open-source community such an amazing place to learn, inspire and create, and we welcome your support! Any contributions you make are **greatly appreciated**.
 
-## Ways to Contribute
+## Ways to contribute
 
 If you have ideas for enhancements, you can:
 
@@ -12,7 +12,7 @@ If you have ideas for enhancements, you can:
 - Improve documentation
 - Add examples or tutorials
 
-## Contribution Process
+## Contribution process
 
 1. **Fork the repository**
    ```bash
@@ -63,9 +63,9 @@ If you have ideas for enhancements, you can:
    - Reference any related issues
    - Include examples if applicable
 
-## Development Guidelines
+## Development guidelines
 
-### Code Style
+### Code style
 
 This project uses:
 
@@ -85,17 +85,17 @@ This project uses:
 - Add examples to demonstrate usage
 - Update the API documentation pages if you add new modules
 
-### Issues and Bug Reports
+### Issues and bug reports
 
 When reporting bugs, please include:
 
 - A clear and descriptive title
 - Steps to reproduce the issue
-- Expected vs. actual behavior
+- Expected vs. actual behaviour
 - Your environment details (Python version, OS, etc.)
 - Any relevant error messages or logs
 
-### Feature Requests
+### Feature requests
 
 For feature requests, please:
 
@@ -104,7 +104,7 @@ For feature requests, please:
 - Describe the proposed solution
 - Consider alternatives you've thought about
 
-## Getting Help
+## Getting help
 
 If you need help or have questions:
 

@@ -12,15 +12,29 @@ docs_public
 *.csv
 *.parquet
 *.ipc
+*.mztab
+*.fasta
+*.mgf
 *.pkl
 *.json
 *.yaml
+*.pdf
+*.png
+
+*.ipynb
 
 examples/winnow-general-model
 examples/winnow-ms-datasets
 examples/output
 
+# Sample data files
+examples/example_data/*.ipc
+examples/example_data/*.csv
+examples/example_data/*.parquet
+
 build/
+
+.cursorrules
 
 # Coverage reports
 htmlcov/

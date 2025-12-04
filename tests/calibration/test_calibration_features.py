@@ -16,7 +16,6 @@ from winnow.calibration.calibration_features import (
     _raise_value_error,
 )
 from winnow.datasets.calibration_dataset import CalibrationDataset
-from winnow.constants import RESIDUE_MASSES
 
 
 class TestUtilityFunctions:
@@ -105,7 +104,23 @@ class TestMassErrorFeature:
     @pytest.fixture()
     def mass_error_feature(self):
         """Create a MassErrorFeature instance for testing."""
-        return MassErrorFeature(residue_masses=RESIDUE_MASSES)
+        residue_masses = {
+            "G": 57.021464,
+            "A": 71.037114,
+            "P": 97.052764,
+            "E": 129.042593,
+            "T": 101.047670,
+            "I": 113.084064,
+            "D": 115.026943,
+            "R": 156.101111,
+            "O": 237.147727,
+            "N": 114.042927,
+            "S": 87.032028,
+            "M": 131.040485,
+            "L": 113.084064,
+            "V": 99.068414,
+        }
+        return MassErrorFeature(residue_masses=residue_masses)
 
     @pytest.fixture()
     def sample_dataset(self):
@@ -469,7 +484,9 @@ class TestRetentionTimeFeature:
     @pytest.fixture()
     def retention_time_feature(self):
         """Create a RetentionTimeFeature instance for testing."""
-        return RetentionTimeFeature(hidden_dim=10, train_fraction=0.8)
+        return RetentionTimeFeature(
+            hidden_dim=10, train_fraction=0.8, invalid_prosit_tokens=["U", "O", "X"]
+        )
 
     @pytest.fixture()
     def sample_dataset_with_rt(self):
@@ -494,7 +511,9 @@ class TestRetentionTimeFeature:
 
     def test_initialization_parameters(self):
         """Test initialization with custom parameters."""
-        feature = RetentionTimeFeature(hidden_dim=10, train_fraction=0.8)
+        feature = RetentionTimeFeature(
+            hidden_dim=10, train_fraction=0.8, invalid_prosit_tokens=["U", "O", "X"]
+        )
         assert feature.hidden_dim == 10
         assert feature.train_fraction == 0.8
         assert feature.prosit_irt_model_name == "Prosit_2019_irt"
@@ -779,7 +798,7 @@ class TestPrositFeatures:
     @pytest.fixture()
     def prosit_features(self):
         """Create a PrositFeatures instance for testing."""
-        return PrositFeatures(mz_tolerance=0.02)
+        return PrositFeatures(mz_tolerance=0.02, invalid_prosit_tokens=["U", "O", "X"])
 
     @pytest.fixture()
     def sample_dataset_with_spectra(self):
@@ -818,7 +837,9 @@ class TestPrositFeatures:
 
     def test_initialization_with_tolerance(self):
         """Test initialization with custom tolerance."""
-        feature = PrositFeatures(mz_tolerance=0.01)
+        feature = PrositFeatures(
+            mz_tolerance=0.01, invalid_prosit_tokens=["U", "O", "X"]
+        )
         assert feature.mz_tolerance == 0.01
         assert feature.prosit_intensity_model_name == "Prosit_2020_intensity_HCD"
 
@@ -1152,7 +1173,9 @@ class TestChimericFeatures:
     @pytest.fixture()
     def chimeric_features(self):
         """Create a ChimericFeatures instance for testing."""
-        return ChimericFeatures(mz_tolerance=0.02)
+        return ChimericFeatures(
+            mz_tolerance=0.02, invalid_prosit_tokens=["U", "O", "X"]
+        )
 
     @pytest.fixture()
     def sample_dataset_with_beam_predictions(self):
@@ -1205,7 +1228,9 @@ class TestChimericFeatures:
 
     def test_initialization_with_tolerance(self):
         """Test initialization with custom tolerance."""
-        feature = ChimericFeatures(mz_tolerance=0.01)
+        feature = ChimericFeatures(
+            mz_tolerance=0.01, invalid_prosit_tokens=["U", "O", "X"]
+        )
         assert feature.mz_tolerance == 0.01
 
     def test_prepare_does_nothing(
