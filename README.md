@@ -106,7 +106,38 @@ uv pip install winnow-fdr
 ```
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
+<!-- QUICK START -->
+## Quick Start
 
+Get started with `winnow` in minutes using the included sample data:
+
+```bash
+# Generate sample data (if not already present)
+make sample-data
+
+# Train a calibrator on the sample data
+make train-sample
+
+# Run prediction with the trained model
+make predict-sample
+```
+
+The sample data is automatically configured in `config/train.yaml` and `config/predict.yaml`, so you can also use the commands directly:
+
+```bash
+# Train with sample data
+winnow train
+
+# Predict with pretrained HuggingFace model
+winnow predict
+
+# Predict with your locally trained model
+winnow predict calibrator.pretrained_model_name_or_path=models/new_model
+```
+
+**Note:** The sample data is minimal (20 spectra) and intended for testing only. For production use, replace with your own datasets.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- USAGE EXAMPLES -->
 ## Usage

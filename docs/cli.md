@@ -14,6 +14,36 @@ pip install winnow-fdr
 uv pip install winnow-fdr
 ```
 
+## Quick Start
+
+Get started immediately with the included sample data:
+
+```bash
+# Generate sample data (if not already present)
+make sample-data
+
+# Train a calibrator on the sample data
+make train-sample
+
+# Run prediction with the trained model
+make predict-sample
+```
+
+The sample data is pre-configured in the default config files (`config/train.yaml` and `config/predict.yaml`), pointing to `examples/example_data/`. You can also use the commands directly:
+
+```bash
+# Train with sample data (uses defaults from config/train.yaml)
+winnow train
+
+# Predict with pretrained HuggingFace model (uses defaults from config/predict.yaml)
+winnow predict
+
+# Predict with your locally trained model
+winnow predict calibrator.pretrained_model_name_or_path=models/new_model
+```
+
+**Note:** The sample data is minimal (20 spectra) and intended for testing only. For production use, replace the dataset paths in the config files or override them on the command line.
+
 ## Commands
 
 ### `winnow config`
