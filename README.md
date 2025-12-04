@@ -24,7 +24,7 @@
     </a>
     <a href="https://github.com/instadeepai/winnow/actions">
         <img
-            src="https://img.shields.io/badge/coverage-55%25-red?logo=coverage"
+            src="https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/winnowbot/f6df3d7ac249eb608e631192d2efb25e/raw/pytest-coverage-comment.json"
             alt="Test Coverage"
             style="max-width:100%;"
         >
