@@ -8,7 +8,6 @@ import warnings
 import numpy as np
 import pandas as pd
 
-from jaxtyping import Float
 from numpy.typing import NDArray
 
 from winnow.datasets.psm_dataset import PSMDataset
@@ -203,7 +202,7 @@ class FDRControl(metaclass=ABCMeta):
 
     def get_confidence_curve(
         self, resolution: float, min_confidence: float, max_confidence: float
-    ) -> Tuple[Float[np.ndarray, "threshold"], Float[np.ndarray, "threshold"]]:  # noqa: F821
+    ) -> Tuple[NDArray[np.float64], NDArray[np.float64]]:
         """Return the curve with the confidence cutoff for corresponding FDR thresholds.
 
         Args:

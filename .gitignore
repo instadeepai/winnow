@@ -30,3 +30,7 @@ examples/output
 build/
 
 .cursorrules
+
+# Coverage reports
+htmlcov/
+.coverage

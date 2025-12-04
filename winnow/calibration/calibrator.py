@@ -6,7 +6,7 @@ import pickle
 import numpy as np
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
-from jaxtyping import Float
+from numpy.typing import NDArray
 from huggingface_hub import snapshot_download
 from omegaconf import DictConfig
 
@@ -20,7 +20,7 @@ from winnow.datasets.calibration_dataset import CalibrationDataset
 class ProbabilityCalibrator:
     """A class for recalibrating probabilities for a de novo peptide sequencing method.
 
-    This class provides functionality to recalibrate predicted probabilities by fitting a logistic regression model using various features computed from a calibration dataset.
+    This class provides functionality to recalibrate predicted probabilities by fitting an MLP classifier using various features computed from a calibration dataset.
     """
 
     def __init__(
@@ -210,9 +210,9 @@ class ProbabilityCalibrator:
                 self.dependencies.pop(dependency.name)
 
     def fit(self, dataset: CalibrationDataset) -> None:
-        """Fit the logistic regression model using the given calibration dataset.
+        """Fit the MLP classifier using the given calibration dataset.
 
-        This method computes the features from the dataset, prepares the labels, and trains a logistic regression model for recalibrating probabilities.
+        This method computes the features from the dataset, prepares the labels, and trains an MLP classifier for recalibrating probabilities.
 
         Args:
             dataset (CalibrationDataset): The dataset used for training the classifier.
@@ -225,8 +225,8 @@ class ProbabilityCalibrator:
     def compute_features(
         self, dataset: CalibrationDataset, labelled: bool
     ) -> Union[
-        Float[np.ndarray, "batch feature"],
-        Tuple[Float[np.ndarray, "batch feature"], Float[np.ndarray, "batch"]],  # noqa: F821
+        NDArray[np.float64],
+        Tuple[NDArray[np.float64], NDArray[np.float64]],
     ]:
         """Compute the features for the dataset, including any dependencies and feature calculations.
 
@@ -238,8 +238,8 @@ class ProbabilityCalibrator:
 
         Returns:
             Union[
-                Float[np.ndarray, "batch feature"],
-                Tuple[Float[np.ndarray, "batch feature"], Float[np.ndarray, "batch"]]
+                NDArray[np.float64],
+                Tuple[NDArray[np.float64], NDArray[np.float64]]
             ]:
                 - If `labelled` is True: A tuple containing the computed feature matrix and the corresponding labels.
                 - If `labelled` is False: Only the computed feature matrix.
