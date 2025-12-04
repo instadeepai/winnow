@@ -108,3 +108,28 @@ set-gcp-credentials:
 ## Set the Ceph credentials
 set-ceph-credentials:
 	uv run python scripts/set_ceph_credentials.py
+
+#################################################################################
+## Sample data and CLI commands													#
+#################################################################################
+
+.PHONY: sample-data train-sample predict-sample clean clean-all
+
+## Generate sample data files for testing
+sample-data:
+	uv run python scripts/generate_sample_data.py
+
+## Run winnow train with sample data (uses defaults from config)
+train-sample:
+	winnow train
+
+## Run winnow predict with sample data (uses locally trained model from models/new_model)
+predict-sample:
+	winnow predict calibrator.pretrained_model_name_or_path=models/new_model
+
+## Clean output directories (does not delete sample data)
+clean:
+	rm -rf models/ results/
+
+## Clean outputs and regenerate sample data
+clean-all: clean sample-data
