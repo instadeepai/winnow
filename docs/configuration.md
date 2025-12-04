@@ -26,10 +26,10 @@ winnow predict
 
 ## Configuration files
 
-Winnow's configuration files are organised in the `config/` directory:
+Winnow's configuration files are organised in the `configs/` directory:
 
 ```
-config/
+configs/
 ├── residues.yaml              # Amino acid masses, modifications
 ├── data_loader/               # Dataset format loaders
 │   ├── instanovo.yaml
@@ -95,7 +95,7 @@ winnow train data_loader=mztab dataset.spectrum_path_or_directory=data/spectra.p
 
 ## Training configuration
 
-### Main training config (`config/train.yaml`)
+### Main training config (`configs/train.yaml`)
 
 Controls dataset loading, output paths and composition:
 
@@ -126,7 +126,7 @@ dataset_output_path: results/calibrated_dataset.csv
 - `model_output_dir`: Where to save trained model
 - `dataset_output_path`: Where to save calibrated training results
 
-### Calibrator config (`config/calibrator.yaml`)
+### Calibrator config (`configs/calibrator.yaml`)
 
 Controls model architecture and calibration features:
 
@@ -192,7 +192,7 @@ calibrator:
 
 ## Prediction configuration
 
-### Main prediction config (`config/predict.yaml`)
+### Main prediction config (`configs/predict.yaml`)
 
 Controls dataset loading, FDR estimation and output:
 
@@ -242,7 +242,7 @@ output_folder: results/predictions
 
 ### FDR method configs
 
-**Non-parametric FDR** (`config/fdr_method/nonparametric.yaml`):
+**Non-parametric FDR** (`configs/fdr_method/nonparametric.yaml`):
 
 ```yaml
 _target_: winnow.fdr.nonparametric.NonParametricFDRControl
@@ -250,7 +250,7 @@ _target_: winnow.fdr.nonparametric.NonParametricFDRControl
 
 No additional parameters required.
 
-**Database-grounded FDR** (`config/fdr_method/database_grounded.yaml`):
+**Database-grounded FDR** (`configs/fdr_method/database_grounded.yaml`):
 
 ```yaml
 _target_: winnow.fdr.database_grounded.DatabaseGroundedFDRControl
@@ -271,7 +271,7 @@ Requires ground truth sequences in the dataset.
 
 ## Shared configuration
 
-### Residues config (`config/residues.yaml`)
+### Residues config (`configs/residues.yaml`)
 
 Defines amino acid masses, modifications and invalid tokens:
 
@@ -310,9 +310,9 @@ This configuration is shared across all pipelines and referenced via `${residue_
 
 ### Data loader configs
 
-Each data format has a dedicated loader configuration in `config/data_loader/`:
+Each data format has a dedicated loader configuration in `configs/data_loader/`:
 
-**InstaNovo** (`config/data_loader/instanovo.yaml`):
+**InstaNovo** (`configs/data_loader/instanovo.yaml`):
 ```yaml
 _target_: winnow.datasets.data_loaders.InstaNovoDatasetLoader
 residue_masses: ${residue_masses}
@@ -322,7 +322,7 @@ residue_remapping:
   # ... maps legacy notations to UNIMOD tokens
 ```
 
-**MZTab** (`config/data_loader/mztab.yaml`):
+**MZTab** (`configs/data_loader/mztab.yaml`):
 ```yaml
 _target_: winnow.datasets.data_loaders.MZTabDatasetLoader
 residue_masses: ${residue_masses}
@@ -333,13 +333,13 @@ residue_remapping:
   # ... maps Casanovo notations to UNIMOD tokens
 ```
 
-**PointNovo** (`config/data_loader/pointnovo.yaml`):
+**PointNovo** (`configs/data_loader/pointnovo.yaml`):
 ```yaml
 _target_: winnow.datasets.data_loaders.PointNovoDatasetLoader
 residue_masses: ${residue_masses}
 ```
 
-**Winnow** (`config/data_loader/winnow.yaml`):
+**Winnow** (`configs/data_loader/winnow.yaml`):
 ```yaml
 _target_: winnow.datasets.data_loaders.WinnowDatasetLoader
 residue_masses: ${residue_masses}
@@ -426,10 +426,10 @@ Common interpolation patterns in Winnow configs:
 ### Add a custom data loader
 
 1. Create loader class implementing `DatasetLoader` protocol
-2. Add configuration file: `config/data_loader/custom.yaml`
+2. Add configuration file: `configs/data_loader/custom.yaml`
 3. Use with: `winnow train data_loader=custom`
 
-Example `config/data_loader/custom.yaml`:
+Example `configs/data_loader/custom.yaml`:
 ```yaml
 _target_: my_module.CustomDatasetLoader
 residue_masses: ${residue_masses}
@@ -439,7 +439,7 @@ custom_param: value
 ### Add custom calibration features
 
 1. Create feature class inheriting from `CalibrationFeatures`
-2. Add to `config/calibrator.yaml`:
+2. Add to `configs/calibrator.yaml`:
    ```yaml
    features:
      custom_feature:
@@ -451,10 +451,10 @@ custom_param: value
 ### Add custom FDR method
 
 1. Create FDR class implementing the FDR interface
-2. Add configuration file: `config/fdr_method/custom_method.yaml`
+2. Add configuration file: `configs/fdr_method/custom_method.yaml`
 3. Use with: `winnow predict fdr_method=custom_method`
 
-Example `config/fdr_method/custom_method.yaml`:
+Example `configs/fdr_method/custom_method.yaml`:
 ```yaml
 _target_: my_module.CustomFDRControl
 confidence_feature: ${fdr_control.confidence_column}
@@ -493,6 +493,135 @@ winnow predict fdr_method=typo
 # Available options in 'fdr_method': nonparametric, database_grounded
 ```
 
+## Advanced: custom config directories
+
+For advanced users who have installed winnow as a package and need to customise multiple configuration files, you can use the `--config-dir` flag to specify a custom configuration directory. This is particularly useful when you have complex customisations that would be verbose to specify via command-line overrides.
+
+**When to use custom config directories:**
+- **CLI overrides**: For simple parameter changes (1-3 values) - use command-line overrides like `winnow train calibrator.seed=42`
+- **Custom config dirs**: For complex configurations with many custom settings (advanced users) - use `--config-dir`
+- **Cloning repo**: For extending Winnow (developers) - clone the repository, make changes, and modify configs directly
+
+### Config file structure and maming
+
+Your custom config directory should mirror the structure of the package configs:
+
+```
+my_configs/
+├── residues.yaml              # Override residue masses/modifications
+├── calibrator.yaml            # Override calibrator features
+├── train.yaml                 # Override training config (if needed)
+├── predict.yaml               # Override prediction config (if needed)
+├── data_loader/               # Override data loaders (if needed)
+│   └── instanovo.yaml
+│   └── mztab.yaml
+│   └── winnow.yaml
+└── fdr_method/               # Override FDR methods (if needed)
+│   └── database_grounded.yaml
+│   └── nonparametric.yaml
+```
+
+**Important requirements:**
+- File names must match package config names **exactly** (case-sensitive)
+- Directory structure should mirror package structure (e.g., `data_loader/`, `fdr_method/`)
+- Only include files you want to override - you don't need to include everything
+- YAML files must be valid and follow the same structure as package configs
+
+### Partial configs
+
+You can use **partial configs at the file level** - only include the files you want to override. For example, if you only want to customise residue masses and calibrator settings:
+
+```bash
+my_configs/
+├── residues.yaml       # Your custom residues
+└── calibrator.yaml    # Your custom calibrator config
+```
+
+When you use `--config-dir`, winnow will:
+1. Use your custom files for files present in your directory (these completely replace package versions)
+2. Use package defaults for files not in your directory
+
+**Important limitation**: Partial configs work at the **file level**, not the **key level** within a file. If you provide a custom `calibrator.yaml`, it must contain the complete structure - you can't just override `seed` and expect other settings to come from package defaults. See "Behaviour with variables" below for details.
+
+### Behaviour with variables
+
+**How config files work**: When you provide a custom config file (e.g., `calibrator.yaml`), it **completely replaces** the package version of that file. Hydra does not merge keys within the same file - it uses your file exactly as written.
+
+**What this means:**
+- ✅ **Partial configs at file level**: You only need to include the files you want to override (e.g., just `residues.yaml` and `calibrator.yaml`). Files not in your custom directory use package defaults.
+- ❌ **Partial configs at key level don't work**: If you provide `calibrator.yaml` with only `seed: 999`, the other settings (`hidden_layer_sizes`, `features`, etc.) will be **missing**, not using package defaults. This will cause errors.
+
+**Example - What happens with minimal config:**
+```yaml
+# custom/calibrator.yaml - TOO MINIMAL
+calibrator:
+  _target_: winnow.calibration.calibrator.ProbabilityCalibrator
+  seed: 99999
+```
+
+**Result**: Only `_target_` and `seed` are present. All other keys (`hidden_layer_sizes`, `learning_rate_init`, `features`, etc.) are **missing** from the final config. This will cause errors when running the pipeline in most cases.
+
+**Example - What you need (complete structure):**
+```yaml
+# custom/calibrator.yaml - COMPLETE STRUCTURE REQUIRED
+calibrator:
+  _target_: winnow.calibration.calibrator.ProbabilityCalibrator
+  seed: 99999  # Your custom value
+  hidden_layer_sizes: [50, 50]  # Must include all settings
+  learning_rate_init: 0.001
+  alpha: 0.0001
+  max_iter: 1000
+  early_stopping: true
+  validation_fraction: 0.1
+  features:
+    mass_error:
+      _target_: winnow.calibration.calibration_features.MassErrorFeature
+      residue_masses: ${residue_masses}
+    prosit_features:
+      # ... include all features you want to keep
+    # Features you don't include will be missing (not using defaults)
+```
+
+**Removing features**: To remove features, simply **don't include them** in your custom `calibrator.yaml`. Since your file completely replaces the package version, any features you omit will be absent from the final config. It is also possible to specify this using a tilde with CLI overrides (e.g., `~calibrator.prosit_features`).
+
+**New variables**: Adding new keys that don't exist in package configs will cause them to be ignored (Hydra is not strict by default). They won't cause errors, but they also won't be used unless your code explicitly accesses them. **Stick to overriding existing keys** from package configs.
+
+**Recommendation**: Always start by copying the complete package config file, then modify only the values you need. You can get the package config structure by running `winnow config train` and copying the relevant section, or by copying from `winnow/configs/` in the [repository](https://github.com/instadeepai/winnow).
+
+### Getting package config structure
+
+Before creating custom configs, you need to know the structure of package configs. Here are ways to get them:
+
+1. **View resolved config**: Run `winnow config train` or `winnow config predict` to see the complete resolved configuration
+2. **Clone the repository**: Visit the winnow [repository](https://github.com/instadeepai/winnow) and check `winnow/configs/` directory
+3. **Inspect installed package**: Find the package location (e.g., `python -c "import winnow; print(winnow.__file__)"`) and navigate to `configs/`
+
+**Recommended workflow**: Start by creating a new config directory, copying in the package config file you want to customise, and then modify only the values you need.
+
+### Troubleshooting
+
+**Common mistakes:**
+
+1. **Wrong file names**: File names must match exactly (case-sensitive)
+   - ❌ `Residues.yaml` (wrong case)
+   - ✅ `residues.yaml` (correct)
+
+2. **Incorrect structure**: Directory structure must match package structure
+   - ❌ `my_configs/data_loaders/` (wrong directory name)
+   - ✅ `my_configs/data_loader/` (correct)
+
+3. **Typos in keys**: YAML keys must match package config keys exactly
+   - Check package configs for correct key names
+
+4. **Invalid YAML**: Ensure your YAML files are valid
+   - Use a YAML validator if unsure
+
+**How to check if custom config is being used:**
+
+1. Use `winnow config train --config-dir my_configs` and search for your custom values
+2. Compare output with `winnow config train` (without custom dir) to see differences
+3. Check logs - winnow logs which config directory is being used
+
 ## Additional resources
 
 - [Hydra documentation](https://hydra.cc/docs/intro/)
@@ -519,7 +648,7 @@ If you're migrating from the old argument-based CLI:
 
 **Key changes:**
 
-- `data_source` renamed to `data_loader` (references config/data_loader/*.yaml)
+- `data_source` renamed to `data_loader` (references configs/data_loader/*.yaml)
 - `fdr_threshold` and `confidence_column` now nested under `fdr_control`
 - `local_model_folder` and `huggingface_model_name` merged into `pretrained_model_name_or_path`
 - Dataset paths are now specified directly as Hydra parameters instead of via separate YAML files:

@@ -1,5 +1,0 @@
-# --- PointNovo data loading configuration ---
-
-_target_: winnow.datasets.data_loaders.PointNovoDatasetLoader
-
-residue_masses: ${residue_masses}
