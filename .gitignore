@@ -25,3 +25,5 @@ build/
 # Coverage reports
 htmlcov/
 .coverage
+coverage.xml
+pytest.xml
