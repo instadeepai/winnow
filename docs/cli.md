@@ -190,15 +190,15 @@ winnow predict fdr_method=database_grounded fdr_control.fdr_threshold=0.05
 
 Training produces:
 
-1. **Model checkpoints** (in `--model-output-folder`):
+1. **Model checkpoints** (`model_output_dir`):
    - `calibrator.pkl`: Complete trained calibrator with all features and parameters
 
-2. **Training results** (`--dataset-output-path`):
+2. **Training results** (`dataset_output_path`):
    - CSV with calibrated scores and evaluation metrics
 
 ### Prediction output
 
-Prediction produces two CSV files in the `--output-folder` directory:
+Prediction produces two CSV files in the `output-folder` directory:
 
 1. **`metadata.csv`**: Contains all metadata and feature columns from the input dataset
    - Original metadata columns (spectrum information, precursors, etc.)
