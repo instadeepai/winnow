@@ -36,6 +36,7 @@ packages = ["winnow", "winnow.scripts", "winnow.fdr", "winnow.datasets", "winnow
 dev = [
     "pre-commit>=4.1.0",
     "pytest>=8.3.5",
+    "pytest-cov>=6.0.0",
 ]
 docs = [
     "markdown-include>=0.8.1",
@@ -54,3 +55,34 @@ notebook = [
 
 [project.scripts]
 winnow='winnow.scripts.main:app'
+
+[tool.coverage.run]
+source = ["winnow"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "*/__pycache__/*",
+    "*/venv/*",
+    "*/env/*",
+    "*/site-packages/*",
+]
+
+[tool.coverage.threshold]
+fail_under = 0
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
