@@ -49,16 +49,17 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
     @staticmethod
     def _load_beam_preds(
-        predictions_path: Path,
+        predictions_path: Path | str,
     ) -> Tuple[pl.DataFrame, pl.DataFrame]:
         """Loads a dataset from a CSV file and optionally filters it.
 
         Args:
-            predictions_path (Path): The path to the CSV file containing the predictions.
+            predictions_path (Path | str): The path to the CSV file containing the predictions.
 
         Returns:
             Tuple[pl.DataFrame, pl.DataFrame]: A tuple containing the predictions and beams dataframes.
         """
+        predictions_path = Path(predictions_path)
         if predictions_path.suffix != ".csv":
             raise ValueError(
                 f"Unsupported file format for InstaNovo beam predictions: {predictions_path.suffix}. Supported format is .csv."
@@ -421,7 +422,7 @@ class MZTabDatasetLoader(DatasetLoader):
         return df, has_labels
 
     @staticmethod
-    def _load_dataset(predictions_path: Path) -> pl.DataFrame:
+    def _load_dataset(predictions_path: Path | str) -> pl.DataFrame:
         """Load predictions from mzTab file.
 
         Args:
@@ -430,6 +431,7 @@ class MZTabDatasetLoader(DatasetLoader):
         Returns:
             DataFrame containing predictions
         """
+        predictions_path = Path(predictions_path)
         if predictions_path.suffix != ".mztab":
             raise ValueError(
                 f"Unsupported file format for MZTab predictions: {predictions_path.suffix}. Supported format is .mztab."
