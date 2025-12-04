@@ -149,12 +149,14 @@ For prediction (`winnow predict`), you need:
 
 Winnow supports multiple input formats:
 
-- **InstaNovo**: Parquet spectra + CSV predictions (beam search format)
-- **MZTab**: MGF/Parquet spectra + MZTab predictions
+- **InstaNovo**: Parquet or IPC spectra + CSV predictions (beam search format)
+- **MZTab**: Parquet or IPC spectra + MZTab predictions
 - **PointNovo**: Similar to InstaNovo format
 - **Winnow**: Internal format (directory with metadata.csv and predictions.pkl)
 
 Specify the format using `data_source=<format>` parameter.
+
+**Note on MGF files**: While many users have their input data in `.mgf` format, Winnow currently requires spectrum data to be in `.parquet` or `.ipc` format. To convert `.mgf` files to `.parquet`, you can use InstaNovo's conversion utilities. See the [InstaNovo documentation](https://instadeepai.github.io/InstaNovo/) for instructions on using `instanovo convert` or the `SpectrumDataFrame` class to perform this conversion.
 
 ## FDR methods
 
