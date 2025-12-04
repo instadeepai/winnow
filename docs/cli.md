@@ -29,13 +29,13 @@ make train-sample
 make predict-sample
 ```
 
-The sample data is pre-configured in the default config files (`config/train.yaml` and `config/predict.yaml`), pointing to `examples/example_data/`. You can also use the commands directly:
+The sample data is pre-configured in the default config files (`configs/train.yaml` and `configs/predict.yaml`), pointing to `examples/example_data/`. You can also use the commands directly:
 
 ```bash
-# Train with sample data (uses defaults from config/train.yaml)
+# Train with sample data (uses defaults from configs/train.yaml)
 winnow train
 
-# Predict with pretrained HuggingFace model (uses defaults from config/predict.yaml)
+# Predict with pretrained HuggingFace model (uses defaults from configs/predict.yaml)
 winnow predict
 
 # Predict with your locally trained model
@@ -71,7 +71,7 @@ This command prints the final YAML configuration with colour-coded hierarchical 
 Train a confidence calibration model on labelled data.
 
 ```bash
-# Use defaults (configured in config/train.yaml)
+# Use defaults (configured in configs/train.yaml)
 winnow train
 
 # Override specific parameters
@@ -141,7 +141,7 @@ By default, `winnow predict` uses the pretrained model `InstaDeepAI/winnow-gener
 
 Winnow uses [Hydra](https://hydra.cc/) for configuration management. All parameters can be configured via:
 
-- **YAML config files** in the `config/` directory (defines defaults)
+- **YAML config files** in the `configs/` directory (defines defaults)
 - **Command-line overrides** using `key=value` syntax
 - **Nested parameters** using dot notation (e.g., `calibrator.seed=42`)
 
@@ -329,7 +329,7 @@ Winnow comes with sensible default settings for all parameters:
 - **FDR**: Non-parametric method with 5% threshold
 - **Model**: Pretrained general model from HuggingFace
 
-All defaults are defined in YAML files under `config/` and can be overridden via command line. For a complete reference of all default parameters and configuration options, see the **[Configuration guide](configuration.md)**.
+All defaults are defined in YAML files under `configs/` and can be overridden via command line. For a complete reference of all default parameters and configuration options, see the **[Configuration guide](configuration.md)**.
 
 ## Troubleshooting
 
@@ -365,7 +365,7 @@ The CLI automatically filters out:
 - Empty predictions
 - Peptides longer than 30 amino acids (Prosit limitation)
 - Precursor charges above 6 (Prosit limitation)
-- Invalid modifications and tokens (defined in `config/residues.yaml`)
+- Invalid modifications and tokens (defined in `configs/residues.yaml`)
 
 ### Getting help
 

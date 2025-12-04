@@ -7,7 +7,7 @@ needed, significantly reducing --help and config command times.
 
 from __future__ import annotations
 
-from typing import Union, Tuple, Optional, List, TYPE_CHECKING
+from typing import Union, Tuple, Optional, List, TYPE_CHECKING, Annotated
 import typer
 import logging
 from rich.logging import RichHandler
@@ -145,19 +145,30 @@ def separate_metadata_and_predictions(
 
 
 def train_entry_point(
-    overrides: Optional[List[str]] = None, execute: bool = True
+    overrides: Optional[List[str]] = None,
+    execute: bool = True,
+    config_dir: Optional[str] = None,
 ) -> None:
     """The main training pipeline entry point.
 
     Args:
         overrides: Optional list of config overrides.
         execute: If False, only print the configuration and return without executing the pipeline.
+        config_dir: Optional path to custom config directory. If provided, configs in this
+            directory take precedence over package configs. Files not in custom dir will use package defaults (file-by-file resolution).
     """
-    from hydra import initialize, compose
+    from hydra import initialize_config_dir, compose
     from hydra.utils import instantiate
+    from winnow.scripts.config_path_utils import get_primary_config_dir
 
-    with initialize(
-        config_path="../../config", version_base="1.3", job_name="winnow_train"
+    # Get primary config directory (custom if provided, otherwise package/dev)
+    primary_config_dir = get_primary_config_dir(config_dir)
+
+    # Initialise Hydra with primary config directory
+    with initialize_config_dir(
+        config_dir=str(primary_config_dir),
+        version_base="1.3",
+        job_name="winnow_train",
     ):
         cfg = compose(config_name="train", overrides=overrides)
 
@@ -205,19 +216,31 @@ def train_entry_point(
 
 
 def predict_entry_point(
-    overrides: Optional[List[str]] = None, execute: bool = True
+    overrides: Optional[List[str]] = None,
+    execute: bool = True,
+    config_dir: Optional[str] = None,
 ) -> None:
     """The main prediction pipeline entry point.
 
     Args:
         overrides: Optional list of config overrides.
         execute: If False, only print the configuration and return without executing the pipeline.
+        config_dir: Optional path to custom config directory. If provided, configs in this
+            directory take precedence over package configs. Files not in custom dir will use
+            package defaults (file-by-file resolution).
     """
-    from hydra import initialize, compose
+    from hydra import initialize_config_dir, compose
     from hydra.utils import instantiate
+    from winnow.scripts.config_path_utils import get_primary_config_dir
 
-    with initialize(
-        config_path="../../config", version_base="1.3", job_name="winnow_predict"
+    # Get primary config directory (custom if provided, otherwise package/dev)
+    primary_config_dir = get_primary_config_dir(config_dir)
+
+    # Initialize Hydra with primary config directory
+    with initialize_config_dir(
+        config_dir=str(primary_config_dir),
+        version_base="1.3",
+        job_name="winnow_predict",
     ):
         cfg = compose(config_name="predict", overrides=overrides)
 
@@ -300,6 +323,10 @@ def predict_entry_point(
         "  [dim]winnow train data_loader=mztab[/dim]  # Use MZTab format instead of InstaNovo\n"
         "  [dim]winnow train model_output_dir=models/my_model[/dim]  # Custom output location\n"
         "  [dim]winnow train calibrator.seed=42[/dim]  # Set random seed\n\n"
+        "[bold cyan]Custom config directory:[/bold cyan]\n"
+        "  [dim]winnow train --config-dir /path/to/configs[/dim]  # Use custom config directory\n"
+        "  [dim]winnow train -cp ./my_configs[/dim]  # Short form (relative or absolute path)\n"
+        "  See docs for advanced usage.\n\n"
         "[bold cyan]Configuration files to customise:[/bold cyan]\n"
         "  • config/train.yaml - Main config (data paths, output locations)\n"
         "  • config/calibrator.yaml - Model architecture and features\n"
@@ -308,11 +335,21 @@ def predict_entry_point(
     ),
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
-def train(ctx: typer.Context) -> None:
+def train(
+    ctx: typer.Context,
+    config_dir: Annotated[
+        Optional[str],
+        typer.Option(
+            "--config-dir",
+            "-cp",
+            help="Path to custom config directory (relative or absolute). See documentation for advanced usage.",
+        ),
+    ] = None,
+) -> None:
     """Passes control directly to the Hydra training pipeline."""
-    # Capture extra arguments as Hydra overrides
+    # Capture extra arguments as Hydra overrides (--config-dir already parsed out by Typer)
     overrides = ctx.args if ctx.args else None
-    train_entry_point(overrides)
+    train_entry_point(overrides, config_dir=config_dir)
 
 
 @app.command(
@@ -328,6 +365,10 @@ def train(ctx: typer.Context) -> None:
         "  [dim]winnow predict fdr_method=database_grounded[/dim]  # Use database-grounded FDR\n"
         "  [dim]winnow predict fdr_threshold=0.01[/dim]  # Target 1% FDR instead of 5%\n"
         "  [dim]winnow predict output_folder=results/my_run[/dim]  # Custom output location\n\n"
+        "[bold cyan]Custom config directory:[/bold cyan]\n"
+        "  [dim]winnow predict --config-dir /path/to/configs[/dim]  # Use custom config directory\n"
+        "  [dim]winnow predict -cp ./my_configs[/dim]  # Short form (relative or absolute path)\n"
+        "  See docs for advanced usage.\n\n"
         "[bold cyan]Configuration files to customise:[/bold cyan]\n"
         "  • config/predict.yaml - Main config (data paths, FDR settings, output)\n"
         "  • config/fdr_method/ - FDR methods (nonparametric, database_grounded)\n"
@@ -336,11 +377,21 @@ def train(ctx: typer.Context) -> None:
     ),
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
-def predict(ctx: typer.Context) -> None:
+def predict(
+    ctx: typer.Context,
+    config_dir: Annotated[
+        Optional[str],
+        typer.Option(
+            "--config-dir",
+            "-cp",
+            help="Path to custom config directory (relative or absolute). See documentation for advanced usage.",
+        ),
+    ] = None,
+) -> None:
     """Passes control directly to the Hydra predict pipeline."""
-    # Capture extra arguments as Hydra overrides
+    # Capture extra arguments as Hydra overrides (--config-dir already parsed out by Typer)
     overrides = ctx.args if ctx.args else None
-    predict_entry_point(overrides)
+    predict_entry_point(overrides, config_dir=config_dir)
 
 
 @config_app.command(
@@ -352,14 +403,26 @@ def predict(ctx: typer.Context) -> None:
         "[bold cyan]Usage:[/bold cyan]\n"
         "  [dim]winnow config train[/dim]  # Show default config\n"
         "  [dim]winnow config train data_loader=mztab[/dim]  # Show config with overrides\n"
-        "  [dim]winnow config train calibrator.seed=42[/dim]  # Check override application"
+        "  [dim]winnow config train calibrator.seed=42[/dim]  # Check override application\n"
+        "  [dim]winnow config train --config-dir /path/to/configs[/dim]  # Show config with custom directory\n"
+        "  [dim]winnow config train -cp ./my_configs[/dim]  # Short form (relative or absolute path)"
     ),
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
-def config_train(ctx: typer.Context) -> None:
+def config_train(
+    ctx: typer.Context,
+    config_dir: Annotated[
+        Optional[str],
+        typer.Option(
+            "--config-dir",
+            "-cp",
+            help="Path to custom config directory (relative or absolute). See documentation for advanced usage.",
+        ),
+    ] = None,
+) -> None:
     """Display the resolved training configuration."""
     overrides = ctx.args if ctx.args else None
-    train_entry_point(overrides, execute=False)
+    train_entry_point(overrides, execute=False, config_dir=config_dir)
 
 
 @config_app.command(
@@ -371,14 +434,26 @@ def config_train(ctx: typer.Context) -> None:
         "[bold cyan]Usage:[/bold cyan]\n"
         "  [dim]winnow config predict[/dim]  # Show default config\n"
         "  [dim]winnow config predict fdr_method=database_grounded[/dim]  # Show config with overrides\n"
-        "  [dim]winnow config predict fdr_control.fdr_threshold=0.01[/dim]  # Check override application"
+        "  [dim]winnow config predict fdr_control.fdr_threshold=0.01[/dim]  # Check override application\n"
+        "  [dim]winnow config predict --config-dir /path/to/configs[/dim]  # Show config with custom directory\n"
+        "  [dim]winnow config predict -cp ./my_configs[/dim]  # Short form (relative or absolute path)"
     ),
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
-def config_predict(ctx: typer.Context) -> None:
+def config_predict(
+    ctx: typer.Context,
+    config_dir: Annotated[
+        Optional[str],
+        typer.Option(
+            "--config-dir",
+            "-cp",
+            help="Path to custom config directory (relative or absolute). See documentation for advanced usage.",
+        ),
+    ] = None,
+) -> None:
     """Display the resolved prediction configuration."""
     overrides = ctx.args if ctx.args else None
-    predict_entry_point(overrides, execute=False)
+    predict_entry_point(overrides, execute=False, config_dir=config_dir)
 
 
 if __name__ == "__main__":

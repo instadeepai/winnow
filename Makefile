@@ -86,11 +86,15 @@ install-all:
 ## Development commands														 	#
 #################################################################################
 
-.PHONY: tests test-docker bash set-gcp-credentials set-ceph-credentials
+.PHONY: tests clean-coverage test-docker bash build-package clean-build clean-workspace test-build clean-all-build test-cli-isolated test-cli-config set-gcp-credentials set-ceph-credentials
 
 ## Run all tests
 tests:
 	$(PYTEST)
+
+## Clean coverage reports
+clean-coverage:
+	rm -rf htmlcov/ .coverage coverage.xml pytest.xml
 
 ## Run all tests in the Docker Image
 test-docker:
@@ -99,6 +103,17 @@ test-docker:
 ## Open a bash shell in the Docker image
 bash:
 	docker run -it $(DOCKER_RUN_FLAGS) $(DOCKER_IMAGE) /bin/bash
+
+## Build the winnow-fdr package (creates wheel and sdist in dist/)
+build-package:
+	uv build
+
+## Clean all build artifacts (dist/, build/, *.egg-info/)
+clean-build:
+	rm -rf dist/ build/ *.egg-info/ winnow_fdr.egg-info/
+
+## Build the package and then clean up (safe test build)
+test-build: build-package clean-build
 
 ## Set the GCP credentials
 set-gcp-credentials:

@@ -122,7 +122,7 @@ make train-sample
 make predict-sample
 ```
 
-The sample data is automatically configured in `config/train.yaml` and `config/predict.yaml`, so you can also use the commands directly:
+The sample data is automatically configured in `configs/train.yaml` and `configs/predict.yaml`, so you can also use the commands directly:
 
 ```bash
 # Train with sample data
