@@ -7,8 +7,6 @@ on:
 jobs:
   tests:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Check out code
         uses: actions/checkout@v5
@@ -19,8 +17,20 @@ jobs:
       - name: Install dependencies
         run: uv sync
       - name: Run tests with coverage
-        run: uv run pytest tests --cov=winnow --cov-report=html --cov-fail-under=0
-      - name: Update coverage badge
-        run: ./scripts/update_coverage_badge.sh
-      - name: Commit updated badge
-        run: ./scripts/commit_coverage_badge.sh
+        run: uv run pytest tests --verbose --cov=winnow --cov-report xml:coverage.xml --cov-report term-missing --junitxml=pytest.xml --cov-fail-under=0
+      - name: pytest coverage comment
+        id: coverageComment
+        uses: MishaKav/pytest-coverage-comment@main
+        with:
+          pytest-xml-coverage-path: ./coverage.xml
+          junitxml-path: ./pytest.xml
+      - name: Create the badge
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.BOT_ACCESS_TOKEN }}
+          gistID: f6df3d7ac249eb608e631192d2efb25e
+          filename: pytest-coverage-comment.json
+          label: Test Coverage
+          message: ${{ steps.coverageComment.outputs.coverage }}
+          color: ${{ steps.coverageComment.outputs.color }}
+          namedLogo: python
