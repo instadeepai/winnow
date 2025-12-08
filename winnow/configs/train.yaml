@@ -1,0 +1,21 @@
+# --- Training a calibrator ---
+defaults:
+  - _self_
+  - residues
+  - calibrator
+  - data_loader: instanovo  # Options: instanovo, mztab, pointnovo, winnow
+
+# --- Pipeline Execution Configuration ---
+
+dataset:
+  # Dataset paths:
+  # Path to the spectrum data file or to folder containing saved internal Winnow dataset.
+  spectrum_path_or_directory: examples/example_data/spectra.ipc
+  # Path to the beam predictions file.
+  # Leave as `null` if data source is `winnow`, or loading will fail.
+  predictions_path: examples/example_data/predictions.csv
+  # NOTE: Make sure that the data loader type matches the data source type in this dataset section.
+
+# Output paths:
+model_output_dir: models/new_model
+dataset_output_path: results/calibrated_dataset.csv

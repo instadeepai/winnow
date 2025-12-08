@@ -1,0 +1,20 @@
+# --- MZTab data loading configuration ---
+_target_: winnow.datasets.data_loaders.MZTabDatasetLoader
+
+residue_masses: ${residue_masses}
+residue_remapping:  # Used to map Casanovo-specific notations to UNIMOD tokens.
+  "M+15.995": "M[UNIMOD:35]"  # Oxidation
+  "Q+0.984": "Q[UNIMOD:7]"  # Deamidation
+  "N+0.984": "N[UNIMOD:7]"  # Deamidation
+  "+42.011": "[UNIMOD:1]"  # Acetylation
+  "+43.006": "[UNIMOD:5]"  # Carbamylation
+  "-17.027": "[UNIMOD:385]"  # Ammonia loss
+  "C+57.021": "C[UNIMOD:4]"  # Carbamidomethylation
+  "C[Carbamidomethyl]": "C[UNIMOD:4]"  # Carbamidomethylation
+  "M[Oxidation]": "M[UNIMOD:35]"  # Oxidation
+  "N[Deamidated]": "N[UNIMOD:7]"  # Deamidation
+  "Q[Deamidated]": "Q[UNIMOD:7]"  # Deamidation
+  # N-terminal modifications.
+  "[Acetyl]-": "[UNIMOD:1]"  # Acetylation
+  "[Carbamyl]-": "[UNIMOD:5]"  # Carbamylation
+  "[Ammonia-loss]-": "[UNIMOD:385]"  # Ammonia loss
