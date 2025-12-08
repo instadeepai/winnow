@@ -1,0 +1,8 @@
+# --- Database-grounded FDR control configuration ---
+
+_target_: winnow.fdr.database_grounded.DatabaseGroundedFDRControl
+
+confidence_feature: ${fdr_control.confidence_column}  # Name of the column with confidence scores to use for FDR estimation.
+residue_masses: ${residue_masses}  # The residue masses from global `residues` config
+isotope_error_range: [0, 1]  # The isotope error range for matching peptides
+drop: 10  # The number of top predictions to drop for stability
