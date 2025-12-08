@@ -24,4 +24,3 @@ spec:
       resources:
         cpus: 8
         ramRatio: 8 # >= 2
-
