@@ -1,0 +1,10 @@
+[github_app]
+handle_pr_actions = ["opened", "reopened", "ready_for_review"]
+pr_commands = [
+    "/describe --pr_description.final_update_message=false",
+    "/review",
+    "/improve",
+]
+
+[pr_description]
+add_original_user_description=true
