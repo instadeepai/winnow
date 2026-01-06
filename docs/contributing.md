@@ -28,7 +28,7 @@ If you have ideas for enhancements, you can:
 3. **Set up development environment**
    ```bash
    # Install development dependencies
-   uv sync --dev"
+   uv sync --dev
 
    # Set up pre-commit hooks
    pre-commit install
