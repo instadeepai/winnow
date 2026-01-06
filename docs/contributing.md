@@ -22,13 +22,13 @@ If you have ideas for enhancements, you can:
 
 2. **Create a feature branch**
    ```bash
-   git checkout -b feature/AmazingFeature
+   git checkout -b feature-amazing-feature
    ```
 
 3. **Set up development environment**
    ```bash
    # Install development dependencies
-   uv sync --dev"
+   uv sync --dev
 
    # Set up pre-commit hooks
    pre-commit install
@@ -50,12 +50,12 @@ If you have ideas for enhancements, you can:
 
 6. **Commit your changes**
    ```bash
-   git commit -m 'Add some AmazingFeature'
+   git commit -m 'Add some amazing feature'
    ```
 
 7. **Push to your branch**
    ```bash
-   git push origin feature/AmazingFeature
+   git push origin feature-amazing-feature
    ```
 
 8. **Open a Pull Request**
