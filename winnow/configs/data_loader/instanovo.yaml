@@ -1,0 +1,23 @@
+# --- InstaNovo data loading configuration ---
+
+_target_: winnow.datasets.data_loaders.InstaNovoDatasetLoader
+
+residue_masses: ${residue_masses}
+residue_remapping:  # Used to map InstaNovo legacy notations to UNIMOD tokens.
+  "M(ox)": "M[UNIMOD:35]"  # Oxidation
+  "M(+15.99)": "M[UNIMOD:35]"  # Oxidation
+  "S(p)": "S[UNIMOD:21]"  # Phosphorylation
+  "T(p)": "T[UNIMOD:21]"  # Phosphorylation
+  "Y(p)": "Y[UNIMOD:21]"  # Phosphorylation
+  "S(+79.97)": "S[UNIMOD:21]"  # Phosphorylation
+  "T(+79.97)": "T[UNIMOD:21]"  # Phosphorylation
+  "Y(+79.97)": "Y[UNIMOD:21]"  # Phosphorylation
+  "Q(+0.98)": "Q[UNIMOD:7]"  # Deamidation
+  "N(+0.98)": "N[UNIMOD:7]"  # Deamidation
+  "Q(+.98)": "Q[UNIMOD:7]"  # Deamidation
+  "N(+.98)": "N[UNIMOD:7]"  # Deamidation
+  "C(+57.02)": "C[UNIMOD:4]"  # Carbamidomethylation
+  # N-terminal modifications.
+  "(+42.01)": "[UNIMOD:1]"  # Acetylation
+  "(+43.01)": "[UNIMOD:5]"  # Carbamylation
+  "(-17.03)": "[UNIMOD:385]"  # Ammonia loss

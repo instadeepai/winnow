@@ -1,7 +1,6 @@
 """Unit tests for winnow DatabaseGroundedFDRControl."""
 
 import pytest
-from unittest.mock import patch, Mock
 import pandas as pd
 from winnow.fdr.database_grounded import DatabaseGroundedFDRControl
 
@@ -12,7 +11,24 @@ class TestDatabaseGroundedFDRControl:
     @pytest.fixture()
     def db_fdr_control(self):
         """Create a DatabaseGroundedFDRControl instance for testing."""
-        return DatabaseGroundedFDRControl(confidence_feature="confidence")
+        residue_masses = {
+            "G": 57.021464,
+            "A": 71.037114,
+            "P": 97.052764,
+            "E": 129.042593,
+            "T": 101.047670,
+            "I": 113.084064,
+            "D": 115.026943,
+            "R": 156.101111,
+            "O": 237.147727,
+            "N": 114.042927,
+            "S": 87.032028,
+            "M": 131.040485,
+            "L": 113.084064,
+        }
+        return DatabaseGroundedFDRControl(
+            confidence_feature="confidence", residue_masses=residue_masses
+        )
 
     @pytest.fixture()
     def sample_dataset_df(self):
@@ -32,59 +48,40 @@ class TestDatabaseGroundedFDRControl:
         assert db_fdr_control._fdr_values is None
         assert db_fdr_control._confidence_scores is None
 
-    @patch("winnow.fdr.database_grounded.Metrics")
-    def test_fit_basic(self, mock_metrics, db_fdr_control, sample_dataset_df):
+    def test_fit_basic(self, db_fdr_control, sample_dataset_df):
         """Test basic fitting functionality."""
-        # Mock the Metrics class and its methods
-        mock_metrics_instance = Mock()
-        mock_metrics.return_value = mock_metrics_instance
-        mock_metrics_instance._split_peptide = lambda x: list(x)
-
-        residue_masses = {
-            "P": 100.0,
-            "E": 110.0,
-            "T": 120.0,
-            "I": 130.0,
-            "D": 140.0,
-            "R": 150.0,
-            "O": 160.0,
-            "N": 170.0,
-            "S": 180.0,
-            "A": 190.0,
-            "M": 200.0,
-            "L": 210.0,
-        }
+        # Convert sequences to list format as expected by the implementation
+        sample_dataset_df = sample_dataset_df.copy()
+        sample_dataset_df["prediction"] = sample_dataset_df["prediction"].apply(list)
 
         # Should not raise an exception
-        db_fdr_control.fit(sample_dataset_df, residue_masses)
+        db_fdr_control.fit(sample_dataset_df)
 
-        # Check that metrics was called
-        mock_metrics.assert_called_once()
+        # Check that fit created the required attributes
+        assert hasattr(db_fdr_control, "preds")
+        assert hasattr(db_fdr_control, "_fdr_values")
+        assert hasattr(db_fdr_control, "_confidence_scores")
+        assert db_fdr_control._fdr_values is not None
+        assert db_fdr_control._confidence_scores is not None
 
     def test_fit_with_parameters(self, db_fdr_control):
         """Test fit with custom parameters."""
         sample_df = pd.DataFrame(
-            {"sequence": ["TEST"], "prediction": ["TEST"], "confidence": [0.9]}
+            {"sequence": ["TEST"], "prediction": [list("TEST")], "confidence": [0.9]}
         )
-        residue_masses = {"T": 100.0, "E": 110.0, "S": 120.0}
 
-        with patch("winnow.fdr.database_grounded.Metrics") as mock_metrics:
-            mock_metrics_instance = Mock()
-            mock_metrics.return_value = mock_metrics_instance
-            mock_metrics_instance._split_peptide = lambda x: list(x)
+        db_fdr_control.fit(sample_df)
 
-            db_fdr_control.fit(
-                sample_df, residue_masses, isotope_error_range=(0, 2), drop=5
-            )
-
-            # Check that Metrics was initialized with correct parameters
-            mock_metrics.assert_called_once()
+        # Check that fit created the required attributes
+        assert hasattr(db_fdr_control, "preds")
+        assert len(db_fdr_control.preds) == 1
+        assert db_fdr_control.preds.iloc[0]["confidence"] == 0.9
 
     def test_fit_with_empty_data(self, db_fdr_control):
         """Test that fit method handles empty data."""
         empty_data = pd.DataFrame()
         with pytest.raises(AssertionError, match="Fit method requires non-empty data"):
-            db_fdr_control.fit(empty_data, residue_masses={"A": 71.03})
+            db_fdr_control.fit(empty_data)
 
     def test_get_confidence_cutoff_requires_fitting(self, db_fdr_control):
         """Test that get_confidence_cutoff requires fitting first."""

@@ -13,7 +13,6 @@ from sklearn.neural_network import MLPRegressor
 import koinapy
 
 from winnow.datasets.calibration_dataset import CalibrationDataset
-from winnow.constants import INVALID_PROSIT_TOKENS
 
 
 def map_modification(peptide: List[str]) -> List[str]:
@@ -197,18 +196,28 @@ def compute_ion_identifications(
 class PrositFeatures(CalibrationFeatures):
     """A class for extracting features related to Prosit: a machine learning-based intensity prediction tool for peptide fragmentation."""
 
-    def __init__(self, mz_tolerance: float, learn_from_missing: bool = True) -> None:
+    def __init__(
+        self,
+        mz_tolerance: float,
+        invalid_prosit_tokens: List[str],
+        learn_from_missing: bool = True,
+        prosit_intensity_model_name: str = "Prosit_2020_intensity_HCD",
+    ) -> None:
         """Initialize PrositFeatures.
 
         Args:
             mz_tolerance (float): The mass-to-charge tolerance for ion matching.
+            invalid_prosit_tokens (List[str]): The tokens to consider as invalid for Prosit intensity prediction.
             learn_from_missing (bool): Whether to learn from missing data by including a missingness indicator column.
                 If False, an error will be raised when invalid spectra are encountered.
                 Defaults to True.
+            prosit_intensity_model_name (str): The name of the Prosit intensity model to use.
+                Defaults to "Prosit_2020_intensity_HCD".
         """
         self.mz_tolerance = mz_tolerance
+        self.invalid_prosit_tokens = invalid_prosit_tokens
         self.learn_from_missing = learn_from_missing
-        self.prosit_intensity_model_name = "Prosit_2020_intensity_HCD"
+        self.prosit_intensity_model_name = prosit_intensity_model_name
 
     @property
     def dependencies(self) -> List[FeatureDependency]:
@@ -266,7 +275,7 @@ class PrositFeatures(CalibrationFeatures):
                 metadata_predicate=lambda row: (
                     any(
                         token in row["prediction_untokenised"]
-                        for token in INVALID_PROSIT_TOKENS
+                        for token in self.invalid_prosit_tokens
                     )
                 )
             )
@@ -322,7 +331,7 @@ class PrositFeatures(CalibrationFeatures):
                     f"Please filter your dataset to remove:\n"
                     f"  - Peptides longer than 30 amino acids\n"
                     f"  - Precursor charges greater than 6\n"
-                    f"  - Peptides with unsupported modifications (e.g., {', '.join(INVALID_PROSIT_TOKENS[:3])}...)\n"
+                    f"  - Peptides with unsupported modifications (e.g., {', '.join(self.invalid_prosit_tokens[:3])}...)\n"
                     f"Or set learn_from_missing=True to handle missing data automatically."
                 )
 
@@ -413,18 +422,28 @@ class ChimericFeatures(CalibrationFeatures):
     are stored in the dataset metadata.
     """
 
-    def __init__(self, mz_tolerance: float, learn_from_missing: bool = True) -> None:
+    def __init__(
+        self,
+        mz_tolerance: float,
+        invalid_prosit_tokens: List[str],
+        learn_from_missing: bool = True,
+        prosit_intensity_model_name: str = "Prosit_2020_intensity_HCD",
+    ) -> None:
         """Initialize ChimericFeatures.
 
         Args:
             mz_tolerance (float): The mass-to-charge tolerance for ion matching.
+            invalid_prosit_tokens (List[str]): The tokens to consider as invalid for Prosit intensity prediction.
             learn_from_missing (bool): Whether to learn from missing data by including a missingness indicator column.
                 If False, an error will be raised when invalid spectra are encountered.
                 Defaults to True.
+            prosit_intensity_model_name (str): The name of the Prosit intensity model to use.
+                Defaults to "Prosit_2020_intensity_HCD".
         """
         self.mz_tolerance = mz_tolerance
         self.learn_from_missing = learn_from_missing
-        self.prosit_intensity_model_name = "Prosit_2020_intensity_HCD"
+        self.invalid_prosit_tokens = invalid_prosit_tokens
+        self.prosit_intensity_model_name = prosit_intensity_model_name
 
     @property
     def dependencies(self) -> List[FeatureDependency]:
@@ -488,7 +507,7 @@ class ChimericFeatures(CalibrationFeatures):
                     len(beam) > 1
                     and any(
                         token in "".join(beam[1].sequence)
-                        for token in INVALID_PROSIT_TOKENS
+                        for token in self.invalid_prosit_tokens
                     )
                 )
             )
@@ -552,7 +571,7 @@ class ChimericFeatures(CalibrationFeatures):
                     f"  - Spectra without runner-up sequences (beam search required)\n"
                     f"  - Runner-up peptides longer than 30 amino acids\n"
                     f"  - Runner-up peptides with precursor charges greater than 6\n"
-                    f"  - Runner-up peptides with unsupported modifications (e.g., {', '.join(INVALID_PROSIT_TOKENS[:3])}...)\n"
+                    f"  - Runner-up peptides with unsupported modifications (e.g., {', '.join(self.invalid_prosit_tokens[:3])}...)\n"
                     f"Or set learn_from_missing=True to handle missing data automatically."
                 )
 
@@ -834,23 +853,50 @@ class RetentionTimeFeature(CalibrationFeatures):
     irt_predictor: MLPRegressor
 
     def __init__(
-        self, hidden_dim: int, train_fraction: float, learn_from_missing: bool = True
+        self,
+        hidden_dim: int,
+        train_fraction: float,
+        invalid_prosit_tokens: List[str],
+        learn_from_missing: bool = True,
+        seed: int = 42,
+        learning_rate_init: float = 0.001,
+        alpha: float = 0.0001,
+        max_iter: int = 200,
+        early_stopping: bool = False,
+        validation_fraction: float = 0.1,
+        prosit_irt_model_name: str = "Prosit_2019_irt",
     ) -> None:
         """Initialize RetentionTimeFeature.
 
         Args:
             hidden_dim (int): Hidden dimension size for the MLP regressor.
             train_fraction (float): Fraction of data to use for training the iRT calibrator.
+            invalid_prosit_tokens (List[str]): The tokens to consider as invalid for Prosit iRT prediction.
             learn_from_missing (bool): Whether to learn from missing data by including a missingness indicator column.
                 If False, an error will be raised when invalid spectra are encountered.
                 Defaults to True.
+            seed (int): Random seed for the regressor. Defaults to 42.
+            learning_rate_init (float): The initial learning rate. Defaults to 0.001.
+            alpha (float): L2 regularisation parameter. Defaults to 0.0001.
+            max_iter (int): Maximum number of training iterations. Defaults to 200.
+            early_stopping (bool): Whether to use early stopping to terminate training. Defaults to False.
+            validation_fraction (float): Proportion of training data to use for early stopping validation. Defaults to 0.1.
+            prosit_irt_model_name (str): The name of the Prosit iRT model to use.
+                Defaults to "Prosit_2019_irt".
         """
         self.train_fraction = train_fraction
         self.hidden_dim = hidden_dim
         self.learn_from_missing = learn_from_missing
-        self.prosit_irt_model_name = "Prosit_2019_irt"
+        self.invalid_prosit_tokens = invalid_prosit_tokens
+        self.prosit_irt_model_name = prosit_irt_model_name
         self.irt_predictor = MLPRegressor(
-            hidden_layer_sizes=[hidden_dim], random_state=42
+            hidden_layer_sizes=[hidden_dim],
+            random_state=seed,
+            learning_rate_init=learning_rate_init,
+            alpha=alpha,
+            max_iter=max_iter,
+            early_stopping=early_stopping,
+            validation_fraction=validation_fraction,
         )
 
     @property
@@ -906,7 +952,7 @@ class RetentionTimeFeature(CalibrationFeatures):
                 metadata_predicate=lambda row: (
                     any(
                         token in row["prediction_untokenised"]
-                        for token in INVALID_PROSIT_TOKENS
+                        for token in self.invalid_prosit_tokens
                     )
                 )
             )
@@ -1003,7 +1049,7 @@ class RetentionTimeFeature(CalibrationFeatures):
                     f"  - Spectra without retention time data\n"
                     f"  - Peptides longer than 30 amino acids\n"
                     f"  - Precursor charges greater than 6\n"
-                    f"  - Peptides with unsupported modifications (e.g., {', '.join(INVALID_PROSIT_TOKENS[:3])}...)\n"
+                    f"  - Peptides with unsupported modifications (e.g., {', '.join(self.invalid_prosit_tokens[:3])}...)\n"
                     f"Or set learn_from_missing=True to handle missing data automatically."
                 )
 
