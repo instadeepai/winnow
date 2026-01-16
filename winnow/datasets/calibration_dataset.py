@@ -15,7 +15,7 @@ import pickle
 import numpy as np
 import pandas as pd
 
-from instanovo.inference.beam_search import ScoredSequence
+from winnow.compat.instanovo import ScoredSequence
 
 
 @dataclass
