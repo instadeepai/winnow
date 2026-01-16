@@ -90,9 +90,3 @@ exclude_lines = [
 
 [tool.coverage.html]
 directory = "htmlcov"
-
-[tool.uv.workspace]
-members = [
-    "winnow_demo",
-    "tmp",
-]
