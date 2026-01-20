@@ -363,7 +363,7 @@ def train(
         "[bold cyan]Override parameters:[/bold cyan]\n"
         "  [dim]winnow predict data_loader=mztab[/dim]  # Use MZTab format instead of InstaNovo\n"
         "  [dim]winnow predict fdr_method=database_grounded[/dim]  # Use database-grounded FDR\n"
-        "  [dim]winnow predict fdr_threshold=0.01[/dim]  # Target 1% FDR instead of 5%\n"
+        "  [dim]winnow predict fdr_control.fdr_threshold=0.01[/dim]  # Target 1% FDR instead of 5%\n"
         "  [dim]winnow predict output_folder=results/my_run[/dim]  # Custom output location\n\n"
         "[bold cyan]Custom config directory:[/bold cyan]\n"
         "  [dim]winnow predict --config-dir /path/to/configs[/dim]  # Use custom config directory\n"

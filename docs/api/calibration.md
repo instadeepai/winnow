@@ -189,25 +189,17 @@ Winnow provides two strategies for handling such cases:
 
 ### Configuration
 
-Configure via CLI flags during training:
+Configure via config overrides during training:
 
 ```bash
 # Default: Learn from missingness
-winnow train \
-    --data-source instanovo \
-    --dataset-config-path config.yaml \
-    --model-output-folder ./model \
-    --dataset-output-path ./results.csv
+winnow train
 
 # Strict: Require clean data
 winnow train \
-    --data-source instanovo \
-    --dataset-config-path config.yaml \
-    --model-output-folder ./model \
-    --dataset-output-path ./results.csv \
-    --no-learn-prosit-missing \
-    --no-learn-chimeric-missing \
-    --no-learn-retention-missing
+    calibrator.features.prosit_features.learn_from_missing=false \
+    calibrator.features.chimeric_features.learn_from_missing=false \
+    calibrator.features.retention_time_feature.learn_from_missing=false
 ```
 
 Or configure programmatically:
