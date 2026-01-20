@@ -140,7 +140,7 @@ train-sample:
 
 ## Run winnow predict with sample data (uses locally trained model from models/new_model)
 predict-sample:
-	winnow predict calibrator.pretrained_model_name_or_path=models/new_model
+	winnow predict calibrator.pretrained_model_name_or_path=models/new_model fdr_control.fdr_threshold=1.0
 
 ## Clean output directories (does not delete sample data)
 clean:
