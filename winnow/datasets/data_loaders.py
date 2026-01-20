@@ -607,7 +607,7 @@ class MZTabDatasetLoader(DatasetLoader):
 
     def _map_modifications(self, sequence: str) -> str:
         """Map modifications to UNIMOD."""
-        for mod, unimod in self.metrics.residue_remapping.items():
+        for mod, unimod in self.metrics.residue_set.residue_remapping.items():
             sequence = sequence.replace(mod, unimod)
         return sequence
 
