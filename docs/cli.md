@@ -29,7 +29,7 @@ make train-sample
 make predict-sample
 ```
 
-The sample data is pre-configured in the default config files (`configs/train.yaml` and `configs/predict.yaml`), pointing to `examples/example_data/`. You can also use the commands directly:
+The sample data is pre-configured in the default config files (`configs/train.yaml` and `configs/predict.yaml`), pointing to `examples/example_data/`. You can also use the `winnow` commands directly:
 
 ```bash
 # Train with sample data (uses defaults from configs/train.yaml)
@@ -38,11 +38,14 @@ winnow train
 # Predict with pretrained HuggingFace model (uses defaults from configs/predict.yaml)
 winnow predict
 
+# Do not filter predictions on an FDR threshold
+winnow predict fdr_control.fdr_threshold=1.0
+
 # Predict with your locally trained model
 winnow predict calibrator.pretrained_model_name_or_path=models/new_model
 ```
 
-**Note:** The sample data is minimal (20 spectra) and intended for testing only. For production use, replace the dataset paths in the config files or override them on the command line.
+**Note:** The sample data is minimal (20 spectra) and intended for testing only. When using the sample data, it's **recommended to use the `make` commands** (e.g., `make predict-sample`) as they include necessary configuration adjustments. Specifically, `make predict-sample` sets `fdr_control.fdr_threshold=1.0` because the sample data contains artificial PSMs with relatively high error rates, and using the default threshold (0.05) would filter out all predictions, resulting in empty output. For use with real datasets, use the standard FDR threshold (default 0.05) or adjust as appropriate for your application.
 
 ## Commands
 

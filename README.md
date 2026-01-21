@@ -115,27 +115,14 @@ Get started with `winnow` in minutes using the included sample data:
 # Generate sample data (if not already present)
 make sample-data
 
-# Train a calibrator on the sample data
+# Train a calibrator on the sample data using default settings
 make train-sample
 
-# Run prediction with the trained model
+# Run prediction with the trained model without filtering on an FDR threshold
 make predict-sample
 ```
 
-The sample data is automatically configured in `configs/train.yaml` and `configs/predict.yaml`, so you can also use the commands directly:
-
-```bash
-# Train with sample data
-winnow train
-
-# Predict with pretrained HuggingFace model
-winnow predict
-
-# Predict with your locally trained model
-winnow predict calibrator.pretrained_model_name_or_path=models/new_model
-```
-
-**Note:** The sample data is minimal (20 spectra) and intended for testing only. For production use, replace with your own datasets.
+**Note:** The sample data is minimal (20 spectra) and intended for testing only. The `make` commands shown above are configured for the sample data with adjusted settings (e.g., relaxed FDR threshold). For your own datasets, use the `winnow` commands outlined below.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
