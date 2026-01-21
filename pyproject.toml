@@ -31,7 +31,7 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["winnow", "winnow.scripts", "winnow.fdr", "winnow.datasets", "winnow.calibration", "winnow.compat"]
+packages = ["winnow", "winnow.scripts", "winnow.fdr", "winnow.datasets", "winnow.calibration", "winnow.compat", "winnow.configs", "winnow.configs.data_loader", "winnow.configs.fdr_method"]
 
 [tool.setuptools.package-data]
 winnow = ["configs/**/*.yaml", "configs/**/*.yml"]
