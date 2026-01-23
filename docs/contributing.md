@@ -22,7 +22,7 @@ If you have ideas for enhancements, you can:
 
 2. **Create a feature branch**
    ```bash
-   git checkout -b feature-amazing-feature
+   git checkout -b feat-amazing-feature
    ```
 
 3. **Set up development environment**
@@ -50,12 +50,12 @@ If you have ideas for enhancements, you can:
 
 6. **Commit your changes**
    ```bash
-   git commit -m 'Add some amazing feature'
+   git commit -m 'feat: add some amazing feature'
    ```
 
 7. **Push to your branch**
    ```bash
-   git push origin feature-amazing-feature
+   git push origin feat-amazing-feature
    ```
 
 8. **Open a Pull Request**

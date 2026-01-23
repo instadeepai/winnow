@@ -187,9 +187,9 @@ If you have ideas for enhancements, you can:
 ### Contribution process
 
 1. Fork the repository.
-2. Create a feature branch (`git checkout -b feature-amazing-feature`).
-3. Commit your changes (`git commit -m 'Add some amazing feature'`).
-4. Push to your branch (`git push origin feature-amazing-feature`).
+2. Create a feature branch (`git checkout -b feat-amazing-feature`).
+3. Commit your changes (`git commit -m 'feat: add some amazing feature'`).
+4. Push to your branch (`git push origin feat-amazing-feature`).
 
 Don't forget to give the project a star! Thanks again! :star:
 
@@ -200,10 +200,6 @@ Don't forget to give the project a star! Thanks again! :star:
 If you use `winnow` in your research, please cite the following preprint:
 
 ```bibtex
-@article{mabona2025novopeptidesequencingrescoring,
-      title={De novo peptide sequencing rescoring and FDR estimation with Winnow},
-      author={Amandla Mabona and Jemma Daniel and Henrik Servais Janssen Knudsen and Rachel Catzel
-      and Kevin Michael Eloff and Erwin M. Schoof and Nicolas Lopez Carranza and Timothy P. Jenkins
 @article{mabona2025novopeptidesequencingrescoring,
      title={De novo peptide sequencing rescoring and FDR estimation with Winnow},
      author={Amandla Mabona and Jemma Daniel and Henrik Servais Janssen Knudsen
