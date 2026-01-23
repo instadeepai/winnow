@@ -96,7 +96,7 @@ class CustomFeature(CalibrationFeatures):
 - **Column Specification**: Define output column names
 - **Dataset Integration**: Direct access to CalibrationDataset for computation
 
-## Built-in Features
+## Built-in features
 
 ### MassErrorFeature
 
@@ -159,7 +159,7 @@ feature = RetentionTimeFeature(hidden_dim=10, train_fraction=0.1)
 
 **Purpose**: Incorporates chromatographic information for confidence calibration.
 
-## Handling Missing Features
+## Handling missing features
 
 Prosit-dependent features (PrositFeatures, ChimericFeatures, RetentionTimeFeature) may not be computable for all peptides due to limitations like:
 
@@ -170,7 +170,7 @@ Prosit-dependent features (PrositFeatures, ChimericFeatures, RetentionTimeFeatur
 
 Winnow provides two strategies for handling such cases:
 
-### Learn Strategy (Default, `learn_from_missing=True`)
+### Learn strategy (Default, `learn_from_missing=True`)
 
 **Recommended for most use cases.**
 
@@ -179,7 +179,7 @@ Winnow provides two strategies for handling such cases:
 - Uses all available data, maximising recall
 - More robust across diverse datasets
 
-### Filter Strategy (`learn_from_missing=False`)
+### Filter strategy (`learn_from_missing=False`)
 
 **Use when you want strict data quality requirements.**
 
@@ -189,25 +189,17 @@ Winnow provides two strategies for handling such cases:
 
 ### Configuration
 
-Configure via CLI flags during training:
+Configure via config overrides during training:
 
 ```bash
 # Default: Learn from missingness
-winnow train \
-    --data-source instanovo \
-    --dataset-config-path config.yaml \
-    --model-output-folder ./model \
-    --dataset-output-path ./results.csv
+winnow train
 
 # Strict: Require clean data
 winnow train \
-    --data-source instanovo \
-    --dataset-config-path config.yaml \
-    --model-output-folder ./model \
-    --dataset-output-path ./results.csv \
-    --no-learn-prosit-missing \
-    --no-learn-chimeric-missing \
-    --no-learn-retention-missing
+    calibrator.features.prosit_features.learn_from_missing=false \
+    calibrator.features.chimeric_features.learn_from_missing=false \
+    calibrator.features.retention_time_feature.learn_from_missing=false
 ```
 
 Or configure programmatically:
@@ -228,14 +220,14 @@ rt_feat = RetentionTimeFeature(hidden_dim=10, train_fraction=0.1, learn_from_mis
 
 ## Workflow
 
-### Training Workflow
+### Training workflow
 
 1. **Create Calibrator**: Initialise `ProbabilityCalibrator`
 2. **Add Features**: Use `add_feature()` to include desired calibration features
 3. **Fit Model**: Call `fit()` with labelled `CalibrationDataset`
 4. **Save Model**: Use `save()` to persist trained calibrator
 
-### Prediction Workflow
+### Prediction workflow
 
 1. **Load Calibrator**: Use `load()` to restore trained model from a HuggingFace repository or a local directory
    ```python
@@ -251,7 +243,7 @@ rt_feat = RetentionTimeFeature(hidden_dim=10, train_fraction=0.1, learn_from_mis
 2. **Predict**: Call `predict()` with unlabelled `CalibrationDataset`
 3. **Access Results**: Calibrated scores stored in dataset's "calibrated_confidence" column
 
-## Feature Dependencies
+## Feature dependencies
 
 The system automatically handles feature dependencies:
 

@@ -86,11 +86,15 @@ install-all:
 ## Development commands														 	#
 #################################################################################
 
-.PHONY: tests test-docker bash set-gcp-credentials set-ceph-credentials
+.PHONY: tests clean-coverage test-docker bash build-package clean-build clean-workspace test-build clean-all-build test-cli-isolated test-cli-config set-gcp-credentials set-ceph-credentials
 
 ## Run all tests
 tests:
 	$(PYTEST)
+
+## Clean coverage reports
+clean-coverage:
+	rm -rf htmlcov/ .coverage coverage.xml pytest.xml
 
 ## Run all tests in the Docker Image
 test-docker:
@@ -100,6 +104,17 @@ test-docker:
 bash:
 	docker run -it $(DOCKER_RUN_FLAGS) $(DOCKER_IMAGE) /bin/bash
 
+## Build the winnow-fdr package (creates wheel and sdist in dist/)
+build-package:
+	uv build
+
+## Clean all build artifacts (dist/, build/, *.egg-info/)
+clean-build:
+	rm -rf dist/ build/ *.egg-info/ winnow_fdr.egg-info/
+
+## Build the package and then clean up (safe test build)
+test-build: build-package clean-build
+
 ## Set the GCP credentials
 set-gcp-credentials:
 	uv run python scripts/set_gcp_credentials.py
@@ -108,3 +123,28 @@ set-gcp-credentials:
 ## Set the Ceph credentials
 set-ceph-credentials:
 	uv run python scripts/set_ceph_credentials.py
+
+#################################################################################
+## Sample data and CLI commands													#
+#################################################################################
+
+.PHONY: sample-data train-sample predict-sample clean clean-all
+
+## Generate sample data files for testing
+sample-data:
+	uv run python scripts/generate_sample_data.py
+
+## Run winnow train with sample data (uses defaults from config)
+train-sample:
+	uv run winnow train
+
+## Run winnow predict with sample data (uses locally trained model from models/new_model)
+predict-sample:
+	uv run winnow predict calibrator.pretrained_model_name_or_path=models/new_model fdr_control.fdr_threshold=1.0
+
+## Clean output directories (does not delete sample data)
+clean:
+	rm -rf models/ results/
+
+## Clean outputs and regenerate sample data
+clean-all: clean sample-data

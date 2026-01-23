@@ -42,9 +42,9 @@
     <a href="https://instadeepai.github.io/winnow/"><strong>Explore the docs »</strong></a>
     <br />
     <br />
-    <a href="https://github.com/instadeepai/winnow/issues/new?labels=bug&template=bug_report.md">Report Bug</a>
+    <a href="https://github.com/instadeepai/winnow/issues/new?labels=bug&template=bug_report.md">Report bug</a>
     &middot;
-    <a href="https://github.com/instadeepai/winnow/issues/new?labels=enhancement&template=feature_request.md">Request Feature</a>
+    <a href="https://github.com/instadeepai/winnow/issues/new?labels=enhancement&template=feature_request.md">Request feature</a>
   </p>
 </div>
 
@@ -55,16 +55,13 @@
   <summary>Table of Contents</summary>
   <ol>
     <li>
-      <a href="#about-the-project">About The Project</a>
+      <a href="#about-the-project">About the project</a>
     </li>
     <li>
       <a href="#installation">Installation</a>
     </li>
-    <li><a href="#usage">Usage</a>
-      <ul>
-        <li><a href="#CLI">CLI</a></li>
-        <li><a href="#Package">Package</a></li>
-      </ul>
+    <li>
+      <a href="#usage">Usage</a>
     </li>
     <li><a href="#contributing">Contributing</a></li>
   </ol>
@@ -77,7 +74,7 @@
 </div>
 
 <!-- ABOUT THE PROJECT -->
-## About The Project
+## About the project
 
 <!-- [![Product Name Screen Shot][product-screenshot]](https://example.com) -->
 In bottom-up proteomics workflows, peptide sequencing—matching an MS2 spectrum to a peptide—is just the first step. The resulting peptide-spectrum matches (PSMs) often contain many incorrect identifications, which can negatively impact downstream tasks like protein assembly.
@@ -87,7 +84,7 @@ To mitigate this, intermediate steps are introduced to:
 1. Assign confidence scores to PSMs that better correlate with correctness.
 2. Estimate and control the false discovery rate (FDR) by filtering identifications based on confidence scores.
 
-For database search-based peptide sequencing, PSM rescoring and target-decoy competition (TDC) are standard approaches, supported by an extensive ecosystem of tools. However, *de novo* peptide sequencing lacks standardized methods for these tasks.
+For database search-based peptide sequencing, PSM rescoring and target-decoy competition (TDC) are standard approaches, supported by an extensive ecosystem of tools. However, *de novo* peptide sequencing lacks standardised methods for these tasks.
 
 `winnow` aims to fill this gap by implementing the calibrate-estimate framework for FDR estimation. Unlike TDC, this approach is directly applicable to *de novo* sequencing models. Additionally, its calibration step naturally incorporates common confidence rescoring workflows as part of FDR estimation.
 
@@ -109,7 +106,25 @@ uv pip install winnow-fdr
 ```
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
+<!-- QUICK START -->
+## Quick Start
 
+Get started with `winnow` in minutes using the included sample data:
+
+```bash
+# Generate sample data (if not already present)
+make sample-data
+
+# Train a calibrator on the sample data using default settings
+make train-sample
+
+# Run prediction with the trained model without filtering on an FDR threshold
+make predict-sample
+```
+
+**Note:** The sample data is minimal (20 spectra) and intended for testing only. The `make` commands shown above are configured for the sample data with adjusted settings (e.g., relaxed FDR threshold). For your own datasets, use the `winnow` commands outlined below.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- USAGE EXAMPLES -->
 ## Usage
@@ -126,13 +141,26 @@ Installing `winnow` provides the `winnow` command with two sub-commands:
 1. `winnow train` – Performs confidence calibration on a dataset of annotated PSMs, outputting the fitted model checkpoint.
 2. `winnow predict` – Performs confidence calibration using a fitted model checkpoint (defaults to a pretrained general model from HuggingFace), estimates and controls FDR using the calibrated confidence scores.
 
-By default, `winnow predict` uses a pretrained general model (`InstaDeepAI/winnow-general-model`) hosted on HuggingFace Hub, allowing you to get started immediately without training. You can also specify custom HuggingFace models or use locally trained models.
+By default, `winnow predict` uses a pretrained general model ([`InstaDeepAI/winnow-general-model`](https://huggingface.co/InstaDeepAI/winnow-general-model)) hosted on HuggingFace Hub, allowing you to get started immediately without training. You can also specify custom HuggingFace models or use locally trained models.
 
-Refer to the documentation for details on command-line arguments and usage examples.
+Winnow uses [Hydra](https://hydra.cc/) for flexible, hierarchical configuration management. All parameters can be configured via YAML files or overridden on the command line:
+
+```bash
+# Quick start with defaults
+winnow predict
+
+# Override specific parameters
+winnow predict fdr_control.fdr_threshold=0.01
+
+# Specify different data source and dataset paths
+winnow predict data_loader=mztab dataset.spectrum_path_or_directory=data/spectra.parquet dataset.predictions_path=data/preds.mztab
+```
+
+Refer to the [CLI Guide](cli.md) and [Configuration Guide](configuration.md) for details on usage and configuration options.
 
 ### Package
 
-The `winnow` package is organized into three sub-modules:
+The `winnow` package is organised into three sub-modules:
 
 1. `winnow.datasets` – Handles data loading and saving, including the `CalibrationDataset` class for mapping peptide sequencing output formats.
 2. `winnow.calibration` – Implements confidence calibration. Key components include:
@@ -152,10 +180,11 @@ For an example, check out the [example notebook](https://github.com/instadeepai/
 Contributions are what make the open-source community such an amazing place to learn, inspire and create, and we welcome your support! Any contributions you make are **greatly appreciated**.
 
 If you have ideas for enhancements, you can:
+
 - Fork the repository and submit a pull request.
 - Open an issue and tag it with "enhancement".
 
-### Contribution Process
+### Contribution process
 
 1. Fork the repository.
 2. Create a feature branch (`git checkout -b feature-amazing-feature`).
@@ -166,7 +195,7 @@ Don't forget to give the project a star! Thanks again! :star:
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-### BibTeX entry and citation info
+### BibTeX entry and citation information
 
 If you use `winnow` in your research, please cite the following preprint:
 
@@ -175,7 +204,11 @@ If you use `winnow` in your research, please cite the following preprint:
       title={De novo peptide sequencing rescoring and FDR estimation with Winnow},
       author={Amandla Mabona and Jemma Daniel and Henrik Servais Janssen Knudsen and Rachel Catzel
       and Kevin Michael Eloff and Erwin M. Schoof and Nicolas Lopez Carranza and Timothy P. Jenkins
-      and Jeroen Van Goey and Konstantinos Kalogeropoulos},
+@article{mabona2025novopeptidesequencingrescoring,
+     title={De novo peptide sequencing rescoring and FDR estimation with Winnow},
+     author={Amandla Mabona and Jemma Daniel and Henrik Servais Janssen Knudsen
+     and Rachel Catzel and Kevin Michael Eloff and Erwin M. Schoof and Nicolas Lopez
+     Carranza and Timothy P. Jenkins and Jeroen Van Goey and Konstantinos Kalogeropoulos},
       year={2025},
       eprint={2509.24952},
       archivePrefix={arXiv},

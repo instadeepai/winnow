@@ -1,0 +1,38 @@
+# --- Predicting scores and applying FDR control ---
+defaults:
+  - _self_
+  - residues
+  - data_loader: instanovo  # Options: instanovo, mztab, pointnovo, winnow
+  - fdr_method: nonparametric  # Options: nonparametric, database_grounded
+
+# --- Pipeline Execution Configuration ---
+
+dataset:
+  # Dataset paths:
+  # Path to the spectrum data file or to folder containing saved internal Winnow dataset.
+  spectrum_path_or_directory: examples/example_data/spectra.ipc
+  # Path to the beam predictions file.
+  # Leave as `null` if data source is `winnow`, or loading will fail.
+  predictions_path: examples/example_data/predictions.csv
+  # NOTE: Make sure that the data loader type matches the data source type in this dataset section.
+
+calibrator:
+  # Model loading:
+  # Path to the local calibrator directory or the HuggingFace model identifier.
+  # If the path is a local directory path, it will be used directly. If it is a HuggingFace repository identifier, it will be downloaded from HuggingFace.
+  pretrained_model_name_or_path: InstaDeepAI/winnow-general-model
+  # Directory to cache the HuggingFace model.
+  cache_dir: null  # can be set to `null` if using local model or for the default cache directory from HuggingFace.
+
+fdr_control:
+  # FDR settings:
+  # Target FDR threshold (e.g. 0.01 for 1%, 0.05 for 5% etc.).
+  fdr_threshold: 0.05
+  # Name of the column with confidence scores to use for FDR estimation.
+  confidence_column: calibrated_confidence
+
+# Folder path to write the outputs to.
+# This will create two CSV files in the output folder:
+# - metadata.csv: Contains all metadata and feature columns from the input dataset.
+# - preds_and_fdr_metrics.csv: Contains predictions and FDR metrics.
+output_folder: results/predictions

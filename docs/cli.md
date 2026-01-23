@@ -1,6 +1,8 @@
-# Command Line Interface
+# Command line interface
 
-The winnow CLI provides a simple interface for confidence calibration and FDR control workflows. It supports both training calibration models and applying them for prediction and FDR filtering.
+This guide provides practical examples and workflows for using the `winnow` command-line interface.
+
+**Looking for configuration details?** See the **[Configuration guide](configuration.md)** for comprehensive documentation of the configuration system, YAML structure and advanced patterns.
 
 ## Installation
 
@@ -12,148 +14,153 @@ pip install winnow-fdr
 uv pip install winnow-fdr
 ```
 
+## Quick Start
+
+Get started immediately with the included sample data:
+
+```bash
+# Generate sample data (if not already present)
+make sample-data
+
+# Train a calibrator on the sample data
+make train-sample
+
+# Run prediction with the trained model
+make predict-sample
+```
+
+The sample data is pre-configured in the default config files (`configs/train.yaml` and `configs/predict.yaml`), pointing to `examples/example_data/`. You can also use the `winnow` commands directly:
+
+```bash
+# Train with sample data (uses defaults from configs/train.yaml)
+winnow train
+
+# Predict with pretrained HuggingFace model (uses defaults from configs/predict.yaml)
+winnow predict
+
+# Do not filter predictions on an FDR threshold
+winnow predict fdr_control.fdr_threshold=1.0
+
+# Predict with your locally trained model
+winnow predict calibrator.pretrained_model_name_or_path=models/new_model
+```
+
+**Note:** The sample data is minimal (20 spectra) and intended for testing only. When using the sample data, it's **recommended to use the `make` commands** (e.g., `make predict-sample`) as they include necessary configuration adjustments. Specifically, `make predict-sample` sets `fdr_control.fdr_threshold=1.0` because the sample data contains artificial PSMs with relatively high error rates, and using the default threshold (0.05) would filter out all predictions, resulting in empty output. For use with real datasets, use the standard FDR threshold (default 0.05) or adjust as appropriate for your application.
+
 ## Commands
+
+### `winnow config`
+
+Display the resolved configuration for any command without executing it. This is useful for inspecting how defaults and overrides are composed.
+
+```bash
+# Show training configuration
+winnow config train
+
+# Show prediction configuration
+winnow config predict
+
+# Check configuration with overrides
+winnow config train data_loader=mztab model_output_dir=models/my_model
+winnow config predict fdr_method=database_grounded fdr_control.fdr_threshold=0.01
+```
+
+This command prints the final YAML configuration with colour-coded hierarchical formatting, making it easy to read and verify your settings. Keys are coloured by nesting depth to help visualise the configuration structure. The output shows all defaults, composition and overrides after they have been applied.
+
+**Note:** Some keys appear with quotes (e.g. `'N'`, `'Y'`) because they are reserved words in YAML that would otherwise be interpreted as boolean values. The quotes ensure they are treated as strings.
 
 ### `winnow train`
 
 Train a confidence calibration model on labelled data.
 
 ```bash
-winnow train \
-    --data-source instanovo \
-    --dataset-config-path train_config.yaml \
-    --model-output-folder ./calibrator_model \
-    --dataset-output-path ./training_results.csv
+# Use defaults (configured in configs/train.yaml)
+winnow train
+
+# Override specific parameters
+winnow train data_loader=mztab model_output_dir=models/my_model
+
+# Specify dataset paths
+winnow train dataset.spectrum_path_or_directory=data/spectra.parquet dataset.predictions_path=data/preds.csv
 ```
 
-**Arguments:**
+**Common Parameters:**
 
-- `--data-source`: Type of dataset (`instanovo`, `mztab`, `winnow`)
-- `--dataset-config-path`: Path to YAML configuration file
-- `--model-output-folder`: Directory to save trained calibrator
-- `--dataset-output-path`: Path to save training results CSV
-- `--learn-prosit-missing` / `--no-learn-prosit-missing`: Whether to learn from missing Prosit features (default: True)
-- `--learn-chimeric-missing` / `--no-learn-chimeric-missing`: Whether to learn from missing chimeric features (default: True)
-- `--learn-retention-missing` / `--no-learn-retention-missing`: Whether to learn from missing retention time features (default: True)
+- `data_loader`: Type of dataset loader (`instanovo`, `mztab`, `pointnovo`, `winnow`)
+- `dataset.spectrum_path_or_directory`: Path to spectrum/metadata file (or directory for winnow format)
+- `dataset.predictions_path`: Path to predictions file (set to `null` for winnow format)
+- `model_output_dir`: Directory to save trained calibrator
+- `dataset_output_path`: Path to save training results CSV
 
-**Missingness Handling:**
+**Advanced calibrator configuration:**
 
-By default, the calibrator learns from missing data by including missingness indicators as features.
-
-If you wish to train only on complete data (training will fail if invalid spectra are found):
+You can customise the calibrator architecture and features using nested parameters:
 
 ```bash
-winnow train \
-    --data-source instanovo \
-    --dataset-config-path train_config.yaml \
-    --model-output-folder ./calibrator_model \
-    --dataset-output-path ./training_results.csv \
-    --no-learn-prosit-missing \
-    --no-learn-chimeric-missing \
-    --no-learn-retention-missing
+# Change MLP architecture
+winnow train calibrator.hidden_layer_sizes=[100,50,25]
+
+# Configure individual features
+winnow train calibrator.features.prosit_features.mz_tolerance=0.01
 ```
 
-See the [Handling Missing Features](api/calibration.md#handling-missing-features) section for more details.
+For comprehensive calibrator configuration options, see:
+- [Configuration guide](configuration.md) - Complete parameter reference
+- [Calibration API](api/calibration.md#handling-missing-features) - Feature implementation details
 
 ### `winnow predict`
 
 Apply calibration and FDR control to new data using a trained model. By default, uses a pretrained general model from HuggingFace Hub.
 
 ```bash
-# Use default pretrained model from HuggingFace (recommended for getting started)
-winnow predict \
-    --data-source instanovo \
-    --dataset-config-path test_config.yaml \
-    --method winnow \
-    --fdr-threshold 0.01 \
-    --confidence-column confidence \
-    --output-folder ./predictions
+# Use defaults (pretrained model from HuggingFace)
+winnow predict
+
+# Override specific parameters
+winnow predict data_loader=mztab fdr_control.fdr_threshold=0.01 fdr_method=database_grounded
+
+# Specify dataset paths
+winnow predict dataset.spectrum_path_or_directory=data/spectra.parquet dataset.predictions_path=data/preds.csv
 
 # Use a custom HuggingFace model
-winnow predict \
-    --data-source instanovo \
-    --dataset-config-path test_config.yaml \
-    --huggingface-model-name my-org/my-custom-model \
-    --method winnow \
-    --fdr-threshold 0.01 \
-    --confidence-column confidence \
-    --output-folder ./predictions
+winnow predict calibrator.pretrained_model_name_or_path=my-org/my-custom-model
 
 # Use a local model
-winnow predict \
-    --data-source instanovo \
-    --dataset-config-path test_config.yaml \
-    --local-model-folder ./calibrator_model \
-    --method winnow \
-    --fdr-threshold 0.01 \
-    --confidence-column confidence \
-    --output-folder ./predictions
+winnow predict calibrator.pretrained_model_name_or_path=models/my_model
 ```
 
-**Arguments:**
+**Common Parameters:**
 
-- `--data-source`: Type of dataset (`instanovo`, `winnow`, `mztab`)
-- `--dataset-config-path`: Path to YAML configuration file
-- `--huggingface-model-name`: HuggingFace model identifier (defaults to `InstaDeepAI/winnow-general-model`). Use this to load models from HuggingFace Hub.
-- `--local-model-folder`: Directory containing trained calibrator. Use this to load local models instead of HuggingFace models.
-- `--method`: FDR estimation method (`winnow` or `database-ground`)
-- `--fdr-threshold`: Target FDR threshold (e.g., 0.01 for 1%)
-- `--confidence-column`: Name of confidence score column
-- `--output-folder`: Folder path to write output files to (creates `metadata.csv` and `preds_and_fdr_metrics.csv`)
+- `data_loader`: Type of dataset loader (`instanovo`, `mztab`, `pointnovo`, `winnow`)
+- `dataset.spectrum_path_or_directory`: Path to spectrum/metadata file (or directory for winnow format)
+- `dataset.predictions_path`: Path to predictions file
+- `fdr_method`: FDR estimation method (`nonparametric` or `database_grounded`)
+- `fdr_control.fdr_threshold`: Target FDR threshold (e.g. 0.01 for 1%)
+- `output_folder`: Folder path to write output files
 
-**Note:** If neither `--local-model-folder` nor `--huggingface-model-name` are provided, the default pretrained general model from HuggingFace (`InstaDeepAI/winnow-general-model`) will be loaded automatically.
+By default, `winnow predict` uses the pretrained model `InstaDeepAI/winnow-general-model` from HuggingFace Hub. To use a different model, override the calibrator settings (see [Configuration guide](configuration.md#using-a-custom-model) for details).
 
-## Configuration Files
+## Configuration system
 
-The CLI uses YAML configuration files to specify dataset locations and parameters. The format depends on the data source.
+Winnow uses [Hydra](https://hydra.cc/) for configuration management. All parameters can be configured via:
 
-### InstaNovo Configuration
+- **YAML config files** in the `configs/` directory (defines defaults)
+- **Command-line overrides** using `key=value` syntax
+- **Nested parameters** using dot notation (e.g., `calibrator.seed=42`)
 
-For InstaNovo/CSV datasets:
 
-```yaml
-# instanovo_config.yaml
-beam_predictions_path: "/path/to/predictions.csv"
-spectrum_path: "/path/to/spectra.csv"
-```
+For comprehensive configuration documentation, including:
 
-**Required files:**
+- Full configuration file structure and composition
+- Config interpolation and variable references
+- Creating custom configurations
+- Advanced patterns and debugging
 
-- **Spectrum file**: Parquet/IPC file containing spectral metadata and features
-- **Predictions CSV**: Contains beam search results with columns like `preds`, `preds_beam_1`, confidence scores
+See the **[Configuration guide](configuration.md)**.
 
-### MZTab Configuration
+## Data requirements
 
-For MZTab format datasets (traditional search engines and Casanovo outputs):
-
-```yaml
-# mztab_config.yaml
-spectrum_path: "/path/to/spectra.parquet"
-predictions_path: "/path/to/predictions.mztab"
-```
-
-**Required files:**
-
-- **Spectrum file**: Parquet/IPC file with spectrum metadata and row indices matching MZTab spectra_ref
-- **MZTab file**: Standard MZTab format containing predictions
-
-### Winnow Internal Configuration
-
-For winnow's internal format:
-
-```yaml
-# winnow_config.yaml
-data_dir: "/path/to/winnow_dataset_directory"
-```
-
-**Required structure:**
-
-- Directory containing `metadata.csv` and optionally `predictions.pkl`
-- Created by `CalibrationDataset.save()`
-
-## Data Requirements
-
-### Training Data
+### Training data
 
 For training (`winnow train`), you need:
 
@@ -162,34 +169,43 @@ For training (`winnow train`), you need:
 - **Spectral data**: MS/MS spectra and metadata
 - **Unique identifiers**: Each PSM must have a unique `spectrum_id` in both input files
 
-### Prediction Data
+### Prediction data
 
 For prediction (`winnow predict`), you need:
 
-- **Unlabelled dataset**: Predictions and spectra (no ground truth required)
-- **Trained model**: Output from `winnow train`
+- **Unlabelled dataset**: Predictions and spectra (no ground truth required for non-parametric FDR)
+- **Trained model**: Pretrained model from HuggingFace or output from `winnow train`
 - **Confidence scores**: Raw confidence values to calibrate
 - **Unique identifiers**: Each PSM must have a unique `spectrum_id` in both input files
 
-## FDR Methods
+### Data formats
 
-### Winnow Method (`--method winnow`)
+Winnow supports multiple input formats:
+
+- **InstaNovo**: Parquet or IPC spectra + CSV predictions (beam search format)
+- **MZTab**: Parquet or IPC spectra + MZTab predictions
+- **PointNovo**: Similar to InstaNovo format
+- **Winnow**: Internal format (directory with metadata.csv and predictions.pkl)
+
+Specify the format using `data_source=<format>` parameter.
+
+**Note on MGF files**: While many users have their input data in `.mgf` format, Winnow currently requires spectrum data to be in `.parquet` or `.ipc` format. To convert `.mgf` files to `.parquet`, you can use InstaNovo's conversion utilities. See the [InstaNovo documentation](https://instadeepai.github.io/InstaNovo/) for instructions on using `instanovo convert` or the `SpectrumDataFrame` class to perform this conversion.
+
+## FDR methods
+
+### Non-parametric method (`fdr_method=nonparametric`)
 
 Uses non-parametric FDR estimation procedure:
 
 - **No ground truth required**: Works with confidence scores alone
 - **No correct/incorrect distribution modelling**: Process directly estimates FDR using calibrated confidence scores
-- **Multiple metrics**: Provides FDR, PEP and q-values.
+- **Multiple metrics**: Provides FDR, PEP and q-values
 
 ```bash
-winnow predict \
-    --method winnow \
-    --fdr-threshold 0.01 \
-    --confidence-column calibrated_confidence \
-    # ... other args
+winnow predict fdr_method=nonparametric fdr_control.fdr_threshold=0.01
 ```
 
-### Database-Grounded Method (`--method database-ground`)
+### Database-grounded method (`fdr_method=database_grounded`)
 
 Uses database search results for validation:
 
@@ -198,28 +214,24 @@ Uses database search results for validation:
 - **Direct estimates**: FDR calculated from actual correct/incorrect labels
 
 ```bash
-winnow predict \
-    --method database-ground \
-    --fdr-threshold 0.05 \
-    --confidence-column confidence \
-    # ... other args
+winnow predict fdr_method=database_grounded fdr_control.fdr_threshold=0.05
 ```
 
-## Output Files
+## Output files
 
-### Training Output
+### Training output
 
 Training produces:
 
-1. **Model checkpoints** (in `--model-output-folder`):
+1. **Model checkpoints** (`model_output_dir`):
    - `calibrator.pkl`: Complete trained calibrator with all features and parameters
 
-2. **Training results** (`--dataset-output-path`):
+2. **Training results** (`dataset_output_path`):
    - CSV with calibrated scores and evaluation metrics
 
-### Prediction Output
+### Prediction output
 
-Prediction produces two CSV files in the `--output-folder` directory:
+Prediction produces two CSV files in the `output-folder` directory:
 
 1. **`metadata.csv`**: Contains all metadata and feature columns from the input dataset
    - Original metadata columns (spectrum information, precursors, etc.)
@@ -238,94 +250,147 @@ Prediction produces two CSV files in the `--output-folder` directory:
 
 This separation allows users to work with metadata and features separately from predictions and error metrics, making downstream analysis more convenient.
 
-## Example Workflows
+## Example workflows
 
-### Complete Training and Prediction Pipeline
+### Quick start with defaults
+
+```bash
+# Predict using pretrained model, InstaNovo predictions and default settings
+winnow predict \
+    dataset.spectrum_path_or_directory=data/test_spectra.parquet \
+    dataset.predictions_path=data/test_predictions.csv
+```
+
+### Complete training and prediction pipeline
 
 ```bash
 # Step 1: Train calibrator on labelled data
 winnow train \
-    --data-source instanovo \
-    --dataset-config-path configs/train_data.yaml \
-    --model-output-folder models/my_calibrator \
-    --dataset-output-folder results/training_output.csv
+    data_loader=instanovo \
+    dataset.spectrum_path_or_directory=data/train_spectra.parquet \
+    dataset.predictions_path=data/train_predictions.csv \
+    model_output_dir=models/my_calibrator \
+    dataset_output_path=results/training_output.csv
 
-# Step 2: Apply to new data with FDR control (using default pretrained model)
+# Step 2: Apply to new data with FDR control
 winnow predict \
-    --data-source instanovo \
-    --dataset-config-path configs/test_data.yaml \
-    --method winnow \
-    --fdr-threshold 0.01 \
-    --confidence-column confidence \
-    --output-folder results/predictions
+    data_loader=instanovo \
+    dataset.spectrum_path_or_directory=data/test_spectra.parquet \
+    dataset.predictions_path=data/test_predictions.csv \
+    calibrator.pretrained_model_name_or_path=models/my_calibrator \
+    fdr_method=nonparametric \
+    fdr_control.fdr_threshold=0.01 \
+    output_folder=results/predictions
+```
 
-# Alternative: Use the locally trained model
+### MZTab format
+
+```bash
+# Train with MZTab format
+winnow train \
+    data_loader=mztab \
+    dataset.spectrum_path_or_directory=data/spectra.parquet \
+    dataset.predictions_path=data/casanovo_results.mztab \
+    model_output_dir=models/mztab_model
+
+# Predict with MZTab format
 winnow predict \
-    --data-source instanovo \
-    --dataset-config-path configs/test_data.yaml \
-    --local-model-folder models/my_calibrator \
-    --method winnow \
-    --fdr-threshold 0.01 \
-    --confidence-column confidence \
-    --output-folder results/predictions
+    data_loader=mztab \
+    dataset.spectrum_path_or_directory=data/test_spectra.parquet \
+    dataset.predictions_path=data/test_results.mztab \
+    calibrator.pretrained_model_name_or_path=models/mztab_model \
+    fdr_control.fdr_threshold=0.05
 ```
 
-### Configuration File Examples
+### Advanced configuration
 
-**Training configuration** (`configs/train_data.yaml`):
-```yaml
-beam_predictions_path: "data/train_predictions.csv"
-spectrum_path: "data/train_spectra.csv"
+```bash
+# Train with custom calibrator settings
+winnow train \
+    dataset.spectrum_path_or_directory=data/spectra.parquet \
+    dataset.predictions_path=data/predictions.csv \
+    calibrator.hidden_layer_sizes=[100,50,25] \
+    calibrator.learning_rate_init=0.01 \
+    calibrator.max_iter=500 \
+    calibrator.features.prosit_features.mz_tolerance=0.01
+
+# Predict with database-grounded FDR
+winnow predict \
+    dataset.spectrum_path_or_directory=data/test_spectra.parquet \
+    dataset.predictions_path=data/test_predictions.csv \
+    fdr_method=database_grounded \
+    fdr_control.fdr_threshold=0.01 \
+    calibrator.pretrained_model_name_or_path=models/custom_model
 ```
 
-**Test configuration** (`configs/test_data.yaml`):
-```yaml
-beam_predictions_path: "data/test_predictions.csv"
-spectrum_path: "data/test_spectra.csv"
-```
+## Default configuration
 
-## Built-in Features
+Winnow comes with sensible default settings for all parameters:
 
-The CLI automatically includes these calibration features:
+- **Calibrator**: 2-layer MLP with 50 hidden units per layer
+- **Features**: Mass error, Prosit features, retention time, chimeric features, beam features
+- **FDR**: Non-parametric method with 5% threshold
+- **Model**: Pretrained general model from HuggingFace
 
-- **Mass Error**: Difference between observed and theoretical mass
-- **Prosit Features**: ML-based intensity predictions (`mz_tolerance=0.02`)
-- **Retention Time**: iRT predictions (`hidden_dim=10`, `train_fraction=0.1`)
-- **Chimeric Features**: Chimeric spectrum detection (`mz_tolerance=0.02`)
-- **Beam Features**: Beam search diversity metrics
-
-## Default Parameters
-
-The CLI uses these default parameters:
-
-- **Seed**: 42 (for reproducibility)
-- **MZ Tolerance**: 0.02 Da
-- **FDR Learning Rate**: 0.005
-- **FDR Training Steps**: 5000
-- **Retention Time Hidden Dim**: 10
-- **Retention Time Train Fraction**: 0.1
+All defaults are defined in YAML files under `configs/` and can be overridden via command line. For a complete reference of all default parameters and configuration options, see the **[Configuration guide](configuration.md)**.
 
 ## Troubleshooting
 
-### Common Issues
+### Common issues
 
-**Missing columns**: Ensure your CSV files contain expected columns:
+**Missing columns**: Ensure your data files contain expected columns:
 
 - `preds`: Main prediction
 - `confidence`: Confidence scores
-- `sequence`: Ground truth (for training/database method)
+- `sequence`: Ground truth (for training/database-grounded FDR)
 
-**File paths**: Use absolute paths in configuration files to avoid path resolution issues.
+**File paths**: Use absolute paths in dataset path overrides to avoid path resolution issues:
+```bash
+winnow predict dataset.spectrum_path_or_directory=/absolute/path/to/spectra.parquet
+```
 
-**Memory issues**: Large datasets may require more memory. Consider filtering data or using smaller batch sizes.
+**Configuration errors**: If Hydra reports a missing config file:
+```bash
+winnow predict fdr_method=typo
+# Error: Could not find 'fdr/typo'
+# Available options in 'fdr': nonparametric, database_grounded
+```
 
-### Dataset Filtering
+**Memory issues**: Large datasets may require more memory. Consider:
+- Filtering data before processing
+- Using a machine with more RAM
+- Processing in batches (requires custom Python script)
+
+### Dataset filtering
 
 The CLI automatically filters out:
 
 - Empty predictions
 - Peptides longer than 30 amino acids (Prosit limitation)
 - Precursor charges above 6 (Prosit limitation)
-- Invalid modifications and tokens
+- Invalid modifications and tokens (defined in `configs/residues.yaml`)
 
-For more advanced usage and customisation, refer to the [Python API documentation](api/calibration.md) and [examples notebook](https://github.com/instadeepai/winnow/blob/main/examples/getting_started_with_winnow.ipynb).
+### Getting help
+
+View available options:
+
+```bash
+winnow --help           # List all commands
+winnow train --help     # Command-specific help
+winnow predict --help
+winnow config --help    # Config command help
+
+winnow config train     # View resolved training configuration
+winnow config predict   # View resolved prediction configuration
+```
+
+## Where to find information
+
+This CLI guide focuses on **practical command-line usage**. For other information, see:
+
+| Topic | Documentation |
+|-------|---------------|
+| Configuration system, YAML structure, advanced patterns | [Configuration guide](configuration.md) |
+| Python API, feature implementation, programmatic usage | [API reference](api/calibration.md) |
+| Interactive tutorials and examples | [Examples notebook](https://github.com/instadeepai/winnow/blob/main/examples/getting_started_with_winnow.ipynb) |
+| Contributing, development setup | [Contributing guide](contributing.md) |

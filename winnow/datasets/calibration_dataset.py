@@ -9,13 +9,13 @@ Classes:
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple, Union
 import pickle
 
 import numpy as np
 import pandas as pd
 
-from instanovo.inference.beam_search import ScoredSequence
+from winnow.compat.instanovo import ScoredSequence
 
 
 @dataclass
@@ -48,7 +48,7 @@ class CalibrationDataset:
             data_dir (Path): Directory to save the dataset. This will contain `metadata.csv` and
                             optionally, `predictions.pkl` for serialized beam search results.
         """
-        data_dir.mkdir(parents=True)
+        data_dir.mkdir(parents=True, exist_ok=True)
         with (data_dir / "metadata.csv").open(mode="w") as metadata_file:
             output_metadata = self.metadata.copy(deep=True)
             if "sequence" in output_metadata.columns:
@@ -127,20 +127,26 @@ class CalibrationDataset:
 
         return CalibrationDataset(predictions=predictions, metadata=metadata)
 
-    def to_csv(self, path: Path) -> None:
+    def to_csv(self, path: Union[Path, str]) -> None:
         """Saves the dataset metadata to a CSV file.
 
         Args:
             path (str): Path to the output CSV file.
         """
+        if isinstance(path, str):
+            path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
         self.metadata.to_csv(path)
 
-    def to_parquet(self, path: str) -> None:
+    def to_parquet(self, path: Union[Path, str]) -> None:
         """Saves the dataset metadata to a parquet file.
 
         Args:
             path (str): Path to the output parquet file.
         """
+        if isinstance(path, str):
+            path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
         self.metadata.to_parquet(path)
 
     def _create_predicate_error_message(

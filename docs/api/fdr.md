@@ -2,7 +2,7 @@
 
 The `winnow.fdr` module implements false discovery rate (FDR) estimation and control methods for *de novo* peptide sequencing using both database-grounded and non-parametric approaches.
 
-## Base Interface
+## Base interface
 
 ### FDRControl
 
@@ -108,9 +108,9 @@ dataset_with_q_values = fdr_control.add_psm_q_value(dataset, "confidence")
     - **Q-value**: `compute_q_value(score)` - Minimum FDR for significance
 - **No Ground Truth Required**: Works with confidence scores alone
 
-## Additional Features
+## Additional features
 
-### PSM-Specific FDR
+### PSM-specific FDR
 
 Both methods support PSM-specific FDR estimation:
 
@@ -140,7 +140,7 @@ dataset_with_q_values = fdr_control.add_psm_q_value(
 psm_q_values = dataset_with_q_values["psm_q_value"]
 ```
 
-### Confidence Curves
+### Confidence curves
 
 Generate FDR vs confidence curves for analysis:
 
@@ -159,7 +159,7 @@ plt.xlabel("FDR Threshold")
 plt.ylabel("Confidence Cutoff")
 ```
 
-### Dataset Filtering
+### Dataset filtering
 
 Filter PSM datasets at target FDR levels:
 
@@ -175,7 +175,7 @@ filtered_psms = fdr_control.filter_entries(
 print(f"Retained {len(filtered_psms)} PSMs at 1% FDR")
 ```
 
-### FDR Estimation Method Selection
+### FDR estimation method selection
 
 **Use DatabaseGroundedFDRControl when:**
 
