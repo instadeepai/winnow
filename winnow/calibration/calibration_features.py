@@ -15,21 +15,6 @@ import koinapy
 from winnow.datasets.calibration_dataset import CalibrationDataset
 
 
-def map_modification(peptide: List[str]) -> List[str]:
-    """Converts carbamidomethylated Cysteine to an unmodified token representation in a peptide sequence.
-
-    This is to ensure compatibility with Prosit models, which say:
-        "Each C is treated as Cysteine with carbamidomethylation (fixed modification in MaxQuant)".
-
-    Args:
-        peptide (List[str]): A list of residues representing the peptide sequence.
-
-    Returns:
-        List[str]: A list of residues with modifications mapped to standard notation.
-    """
-    return ["C" if residue == "C[UNIMOD:4]" else residue for residue in peptide]
-
-
 def _raise_value_error(value, name: str):
     """Raise a ValueError if the given value is None."""
     if value is None:
@@ -345,12 +330,7 @@ class PrositFeatures(CalibrationFeatures):
         # Prepare input data
         inputs = pd.DataFrame()
         inputs["peptide_sequences"] = np.array(
-            [
-                "".join(peptide)
-                for peptide in valid_prosit_input.metadata["prediction"].apply(
-                    map_modification
-                )
-            ]
+            ["".join(peptide) for peptide in valid_prosit_input.metadata["prediction"]]
         )
         inputs["precursor_charges"] = np.array(
             valid_prosit_input.metadata["precursor_charge"]
@@ -586,7 +566,7 @@ class ChimericFeatures(CalibrationFeatures):
         inputs = pd.DataFrame()
         inputs["peptide_sequences"] = np.array(
             [
-                "".join(map_modification(items[1].sequence))  # type: ignore
+                "".join(items[1].sequence)  # type: ignore
                 for items in valid_chimeric_prosit_input.predictions
             ]
         )
@@ -1005,10 +985,7 @@ class RetentionTimeFeature(CalibrationFeatures):
 
         inputs = pd.DataFrame()
         inputs["peptide_sequences"] = np.array(
-            [
-                "".join(peptide)
-                for peptide in train_data["prediction"].apply(map_modification)
-            ]
+            ["".join(peptide) for peptide in train_data["prediction"]]
         )
         inputs = inputs.set_index(train_data.index)
 
@@ -1063,12 +1040,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         # Prepare input data
         inputs = pd.DataFrame()
         inputs["peptide_sequences"] = np.array(
-            [
-                "".join(peptide)
-                for peptide in valid_irt_input.metadata["prediction"].apply(
-                    map_modification
-                )
-            ]
+            ["".join(peptide) for peptide in valid_irt_input.metadata["prediction"]]
         )
         inputs.index = valid_irt_input.metadata["spectrum_id"]
 

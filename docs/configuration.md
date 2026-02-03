@@ -291,22 +291,20 @@ residue_masses:
   "[UNIMOD:385]": -17.026549  # NH3 loss (terminal)
 
 invalid_prosit_tokens:
-  # InstaNovo
-  - "[UNIMOD:7]"
-  - "[UNIMOD:21]"
-  - "[UNIMOD:1]"
-  - "[UNIMOD:5]"
-  - "[UNIMOD:385]"
-  # Casanovo
-  - "+0.984"
-  - "+42.011"
-  - "+43.006"
-  - "-17.027"
-  - "[Deamidated]"
+  - "[UNIMOD:7]"   # Deamidation
+  - "[UNIMOD:21]"  # Phosphorylation
+  - "[UNIMOD:1]"   # Acetylation (N-terminal)
+  - "[UNIMOD:5]"   # Carbamylation (N-terminal)
+  - "[UNIMOD:385]" # Ammonia loss (N-terminal)
   # ... other unsupported modifications
 ```
 
+**Important note on cysteine handling:**
+Prosit models require all cysteines to be carbamidomethylated (C[UNIMOD:4]). Peptides containing unmodified cysteine ("C") are automatically filtered out during Prosit feature computation. The carbamidomethylation annotation is passed explicitly to Prosit models.
+
 This configuration is shared across all pipelines and referenced via `${residue_masses}` and `${invalid_prosit_tokens}` interpolation.
+
+Winnow represents PTMs using the UNIMOD format internally, so all residue masses and PTMs to be filtered from Prosit features must use this format. Please check that all PTMs unsupported by selected Prosit models will be filtered out.
 
 ### Data loader configs
 

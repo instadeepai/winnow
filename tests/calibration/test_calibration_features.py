@@ -955,22 +955,6 @@ class TestPrositFeatures:
         # Check that ion computation was called
         mock_compute_ions.assert_called_once()
 
-    def test_map_modification_function(self):
-        """Test the map_modification helper function."""
-        from winnow.calibration.calibration_features import map_modification
-
-        # Test normal peptide
-        normal_peptide = ["A", "G", "S"]
-        assert map_modification(normal_peptide) == ["A", "G", "S"]
-
-        # Test peptide with carbamidomethylated cysteine
-        modified_peptide = ["A", "C[UNIMOD:4]", "G"]
-        assert map_modification(modified_peptide) == ["A", "C", "G"]
-
-        # Test peptide with multiple modifications
-        multi_modified = ["C[UNIMOD:4]", "A", "C[UNIMOD:4]"]
-        assert map_modification(multi_modified) == ["C", "A", "C"]
-
     def test_compute_maps_values_to_correct_rows_and_imputes_missing(
         self,
         prosit_features,
