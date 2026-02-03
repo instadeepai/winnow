@@ -20,7 +20,7 @@ calibrator:
       _target_: winnow.calibration.calibration_features.PrositFeatures
       mz_tolerance: 0.02
       learn_from_missing: true  # Whether to learn from missing Prosit features. If False, errors will be raised when invalid spectra are encountered.
-      invalid_prosit_tokens: ${invalid_prosit_tokens}  # The tokens to consider as invalid for Prosit features.
+      invalid_prosit_residues: ${invalid_prosit_residues}  # The residues to consider as invalid for Prosit features.
       prosit_intensity_model_name: Prosit_2020_intensity_HCD  # The name of the Prosit intensity model to use.
 
     retention_time_feature:
@@ -34,14 +34,14 @@ calibrator:
       max_iter: 200  # Maximum number of training iterations for the MLP regressor.
       early_stopping: false  # Whether to use early stopping for the MLP regressor.
       validation_fraction: 0.1  # Proportion of training data to use for early stopping validation.
-      invalid_prosit_tokens: ${invalid_prosit_tokens}  # The tokens to consider as invalid for Prosit iRT features.
+      invalid_prosit_residues: ${invalid_prosit_residues}  # The residues to consider as invalid for Prosit iRT features.
       prosit_irt_model_name: Prosit_2019_irt  # The name of the Prosit iRT model to use.
 
     chimeric_features:
       _target_: winnow.calibration.calibration_features.ChimericFeatures
       mz_tolerance: 0.02
       learn_from_missing: true  # Whether to learn from missing chimeric features. If False, errors will be raised when invalid spectra are encountered.
-      invalid_prosit_tokens: ${invalid_prosit_tokens}  # The tokens to consider as invalid for Prosit chimeric intensity features.
+      invalid_prosit_residues: ${invalid_prosit_residues}  # The residues to consider as invalid for Prosit chimeric intensity features.
       prosit_intensity_model_name: Prosit_2020_intensity_HCD  # The name of the Prosit intensity model to use.
 
     beam_features:

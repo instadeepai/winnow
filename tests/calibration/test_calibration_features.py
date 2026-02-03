@@ -485,7 +485,7 @@ class TestRetentionTimeFeature:
     def retention_time_feature(self):
         """Create a RetentionTimeFeature instance for testing."""
         return RetentionTimeFeature(
-            hidden_dim=10, train_fraction=0.8, invalid_prosit_tokens=["U", "O", "X"]
+            hidden_dim=10, train_fraction=0.8, invalid_prosit_residues=["U", "O", "X"]
         )
 
     @pytest.fixture()
@@ -512,7 +512,7 @@ class TestRetentionTimeFeature:
     def test_initialization_parameters(self):
         """Test initialization with custom parameters."""
         feature = RetentionTimeFeature(
-            hidden_dim=10, train_fraction=0.8, invalid_prosit_tokens=["U", "O", "X"]
+            hidden_dim=10, train_fraction=0.8, invalid_prosit_residues=["U", "O", "X"]
         )
         assert feature.hidden_dim == 10
         assert feature.train_fraction == 0.8
@@ -798,7 +798,9 @@ class TestPrositFeatures:
     @pytest.fixture()
     def prosit_features(self):
         """Create a PrositFeatures instance for testing."""
-        return PrositFeatures(mz_tolerance=0.02, invalid_prosit_tokens=["U", "O", "X"])
+        return PrositFeatures(
+            mz_tolerance=0.02, invalid_prosit_residues=["U", "O", "X"]
+        )
 
     @pytest.fixture()
     def sample_dataset_with_spectra(self):
@@ -838,7 +840,7 @@ class TestPrositFeatures:
     def test_initialization_with_tolerance(self):
         """Test initialization with custom tolerance."""
         feature = PrositFeatures(
-            mz_tolerance=0.01, invalid_prosit_tokens=["U", "O", "X"]
+            mz_tolerance=0.01, invalid_prosit_residues=["U", "O", "X"]
         )
         assert feature.mz_tolerance == 0.01
         assert feature.prosit_intensity_model_name == "Prosit_2020_intensity_HCD"
@@ -1158,7 +1160,7 @@ class TestChimericFeatures:
     def chimeric_features(self):
         """Create a ChimericFeatures instance for testing."""
         return ChimericFeatures(
-            mz_tolerance=0.02, invalid_prosit_tokens=["U", "O", "X"]
+            mz_tolerance=0.02, invalid_prosit_residues=["U", "O", "X"]
         )
 
     @pytest.fixture()
@@ -1213,7 +1215,7 @@ class TestChimericFeatures:
     def test_initialization_with_tolerance(self):
         """Test initialization with custom tolerance."""
         feature = ChimericFeatures(
-            mz_tolerance=0.01, invalid_prosit_tokens=["U", "O", "X"]
+            mz_tolerance=0.01, invalid_prosit_residues=["U", "O", "X"]
         )
         assert feature.mz_tolerance == 0.01
 

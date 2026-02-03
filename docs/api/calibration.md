@@ -120,7 +120,7 @@ from winnow.calibration.calibration_features import PrositFeatures
 
 feature = PrositFeatures(
     mz_tolerance=0.02,
-    invalid_prosit_tokens=["[UNIMOD:7]", "[UNIMOD:21]"],  # Modifications not supported by Prosit
+    invalid_prosit_residues=["N[UNIMOD:7]", "Q[UNIMOD:7]"],  # Residues not supported by Prosit
 )
 ```
 

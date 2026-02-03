@@ -184,7 +184,7 @@ class PrositFeatures(CalibrationFeatures):
     def __init__(
         self,
         mz_tolerance: float,
-        invalid_prosit_tokens: List[str],
+        invalid_prosit_residues: List[str],
         learn_from_missing: bool = True,
         prosit_intensity_model_name: str = "Prosit_2020_intensity_HCD",
     ) -> None:
@@ -192,7 +192,7 @@ class PrositFeatures(CalibrationFeatures):
 
         Args:
             mz_tolerance (float): The mass-to-charge tolerance for ion matching.
-            invalid_prosit_tokens (List[str]): The tokens to consider as invalid for Prosit intensity prediction.
+            invalid_prosit_residues (List[str]): The residues to consider as invalid for Prosit intensity prediction. These must be in UNIMOD format.
             learn_from_missing (bool): Whether to learn from missing data by including a missingness indicator column.
                 If False, an error will be raised when invalid spectra are encountered.
                 Defaults to True.
@@ -200,7 +200,7 @@ class PrositFeatures(CalibrationFeatures):
                 Defaults to "Prosit_2020_intensity_HCD".
         """
         self.mz_tolerance = mz_tolerance
-        self.invalid_prosit_tokens = invalid_prosit_tokens
+        self.invalid_prosit_residues = invalid_prosit_residues
         self.learn_from_missing = learn_from_missing
         self.prosit_intensity_model_name = prosit_intensity_model_name
 
@@ -259,8 +259,8 @@ class PrositFeatures(CalibrationFeatures):
             .filter_entries(
                 metadata_predicate=lambda row: (
                     any(
-                        token in row["prediction_untokenised"]
-                        for token in self.invalid_prosit_tokens
+                        token in row["prediction"]
+                        for token in self.invalid_prosit_residues
                     )
                 )
             )
@@ -316,7 +316,7 @@ class PrositFeatures(CalibrationFeatures):
                     f"Please filter your dataset to remove:\n"
                     f"  - Peptides longer than 30 amino acids\n"
                     f"  - Precursor charges greater than 6\n"
-                    f"  - Peptides with unsupported modifications (e.g., {', '.join(self.invalid_prosit_tokens[:3])}...)\n"
+                    f"  - Peptides with unsupported modifications (e.g., {', '.join(self.invalid_prosit_residues[:3])}...)\n"
                     f"Or set learn_from_missing=True to handle missing data automatically."
                 )
 
@@ -405,7 +405,7 @@ class ChimericFeatures(CalibrationFeatures):
     def __init__(
         self,
         mz_tolerance: float,
-        invalid_prosit_tokens: List[str],
+        invalid_prosit_residues: List[str],
         learn_from_missing: bool = True,
         prosit_intensity_model_name: str = "Prosit_2020_intensity_HCD",
     ) -> None:
@@ -413,7 +413,7 @@ class ChimericFeatures(CalibrationFeatures):
 
         Args:
             mz_tolerance (float): The mass-to-charge tolerance for ion matching.
-            invalid_prosit_tokens (List[str]): The tokens to consider as invalid for Prosit intensity prediction.
+            invalid_prosit_residues (List[str]): The residues to consider as invalid for Prosit intensity prediction. These must be in UNIMOD format.
             learn_from_missing (bool): Whether to learn from missing data by including a missingness indicator column.
                 If False, an error will be raised when invalid spectra are encountered.
                 Defaults to True.
@@ -422,7 +422,7 @@ class ChimericFeatures(CalibrationFeatures):
         """
         self.mz_tolerance = mz_tolerance
         self.learn_from_missing = learn_from_missing
-        self.invalid_prosit_tokens = invalid_prosit_tokens
+        self.invalid_prosit_residues = invalid_prosit_residues
         self.prosit_intensity_model_name = prosit_intensity_model_name
 
     @property
@@ -486,8 +486,8 @@ class ChimericFeatures(CalibrationFeatures):
                 predictions_predicate=lambda beam: (
                     len(beam) > 1
                     and any(
-                        token in "".join(beam[1].sequence)
-                        for token in self.invalid_prosit_tokens
+                        token in beam[1].sequence
+                        for token in self.invalid_prosit_residues
                     )
                 )
             )
@@ -551,7 +551,7 @@ class ChimericFeatures(CalibrationFeatures):
                     f"  - Spectra without runner-up sequences (beam search required)\n"
                     f"  - Runner-up peptides longer than 30 amino acids\n"
                     f"  - Runner-up peptides with precursor charges greater than 6\n"
-                    f"  - Runner-up peptides with unsupported modifications (e.g., {', '.join(self.invalid_prosit_tokens[:3])}...)\n"
+                    f"  - Runner-up peptides with unsupported modifications (e.g., {', '.join(self.invalid_prosit_residues[:3])}...)\n"
                     f"Or set learn_from_missing=True to handle missing data automatically."
                 )
 
@@ -836,7 +836,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         self,
         hidden_dim: int,
         train_fraction: float,
-        invalid_prosit_tokens: List[str],
+        invalid_prosit_residues: List[str],
         learn_from_missing: bool = True,
         seed: int = 42,
         learning_rate_init: float = 0.001,
@@ -851,7 +851,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         Args:
             hidden_dim (int): Hidden dimension size for the MLP regressor.
             train_fraction (float): Fraction of data to use for training the iRT calibrator.
-            invalid_prosit_tokens (List[str]): The tokens to consider as invalid for Prosit iRT prediction.
+            invalid_prosit_residues (List[str]): The residues to consider as invalid for Prosit iRT prediction. These must be in UNIMOD format.
             learn_from_missing (bool): Whether to learn from missing data by including a missingness indicator column.
                 If False, an error will be raised when invalid spectra are encountered.
                 Defaults to True.
@@ -867,7 +867,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         self.train_fraction = train_fraction
         self.hidden_dim = hidden_dim
         self.learn_from_missing = learn_from_missing
-        self.invalid_prosit_tokens = invalid_prosit_tokens
+        self.invalid_prosit_residues = invalid_prosit_residues
         self.prosit_irt_model_name = prosit_irt_model_name
         self.irt_predictor = MLPRegressor(
             hidden_layer_sizes=[hidden_dim],
@@ -931,8 +931,8 @@ class RetentionTimeFeature(CalibrationFeatures):
             .filter_entries(
                 metadata_predicate=lambda row: (
                     any(
-                        token in row["prediction_untokenised"]
-                        for token in self.invalid_prosit_tokens
+                        token in row["prediction"]
+                        for token in self.invalid_prosit_residues
                     )
                 )
             )
@@ -1026,7 +1026,7 @@ class RetentionTimeFeature(CalibrationFeatures):
                     f"  - Spectra without retention time data\n"
                     f"  - Peptides longer than 30 amino acids\n"
                     f"  - Precursor charges greater than 6\n"
-                    f"  - Peptides with unsupported modifications (e.g., {', '.join(self.invalid_prosit_tokens[:3])}...)\n"
+                    f"  - Peptides with unsupported modifications (e.g., {', '.join(self.invalid_prosit_residues[:3])}...)\n"
                     f"Or set learn_from_missing=True to handle missing data automatically."
                 )
 

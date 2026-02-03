@@ -223,7 +223,7 @@ class TestTokenRemappingIntegration:
     """Integration tests to verify token remapping works with invalid token filtering.
 
     These tests verify that the data loaders correctly remap tokens BEFORE
-    they are checked against invalid_prosit_tokens lists.
+    they are checked against invalid_prosit_residues lists.
     """
 
     @pytest.fixture()
@@ -250,19 +250,20 @@ class TestTokenRemappingIntegration:
         }
 
     @pytest.fixture()
-    def invalid_prosit_tokens_unimod_only(self):
-        """List of invalid tokens using ONLY UNIMOD notation."""
+    def invalid_prosit_residues_unimod_only(self):
+        """List of invalid residues using only UNIMOD notation."""
         return [
-            "[UNIMOD:7]",  # Deamidation
-            "[UNIMOD:1]",  # Acetylation
-            "[UNIMOD:5]",  # Carbamylation
-            "[UNIMOD:385]",  # Ammonia loss
+            "N[UNIMOD:7]",  # Deamidated asparagine
+            "Q[UNIMOD:7]",  # Deamidated glutamine
+            "[UNIMOD:1]",  # N-terminal acetylation
+            "[UNIMOD:5]",  # N-terminal carbamylation
+            "[UNIMOD:385]",  # N-terminal ammonia loss
         ]
 
     def test_casanovo_tokens_map_to_invalid_unimod(
-        self, residue_masses, invalid_prosit_tokens_unimod_only
+        self, residue_masses, invalid_prosit_residues_unimod_only
     ):
-        """Test that Casanovo tokens are detected as invalid after remapping to UNIMOD."""
+        """Test that Casanovo tokens are detected as invalid after remapping and tokenization."""
         residue_remapping = {
             "Q+0.984": "Q[UNIMOD:7]",
             "N+0.984": "N[UNIMOD:7]",
@@ -283,38 +284,38 @@ class TestTokenRemappingIntegration:
 
         # Test sequences with Casanovo notation that should be remapped
         casanovo_sequences = [
-            ("PEPTIDEQ+0.984", "PEPTIDEQ[UNIMOD:7]"),  # Deamidation
-            ("N+0.984PEPTIDE", "N[UNIMOD:7]PEPTIDE"),  # Deamidation
-            ("+42.011PEPTIDE", "[UNIMOD:1]PEPTIDE"),  # Acetylation
-            ("+43.006PEPTIDE", "[UNIMOD:5]PEPTIDE"),  # Carbamylation
-            ("-17.027PEPTIDE", "[UNIMOD:385]PEPTIDE"),  # Ammonia loss
-            ("[Acetyl]-PEPTIDE", "[UNIMOD:1]PEPTIDE"),  # Acetylation (named)
-            ("[Carbamyl]-PEPTIDE", "[UNIMOD:5]PEPTIDE"),  # Carbamylation (named)
-            (
-                "[Ammonia-loss]-PEPTIDE",
-                "[UNIMOD:385]PEPTIDE",
-            ),  # Ammonia loss (named)
-            ("PEPTIN[Deamidated]E", "PEPTIN[UNIMOD:7]E"),  # Deamidation (named)
-            ("Q[Deamidated]PEPTIDE", "Q[UNIMOD:7]PEPTIDE"),  # Deamidation (named)
+            ("PEPTIDEQ+0.984", "Q[UNIMOD:7]"),  # Deamidation
+            ("N+0.984PEPTIDE", "N[UNIMOD:7]"),  # Deamidation
+            ("+42.011PEPTIDE", "[UNIMOD:1]"),  # Acetylation
+            ("+43.006PEPTIDE", "[UNIMOD:5]"),  # Carbamylation
+            ("-17.027PEPTIDE", "[UNIMOD:385]"),  # Ammonia loss
+            ("[Acetyl]-PEPTIDE", "[UNIMOD:1]"),  # Acetylation (named)
+            ("[Carbamyl]-PEPTIDE", "[UNIMOD:5]"),  # Carbamylation (named)
+            ("[Ammonia-loss]-PEPTIDE", "[UNIMOD:385]"),  # Ammonia loss (named)
+            ("PEPTIN[Deamidated]E", "N[UNIMOD:7]"),  # Deamidation (named)
+            ("Q[Deamidated]PEPTIDE", "Q[UNIMOD:7]"),  # Deamidation (named)
         ]
 
-        for casanovo_seq, expected_unimod in casanovo_sequences:
+        for casanovo_seq, expected_token in casanovo_sequences:
             # Map the modifications
             remapped_seq = loader._map_modifications(casanovo_seq)
 
-            # Verify remapping worked
-            assert (
-                remapped_seq == expected_unimod
-            ), f"Failed to remap {casanovo_seq} to {expected_unimod}, got {remapped_seq}"
+            # Tokenize the remapped sequence
+            tokens = loader.metrics._split_peptide(remapped_seq)
 
-            # Verify that the remapped sequence contains an invalid UNIMOD token
-            contains_invalid = any(
-                token in remapped_seq for token in invalid_prosit_tokens_unimod_only
+            # Verify that the tokenized sequence contains the expected invalid token
+            assert expected_token in tokens, (
+                f"Expected token {expected_token} not found in {tokens} "
+                f"(from {casanovo_seq} -> {remapped_seq})"
             )
-            assert contains_invalid, f"Remapped sequence {remapped_seq} should contain an invalid UNIMOD token"
+
+            # Verify that the token is in the invalid list
+            assert (
+                expected_token in invalid_prosit_residues_unimod_only
+            ), f"Residue {expected_token} should be in invalid_prosit_residues list"
 
     def test_valid_sequences_not_affected(
-        self, residue_masses, invalid_prosit_tokens_unimod_only
+        self, residue_masses, invalid_prosit_residues_unimod_only
     ):
         """Test that valid sequences without invalid modifications pass through."""
         residue_remapping = {
@@ -335,21 +336,22 @@ class TestTokenRemappingIntegration:
 
         for seq in valid_sequences:
             remapped_seq = loader._map_modifications(seq)
+            tokens = loader.metrics._split_peptide(remapped_seq)
             contains_invalid = any(
-                token in remapped_seq for token in invalid_prosit_tokens_unimod_only
+                token in invalid_prosit_residues_unimod_only for token in tokens
             )
             assert (
                 not contains_invalid
-            ), f"Valid sequence {remapped_seq} should not contain invalid tokens"
+            ), f"Valid sequence {tokens} should not contain invalid tokens"
 
     def test_only_unimod_notation_needed_in_invalid_list(
-        self, residue_masses, invalid_prosit_tokens_unimod_only
+        self, residue_masses, invalid_prosit_residues_unimod_only
     ):
-        """Test that we only need UNIMOD notation in invalid_prosit_tokens list.
+        """Test that we only need UNIMOD notation in invalid_prosit_residues list.
 
-        This test demonstrates that after remapping, we don't need to include
-        Casanovo-specific notations like '+0.984', '+42.011', etc. in the
-        invalid_prosit_tokens list - only the UNIMOD equivalents are needed.
+        This test demonstrates that after remapping, we only need the actual tokenized
+        forms (e.g., "Q[UNIMOD:7]", "[UNIMOD:1]") in the invalid_prosit_residues list,
+        not the Casanovo-specific notations like '+0.984', '+42.011', etc.
         """
         residue_remapping = {
             "Q+0.984": "Q[UNIMOD:7]",
@@ -364,24 +366,36 @@ class TestTokenRemappingIntegration:
 
         # These Casanovo sequences should be caught by UNIMOD-only invalid list
         test_cases = [
-            ("PEPTIDEQ+0.984", True),  # Should be invalid after remapping
-            ("+42.011PEPTIDE", True),  # Should be invalid after remapping
-            ("[Carbamyl]-PEPTIDE", True),  # Should be invalid after remapping
-            ("PEPTIDE", False),  # Should be valid
-            ("M[UNIMOD:35]PEPTIDE", False),  # Valid modification
+            (
+                "PEPTIDEQ+0.984",
+                True,
+                "Q[UNIMOD:7]",
+            ),  # Should be invalid after remapping
+            ("+42.011PEPTIDE", True, "[UNIMOD:1]"),  # Should be invalid after remapping
+            (
+                "[Carbamyl]-PEPTIDE",
+                True,
+                "[UNIMOD:5]",
+            ),  # Should be invalid after remapping
+            ("PEPTIDE", False, None),  # Should be valid
+            ("M[UNIMOD:35]PEPTIDE", False, None),  # Valid modification
         ]
 
-        for seq, should_be_invalid in test_cases:
+        for seq, should_be_invalid, expected_token in test_cases:
             remapped_seq = loader._map_modifications(seq)
+            tokens = loader.metrics._split_peptide(remapped_seq)
             contains_invalid = any(
-                token in remapped_seq for token in invalid_prosit_tokens_unimod_only
+                token in invalid_prosit_residues_unimod_only for token in tokens
             )
 
             if should_be_invalid:
                 assert (
                     contains_invalid
-                ), f"Sequence {seq} -> {remapped_seq} should be caught as invalid"
+                ), f"Sequence {seq} -> {tokens} should be caught as invalid"
+                assert (
+                    expected_token in tokens
+                ), f"Expected invalid token {expected_token} in {tokens}"
             else:
                 assert (
                     not contains_invalid
-                ), f"Sequence {seq} -> {remapped_seq} should be valid"
+                ), f"Sequence {seq} -> {tokens} should be valid"
