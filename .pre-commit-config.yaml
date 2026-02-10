@@ -86,3 +86,13 @@ repos:
       - id: mypy
         additional_dependencies: [types-requests, types-PyYAML]
         args: [--ignore-missing-imports, "--exclude=(notebooks|tests)", --disable-error-code, "name-defined"]
+
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    # uv version.
+    rev: 0.10.1
+    hooks:
+      # Lock the dependencies from pyproject.toml
+      - id: uv-lock
+      # Compile requirements.txt from pyproject.toml
+      - id: pip-compile
+        args: [pyproject.toml, -o, requirements.txt]
