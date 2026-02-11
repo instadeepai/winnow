@@ -1,7 +1,7 @@
 """Unit tests for winnow data loaders.
 
 This module tests the token remapping functionality that converts various
-notation formats (Casanovo, InstaNovo legacy) to UNIMOD format.
+notation formats (Casanovo, InstaNovo legacy) to Proforma format.
 """
 
 import pytest
@@ -39,7 +39,11 @@ class TestMZTabDatasetLoader:
 
     @pytest.fixture()
     def residue_remapping(self):
-        """Residue remapping for Casanovo-specific notations to UNIMOD tokens."""
+        """Residue remapping for Casanovo-specific notations to UNIMOD tokens.
+
+        Note: N-terminal modifications don't need hyphens because remapping
+        happens at the token level after tokenization (which strips hyphens).
+        """
         return {
             "M+15.995": "M[UNIMOD:35]",  # Oxidation
             "Q+0.984": "Q[UNIMOD:7]",  # Deamidation
@@ -52,10 +56,10 @@ class TestMZTabDatasetLoader:
             "M[Oxidation]": "M[UNIMOD:35]",  # Oxidation
             "N[Deamidated]": "N[UNIMOD:7]",  # Deamidation
             "Q[Deamidated]": "Q[UNIMOD:7]",  # Deamidation
-            # N-terminal modifications
-            "[Acetyl]-": "[UNIMOD:1]",  # Acetylation
-            "[Carbamyl]-": "[UNIMOD:5]",  # Carbamylation
-            "[Ammonia-loss]-": "[UNIMOD:385]",  # Ammonia loss
+            # N-terminal modifications (no hyphens - handled at token level)
+            "[Acetyl]": "[UNIMOD:1]",  # Acetylation
+            "[Carbamyl]": "[UNIMOD:5]",  # Carbamylation
+            "[Ammonia-loss]": "[UNIMOD:385]",  # Ammonia loss
         }
 
     @pytest.fixture()
@@ -71,62 +75,43 @@ class TestMZTabDatasetLoader:
         assert mztab_loader.metrics is not None
         assert mztab_loader.metrics.residue_set is not None
 
-    def test_map_modifications_casanovo_residue_modifications(self, mztab_loader):
-        """Test mapping of Casanovo residue modifications (mass and named notation)."""
+    def test_remap_tokens_residue_modifications(self, mztab_loader):
+        """Test token-level remapping of residue modifications."""
         # Test mass-based notation
-        assert mztab_loader._map_modifications("M+15.995") == "M[UNIMOD:35]"
-        assert mztab_loader._map_modifications("N+0.984") == "N[UNIMOD:7]"
+        tokens = ["M+15.995", "P", "E", "P", "T", "I", "D", "E"]
+        expected = ["M[UNIMOD:35]", "P", "E", "P", "T", "I", "D", "E"]
+        assert mztab_loader._remap_tokens(tokens) == expected
 
         # Test named notation
-        assert mztab_loader._map_modifications("M[Oxidation]") == "M[UNIMOD:35]"
-        assert mztab_loader._map_modifications("N[Deamidated]") == "N[UNIMOD:7]"
+        tokens = ["M[Oxidation]", "P", "E", "P", "T", "I", "D", "E"]
+        expected = ["M[UNIMOD:35]", "P", "E", "P", "T", "I", "D", "E"]
+        assert mztab_loader._remap_tokens(tokens) == expected
 
-    def test_map_modifications_casanovo_terminal_modifications(self, mztab_loader):
-        """Test mapping of Casanovo terminal modifications (mass and named notation)."""
-        # Test mass-based notation
-        assert mztab_loader._map_modifications("+42.011PEPTIDE") == "[UNIMOD:1]PEPTIDE"
-        assert (
-            mztab_loader._map_modifications("-17.027PEPTIDE") == "[UNIMOD:385]PEPTIDE"
-        )
+    def test_remap_tokens_terminal_modifications(self, mztab_loader):
+        """Test token-level remapping of N-terminal modifications.
 
-        # Test named notation
-        assert (
-            mztab_loader._map_modifications("[Acetyl]-PEPTIDE") == "[UNIMOD:1]PEPTIDE"
-        )
-        assert (
-            mztab_loader._map_modifications("[Ammonia-loss]-PEPTIDE")
-            == "[UNIMOD:385]PEPTIDE"
-        )
+        Note: Hyphens are stripped by the tokenizer, so we only need to
+        match the modification token without the hyphen.
+        """
+        # Test mass-based notation (tokenizer captures "+42.011" as standalone token)
+        tokens = ["+42.011", "P", "E", "P", "T", "I", "D", "E"]
+        expected = ["[UNIMOD:1]", "P", "E", "P", "T", "I", "D", "E"]
+        assert mztab_loader._remap_tokens(tokens) == expected
 
-    def test_map_modifications_complex_sequence(self, mztab_loader):
-        """Test mapping in a complex peptide sequence with multiple modifications."""
-        # Complex sequence with multiple modification types
-        input_seq = "M+15.995PEPTIDEN+0.984C+57.021"
-        expected = "M[UNIMOD:35]PEPTIDEN[UNIMOD:7]C[UNIMOD:4]"
-        assert mztab_loader._map_modifications(input_seq) == expected
+        # Test named notation (tokenizer captures "[Acetyl]" without the hyphen)
+        tokens = ["[Acetyl]", "P", "E", "P", "T", "I", "D", "E"]
+        expected = ["[UNIMOD:1]", "P", "E", "P", "T", "I", "D", "E"]
+        assert mztab_loader._remap_tokens(tokens) == expected
 
-    def test_map_modifications_terminal_plus_residue(self, mztab_loader):
-        """Test terminal modification followed by residue modifications."""
-        input_seq = "+42.011PEPTM+15.995IDE"
-        expected = "[UNIMOD:1]PEPTM[UNIMOD:35]IDE"
-        assert mztab_loader._map_modifications(input_seq) == expected
+    def test_remap_tokens_no_modifications(self, mztab_loader):
+        """Test that unmodified tokens pass through unchanged."""
+        tokens = ["P", "E", "P", "T", "I", "D", "E"]
+        assert mztab_loader._remap_tokens(tokens) == tokens
 
-    def test_map_modifications_no_modifications(self, mztab_loader):
-        """Test that unmodified sequences pass through unchanged."""
-        unmodified = "PEPTIDE"
-        assert mztab_loader._map_modifications(unmodified) == unmodified
-
-    def test_map_modifications_already_unimod(self, mztab_loader):
-        """Test that sequences already in UNIMOD format are unchanged."""
-        unimod_seq = "M[UNIMOD:35]PEPTIDEN[UNIMOD:7]"
-        assert mztab_loader._map_modifications(unimod_seq) == unimod_seq
-
-    def test_map_modifications_mixed_formats(self, mztab_loader):
-        """Test mapping when both Casanovo and UNIMOD notations are present."""
-        # If a sequence somehow has both formats, it should still work
-        input_seq = "M+15.995PEPTIDEN[UNIMOD:7]C+57.021"
-        expected = "M[UNIMOD:35]PEPTIDEN[UNIMOD:7]C[UNIMOD:4]"
-        assert mztab_loader._map_modifications(input_seq) == expected
+    def test_remap_tokens_already_unimod(self, mztab_loader):
+        """Test that tokens already in Proforma format are unchanged."""
+        tokens = ["M[UNIMOD:35]", "P", "E", "P", "T", "I", "D", "E"]
+        assert mztab_loader._remap_tokens(tokens) == tokens
 
 
 class TestInstaNovoDatasetLoader:
@@ -263,16 +248,17 @@ class TestTokenRemappingIntegration:
     def test_casanovo_tokens_map_to_invalid_unimod(
         self, residue_masses, invalid_prosit_residues_unimod_only
     ):
-        """Test that Casanovo tokens are detected as invalid after remapping and tokenization."""
+        """Test that Casanovo tokens are detected as invalid after tokenization and remapping."""
         residue_remapping = {
             "Q+0.984": "Q[UNIMOD:7]",
             "N+0.984": "N[UNIMOD:7]",
             "+42.011": "[UNIMOD:1]",
             "+43.006": "[UNIMOD:5]",
             "-17.027": "[UNIMOD:385]",
-            "[Acetyl]-": "[UNIMOD:1]",
-            "[Carbamyl]-": "[UNIMOD:5]",
-            "[Ammonia-loss]-": "[UNIMOD:385]",
+            # No hyphens needed - tokenizer strips them
+            "[Acetyl]": "[UNIMOD:1]",
+            "[Carbamyl]": "[UNIMOD:5]",
+            "[Ammonia-loss]": "[UNIMOD:385]",
             "N[Deamidated]": "N[UNIMOD:7]",
             "Q[Deamidated]": "Q[UNIMOD:7]",
         }
@@ -289,24 +275,27 @@ class TestTokenRemappingIntegration:
             ("+42.011PEPTIDE", "[UNIMOD:1]"),  # Acetylation
             ("+43.006PEPTIDE", "[UNIMOD:5]"),  # Carbamylation
             ("-17.027PEPTIDE", "[UNIMOD:385]"),  # Ammonia loss
-            ("[Acetyl]-PEPTIDE", "[UNIMOD:1]"),  # Acetylation (named)
-            ("[Carbamyl]-PEPTIDE", "[UNIMOD:5]"),  # Carbamylation (named)
-            ("[Ammonia-loss]-PEPTIDE", "[UNIMOD:385]"),  # Ammonia loss (named)
+            ("[Acetyl]-PEPTIDE", "[UNIMOD:1]"),  # Acetylation (named, with hyphen)
+            ("[Carbamyl]-PEPTIDE", "[UNIMOD:5]"),  # Carbamylation (named, with hyphen)
+            (
+                "[Ammonia-loss]-PEPTIDE",
+                "[UNIMOD:385]",
+            ),  # Ammonia loss (named, with hyphen)
             ("PEPTIN[Deamidated]E", "N[UNIMOD:7]"),  # Deamidation (named)
             ("Q[Deamidated]PEPTIDE", "Q[UNIMOD:7]"),  # Deamidation (named)
         ]
 
         for casanovo_seq, expected_token in casanovo_sequences:
-            # Map the modifications
-            remapped_seq = loader._map_modifications(casanovo_seq)
+            # Tokenize first (regex strips hyphens from N-terminal mods)
+            tokens = loader.metrics._split_peptide(casanovo_seq)
 
-            # Tokenize the remapped sequence
-            tokens = loader.metrics._split_peptide(remapped_seq)
+            # Then remap tokens
+            remapped_tokens = loader._remap_tokens(tokens)
 
-            # Verify that the tokenized sequence contains the expected invalid token
-            assert expected_token in tokens, (
-                f"Expected token {expected_token} not found in {tokens} "
-                f"(from {casanovo_seq} -> {remapped_seq})"
+            # Verify that the remapped tokens contain the expected invalid token
+            assert expected_token in remapped_tokens, (
+                f"Expected token {expected_token} not found in {remapped_tokens} "
+                f"(from {casanovo_seq} -> tokens {tokens})"
             )
 
             # Verify that the token is in the invalid list
@@ -335,28 +324,31 @@ class TestTokenRemappingIntegration:
         ]
 
         for seq in valid_sequences:
-            remapped_seq = loader._map_modifications(seq)
-            tokens = loader.metrics._split_peptide(remapped_seq)
+            # Tokenize first, then remap (new flow)
+            tokens = loader.metrics._split_peptide(seq)
+            remapped_tokens = loader._remap_tokens(tokens)
             contains_invalid = any(
-                token in invalid_prosit_residues_unimod_only for token in tokens
+                token in invalid_prosit_residues_unimod_only
+                for token in remapped_tokens
             )
             assert (
                 not contains_invalid
-            ), f"Valid sequence {tokens} should not contain invalid tokens"
+            ), f"Valid sequence {remapped_tokens} should not contain invalid tokens"
 
     def test_only_unimod_notation_needed_in_invalid_list(
         self, residue_masses, invalid_prosit_residues_unimod_only
     ):
         """Test that we only need UNIMOD notation in invalid_prosit_residues list.
 
-        This test demonstrates that after remapping, we only need the actual tokenized
-        forms (e.g., "Q[UNIMOD:7]", "[UNIMOD:1]") in the invalid_prosit_residues list,
-        not the Casanovo-specific notations like '+0.984', '+42.011', etc.
+        This test demonstrates that after tokenization and remapping, we only need
+        the actual tokenized forms (e.g., "Q[UNIMOD:7]", "[UNIMOD:1]") in the
+        invalid_prosit_residues list, not the Casanovo-specific notations.
         """
         residue_remapping = {
             "Q+0.984": "Q[UNIMOD:7]",
             "+42.011": "[UNIMOD:1]",
-            "[Carbamyl]-": "[UNIMOD:5]",
+            # No hyphen needed - tokenizer strips it
+            "[Carbamyl]": "[UNIMOD:5]",
         }
 
         loader = MZTabDatasetLoader(
@@ -376,26 +368,28 @@ class TestTokenRemappingIntegration:
                 "[Carbamyl]-PEPTIDE",
                 True,
                 "[UNIMOD:5]",
-            ),  # Should be invalid after remapping
+            ),  # Should be invalid after remapping (hyphen stripped by tokenizer)
             ("PEPTIDE", False, None),  # Should be valid
             ("M[UNIMOD:35]PEPTIDE", False, None),  # Valid modification
         ]
 
         for seq, should_be_invalid, expected_token in test_cases:
-            remapped_seq = loader._map_modifications(seq)
-            tokens = loader.metrics._split_peptide(remapped_seq)
+            # Tokenize first, then remap (new flow)
+            tokens = loader.metrics._split_peptide(seq)
+            remapped_tokens = loader._remap_tokens(tokens)
             contains_invalid = any(
-                token in invalid_prosit_residues_unimod_only for token in tokens
+                token in invalid_prosit_residues_unimod_only
+                for token in remapped_tokens
             )
 
             if should_be_invalid:
                 assert (
                     contains_invalid
-                ), f"Sequence {seq} -> {tokens} should be caught as invalid"
+                ), f"Sequence {seq} -> {remapped_tokens} should be caught as invalid"
                 assert (
-                    expected_token in tokens
-                ), f"Expected invalid token {expected_token} in {tokens}"
+                    expected_token in remapped_tokens
+                ), f"Expected invalid token {expected_token} in {remapped_tokens}"
             else:
                 assert (
                     not contains_invalid
-                ), f"Sequence {seq} -> {tokens} should be valid"
+                ), f"Sequence {seq} -> {remapped_tokens} should be valid"
