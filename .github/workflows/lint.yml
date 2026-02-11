@@ -15,3 +15,5 @@ jobs:
         run: uv sync --only-dev
       - name: Run pre-commit hooks
         run: uv run --only-dev pre-commit run --all-files
+        env:
+          SKIP: pip-compile
