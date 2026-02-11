@@ -13,6 +13,7 @@ from sklearn.neural_network import MLPRegressor
 import koinapy
 
 from winnow.datasets.calibration_dataset import CalibrationDataset
+from winnow.utils.peptide import tokens_to_proforma
 
 
 def _raise_value_error(value, name: str):
@@ -192,7 +193,7 @@ class PrositFeatures(CalibrationFeatures):
 
         Args:
             mz_tolerance (float): The mass-to-charge tolerance for ion matching.
-            invalid_prosit_residues (List[str]): The residues to consider as invalid for Prosit intensity prediction. These must be in UNIMOD format.
+            invalid_prosit_residues (List[str]): The residues to consider as invalid for Prosit intensity prediction. These must be in Proforma format.
             learn_from_missing (bool): Whether to learn from missing data by including a missingness indicator column.
                 If False, an error will be raised when invalid spectra are encountered.
                 Defaults to True.
@@ -330,7 +331,10 @@ class PrositFeatures(CalibrationFeatures):
         # Prepare input data
         inputs = pd.DataFrame()
         inputs["peptide_sequences"] = np.array(
-            ["".join(peptide) for peptide in valid_prosit_input.metadata["prediction"]]
+            [
+                tokens_to_proforma(peptide)
+                for peptide in valid_prosit_input.metadata["prediction"]
+            ]
         )
         inputs["precursor_charges"] = np.array(
             valid_prosit_input.metadata["precursor_charge"]
@@ -413,7 +417,7 @@ class ChimericFeatures(CalibrationFeatures):
 
         Args:
             mz_tolerance (float): The mass-to-charge tolerance for ion matching.
-            invalid_prosit_residues (List[str]): The residues to consider as invalid for Prosit intensity prediction. These must be in UNIMOD format.
+            invalid_prosit_residues (List[str]): The residues to consider as invalid for Prosit intensity prediction. These must be in Proforma format.
             learn_from_missing (bool): Whether to learn from missing data by including a missingness indicator column.
                 If False, an error will be raised when invalid spectra are encountered.
                 Defaults to True.
@@ -566,7 +570,7 @@ class ChimericFeatures(CalibrationFeatures):
         inputs = pd.DataFrame()
         inputs["peptide_sequences"] = np.array(
             [
-                "".join(items[1].sequence)  # type: ignore
+                tokens_to_proforma(items[1].sequence)  # type: ignore
                 for items in valid_chimeric_prosit_input.predictions
             ]
         )
@@ -851,7 +855,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         Args:
             hidden_dim (int): Hidden dimension size for the MLP regressor.
             train_fraction (float): Fraction of data to use for training the iRT calibrator.
-            invalid_prosit_residues (List[str]): The residues to consider as invalid for Prosit iRT prediction. These must be in UNIMOD format.
+            invalid_prosit_residues (List[str]): The residues to consider as invalid for Prosit iRT prediction. These must be in Proforma format.
             learn_from_missing (bool): Whether to learn from missing data by including a missingness indicator column.
                 If False, an error will be raised when invalid spectra are encountered.
                 Defaults to True.
@@ -985,7 +989,7 @@ class RetentionTimeFeature(CalibrationFeatures):
 
         inputs = pd.DataFrame()
         inputs["peptide_sequences"] = np.array(
-            ["".join(peptide) for peptide in train_data["prediction"]]
+            [tokens_to_proforma(peptide) for peptide in train_data["prediction"]]
         )
         inputs = inputs.set_index(train_data.index)
 
@@ -1040,7 +1044,10 @@ class RetentionTimeFeature(CalibrationFeatures):
         # Prepare input data
         inputs = pd.DataFrame()
         inputs["peptide_sequences"] = np.array(
-            ["".join(peptide) for peptide in valid_irt_input.metadata["prediction"]]
+            [
+                tokens_to_proforma(peptide)
+                for peptide in valid_irt_input.metadata["prediction"]
+            ]
         )
         inputs.index = valid_irt_input.metadata["spectrum_id"]
 

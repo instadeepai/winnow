@@ -23,8 +23,8 @@ class DatasetLoader(Protocol):
         """Initialise the DatasetLoader.
 
         Args:
-            residue_masses: The mapping of residue masses to UNIMOD tokens.
-            residue_remapping: Optional mapping of residue notations to UNIMOD tokens. Defaults to None.
+            residue_masses: The mapping of residues to their masses (ProForma notation).
+            residue_remapping: Optional mapping of input notations to ProForma notation. Defaults to None.
             isotope_error_range: The range of isotope errors to consider when matching peptides. Defaults to (0, 1).
         """
         ...
