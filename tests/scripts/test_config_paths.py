@@ -6,7 +6,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from winnow.scripts.config_path_utils import (
+from winnow.utils.config_path import (
     get_config_dir,
     get_config_search_path,
     get_primary_config_dir,
@@ -50,7 +50,7 @@ class TestGetConfigDir:
 
             # Mock __file__ to point to winnow/scripts/config_paths.py
             with patch(
-                "winnow.scripts.config_path_utils.__file__",
+                "winnow.scripts.config_path.__file__",
                 str(winnow_dir / "scripts" / "config_paths.py"),
             ):
                 config_dir = get_config_dir()
@@ -67,7 +67,7 @@ class TestGetConfigDir:
 
             # Mock __file__ to point to winnow/scripts/config_paths.py
             with patch(
-                "winnow.scripts.config_path_utils.__file__",
+                "winnow.scripts.config_path.__file__",
                 str(repo_root / "winnow" / "scripts" / "config_paths.py"),
             ):
                 config_dir = get_config_dir()
@@ -76,9 +76,7 @@ class TestGetConfigDir:
     def test_not_found(self):
         """Test error when config dir cannot be found."""
         with patch("importlib.resources.files", side_effect=ModuleNotFoundError()):
-            with patch(
-                "winnow.scripts.config_path_utils.__file__", "/nonexistent/path"
-            ):
+            with patch("winnow.scripts.config_path.__file__", "/nonexistent/path"):
                 with pytest.raises(FileNotFoundError):
                     get_config_dir()
 
@@ -92,7 +90,7 @@ class TestGetConfigSearchPath:
         custom_dir.mkdir()
 
         with patch(
-            "winnow.scripts.config_path_utils.get_config_dir",
+            "winnow.scripts.config_path.get_config_dir",
             return_value=Path("/package/configs"),
         ):
             search_path = get_config_search_path(str(custom_dir))
@@ -106,7 +104,7 @@ class TestGetConfigSearchPath:
         package_dir.mkdir()
 
         with patch(
-            "winnow.scripts.config_path_utils.get_config_dir", return_value=package_dir
+            "winnow.scripts.config_path.get_config_dir", return_value=package_dir
         ):
             search_path = get_config_search_path()
             assert len(search_path) == 1
@@ -135,7 +133,7 @@ class TestGetPrimaryConfigDir:
         package_dir.mkdir()
 
         with patch(
-            "winnow.scripts.config_path_utils.get_config_dir", return_value=package_dir
+            "winnow.scripts.config_path.get_config_dir", return_value=package_dir
         ):
             primary_dir = get_primary_config_dir()
             assert primary_dir == package_dir.resolve()
@@ -152,7 +150,7 @@ class TestGetPrimaryConfigDir:
         (package_dir / "residues.yaml").write_text("package: true")
 
         with patch(
-            "winnow.scripts.config_path_utils.get_config_dir", return_value=package_dir
+            "winnow.scripts.config_path.get_config_dir", return_value=package_dir
         ):
             primary_dir = get_primary_config_dir(str(custom_dir))
 
@@ -182,7 +180,7 @@ class TestGetPrimaryConfigDir:
         (package_dir / "calibrator.yaml").write_text("calibrator_config: true")
 
         with patch(
-            "winnow.scripts.config_path_utils.get_config_dir", return_value=package_dir
+            "winnow.scripts.config_path.get_config_dir", return_value=package_dir
         ):
             primary_dir = get_primary_config_dir(str(custom_dir))
 
