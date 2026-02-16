@@ -118,10 +118,15 @@ Extracts features using Prosit intensity prediction models to compare predicted 
 ```python
 from winnow.calibration.calibration_features import PrositFeatures
 
-feature = PrositFeatures(mz_tolerance=0.02)
+feature = PrositFeatures(
+    mz_tolerance=0.02,
+    invalid_prosit_residues=["N[UNIMOD:7]", "Q[UNIMOD:7]"],  # Residues not supported by Prosit
+)
 ```
 
 **Purpose**: Leverages ML-based intensity predictions for spectral quality assessment.
+
+**Important:** Prosit models require all cysteines to be carbamidomethylated (C[UNIMOD:4]). Peptides with unmodified cysteine ("C") are automatically filtered out and cannot have Prosit features computed. The carbamidomethylation is passed explicitly to Prosit models.
 
 ### BeamFeatures
 
@@ -166,6 +171,7 @@ Prosit-dependent features (PrositFeatures, ChimericFeatures, RetentionTimeFeatur
 - Peptides longer than 30 amino acids (Prosit limitation)
 - Precursor charges greater than 6 (Prosit limitation)
 - Unsupported modifications (Prosit limitation)
+- Unmodified cysteine residues (Prosit requires C[UNIMOD:4])
 - Lack of runner-up sequences for chimeric features
 
 Winnow provides two strategies for handling such cases:
@@ -183,7 +189,7 @@ Winnow provides two strategies for handling such cases:
 
 **Use when you want strict data quality requirements.**
 
-- Raises an error immediately when invalid spectra are encountered
+- Raises an error immediately when invalid PSMs are encountered
 - Forces users to pre-filter datasets before training/prediction
 - Cleaner feature space with no missingness indicators
 

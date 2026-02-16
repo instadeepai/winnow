@@ -36,8 +36,8 @@ class InstaNovoDatasetLoader(DatasetLoader):
         """Initialise the InstaNovoDatasetLoader.
 
         Args:
-            residue_masses: The mapping of residue masses to UNIMOD tokens.
-            residue_remapping: The mapping of residue notations to UNIMOD tokens.
+            residue_masses: The mapping of residues to their masses (ProForma notation).
+            residue_remapping: The mapping of input notations to ProForma notation.
             isotope_error_range: The range of isotope errors to consider when matching peptides.
         """
         self.metrics = Metrics(
@@ -383,8 +383,8 @@ class MZTabDatasetLoader(DatasetLoader):
         """Initialise the MZTabDatasetLoader.
 
         Args:
-            residue_masses: The mapping of residue masses to UNIMOD tokens.
-            residue_remapping: The mapping of residue notations to UNIMOD tokens.
+            residue_masses: The mapping of residues to their masses (ProForma notation).
+            residue_remapping: The mapping of input notations to ProForma notation.
             isotope_error_range: The range of isotope errors to consider when matching peptides.
         """
         self.metrics = Metrics(
@@ -550,6 +550,10 @@ class MZTabDatasetLoader(DatasetLoader):
     ) -> pl.DataFrame:
         """Tokenize peptide strings into lists of amino acids and map modifications.
 
+        Tokenization happens first (which strips hyphens from N-terminal modifications),
+        then token-level remapping is applied. This approach handles ProForma notation
+        correctly without requiring hyphens in the residue_remapping config.
+
         Args:
             predictions: Processed predictions or sequence labels
             untokenised_column: Name of the column containing the untokenised sequence
@@ -559,14 +563,14 @@ class MZTabDatasetLoader(DatasetLoader):
             Predictions with tokenized sequences
         """
         return predictions.with_columns(
-            # Map modifications to UNIMOD format (e.g., "M+15.995" -> "M[UNIMOD:35]")
+            # First: tokenize the sequence (regex strips hyphens from N-terminal mods)
             pl.col(untokenised_column)
-            .map_elements(self._map_modifications, return_dtype=pl.Utf8)
+            .map_elements(self.metrics._split_peptide, return_dtype=pl.List(pl.Utf8))
             .alias(tokenised_column)
         ).with_columns(
-            # Split sequence string into list of amino acid tokens
+            # Then: remap tokens to Proforma format (e.g., "[Acetyl]" -> "[UNIMOD:1]")
             pl.col(tokenised_column)
-            .map_elements(self.metrics._split_peptide, return_dtype=pl.List(pl.Utf8))
+            .map_elements(self._remap_tokens, return_dtype=pl.List(pl.Utf8))
             .alias(tokenised_column)
         )
 
@@ -605,11 +609,22 @@ class MZTabDatasetLoader(DatasetLoader):
             beam_predictions.append(scored_sequences if scored_sequences else None)
         return beam_predictions
 
-    def _map_modifications(self, sequence: str) -> str:
-        """Map modifications to UNIMOD."""
-        for mod, unimod in self.metrics.residue_set.residue_remapping.items():
-            sequence = sequence.replace(mod, unimod)
-        return sequence
+    def _remap_tokens(self, tokens: list[str]) -> list[str]:
+        """Remap tokens using residue_remapping.
+
+        Applies remapping at the token level after tokenization, which handles
+        N-terminal modifications correctly without requiring hyphens in the config.
+
+        Args:
+            tokens: List of peptide tokens (amino acids and modifications)
+
+        Returns:
+            List of tokens with modifications remapped to Proforma format
+        """
+        return [
+            self.metrics.residue_set.residue_remapping.get(token, token)
+            for token in tokens
+        ]
 
     def _get_top_predictions(self, predictions: pl.DataFrame) -> pl.DataFrame:
         """Get highest scoring prediction for each spectrum.
@@ -773,8 +788,8 @@ class WinnowDatasetLoader(DatasetLoader):
         """Initialise the WinnowDatasetLoader.
 
         Args:
-            residue_masses: The mapping of residue masses to UNIMOD tokens.
-            residue_remapping: The mapping of residue notations to UNIMOD tokens.
+            residue_masses: The mapping of residues to their masses (ProForma notation).
+            residue_remapping: The mapping of input notations to ProForma notation.
             isotope_error_range: The range of isotope errors to consider when matching peptides.
         """
         self.metrics = Metrics(

@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 from winnow.compat.instanovo import ScoredSequence
+from winnow.utils.peptide import tokens_to_proforma
 
 
 @dataclass
@@ -53,10 +54,10 @@ class CalibrationDataset:
             output_metadata = self.metadata.copy(deep=True)
             if "sequence" in output_metadata.columns:
                 output_metadata["sequence"] = output_metadata["sequence"].apply(
-                    lambda peptide_list: "".join(peptide_list) if peptide_list else None
+                    tokens_to_proforma
                 )
             output_metadata["prediction"] = output_metadata["prediction"].apply(
-                lambda peptide_list: "".join(peptide_list) if peptide_list else None
+                tokens_to_proforma
             )
             output_metadata.to_csv(metadata_file, index=False)
 

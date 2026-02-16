@@ -51,7 +51,7 @@ def print_config(cfg) -> None:
     Args:
         cfg: OmegaConf configuration object to print
     """
-    from winnow.scripts.config_formatter import ConfigFormatter
+    from winnow.utils.config_formatter import ConfigFormatter
 
     formatter = ConfigFormatter()
     formatter.print_config(cfg)
@@ -159,7 +159,7 @@ def train_entry_point(
     """
     from hydra import initialize_config_dir, compose
     from hydra.utils import instantiate
-    from winnow.scripts.config_path_utils import get_primary_config_dir
+    from winnow.utils.config_path import get_primary_config_dir
 
     # Get primary config directory (custom if provided, otherwise package/dev)
     primary_config_dir = get_primary_config_dir(config_dir)
@@ -231,7 +231,7 @@ def predict_entry_point(
     """
     from hydra import initialize_config_dir, compose
     from hydra.utils import instantiate
-    from winnow.scripts.config_path_utils import get_primary_config_dir
+    from winnow.utils.config_path import get_primary_config_dir
 
     # Get primary config directory (custom if provided, otherwise package/dev)
     primary_config_dir = get_primary_config_dir(config_dir)

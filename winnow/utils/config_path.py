@@ -50,9 +50,9 @@ def get_config_dir() -> Path:
         pass
 
     # Fallback to dev mode (cloned repo)
-    # This file is in winnow/scripts/, so go up to repo root
-    script_dir = Path(__file__).parent
-    repo_root = script_dir.parent.parent
+    # This file is in winnow/utils/, so go up to repo root
+    utils_dir = Path(__file__).parent
+    repo_root = utils_dir.parent.parent
     dev_configs = repo_root / "winnow" / "configs"
 
     if dev_configs.exists() and dev_configs.is_dir():

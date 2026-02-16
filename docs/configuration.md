@@ -151,7 +151,7 @@ calibrator:
       _target_: winnow.calibration.calibration_features.PrositFeatures
       mz_tolerance: 0.02
       learn_from_missing: true
-      invalid_prosit_tokens: ${invalid_prosit_tokens}
+      invalid_prosit_residues: ${invalid_prosit_residues}
       prosit_intensity_model_name: Prosit_2020_intensity_HCD
 
     retention_time_feature:
@@ -165,14 +165,14 @@ calibrator:
       max_iter: 200
       early_stopping: false
       validation_fraction: 0.1
-      invalid_prosit_tokens: ${invalid_prosit_tokens}
+      invalid_prosit_residues: ${invalid_prosit_residues}
       prosit_irt_model_name: Prosit_2019_irt
 
     chimeric_features:
       _target_: winnow.calibration.calibration_features.ChimericFeatures
       mz_tolerance: 0.02
       learn_from_missing: true
-      invalid_prosit_tokens: ${invalid_prosit_tokens}
+      invalid_prosit_residues: ${invalid_prosit_residues}
       prosit_intensity_model_name: Prosit_2020_intensity_HCD
 
     beam_features:
@@ -290,23 +290,33 @@ residue_masses:
   "[UNIMOD:5]": 43.005814     # Carbamylation (terminal)
   "[UNIMOD:385]": -17.026549  # NH3 loss (terminal)
 
-invalid_prosit_tokens:
-  # InstaNovo
-  - "[UNIMOD:7]"
-  - "[UNIMOD:21]"
-  - "[UNIMOD:1]"
-  - "[UNIMOD:5]"
-  - "[UNIMOD:385]"
-  # Casanovo
-  - "+0.984"
-  - "+42.011"
-  - "+43.006"
-  - "-17.027"
-  - "[Deamidated]"
+invalid_prosit_residues:
+  # Residue modifications (amino acid + modification)
+  - "N[UNIMOD:7]"   # Deamidated asparagine
+  - "Q[UNIMOD:7]"   # Deamidated glutamine
+  - "R[UNIMOD:7]"   # Arginine citrullination
+  - "P[UNIMOD:35]"  # Proline hydroxylation
+  - "S[UNIMOD:21]"  # Phosphorylated serine
+  - "T[UNIMOD:21]"  # Phosphorylated threonine
+  - "Y[UNIMOD:21]"  # Phosphorylated tyrosine
+  - "C[UNIMOD:312]"  # Cysteinylation
+  - "E[UNIMOD:27]"  # Pyro-glutamine
+  - "Q[UNIMOD:28]"  # Pyro-glutamine
+  # N-terminal modifications (standalone tokens)
+  - "[UNIMOD:1]"    # N-terminal acetylation
+  - "[UNIMOD:5]"    # N-terminal carbamylation
+  - "[UNIMOD:385]"  # N-terminal ammonia loss
+  - "(+25.98)"      # Carbamylation & NH3 loss (legacy notation)
+
   # ... other unsupported modifications
 ```
 
-This configuration is shared across all pipelines and referenced via `${residue_masses}` and `${invalid_prosit_tokens}` interpolation.
+**Important note on cysteine handling:**
+Prosit models require all cysteines to be carbamidomethylated (C[UNIMOD:4]). Peptides containing unmodified cysteine ("C") are automatically filtered out during Prosit feature computation. The carbamidomethylation annotation is passed explicitly to Prosit models.
+
+This configuration is shared across all pipelines and referenced via `${residue_masses}` and `${invalid_prosit_residues}` interpolation.
+
+Winnow represents PTMs using the UNIMOD format internally, so all residue masses and PTMs to be filtered from Prosit features must use this format. Please check that all PTMs unsupported by selected Prosit models will be filtered out.
 
 ### Data loader configs
 
@@ -418,7 +428,7 @@ defaults:
 
 Common interpolation patterns in Winnow configs:
 - `${residue_masses}` - References amino acid masses from residues.yaml
-- `${invalid_prosit_tokens}` - References invalid tokens from residues.yaml
+- `${invalid_prosit_residues}` - References invalid tokens from residues.yaml
 - `${fdr_control.confidence_column}` - References FDR confidence column setting
 
 ## Creating custom configurations
