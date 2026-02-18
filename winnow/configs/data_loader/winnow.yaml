@@ -5,3 +5,4 @@ _target_: winnow.datasets.data_loaders.WinnowDatasetLoader
 residue_masses: ${residue_masses}
 # The internal Winnow dataset loader does not need a residue remapping
 # since it uses the UNIMOD tokens directly.
+residue_remapping: null
