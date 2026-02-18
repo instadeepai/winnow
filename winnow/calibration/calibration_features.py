@@ -264,27 +264,34 @@ def compute_ion_identifications(
     return zip(*matches)
 
 
-class PrositFeatures(CalibrationFeatures):
-    """A class for extracting features related to Prosit: a machine learning-based intensity prediction tool for peptide fragmentation."""
+class FragmentMatchFeatures(CalibrationFeatures):
+    """Computes fragment ion match features between the observed spectrum and the theoretical spectrum.
+
+    Uses a Koina intensity model to generate a theoretical fragmentation spectrum for the top-1
+    de novo predicted peptide sequence, then computes how well that theoretical spectrum matches
+    the observed spectrum (ion match rate and ion match intensity).
+    """
 
     def __init__(
         self,
         mz_tolerance: float,
-        invalid_prosit_residues: List[str],
+        unsupported_residues: List[str],
         learn_from_missing: bool = True,
-        prosit_intensity_model_name: str = "Prosit_2020_intensity_HCD",
+        intensity_model_name: str = "Prosit_2020_intensity_HCD",
         model_input_constants: Optional[Dict[str, Any]] = None,
         model_input_columns: Optional[Dict[str, str]] = None,
     ) -> None:
-        """Initialize PrositFeatures.
+        """Initialize FragmentMatchFeatures.
 
         Args:
             mz_tolerance (float): The mass-to-charge tolerance for ion matching.
-            invalid_prosit_residues (List[str]): The residues to consider as invalid for Prosit intensity prediction. These must be in Proforma format.
+            unsupported_residues (List[str]): Residues unsupported by the configured Koina intensity
+                model. Predictions containing any of these residues are excluded from model input.
+                Must be in ProForma format.
             learn_from_missing (bool): Whether to learn from missing data by including a missingness indicator column.
                 If False, an error will be raised when invalid spectra are encountered.
                 Defaults to True.
-            prosit_intensity_model_name (str): The name of the Koina intensity model to use.
+            intensity_model_name (str): The name of the Koina intensity model to use.
                 Defaults to "Prosit_2020_intensity_HCD".
             model_input_constants (Optional[Dict[str, Any]]): Mapping of Koina input name to a
                 constant value that will be tiled across all rows (e.g. {"collision_energies": 25}).
@@ -298,20 +305,20 @@ class PrositFeatures(CalibrationFeatures):
         """
         _validate_model_input_params(model_input_constants, model_input_columns)
         self.mz_tolerance = mz_tolerance
-        self.invalid_prosit_residues = invalid_prosit_residues
+        self.unsupported_residues = unsupported_residues
         self.learn_from_missing = learn_from_missing
-        self.prosit_intensity_model_name = prosit_intensity_model_name
+        self.intensity_model_name = intensity_model_name
         self.model_input_constants = model_input_constants
         self.model_input_columns = model_input_columns
 
     @property
     def dependencies(self) -> List[FeatureDependency]:
-        """Returns the list of feature dependencies for the PrositFeatures.
+        """Returns the list of feature dependencies for FragmentMatchFeatures.
 
         Since no dependencies are required, this method returns an empty list.
 
         Returns:
-            List[FeatureDependency]: An empty list, as there are no dependencies for Prosit features.
+            List[FeatureDependency]: An empty list, as there are no dependencies for this feature.
         """
         return []
 
@@ -322,35 +329,35 @@ class PrositFeatures(CalibrationFeatures):
         This method provides the natural language identifier used as the key for the feature.
 
         Returns:
-            str: The feature identifier, "Prosit Features".
+            str: The feature identifier, "Fragment Match Features".
         """
-        return "Prosit Features"
+        return "Fragment Match Features"
 
     @property
     def columns(self) -> List[str]:
-        """Returns the columns associated with the Prosit features.
+        """Returns the columns associated with the fragment match features.
 
         The columns include ion matches and the corresponding ion match intensities.
 
         Returns:
             List[str]: A list of column names: ["ion_matches", "ion_match_intensity"] and optionally
-                "is_missing_prosit_features" if learn_from_missing is True.
+                "is_missing_fragment_match_features" if learn_from_missing is True.
         """
         columns = ["ion_matches", "ion_match_intensity"]
         if self.learn_from_missing:
-            columns.append("is_missing_prosit_features")
+            columns.append("is_missing_fragment_match_features")
         return columns
 
-    def check_valid_prosit_prediction(self, dataset: CalibrationDataset) -> pd.Series:
-        """Check which predictions are valid for Prosit intensity prediction.
+    def check_valid_prediction(self, dataset: CalibrationDataset) -> pd.Series:
+        """Check which predictions are valid for intensity prediction.
 
         Args:
             dataset (CalibrationDataset): The dataset to check.
 
         Returns:
-            pd.Series: A series of booleans indicating whether the prediction is valid for Prosit intensity prediction.
+            pd.Series: A series of booleans indicating whether the prediction is valid for intensity prediction.
         """
-        # Filter out invalid spectra for Prosit intensity prediction
+        # Filter out invalid spectra for intensity prediction
         filtered_dataset = (
             dataset.filter_entries(
                 metadata_predicate=lambda row: row["precursor_charge"] > 6
@@ -360,7 +367,7 @@ class PrositFeatures(CalibrationFeatures):
                 metadata_predicate=lambda row: (
                     any(
                         token in row["prediction"]
-                        for token in self.invalid_prosit_residues
+                        for token in self.unsupported_residues
                     )
                 )
             )
@@ -374,12 +381,12 @@ class PrositFeatures(CalibrationFeatures):
         # Obtain valid indices
         valid_spectrum_ids = filtered_dataset.metadata["spectrum_id"]
 
-        # Create boolean series indicating whether the prediction is valid for Prosit intensity prediction
-        is_valid_prosit_prediction = pd.Series(
+        # Create boolean series indicating whether the prediction is valid for intensity prediction
+        is_valid_prediction = pd.Series(
             dataset.metadata["spectrum_id"].isin(valid_spectrum_ids),
         )
 
-        return is_valid_prosit_prediction
+        return is_valid_prediction
 
     def prepare(self, dataset: CalibrationDataset) -> None:
         """Prepares the dataset for feature computation.
@@ -392,9 +399,12 @@ class PrositFeatures(CalibrationFeatures):
         return
 
     def compute(self, dataset: CalibrationDataset) -> None:
-        """Computes the Prosit features for the given dataset.
+        """Computes fragment match features for the given dataset.
 
-        Uses the Prosit model to predict intensities based on peptide sequences, precursor charges and collision energies. Processes and sorts predictions, aligns ion match intensities and mass-to-charge ratios (m/z), and stores the results in the dataset metadata.
+        Uses the configured Koina model to predict theoretical fragmentation spectra
+        based on peptide sequences, precursor charges and other metadata. Processes and sorts predictions,
+        aligns ion match intensities and mass-to-charge ratios (m/z), and stores the results in the
+        dataset metadata.
 
         Args:
             dataset (CalibrationDataset): The dataset containing metadata required for predictions.
@@ -402,29 +412,29 @@ class PrositFeatures(CalibrationFeatures):
         Raises:
             ValueError: If learn_from_missing is False and invalid spectra are found in the dataset.
         """
-        # Check which predictions are valid for Prosit intensity prediction
-        is_valid_prosit_prediction = self.check_valid_prosit_prediction(dataset)
-        dataset.metadata["is_missing_prosit_features"] = ~is_valid_prosit_prediction
+        # Check which predictions are valid for intensity prediction
+        is_valid_prediction = self.check_valid_prediction(dataset)
+        dataset.metadata["is_missing_fragment_match_features"] = ~is_valid_prediction
 
         # If not learning from missing data, raise error when invalid spectra are found
         if not self.learn_from_missing:
-            n_invalid = (~is_valid_prosit_prediction).sum()
+            n_invalid = (~is_valid_prediction).sum()
             if n_invalid > 0:
                 raise ValueError(
-                    f"Found {n_invalid} spectra with missing Prosit features. "
-                    f"When learn_from_missing=False, all spectra must be valid for Prosit prediction. "
+                    f"Found {n_invalid} spectra with missing fragment match features. "
+                    f"When learn_from_missing=False, all spectra must be valid for intensity prediction. "
                     f"Please filter your dataset to remove:\n"
                     f"  - Peptides longer than 30 amino acids\n"
                     f"  - Precursor charges greater than 6\n"
-                    f"  - Peptides with unsupported modifications (e.g., {', '.join(self.invalid_prosit_residues[:3])}...)\n"
+                    f"  - Peptides with unsupported modifications (e.g., {', '.join(self.unsupported_residues[:3])}...)\n"
                     f"Or set learn_from_missing=True to handle missing data automatically."
                 )
 
         original_indices = dataset.metadata.index
 
-        # Filter out invalid spectra for Prosit intensity prediction
-        valid_prosit_input = dataset.filter_entries(
-            metadata_predicate=lambda row: row["is_missing_prosit_features"]
+        # Filter out invalid spectra for intensity prediction
+        valid_input = dataset.filter_entries(
+            metadata_predicate=lambda row: row["is_missing_fragment_match_features"]
         )
 
         # Prepare input data
@@ -432,23 +442,21 @@ class PrositFeatures(CalibrationFeatures):
         inputs["peptide_sequences"] = np.array(
             [
                 tokens_to_proforma(peptide)
-                for peptide in valid_prosit_input.metadata["prediction"]
+                for peptide in valid_input.metadata["prediction"]
             ]
         )
-        inputs["precursor_charges"] = np.array(
-            valid_prosit_input.metadata["precursor_charge"]
-        )
-        inputs.index = valid_prosit_input.metadata["spectrum_id"]
+        inputs["precursor_charges"] = np.array(valid_input.metadata["precursor_charge"])
+        inputs.index = valid_input.metadata["spectrum_id"]
 
-        model = koinapy.Koina(self.prosit_intensity_model_name)
+        model = koinapy.Koina(self.intensity_model_name)
         inputs = _resolve_model_inputs(
             inputs=inputs,
-            metadata=valid_prosit_input.metadata,
+            metadata=valid_input.metadata,
             required_model_inputs=model.model_inputs,
             auto_populated={"peptide_sequences", "precursor_charges"},
             constants=self.model_input_constants,
             columns=self.model_input_columns,
-            model_name=self.prosit_intensity_model_name,
+            model_name=self.intensity_model_name,
         )
         predictions: pd.DataFrame = model.predict(inputs)
 
@@ -480,13 +488,13 @@ class PrositFeatures(CalibrationFeatures):
         grouped_predictions["mz"] = grouped_predictions["mz"].apply(np.sort)
 
         # Match computed metadata to valid spectra and impute missing values for invalid spectra
-        # i.e., if is_missing_prosit_features is True, then prosit_mz and prosit_intensity are NaN
+        # i.e., if is_missing_fragment_match_features is True, then theoretical_mz and theoretical_intensity are NaN
         dataset.metadata.index = dataset.metadata["spectrum_id"]
-        dataset.metadata["prosit_mz"] = grouped_predictions["mz"].reindex(
+        dataset.metadata["theoretical_mz"] = grouped_predictions["mz"].reindex(
             dataset.metadata["spectrum_id"],
             fill_value=np.nan,
         )
-        dataset.metadata["prosit_intensity"] = grouped_predictions[
+        dataset.metadata["theoretical_intensity"] = grouped_predictions[
             "intensities"
         ].reindex(dataset.metadata["spectrum_id"], fill_value=np.nan)
 
@@ -494,10 +502,10 @@ class PrositFeatures(CalibrationFeatures):
         dataset.metadata.index = original_indices
 
         # Compute ion matches and match intensity
-        # Zeros are returned for rows with missing Prosit-predicted spectra
+        # Zeros are returned for rows with missing theoretical spectra
         ion_matches, match_intensity = compute_ion_identifications(
             dataset=dataset.metadata,
-            source_column="prosit_mz",
+            source_column="theoretical_mz",
             mz_tolerance=self.mz_tolerance,
         )
 
@@ -956,9 +964,10 @@ class BeamFeatures(CalibrationFeatures):
 
 
 class RetentionTimeFeature(CalibrationFeatures):
-    """Computes Prosit iRT features and calibrates an iRT predictor.
+    """Computes iRT features and calibrates an iRT predictor.
 
-    This feature uses the Prosit model to predict indexed retention times (iRT) for peptides and trains a regression model to calibrate predictions based on observed retention times.
+    Uses a Koina iRT model to predict indexed retention times (iRT) for peptides and trains a
+    regression model to calibrate predictions based on observed retention times.
     """
 
     irt_predictor: MLPRegressor
@@ -967,7 +976,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         self,
         hidden_dim: int,
         train_fraction: float,
-        invalid_prosit_residues: List[str],
+        unsupported_residues: List[str],
         learn_from_missing: bool = True,
         seed: int = 42,
         learning_rate_init: float = 0.001,
@@ -975,14 +984,16 @@ class RetentionTimeFeature(CalibrationFeatures):
         max_iter: int = 200,
         early_stopping: bool = False,
         validation_fraction: float = 0.1,
-        prosit_irt_model_name: str = "Prosit_2019_irt",
+        irt_model_name: str = "Prosit_2019_irt",
     ) -> None:
         """Initialize RetentionTimeFeature.
 
         Args:
             hidden_dim (int): Hidden dimension size for the MLP regressor.
             train_fraction (float): Fraction of data to use for training the iRT calibrator.
-            invalid_prosit_residues (List[str]): The residues to consider as invalid for Prosit iRT prediction. These must be in Proforma format.
+            unsupported_residues (List[str]): Residues unsupported by the configured Koina iRT
+                model. Predictions containing any of these residues are excluded from model input.
+                Must be in ProForma format.
             learn_from_missing (bool): Whether to learn from missing data by including a missingness indicator column.
                 If False, an error will be raised when invalid spectra are encountered.
                 Defaults to True.
@@ -992,14 +1003,14 @@ class RetentionTimeFeature(CalibrationFeatures):
             max_iter (int): Maximum number of training iterations. Defaults to 200.
             early_stopping (bool): Whether to use early stopping to terminate training. Defaults to False.
             validation_fraction (float): Proportion of training data to use for early stopping validation. Defaults to 0.1.
-            prosit_irt_model_name (str): The name of the Koina iRT model to use.
+            irt_model_name (str): The name of the Koina iRT model to use.
                 Defaults to "Prosit_2019_irt".
         """
         self.train_fraction = train_fraction
         self.hidden_dim = hidden_dim
         self.learn_from_missing = learn_from_missing
-        self.invalid_prosit_residues = invalid_prosit_residues
-        self.prosit_irt_model_name = prosit_irt_model_name
+        self.unsupported_residues = unsupported_residues
+        self.irt_model_name = irt_model_name
         self.irt_predictor = MLPRegressor(
             hidden_layer_sizes=[hidden_dim],
             random_state=seed,
@@ -1030,7 +1041,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         Returns:
             str: The feature identifier.
         """
-        return "Prosit iRT Features"
+        return "iRT Feature"
 
     @property
     def columns(self) -> List[str]:
@@ -1054,30 +1065,19 @@ class RetentionTimeFeature(CalibrationFeatures):
         Returns:
             pd.Series: A series of booleans indicating whether the prediction is valid for iRT prediction.
         """
-        # Filter out invalid spectra for Prosit iRT prediction
-        filtered_dataset = (
-            dataset.filter_entries(
-                metadata_predicate=lambda row: len(row["prediction"]) > 30
-            )
-            .filter_entries(
-                metadata_predicate=lambda row: (
-                    any(
-                        token in row["prediction"]
-                        for token in self.invalid_prosit_residues
-                    )
-                )
-            )
-            .filter_entries(
-                metadata_predicate=lambda row: (
-                    any(token == "C" for token in row["prediction"])
-                )
+        # Filter out invalid spectra for iRT prediction
+        filtered_dataset = dataset.filter_entries(
+            metadata_predicate=lambda row: len(row["prediction"]) > 30
+        ).filter_entries(
+            metadata_predicate=lambda row: (
+                any(token in row["prediction"] for token in self.unsupported_residues)
             )
         )
 
         # Obtain valid indices
         valid_spectrum_ids = filtered_dataset.metadata["spectrum_id"]
 
-        # Create boolean series indicating whether the prediction is valid for Prosit iRT prediction
+        # Create boolean series indicating whether the prediction is valid for iRT prediction
         is_valid_irt_prediction = pd.Series(
             dataset.metadata["spectrum_id"].isin(valid_spectrum_ids),
         )
@@ -1089,8 +1089,8 @@ class RetentionTimeFeature(CalibrationFeatures):
 
         This method:
         1. Selects high-confidence peptide sequences.
-        2. Uses the Prosit model to predict iRT values for them.
-        3. Trains an MLPRegressor to map observed retention times to Prosit-predicted iRT values.
+        2. Uses the configured Koina iRT model to predict iRT values for them.
+        3. Trains an MLPRegressor to map observed retention times to predicted iRT values.
 
         Args:
             dataset (CalibrationDataset): The dataset containing peptide sequences and retention times.
@@ -1101,7 +1101,7 @@ class RetentionTimeFeature(CalibrationFeatures):
             predictions=dataset.predictions.copy() if dataset.predictions else [],
         )
 
-        # Check which predictions are valid for Prosit iRT prediction
+        # Check which predictions are valid for iRT prediction
         is_valid_irt_prediction = self.check_valid_irt_prediction(dataset_copy)
         dataset_copy.metadata["is_missing_irt_error"] = ~is_valid_irt_prediction
         valid_irt_input = dataset_copy.filter_entries(
@@ -1120,7 +1120,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         )
         inputs = inputs.set_index(train_data.index)
 
-        prosit_model = koinapy.Koina(self.prosit_irt_model_name)
+        prosit_model = koinapy.Koina(self.irt_model_name)
         predictions = prosit_model.predict(inputs)
         train_data["iRT"] = predictions["irt"]
 
@@ -1132,7 +1132,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         """Computes the iRT error by comparing observed retention times to predicted iRT values.
 
         This method:
-        1. Uses the Prosit model to predict iRT values for all peptides.
+        1. Uses the configured Koina iRT model to predict iRT values for all peptides.
         2. Uses the trained MLPRegressor to predict iRT values based on observed retention times.
         3. Computes the absolute error between predicted and actual iRT values.
 
@@ -1142,7 +1142,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         Raises:
             ValueError: If learn_from_missing is False and invalid spectra are found in the dataset.
         """
-        # Check which predictions are valid for Prosit iRT prediction
+        # Check which predictions are valid for iRT prediction
         is_valid_irt_prediction = self.check_valid_irt_prediction(dataset)
         dataset.metadata["is_missing_irt_error"] = ~is_valid_irt_prediction
 
@@ -1157,13 +1157,13 @@ class RetentionTimeFeature(CalibrationFeatures):
                     f"  - Spectra without retention time data\n"
                     f"  - Peptides longer than 30 amino acids\n"
                     f"  - Precursor charges greater than 6\n"
-                    f"  - Peptides with unsupported modifications (e.g., {', '.join(self.invalid_prosit_residues[:3])}...)\n"
+                    f"  - Peptides with unsupported modifications (e.g., {', '.join(self.unsupported_residues[:3])}...)\n"
                     f"Or set learn_from_missing=True to handle missing data automatically."
                 )
 
         original_indices = dataset.metadata.index
 
-        # Filter out invalid spectra for Prosit iRT prediction
+        # Filter out invalid spectra for iRT prediction
         valid_irt_input = dataset.filter_entries(
             metadata_predicate=lambda row: row["is_missing_irt_error"]
         )
@@ -1178,7 +1178,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         )
         inputs.index = valid_irt_input.metadata["spectrum_id"]
 
-        prosit_model = koinapy.Koina(self.prosit_irt_model_name)
+        prosit_model = koinapy.Koina(self.irt_model_name)
         predictions = prosit_model.predict(inputs)
         predictions["spectrum_id"] = predictions.index
 
@@ -1191,7 +1191,7 @@ class RetentionTimeFeature(CalibrationFeatures):
 
         # Predict iRT using the trained MLPRegressor
         # Note that we will always obtain a predicted iRT value for each spectrum here,
-        # even if the spectrum is invalid for Prosit, because we predict using observed retention time.
+        # even if the spectrum is invalid for iRT prediction, because we predict using observed retention time.
         dataset.metadata["predicted iRT"] = self.irt_predictor.predict(
             dataset.metadata["retention_time"].values.reshape(-1, 1)
         )

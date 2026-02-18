@@ -1,6 +1,6 @@
 # --- Calibrator configuration ---
 
-# Shared Koina model inputs — applied to all intensity-based features (PrositFeatures, ChimericFeatures).
+# Shared Koina model inputs — applied to all intensity-based features (FragmentMatchFeatures, ChimericFeatures).
 # To use a constant value tiled across all rows, specify it under koina_model_input_constants.
 # To use per-row values from a metadata column, add the column mapping under koina_model_input_columns.
 # Each input key must appear in at most one of these two dicts.
@@ -25,12 +25,12 @@ calibrator:
       _target_: winnow.calibration.calibration_features.MassErrorFeature
       residue_masses: ${residue_masses}  # The residue masses to use for the mass error feature.
 
-    prosit_features:
-      _target_: winnow.calibration.calibration_features.PrositFeatures
+    fragment_match_features:
+      _target_: winnow.calibration.calibration_features.FragmentMatchFeatures
       mz_tolerance: 0.02
-      learn_from_missing: false  # Whether to learn from missing Prosit features. If False, errors will be raised when invalid spectra are encountered.
-      invalid_prosit_residues: ${invalid_prosit_residues}  # The residues to consider as invalid for Prosit features.
-      prosit_intensity_model_name: Prosit_2025_intensity_22PTM  # The name of the Koina intensity model to use.
+      learn_from_missing: false  # Whether to learn from missing fragment match features. If False, errors will be raised when invalid spectra are encountered.
+      unsupported_residues: ${unsupported_residues}  # Residues unsupported by the configured Koina intensity model.
+      intensity_model_name: Prosit_2025_intensity_22PTM  # The name of the Koina intensity model to use.
       model_input_constants: ${koina_model_input_constants}  # Shared Koina model inputs (e.g. collision_energies, fragmentation_types).
       # model_input_columns: ${koina_model_input_columns}  # Uncomment to use per-row metadata columns instead.
 
@@ -45,14 +45,14 @@ calibrator:
       max_iter: 200  # Maximum number of training iterations for the MLP regressor.
       early_stopping: true  # Whether to use early stopping for the MLP regressor.
       validation_fraction: 0.1  # Proportion of training data to use for early stopping validation.
-      invalid_prosit_residues: ${invalid_prosit_residues}  # The residues to consider as invalid for Prosit iRT features.
-      prosit_irt_model_name: Prosit_2025_irt_22PTM  # The name of the Koina iRT model to use.
+      unsupported_residues: ${unsupported_residues}  # Residues unsupported by the configured Koina iRT model.
+      irt_model_name: Prosit_2025_irt_22PTM  # The name of the Koina iRT model to use.
 
     chimeric_features:
       _target_: winnow.calibration.calibration_features.ChimericFeatures
       mz_tolerance: 0.02
       learn_from_missing: false  # Whether to learn from missing chimeric features. If False, errors will be raised when invalid spectra are encountered.
-      invalid_prosit_residues: ${invalid_prosit_residues}  # The residues to consider as invalid for Prosit chimeric intensity features.
+      invalid_prosit_residues: ${unsupported_residues}  # Residues unsupported by the configured Koina intensity model.
       prosit_intensity_model_name: Prosit_2025_intensity_22PTM  # The name of the Koina intensity model to use.
       model_input_constants: ${koina_model_input_constants}  # Shared Koina model inputs (e.g. collision_energies, fragmentation_types).
       # model_input_columns: ${koina_model_input_columns}  # Uncomment to use per-row metadata columns instead.

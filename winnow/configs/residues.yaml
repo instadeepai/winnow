@@ -43,30 +43,25 @@ residue_masses:
   "[UNIMOD:385]": -17.026549 # NH3 loss
   "(+25.98)": 25.980265  # Carbamylation & NH3 loss (legacy notation)
 
-# Invalid residues for Prosit features.
-#
-# Prosit models require the following:
-# 1. All Cysteines MUST be carbamidomethylated (C[UNIMOD:4])
-# 2. Unmodified Cysteine ("C") is invalid and filtered out
-# 3. Carbamidomethylation is passed explicitly to Prosit (not converted to plain "C")
-#
+# Residues unsupported by the configured Koina models.
 # These residues must be specified using UNIMOD PTM IDs.
-# Residues listed here are filtered from predictions before Prosit feature computation.
-# Please check that all PTMs unsupported by selected Prosit models but supported by Winnow are included.
-invalid_prosit_residues:
+# Please check that all PTMs unsupported by your selected Koina models but supported by Winnow are included.
+unsupported_residues:
   # Residue modifications (amino acid + modification)
-  - "N[UNIMOD:7]"   # Deamidated asparagine
-  - "Q[UNIMOD:7]"   # Deamidated glutamine
-  - "R[UNIMOD:7]"   # Arginine citrullination
-  - "P[UNIMOD:35]"  # Proline hydroxylation
-  - "S[UNIMOD:21]"  # Phosphorylated serine
-  - "T[UNIMOD:21]"  # Phosphorylated threonine
-  - "Y[UNIMOD:21]"  # Phosphorylated tyrosine
-  - "C[UNIMOD:312]"  # Cysteinylation
-  - "E[UNIMOD:27]"  # Pyro-glutamine
-  - "Q[UNIMOD:28]"  # Pyro-glutamine
+  # - "N[UNIMOD:7]"   # Deamidated asparagine
+  # - "Q[UNIMOD:7]"   # Deamidated glutamine
+  # - "R[UNIMOD:7]"   # Arginine citrullination
+  # - "P[UNIMOD:35]"  # Proline hydroxylation
+  # - "S[UNIMOD:21]"  # Phosphorylated serine
+  # - "T[UNIMOD:21]"  # Phosphorylated threonine
+  # - "Y[UNIMOD:21]"  # Phosphorylated tyrosine
+  # - "C[UNIMOD:312]"  # Cysteinylation
+  # - "E[UNIMOD:27]"  # Pyro-glutamine
+  # - "Q[UNIMOD:28]"  # Pyro-glutamine
   # N-terminal modifications (standalone tokens)
-  - "[UNIMOD:1]"    # N-terminal acetylation
+  # - "[UNIMOD:1]"    # N-terminal acetylation
   - "[UNIMOD:5]"    # N-terminal carbamylation
   - "[UNIMOD:385]"  # N-terminal ammonia loss
   - "(+25.98)"      # Carbamylation & NH3 loss (legacy notation)
+  # Unsupported residues
+  # - "C"  # Unmodified cysteine (must be explicitly carbamidomethylated for some Koina models)
