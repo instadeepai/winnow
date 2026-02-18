@@ -11,7 +11,7 @@ from winnow.calibration.calibration_features import (
     MassErrorFeature,
     BeamFeatures,
     RetentionTimeFeature,
-    PrositFeatures,
+    FragmentMatchFeatures,
     ChimericFeatures,
     find_matching_ions,
     _raise_value_error,
@@ -488,7 +488,7 @@ class TestRetentionTimeFeature:
     def retention_time_feature(self):
         """Create a RetentionTimeFeature instance for testing."""
         return RetentionTimeFeature(
-            hidden_dim=10, train_fraction=0.8, invalid_prosit_residues=["U", "O", "X"]
+            hidden_dim=10, train_fraction=0.8, unsupported_residues=["U", "O", "X"]
         )
 
     @pytest.fixture()
@@ -508,18 +508,18 @@ class TestRetentionTimeFeature:
 
     def test_properties(self, retention_time_feature):
         """Test RetentionTimeFeature properties."""
-        assert retention_time_feature.name == "Prosit iRT Features"
+        assert retention_time_feature.name == "iRT Feature"
         assert retention_time_feature.columns == ["iRT error", "is_missing_irt_error"]
         assert retention_time_feature.dependencies == []
 
     def test_initialization_parameters(self):
         """Test initialization with custom parameters."""
         feature = RetentionTimeFeature(
-            hidden_dim=10, train_fraction=0.8, invalid_prosit_residues=["U", "O", "X"]
+            hidden_dim=10, train_fraction=0.8, unsupported_residues=["U", "O", "X"]
         )
         assert feature.hidden_dim == 10
         assert feature.train_fraction == 0.8
-        assert feature.prosit_irt_model_name == "Prosit_2019_irt"
+        assert feature.irt_model_name == "Prosit_2019_irt"
         assert hasattr(feature, "irt_predictor")
 
     @patch("winnow.calibration.calibration_features.koinapy.Koina")
@@ -789,15 +789,15 @@ class TestRetentionTimeFeature:
         assert set(dataset.metadata["spectrum_id"].values) == {10, 20, 40}
 
 
-class TestPrositFeatures:
-    """Test the PrositFeatures class."""
+class TestFragmentMatchFeatures:
+    """Test the FragmentMatchFeatures class."""
 
     @pytest.fixture()
     def prosit_features(self):
-        """Create a PrositFeatures instance for testing."""
-        return PrositFeatures(
+        """Create a FragmentMatchFeatures instance for testing."""
+        return FragmentMatchFeatures(
             mz_tolerance=0.02,
-            invalid_prosit_residues=["U", "O", "X"],
+            unsupported_residues=["U", "O", "X"],
             model_input_constants={"collision_energies": 25},
         )
 
@@ -826,25 +826,25 @@ class TestPrositFeatures:
         return CalibrationDataset(metadata=metadata, predictions=[])
 
     def test_properties(self, prosit_features):
-        """Test PrositFeatures properties."""
-        assert prosit_features.name == "Prosit Features"
+        """Test FragmentMatchFeatures properties."""
+        assert prosit_features.name == "Fragment Match Features"
         assert prosit_features.columns == [
             "ion_matches",
             "ion_match_intensity",
-            "is_missing_prosit_features",
+            "is_missing_fragment_match_features",
         ]
         assert prosit_features.dependencies == []
         assert prosit_features.mz_tolerance == 0.02
 
     def test_initialization_with_tolerance(self):
         """Test initialization with custom tolerance."""
-        feature = PrositFeatures(
+        feature = FragmentMatchFeatures(
             mz_tolerance=0.01,
-            invalid_prosit_residues=["U", "O", "X"],
+            unsupported_residues=["U", "O", "X"],
             model_input_constants={"collision_energies": 25},
         )
         assert feature.mz_tolerance == 0.01
-        assert feature.prosit_intensity_model_name == "Prosit_2020_intensity_HCD"
+        assert feature.intensity_model_name == "Prosit_2020_intensity_HCD"
         assert feature.model_input_constants == {"collision_energies": 25}
         assert feature.model_input_columns is None
 
@@ -865,8 +865,8 @@ class TestPrositFeatures:
         prosit_features,
         sample_dataset_with_spectra,
     ):
-        """Test compute method with mocked Prosit model and ion computation."""
-        # Mock the Prosit model
+        """Test compute method with mocked Koina intensity model and ion computation."""
+        # Mock the Koina intensity model
         mock_model_instance = Mock()
         mock_koina.return_value = mock_model_instance
         mock_model_instance.model_inputs = [
@@ -951,12 +951,13 @@ class TestPrositFeatures:
         prosit_features.compute(sample_dataset_with_spectra)
 
         # Check that new columns were added
-        assert "prosit_mz" in sample_dataset_with_spectra.metadata.columns
-        assert "prosit_intensity" in sample_dataset_with_spectra.metadata.columns
+        assert "theoretical_mz" in sample_dataset_with_spectra.metadata.columns
+        assert "theoretical_intensity" in sample_dataset_with_spectra.metadata.columns
         assert "ion_matches" in sample_dataset_with_spectra.metadata.columns
         assert "ion_match_intensity" in sample_dataset_with_spectra.metadata.columns
         assert (
-            "is_missing_prosit_features" in sample_dataset_with_spectra.metadata.columns
+            "is_missing_fragment_match_features"
+            in sample_dataset_with_spectra.metadata.columns
         )
 
         # Check that the model was called
@@ -1010,9 +1011,9 @@ class TestPrositFeatures:
             prosit_features.compute(dataset)
 
         # Verify results
-        assert "is_missing_prosit_features" in dataset.metadata.columns
+        assert "is_missing_fragment_match_features" in dataset.metadata.columns
         spectrum_masks = self._assert_valid_invalid_flags(dataset)
-        self._assert_prosit_mz_intensity(dataset, spectrum_masks)
+        self._assert_theoretical_mz_intensity(dataset, spectrum_masks)
         self._assert_ion_matches(dataset, spectrum_masks)
 
         # Verify dataset structure
@@ -1020,7 +1021,7 @@ class TestPrositFeatures:
         assert set(dataset.metadata["spectrum_id"].values) == {10, 20, 40}
 
     def _create_prosit_mock_predict(self):
-        """Create a mock Prosit predict function for testing."""
+        """Create a mock Koina intensity predict function for testing."""
 
         def mock_prosit_predict(inputs_df):
             """Mock Prosit predict that returns realistic predictions matching experimental m/z values."""
@@ -1085,8 +1086,8 @@ class TestPrositFeatures:
         return mz_values, intensities, annotations
 
     def _assert_valid_invalid_flags(self, dataset):
-        """Assert valid/invalid flags for prosit features."""
-        valid_flags = ~dataset.metadata["is_missing_prosit_features"]
+        """Assert valid/invalid flags for fragment match features."""
+        valid_flags = ~dataset.metadata["is_missing_fragment_match_features"]
         spectrum_masks = {
             10: dataset.metadata["spectrum_id"] == 10,
             20: dataset.metadata["spectrum_id"] == 20,
@@ -1099,34 +1100,44 @@ class TestPrositFeatures:
 
         return spectrum_masks
 
-    def _assert_prosit_mz_intensity(self, dataset, spectrum_masks):
-        """Assert prosit_mz and prosit_intensity values."""
-        assert "prosit_mz" in dataset.metadata.columns
-        assert "prosit_intensity" in dataset.metadata.columns
+    def _assert_theoretical_mz_intensity(self, dataset, spectrum_masks):
+        """Assert theoretical_mz and theoretical_intensity values."""
+        assert "theoretical_mz" in dataset.metadata.columns
+        assert "theoretical_intensity" in dataset.metadata.columns
 
         # Valid entries
         for sid in [10, 40]:
-            prosit_mz = dataset.metadata[spectrum_masks[sid]]["prosit_mz"].iloc[0]
-            assert prosit_mz is not None
-            assert hasattr(prosit_mz, "__iter__") or isinstance(prosit_mz, list)
-            mz_list = list(prosit_mz) if hasattr(prosit_mz, "__iter__") else [prosit_mz]
+            theoretical_mz = dataset.metadata[spectrum_masks[sid]][
+                "theoretical_mz"
+            ].iloc[0]
+            assert theoretical_mz is not None
+            assert hasattr(theoretical_mz, "__iter__") or isinstance(
+                theoretical_mz, list
+            )
+            mz_list = (
+                list(theoretical_mz)
+                if hasattr(theoretical_mz, "__iter__")
+                else [theoretical_mz]
+            )
             assert mz_list == sorted(mz_list)
             assert len(mz_list) > 0
 
-            prosit_intensity = dataset.metadata[spectrum_masks[sid]][
-                "prosit_intensity"
+            theoretical_intensity = dataset.metadata[spectrum_masks[sid]][
+                "theoretical_intensity"
             ].iloc[0]
-            assert prosit_intensity is not None
-            assert len(prosit_intensity) == len(mz_list)
+            assert theoretical_intensity is not None
+            assert len(theoretical_intensity) == len(mz_list)
 
         # Invalid entries
         for sid in [20]:
-            prosit_mz = dataset.metadata[spectrum_masks[sid]]["prosit_mz"].iloc[0]
-            prosit_intensity = dataset.metadata[spectrum_masks[sid]][
-                "prosit_intensity"
+            theoretical_mz = dataset.metadata[spectrum_masks[sid]][
+                "theoretical_mz"
             ].iloc[0]
-            assert pd.isna(prosit_mz) or prosit_mz is None
-            assert pd.isna(prosit_intensity) or prosit_intensity is None
+            theoretical_intensity = dataset.metadata[spectrum_masks[sid]][
+                "theoretical_intensity"
+            ].iloc[0]
+            assert pd.isna(theoretical_mz) or theoretical_mz is None
+            assert pd.isna(theoretical_intensity) or theoretical_intensity is None
 
     def _assert_ion_matches(self, dataset, spectrum_masks):
         """Assert ion_matches and ion_match_intensity values."""
@@ -1596,12 +1607,12 @@ class TestModelInputHelpers:
         assert "collision_energies" in str(exc_info.value)
         assert "fragmentation_types" in str(exc_info.value)
 
-    def test_conflict_detected_at_construction_time_prosit_features(self):
-        """PrositFeatures raises ValueError at construction when keys conflict."""
+    def test_conflict_detected_at_construction_time_fragment_match_feature(self):
+        """FragmentMatchFeatures raises ValueError at construction when keys conflict."""
         with pytest.raises(ValueError, match="collision_energies"):
-            PrositFeatures(
+            FragmentMatchFeatures(
                 mz_tolerance=0.02,
-                invalid_prosit_residues=[],
+                unsupported_residues=[],
                 model_input_constants={"collision_energies": 25},
                 model_input_columns={"collision_energies": "ce_col"},
             )
@@ -1726,11 +1737,11 @@ class TestModelInputHelpers:
         )
         assert list(result.columns) == ["peptide_sequences", "precursor_charges"]
 
-    def test_prosit_features_passes_constant_to_model(self):
-        """PrositFeatures correctly passes model_input_constants to the Koina model call."""
-        feature = PrositFeatures(
+    def test_fragment_match_feature_passes_constant_to_model(self):
+        """FragmentMatchFeatures correctly passes model_input_constants to the Koina model call."""
+        feature = FragmentMatchFeatures(
             mz_tolerance=0.02,
-            invalid_prosit_residues=["U", "O", "X"],
+            unsupported_residues=["U", "O", "X"],
             model_input_constants={"collision_energies": 30},
         )
         metadata = pd.DataFrame(
@@ -1772,11 +1783,11 @@ class TestModelInputHelpers:
         call_args_df = mock_model.predict.call_args[0][0]
         assert list(call_args_df["collision_energies"]) == [30]
 
-    def test_prosit_features_passes_column_to_model(self):
-        """PrositFeatures uses per-row metadata column values when model_input_columns is set."""
-        feature = PrositFeatures(
+    def test_fragment_match_feature_passes_column_to_model(self):
+        """FragmentMatchFeatures uses per-row metadata column values when model_input_columns is set."""
+        feature = FragmentMatchFeatures(
             mz_tolerance=0.02,
-            invalid_prosit_residues=["U", "O", "X"],
+            unsupported_residues=["U", "O", "X"],
             model_input_columns={"collision_energies": "nce"},
         )
         metadata = pd.DataFrame(
