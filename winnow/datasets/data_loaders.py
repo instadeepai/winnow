@@ -68,12 +68,18 @@ class InstaNovoDatasetLoader(DatasetLoader):
         # Use polars column selectors to split dataframe
         beam_df = df.select(
             cs.contains(
-                "instanovo_predictions_beam", "instanovo_log_probabilities_beam"
+                "predictions_beam",
+                "predictions_log_probability_beam",
+                "predictions_token_log_probabilities",
             )
         )
         preds_df = df.select(
             ~cs.contains(
-                ["instanovo_predictions_beam", "instanovo_log_probabilities_beam"]
+                [
+                    "predictions_beam",
+                    "predictions_log_probability_beam",
+                    "predictions_token_log_probabilities",
+                ]
             )
         )
         return preds_df, beam_df
@@ -193,9 +199,9 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
             for beam in range(num_beams):
                 seq_col, log_prob_col, token_log_prob_col = (
-                    f"instanovo_predictions_beam_{beam}",
-                    f"instanovo_log_probabilities_beam_{beam}",
-                    f"token_log_probabilities_beam_{beam}",
+                    f"predictions_beam_{beam}",
+                    f"predictions_log_probability_beam_{beam}",
+                    f"predictions_token_log_probabilities_{beam}",
                 )
                 sequence, log_prob, token_log_prob = (
                     row.get(seq_col),
@@ -209,7 +215,9 @@ class InstaNovoDatasetLoader(DatasetLoader):
                             sequence=self.metrics._split_peptide(sequence),
                             mass_error=None,
                             sequence_log_probability=log_prob,
-                            token_log_probabilities=token_log_prob,
+                            token_log_probabilities=ast.literal_eval(token_log_prob)
+                            if isinstance(token_log_prob, str)
+                            else token_log_prob,
                         )
                     )
 
@@ -220,7 +228,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
             [
                 pl.col(col).str.replace_all("L", "I")
                 for col in beam_df.columns
-                if "instanovo_predictions_beam" in col
+                if "predictions_beam" in col
             ]
         )
 
@@ -815,7 +823,7 @@ class WinnowDatasetLoader(DatasetLoader):
         if predictions_path is not None:
             raise ValueError("predictions_path is not used for WinnowDatasetLoader")
 
-        metadata_csv_path = data_path / "metadata.csv"
+        metadata_csv_path = data_path / Path("metadata.csv")
         if not metadata_csv_path.exists():
             raise FileNotFoundError(
                 f"Winnow dataset loader expects a CSV file containing metadata at {metadata_csv_path}. "
@@ -850,7 +858,7 @@ class WinnowDatasetLoader(DatasetLoader):
             else ast.literal_eval(re.sub(r"(\n?)(\s+)", ", ", re.sub(r"\[\s+", "[", s)))
         )
 
-        predictions_pkl_path = data_path / "predictions.pkl"
+        predictions_pkl_path = data_path / Path("predictions.pkl")
         if predictions_pkl_path.exists():
             try:
                 with predictions_pkl_path.open(mode="rb") as predictions_file:
