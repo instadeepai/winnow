@@ -1,5 +1,14 @@
 # --- Calibrator configuration ---
 
+# Shared Koina model inputs — applied to all intensity-based features (PrositFeatures, ChimericFeatures).
+# To use a constant value tiled across all rows, specify it under koina_model_input_constants.
+# To use per-row values from a metadata column, add the column mapping under koina_model_input_columns.
+# Each input key must appear in at most one of these two dicts.
+koina_model_input_constants:
+  collision_energies: 25
+  fragmentation_types: HCD
+# koina_model_input_columns: {}
+
 calibrator:
   _target_: winnow.calibration.calibrator.ProbabilityCalibrator
 
@@ -19,30 +28,34 @@ calibrator:
     prosit_features:
       _target_: winnow.calibration.calibration_features.PrositFeatures
       mz_tolerance: 0.02
-      learn_from_missing: true  # Whether to learn from missing Prosit features. If False, errors will be raised when invalid spectra are encountered.
+      learn_from_missing: false  # Whether to learn from missing Prosit features. If False, errors will be raised when invalid spectra are encountered.
       invalid_prosit_residues: ${invalid_prosit_residues}  # The residues to consider as invalid for Prosit features.
-      prosit_intensity_model_name: Prosit_2020_intensity_HCD  # The name of the Prosit intensity model to use.
+      prosit_intensity_model_name: Prosit_2025_intensity_22PTM  # The name of the Koina intensity model to use.
+      model_input_constants: ${koina_model_input_constants}  # Shared Koina model inputs (e.g. collision_energies, fragmentation_types).
+      # model_input_columns: ${koina_model_input_columns}  # Uncomment to use per-row metadata columns instead.
 
     retention_time_feature:
       _target_: winnow.calibration.calibration_features.RetentionTimeFeature
       hidden_dim: 10  # The hidden dimension size for the MLP regressor used to predict iRT from observed retention times.
       train_fraction: 0.1  # The fraction of the data to use for training the iRT predictor.
-      learn_from_missing: true  # Whether to learn from missing retention time features. If False, errors will be raised when invalid spectra are encountered.
+      learn_from_missing: false  # Whether to learn from missing retention time features. If False, errors will be raised when invalid spectra are encountered.
       seed: 42  # Random seed for the MLP regressor.
       learning_rate_init: 0.001  # The initial learning rate for the MLP regressor.
       alpha: 0.0001  # L2 regularisation parameter for the MLP regressor.
       max_iter: 200  # Maximum number of training iterations for the MLP regressor.
-      early_stopping: false  # Whether to use early stopping for the MLP regressor.
+      early_stopping: true  # Whether to use early stopping for the MLP regressor.
       validation_fraction: 0.1  # Proportion of training data to use for early stopping validation.
       invalid_prosit_residues: ${invalid_prosit_residues}  # The residues to consider as invalid for Prosit iRT features.
-      prosit_irt_model_name: Prosit_2019_irt  # The name of the Prosit iRT model to use.
+      prosit_irt_model_name: Prosit_2025_irt_22PTM  # The name of the Koina iRT model to use.
 
     chimeric_features:
       _target_: winnow.calibration.calibration_features.ChimericFeatures
       mz_tolerance: 0.02
-      learn_from_missing: true  # Whether to learn from missing chimeric features. If False, errors will be raised when invalid spectra are encountered.
+      learn_from_missing: false  # Whether to learn from missing chimeric features. If False, errors will be raised when invalid spectra are encountered.
       invalid_prosit_residues: ${invalid_prosit_residues}  # The residues to consider as invalid for Prosit chimeric intensity features.
-      prosit_intensity_model_name: Prosit_2020_intensity_HCD  # The name of the Prosit intensity model to use.
+      prosit_intensity_model_name: Prosit_2025_intensity_22PTM  # The name of the Koina intensity model to use.
+      model_input_constants: ${koina_model_input_constants}  # Shared Koina model inputs (e.g. collision_energies, fragmentation_types).
+      # model_input_columns: ${koina_model_input_columns}  # Uncomment to use per-row metadata columns instead.
 
     beam_features:
       _target_: winnow.calibration.calibration_features.BeamFeatures
