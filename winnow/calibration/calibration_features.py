@@ -1,7 +1,7 @@
 from abc import ABCMeta, abstractmethod
 import bisect
 from math import exp, isnan
-from typing import Dict, List, Tuple, Iterator, Optional
+from typing import Any, Dict, List, Set, Tuple, Iterator, Optional
 import warnings
 
 import pandas as pd
@@ -20,6 +20,91 @@ def _raise_value_error(value, name: str):
     """Raise a ValueError if the given value is None."""
     if value is None:
         raise ValueError(f"{name} cannot be None")
+
+
+def _validate_model_input_params(
+    model_input_constants: Optional[Dict[str, Any]],
+    model_input_columns: Optional[Dict[str, str]],
+) -> None:
+    """Raise ValueError if the same key appears in both model_input_constants and model_input_columns.
+
+    Args:
+        model_input_constants: Mapping of Koina input name to a constant value tiled across all rows.
+        model_input_columns: Mapping of Koina input name to a metadata column name providing per-row values.
+
+    Raises:
+        ValueError: If any key is present in both dicts, since this is an unresolvable conflict.
+    """
+    if model_input_constants is None or model_input_columns is None:
+        return
+    conflicts = set(model_input_constants) & set(model_input_columns)
+    if conflicts:
+        raise ValueError(
+            f"The following Koina model input(s) are specified in both model_input_constants "
+            f"and model_input_columns, which is ambiguous: {sorted(conflicts)}. "
+            f"Specify each input in exactly one of model_input_constants or model_input_columns."
+        )
+
+
+def _resolve_model_inputs(
+    inputs: pd.DataFrame,
+    metadata: pd.DataFrame,
+    required_model_inputs: List[str],
+    auto_populated: Set[str],
+    constants: Optional[Dict[str, Any]],
+    columns: Optional[Dict[str, str]],
+    model_name: str,
+) -> pd.DataFrame:
+    """Populate additional Koina model inputs beyond those that are auto-populated.
+
+    Determines which model inputs remain after accounting for auto-populated columns,
+    validates that all of them are covered by either a constant value or a metadata column
+    mapping, and fills in the inputs DataFrame accordingly.
+
+    Args:
+        inputs: DataFrame already containing auto-populated columns (e.g. peptide_sequences,
+            precursor_charges). This DataFrame is modified in-place and returned.
+        metadata: The full metadata DataFrame for the valid subset being predicted, used to
+            resolve per-row column values.
+        required_model_inputs: Full list of input names required by the Koina model
+            (i.e. model.model_inputs).
+        auto_populated: Set of input names already present in inputs and therefore excluded
+            from the remaining check (e.g. {"peptide_sequences", "precursor_charges"}).
+        constants: Mapping of Koina input name to a scalar value that will be tiled across
+            all rows. May be None or empty.
+        columns: Mapping of Koina input name to a metadata column name that provides
+            per-row values. May be None or empty.
+        model_name: Name of the Koina model, used in error messages.
+
+    Returns:
+        The inputs DataFrame with all required model inputs populated.
+
+    Raises:
+        ValueError: If any required model input (beyond auto-populated ones) is not covered
+            by constants or columns.
+        KeyError: If a column specified in columns does not exist in metadata.
+    """
+    constants = constants or {}
+    columns = columns or {}
+
+    remaining = [col for col in required_model_inputs if col not in auto_populated]
+    missing = [col for col in remaining if col not in constants and col not in columns]
+    if missing:
+        raise ValueError(
+            f"Koina model '{model_name}' requires the following input(s) that have not been "
+            f"provided: {missing}. Supply them via:\n"
+            f"  model_input_constants: {{{', '.join(f'{m}: <value>' for m in missing)}}}\n"
+            f"  or model_input_columns: {{{', '.join(f'{m}: <metadata_column>' for m in missing)}}}"
+        )
+
+    n_rows = len(inputs)
+    for col in remaining:
+        if col in constants:
+            inputs[col] = np.array([constants[col]] * n_rows)
+        else:
+            inputs[col] = metadata[columns[col]].to_numpy()
+
+    return inputs
 
 
 class FeatureDependency(metaclass=ABCMeta):
@@ -188,6 +273,8 @@ class PrositFeatures(CalibrationFeatures):
         invalid_prosit_residues: List[str],
         learn_from_missing: bool = True,
         prosit_intensity_model_name: str = "Prosit_2020_intensity_HCD",
+        model_input_constants: Optional[Dict[str, Any]] = None,
+        model_input_columns: Optional[Dict[str, str]] = None,
     ) -> None:
         """Initialize PrositFeatures.
 
@@ -197,13 +284,25 @@ class PrositFeatures(CalibrationFeatures):
             learn_from_missing (bool): Whether to learn from missing data by including a missingness indicator column.
                 If False, an error will be raised when invalid spectra are encountered.
                 Defaults to True.
-            prosit_intensity_model_name (str): The name of the Prosit intensity model to use.
+            prosit_intensity_model_name (str): The name of the Koina intensity model to use.
                 Defaults to "Prosit_2020_intensity_HCD".
+            model_input_constants (Optional[Dict[str, Any]]): Mapping of Koina input name to a
+                constant value that will be tiled across all rows (e.g. {"collision_energies": 25}).
+                Defaults to None (no additional constants).
+            model_input_columns (Optional[Dict[str, str]]): Mapping of Koina input name to a
+                metadata column name that provides per-row values
+                (e.g. {"collision_energies": "nce_col"}). Defaults to None.
+
+        Raises:
+            ValueError: If the same key appears in both model_input_constants and model_input_columns.
         """
+        _validate_model_input_params(model_input_constants, model_input_columns)
         self.mz_tolerance = mz_tolerance
         self.invalid_prosit_residues = invalid_prosit_residues
         self.learn_from_missing = learn_from_missing
         self.prosit_intensity_model_name = prosit_intensity_model_name
+        self.model_input_constants = model_input_constants
+        self.model_input_columns = model_input_columns
 
     @property
     def dependencies(self) -> List[FeatureDependency]:
@@ -334,14 +433,18 @@ class PrositFeatures(CalibrationFeatures):
         inputs["precursor_charges"] = np.array(
             valid_prosit_input.metadata["precursor_charge"]
         )
-        inputs["collision_energies"] = np.array(len(valid_prosit_input.metadata) * [25])
         inputs.index = valid_prosit_input.metadata["spectrum_id"]
 
         model = koinapy.Koina(self.prosit_intensity_model_name)
-        if "fragmentation_types" in model.model_inputs:
-            inputs["fragmentation_types"] = np.array(
-                len(valid_prosit_input.metadata) * ["HCD"]
-            )
+        inputs = _resolve_model_inputs(
+            inputs=inputs,
+            metadata=valid_prosit_input.metadata,
+            required_model_inputs=model.model_inputs,
+            auto_populated={"peptide_sequences", "precursor_charges"},
+            constants=self.model_input_constants,
+            columns=self.model_input_columns,
+            model_name=self.prosit_intensity_model_name,
+        )
         predictions: pd.DataFrame = model.predict(inputs)
 
         # Group predictions by spectrum_id to get one row per peptide
@@ -411,6 +514,8 @@ class ChimericFeatures(CalibrationFeatures):
         invalid_prosit_residues: List[str],
         learn_from_missing: bool = True,
         prosit_intensity_model_name: str = "Prosit_2020_intensity_HCD",
+        model_input_constants: Optional[Dict[str, Any]] = None,
+        model_input_columns: Optional[Dict[str, str]] = None,
     ) -> None:
         """Initialize ChimericFeatures.
 
@@ -420,13 +525,25 @@ class ChimericFeatures(CalibrationFeatures):
             learn_from_missing (bool): Whether to learn from missing data by including a missingness indicator column.
                 If False, an error will be raised when invalid spectra are encountered.
                 Defaults to True.
-            prosit_intensity_model_name (str): The name of the Prosit intensity model to use.
+            prosit_intensity_model_name (str): The name of the Koina intensity model to use.
                 Defaults to "Prosit_2020_intensity_HCD".
+            model_input_constants (Optional[Dict[str, Any]]): Mapping of Koina input name to a
+                constant value that will be tiled across all rows (e.g. {"collision_energies": 25}).
+                Defaults to None (no additional constants).
+            model_input_columns (Optional[Dict[str, str]]): Mapping of Koina input name to a
+                metadata column name that provides per-row values
+                (e.g. {"collision_energies": "nce_col"}). Defaults to None.
+
+        Raises:
+            ValueError: If the same key appears in both model_input_constants and model_input_columns.
         """
+        _validate_model_input_params(model_input_constants, model_input_columns)
         self.mz_tolerance = mz_tolerance
         self.learn_from_missing = learn_from_missing
         self.invalid_prosit_residues = invalid_prosit_residues
         self.prosit_intensity_model_name = prosit_intensity_model_name
+        self.model_input_constants = model_input_constants
+        self.model_input_columns = model_input_columns
 
     @property
     def dependencies(self) -> List[FeatureDependency]:
@@ -571,12 +688,18 @@ class ChimericFeatures(CalibrationFeatures):
         inputs["precursor_charges"] = np.array(
             valid_chimeric_prosit_input.metadata["precursor_charge"]
         )
-        inputs["collision_energies"] = np.array(
-            len(valid_chimeric_prosit_input.metadata) * [25]
-        )
         inputs.index = valid_chimeric_prosit_input.metadata["spectrum_id"]
 
         model = koinapy.Koina(self.prosit_intensity_model_name)
+        inputs = _resolve_model_inputs(
+            inputs=inputs,
+            metadata=valid_chimeric_prosit_input.metadata,
+            required_model_inputs=model.model_inputs,
+            auto_populated={"peptide_sequences", "precursor_charges"},
+            constants=self.model_input_constants,
+            columns=self.model_input_columns,
+            model_name=self.prosit_intensity_model_name,
+        )
         predictions: pd.DataFrame = model.predict(inputs)
 
         # Group predictions by spectrum_id to get one row per peptide
@@ -859,7 +982,7 @@ class RetentionTimeFeature(CalibrationFeatures):
             max_iter (int): Maximum number of training iterations. Defaults to 200.
             early_stopping (bool): Whether to use early stopping to terminate training. Defaults to False.
             validation_fraction (float): Proportion of training data to use for early stopping validation. Defaults to 0.1.
-            prosit_irt_model_name (str): The name of the Prosit iRT model to use.
+            prosit_irt_model_name (str): The name of the Koina iRT model to use.
                 Defaults to "Prosit_2019_irt".
         """
         self.train_fraction = train_fraction
@@ -979,8 +1102,6 @@ class RetentionTimeFeature(CalibrationFeatures):
         inputs = inputs.set_index(train_data.index)
 
         prosit_model = koinapy.Koina(self.prosit_irt_model_name)
-        # TODO: make this a better fix (maybe check for all inputs), and document that only HCD is currently supported.
-        # TODO: allow user to pre-specify a set collision energy for the dataset, and similar for fragmentation type
         predictions = prosit_model.predict(inputs)
         train_data["iRT"] = predictions["irt"]
 
