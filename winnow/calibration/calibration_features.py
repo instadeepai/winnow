@@ -265,11 +265,6 @@ class PrositFeatures(CalibrationFeatures):
                     )
                 )
             )
-            .filter_entries(
-                metadata_predicate=lambda row: (
-                    any(token == "C" for token in row["prediction"])
-                )
-            )
         )
 
         # Obtain valid indices
@@ -343,6 +338,10 @@ class PrositFeatures(CalibrationFeatures):
         inputs.index = valid_prosit_input.metadata["spectrum_id"]
 
         model = koinapy.Koina(self.prosit_intensity_model_name)
+        if "fragmentation_types" in model.model_inputs:
+            inputs["fragmentation_types"] = np.array(
+                len(valid_prosit_input.metadata) * ["HCD"]
+            )
         predictions: pd.DataFrame = model.predict(inputs)
 
         # Group predictions by spectrum_id to get one row per peptide
@@ -493,11 +492,6 @@ class ChimericFeatures(CalibrationFeatures):
                         token in beam[1].sequence
                         for token in self.invalid_prosit_residues
                     )
-                )
-            )
-            .filter_entries(
-                predictions_predicate=lambda beam: (
-                    len(beam) > 1 and any(token == "C" for token in beam[1].sequence)
                 )
             )
         )
@@ -928,21 +922,12 @@ class RetentionTimeFeature(CalibrationFeatures):
             pd.Series: A series of booleans indicating whether the prediction is valid for iRT prediction.
         """
         # Filter out invalid spectra for Prosit iRT prediction
-        filtered_dataset = (
-            dataset.filter_entries(
-                metadata_predicate=lambda row: len(row["prediction"]) > 30
-            )
-            .filter_entries(
-                metadata_predicate=lambda row: (
-                    any(
-                        token in row["prediction"]
-                        for token in self.invalid_prosit_residues
-                    )
-                )
-            )
-            .filter_entries(
-                metadata_predicate=lambda row: (
-                    any(token == "C" for token in row["prediction"])
+        filtered_dataset = dataset.filter_entries(
+            metadata_predicate=lambda row: len(row["prediction"]) > 30
+        ).filter_entries(
+            metadata_predicate=lambda row: (
+                any(
+                    token in row["prediction"] for token in self.invalid_prosit_residues
                 )
             )
         )
