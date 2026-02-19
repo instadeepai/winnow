@@ -193,8 +193,12 @@ def train_entry_point(
 
     annotated_dataset = data_loader.load(**dataset_params)
 
-    logger.info("Filtering dataset.")
+    logger.info(f"Loaded: {len(annotated_dataset.metadata)} spectra")
+
+    logger.info("Filtering dataset for empty predictions.")
     annotated_dataset = filter_dataset(annotated_dataset)
+
+    logger.info(f"After filtering: {len(annotated_dataset.metadata)} spectra")
 
     # Instantiate the calibrator from the config
     logger.info("Instantiating calibrator from config.")
@@ -266,8 +270,12 @@ def predict_entry_point(
 
     dataset = data_loader.load(**dataset_params)
 
-    logger.info("Filtering dataset.")
+    logger.info(f"Loaded: {len(dataset.metadata)} spectra")
+
+    logger.info("Filtering dataset for empty predictions.")
     dataset = filter_dataset(dataset)
+
+    logger.info(f"After filtering: {len(dataset.metadata)} spectra")
 
     # Load trained calibrator
     logger.info("Loading trained calibrator.")
