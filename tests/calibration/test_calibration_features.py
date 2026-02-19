@@ -1,5 +1,6 @@
 """Unit tests for winnow calibration features."""
 
+import warnings
 import numpy as np
 import pandas as pd
 import pytest
@@ -1845,6 +1846,352 @@ class TestModelInputHelpers:
         if extra:
             data.update(extra)
         return pd.DataFrame(data)
+
+
+class TestLearnFromMissingFiltering:
+    """Tests for the learn_from_missing=False filtering behaviour.
+
+    When learn_from_missing=False, invalid entries must be **dropped** from the
+    dataset before Koina is called.  A UserWarning reporting the count of removed
+    PSMs must be emitted.  The feature columns (ion_matches, iRT error, …) must
+    be present on the surviving rows.  The is_missing_* indicator column must NOT
+    appear in feature.columns (though it may be present in metadata as a temporary
+    intermediate).
+
+    When learn_from_missing=True (the default), all rows are retained: invalid
+    rows get their feature values imputed to zero and the is_missing_* indicator
+    column is added to feature.columns so the calibrator can learn from the gap.
+    """
+
+    # ------------------------------------------------------------------
+    # Shared helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _make_intensity_mock(spectrum_id_to_ions: dict):
+        """Return a callable that mimics koinapy.Koina.predict for intensity models.
+
+        Args:
+            spectrum_id_to_ions: mapping from spectrum_id to a list of
+                (mz, intensity, annotation) tuples to return.
+        """
+
+        def _predict(inputs_df):
+            rows, idx = [], []
+            for sid in inputs_df.index:
+                for mz, intensity, ann in spectrum_id_to_ions.get(sid, []):
+                    rows.append(
+                        {
+                            "peptide_sequences": inputs_df.loc[
+                                sid, "peptide_sequences"
+                            ],
+                            "precursor_charges": inputs_df.loc[
+                                sid, "precursor_charges"
+                            ],
+                            "collision_energies": inputs_df.loc[
+                                sid, "collision_energies"
+                            ],
+                            "intensities": intensity,
+                            "mz": mz,
+                            "annotation": ann,
+                        }
+                    )
+                    idx.append(sid)
+            return pd.DataFrame(rows, index=idx)
+
+        return _predict
+
+    # ------------------------------------------------------------------
+    # FragmentMatchFeatures
+    # ------------------------------------------------------------------
+
+    @patch("winnow.calibration.calibration_features.koinapy.Koina")
+    def test_fragment_match_false_drops_invalid_rows_and_warns(self, mock_koina):
+        """learn_from_missing=False: invalid rows are removed from the dataset and a warning is
+        emitted. Feature columns (ion_matches, ion_match_intensity) must be present on the
+        surviving rows."""
+        feature = FragmentMatchFeatures(
+            mz_tolerance=0.02,
+            unsupported_residues=[],
+            learn_from_missing=False,
+            max_peptide_length=5,  # short limit so row 1 (len 6) is invalid
+            model_input_constants={"collision_energies": 25},
+        )
+        metadata = pd.DataFrame(
+            {
+                "prediction": [["A", "G"], ["A"] * 6, ["S", "P"]],
+                "precursor_charge": [2, 2, 2],
+                "spectrum_id": [10, 20, 30],
+                "mz_array": [[100.0, 200.0], [120.0], [110.0, 210.0]],
+                "intensity_array": [[1000.0, 2000.0], [1200.0], [1100.0, 2100.0]],
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=[])
+
+        mock_model = mock_koina.return_value
+        mock_model.model_inputs = [
+            "peptide_sequences",
+            "precursor_charges",
+            "collision_energies",
+        ]
+        mock_model.predict = self._make_intensity_mock(
+            {
+                10: [(100.0, 0.8, "b1"), (200.0, 0.6, "y1")],
+                30: [(110.0, 0.7, "b1"), (210.0, 0.5, "y1")],
+            }
+        )
+
+        with pytest.warns(UserWarning, match="Filtered 1 spectra"):
+            feature.compute(dataset)
+
+        # The invalid row (spectrum_id=20) must be gone from the caller's dataset.
+        assert (
+            len(dataset.metadata) == 2
+        ), "Expected 2 rows after filtering the 1 invalid entry"
+        assert 20 not in dataset.metadata["spectrum_id"].values
+
+        # Feature values must be computed for the 2 remaining valid rows.
+        assert "ion_matches" in dataset.metadata.columns
+        assert "ion_match_intensity" in dataset.metadata.columns
+
+    @patch("winnow.calibration.calibration_features.koinapy.Koina")
+    def test_fragment_match_false_no_warning_when_all_valid(self, mock_koina):
+        """learn_from_missing=False: no UserWarning is emitted when every entry is valid."""
+        feature = FragmentMatchFeatures(
+            mz_tolerance=0.02,
+            unsupported_residues=[],
+            learn_from_missing=False,
+            model_input_constants={"collision_energies": 25},
+        )
+        metadata = pd.DataFrame(
+            {
+                "prediction": [["A", "G"], ["S", "P"]],
+                "precursor_charge": [2, 2],
+                "spectrum_id": [10, 30],
+                "mz_array": [[100.0, 200.0], [110.0, 210.0]],
+                "intensity_array": [[1000.0, 2000.0], [1100.0, 2100.0]],
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=[])
+
+        mock_model = mock_koina.return_value
+        mock_model.model_inputs = [
+            "peptide_sequences",
+            "precursor_charges",
+            "collision_energies",
+        ]
+        mock_model.predict = self._make_intensity_mock(
+            {
+                10: [(100.0, 0.8, "b1"), (200.0, 0.6, "y1")],
+                30: [(110.0, 0.7, "b1"), (210.0, 0.5, "y1")],
+            }
+        )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            feature.compute(dataset)  # Must not raise
+
+        assert len(dataset.metadata) == 2
+        assert "ion_matches" in dataset.metadata.columns
+
+    def test_fragment_match_false_columns_excludes_indicator(self):
+        """learn_from_missing=False: is_missing_fragment_match_features must not appear in
+        feature.columns (it is only a temporary intermediate, not a calibrator feature)."""
+        feature = FragmentMatchFeatures(
+            mz_tolerance=0.02,
+            unsupported_residues=[],
+            learn_from_missing=False,
+        )
+        assert "is_missing_fragment_match_features" not in feature.columns
+        assert feature.columns == ["ion_matches", "ion_match_intensity"]
+
+    def test_fragment_match_true_columns_includes_indicator(self):
+        """learn_from_missing=True: is_missing_fragment_match_features must appear in
+        feature.columns so the calibrator can learn from missingness."""
+        feature = FragmentMatchFeatures(
+            mz_tolerance=0.02,
+            unsupported_residues=[],
+            learn_from_missing=True,
+        )
+        assert "is_missing_fragment_match_features" in feature.columns
+
+    @patch("winnow.calibration.calibration_features.koinapy.Koina")
+    def test_fragment_match_true_retains_invalid_rows_with_zero_features(
+        self, mock_koina
+    ):
+        """learn_from_missing=True: invalid rows stay in the dataset, their ion_matches and
+        ion_match_intensity values are zero, and is_missing_* is True for those rows."""
+        feature = FragmentMatchFeatures(
+            mz_tolerance=0.02,
+            unsupported_residues=[],
+            learn_from_missing=True,
+            max_peptide_length=5,
+            model_input_constants={"collision_energies": 25},
+        )
+        metadata = pd.DataFrame(
+            {
+                "prediction": [["A", "G"], ["A"] * 6, ["S", "P"]],
+                "precursor_charge": [2, 2, 2],
+                "spectrum_id": [10, 20, 30],
+                "mz_array": [[100.0, 200.0], [120.0], [110.0, 210.0]],
+                "intensity_array": [[1000.0, 2000.0], [1200.0], [1100.0, 2100.0]],
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=[])
+
+        mock_model = mock_koina.return_value
+        mock_model.model_inputs = [
+            "peptide_sequences",
+            "precursor_charges",
+            "collision_energies",
+        ]
+        mock_model.predict = self._make_intensity_mock(
+            {
+                10: [(100.0, 0.8, "b1"), (200.0, 0.6, "y1")],
+                30: [(110.0, 0.7, "b1"), (210.0, 0.5, "y1")],
+            }
+        )
+
+        feature.compute(dataset)
+
+        # All 3 rows must be present.
+        assert len(dataset.metadata) == 3
+        assert set(dataset.metadata["spectrum_id"].values) == {10, 20, 30}
+
+        # Indicator column must exist and correctly flag the invalid row.
+        assert "is_missing_fragment_match_features" in dataset.metadata.columns
+        row20 = dataset.metadata[dataset.metadata["spectrum_id"] == 20].iloc[0]
+        assert row20["is_missing_fragment_match_features"]
+
+        # Invalid row must have zero ion matches.
+        assert row20["ion_matches"] == 0.0
+        assert row20["ion_match_intensity"] == 0.0
+
+    # ------------------------------------------------------------------
+    # ChimericFeatures
+    # ------------------------------------------------------------------
+
+    @patch("winnow.calibration.calibration_features.koinapy.Koina")
+    def test_chimeric_false_drops_entries_without_runnerup_and_warns(self, mock_koina):
+        """learn_from_missing=False: spectra without a runner-up beam are removed from the
+        dataset and a UserWarning is emitted."""
+        feature = ChimericFeatures(
+            mz_tolerance=0.02,
+            invalid_prosit_residues=[],
+            learn_from_missing=False,
+            model_input_constants={"collision_energies": 25},
+        )
+        metadata = pd.DataFrame(
+            {
+                "precursor_charge": [2, 2, 2],
+                "spectrum_id": [10, 20, 30],
+                "mz_array": [[100.0, 200.0], [120.0], [110.0, 210.0]],
+                "intensity_array": [[1000.0, 2000.0], [1200.0], [1100.0, 2100.0]],
+            }
+        )
+        predictions = [
+            [  # spectrum 10: valid (has runner-up)
+                MockScoredSequence(["A", "G"], np.log(0.8)),
+                MockScoredSequence(["G", "A"], np.log(0.6)),
+            ],
+            [  # spectrum 20: invalid (only one beam, no runner-up)
+                MockScoredSequence(["V", "T"], np.log(0.9)),
+            ],
+            [  # spectrum 30: valid (has runner-up)
+                MockScoredSequence(["S", "P"], np.log(0.7)),
+                MockScoredSequence(["P", "S"], np.log(0.5)),
+            ],
+        ]
+        dataset = CalibrationDataset(metadata=metadata, predictions=predictions)
+
+        mock_model = mock_koina.return_value
+        mock_model.model_inputs = [
+            "peptide_sequences",
+            "precursor_charges",
+            "collision_energies",
+        ]
+        mock_model.predict = self._make_intensity_mock(
+            {
+                10: [(100.0, 0.8, "b1"), (200.0, 0.6, "y1")],
+                30: [(110.0, 0.7, "b1"), (210.0, 0.5, "y1")],
+            }
+        )
+
+        with pytest.warns(UserWarning, match="Filtered 1 spectra"):
+            feature.compute(dataset)
+
+        assert len(dataset.metadata) == 2
+        assert 20 not in dataset.metadata["spectrum_id"].values
+        assert "chimeric_ion_matches" in dataset.metadata.columns
+        assert "chimeric_ion_match_intensity" in dataset.metadata.columns
+
+    def test_chimeric_false_columns_excludes_indicator(self):
+        """learn_from_missing=False: is_missing_chimeric_features must not appear in
+        feature.columns."""
+        feature = ChimericFeatures(
+            mz_tolerance=0.02,
+            invalid_prosit_residues=[],
+            learn_from_missing=False,
+        )
+        assert "is_missing_chimeric_features" not in feature.columns
+        assert feature.columns == [
+            "chimeric_ion_matches",
+            "chimeric_ion_match_intensity",
+        ]
+
+    # ------------------------------------------------------------------
+    # RetentionTimeFeature
+    # ------------------------------------------------------------------
+
+    @patch("winnow.calibration.calibration_features.koinapy.Koina")
+    def test_irt_false_drops_invalid_rows_and_warns(self, mock_koina):
+        """learn_from_missing=False: invalid rows are removed from the dataset and a
+        UserWarning is emitted. The iRT error column must be present on the surviving rows."""
+        feature = RetentionTimeFeature(
+            hidden_dim=10,
+            train_fraction=0.8,
+            unsupported_residues=[],
+            learn_from_missing=False,
+            max_peptide_length=5,  # short limit so row 1 (len 6) is invalid
+        )
+        metadata = pd.DataFrame(
+            {
+                "prediction": [["A", "G"], ["A"] * 6, ["S", "P"]],
+                "retention_time": [10.5, 15.2, 8.7],
+                "precursor_charge": [2, 2, 2],
+                "spectrum_id": [10, 20, 30],
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=[])
+
+        mock_model = mock_koina.return_value
+        mock_model.model_inputs = ["peptide_sequences"]
+        mock_model.predict.return_value = pd.DataFrame(
+            {"irt": [25.5, 30.2]}, index=[10, 30]
+        )
+
+        with patch.object(
+            feature.irt_predictor, "predict", return_value=np.array([21.0, 16.0])
+        ):
+            with pytest.warns(UserWarning, match="Filtered 1 spectra"):
+                feature.compute(dataset)
+
+        assert (
+            len(dataset.metadata) == 2
+        ), "Expected 2 rows after filtering the 1 invalid entry"
+        assert 20 not in dataset.metadata["spectrum_id"].values
+        assert "iRT error" in dataset.metadata.columns
+
+    def test_irt_false_columns_excludes_indicator(self):
+        """learn_from_missing=False: is_missing_irt_error must not appear in feature.columns."""
+        feature = RetentionTimeFeature(
+            hidden_dim=10,
+            train_fraction=0.8,
+            unsupported_residues=[],
+            learn_from_missing=False,
+        )
+        assert "is_missing_irt_error" not in feature.columns
+        assert feature.columns == ["iRT error"]
 
 
 class ConcreteFeature(CalibrationFeatures):
