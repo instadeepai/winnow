@@ -114,38 +114,35 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
     @staticmethod
     def _merge_spectrum_data(
-        beam_dataset: pd.DataFrame, spectrum_dataset: pd.DataFrame
+        preds_dataset: pd.DataFrame, spectrum_dataset: pd.DataFrame
     ) -> pd.DataFrame:
         """Merge the input and output data from the de novo sequencing model.
 
         Args:
-            beam_dataset (pd.DataFrame): The dataframe containing the beam predictions.
+            preds_dataset (pd.DataFrame): The dataframe containing the beam predictions.
             spectrum_dataset (pd.DataFrame): The dataframe containing the spectrum data.
 
         Returns:
             pd.DataFrame: The merged dataframe.
         """
-        merged_df = pd.merge(
-            beam_dataset,
+        # Merge the predictions and input datasets on the spectrum_id column
+        # There should be no duplicate columns between the two datasets except for spectrum_id
+        merged_dataset = pd.merge(
+            preds_dataset,
             spectrum_dataset,
             on=["spectrum_id"],
-            suffixes=("_from_beams", ""),
-        )
-        merged_df = merged_df.drop(
-            columns=[
-                col + "_from_beams"
-                for col in beam_dataset.columns
-                if col in spectrum_dataset.columns and col != "spectrum_id"
-            ],
-            axis=1,
+            suffixes=("_from_preds", "_from_inputs"),
+            how="inner",
         )
 
-        if len(merged_df) != len(beam_dataset):
+        # If the number of rows in the merged dataset is not equal to the number of rows in the predictions dataset, it is likely that spectrum_id is not unique in the input dataset.
+        # It is possible for the inputs dataset to have more rows than the predictions dataset if the DNS model filtered out some spectra before prediction.
+        if len(merged_dataset) != len(preds_dataset):
             raise ValueError(
-                f"Merge conflict: Expected {len(beam_dataset)} rows, but got {len(merged_df)}."
+                f"Merge conflict: Expected {len(preds_dataset)} rows, but got {len(merged_dataset)}."
             )
 
-        return merged_df
+        return merged_dataset
 
     def load(
         self, *, data_path: Path, predictions_path: Optional[Path] = None, **kwargs: Any
@@ -172,7 +169,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
         predictions, beams = self._load_beam_preds(beam_predictions_path)
         beams = self._process_beams(beams)
-        predictions = self._process_predictions(predictions.to_pandas(), has_labels)
+        predictions = self._process_predictions(predictions.to_pandas(), inputs.columns)
 
         predictions = self._merge_spectrum_data(predictions, inputs)
         predictions = self._evaluate_predictions(predictions, has_labels)
@@ -266,56 +263,58 @@ class InstaNovoDatasetLoader(DatasetLoader):
         return df
 
     def _process_predictions(
-        self, dataset: pd.DataFrame, has_labels: bool
+        self, preds_dataset: pd.DataFrame, input_dataset_columns: List[str]
     ) -> pd.DataFrame:
         """Processes the predictions obtained from saved beams.
 
         Args:
-            dataset (pd.DataFrame): The dataframe containing the predictions.
-            has_labels (bool): Whether the dataset has ground truth labels.
+            preds_dataset (pd.DataFrame): The dataframe containing the predictions.
+            input_dataset_columns (List[str]): The columns of the input dataset.
 
         Returns:
             pd.DataFrame: The processed dataframe.
         """
+        # Drop duplicate columns from the input dataset except spectrum_id
+        preds_dataset = preds_dataset.drop(
+            columns=[
+                col
+                for col in preds_dataset.columns
+                if col in input_dataset_columns and col != "spectrum_id"
+            ]
+        )
+
         rename_dict = {
             "predictions": "prediction_untokenised",
             "predictions_tokenised": "prediction",
             "log_probs": "confidence",
         }
-        if has_labels:
-            rename_dict["sequence"] = "sequence_untokenised"
-        dataset.rename(rename_dict, axis=1, inplace=True)
+        preds_dataset.rename(rename_dict, axis=1, inplace=True)
 
-        dataset["prediction"] = dataset["prediction"].apply(
+        preds_dataset.loc[preds_dataset["confidence"] == -1.0, "confidence"] = float(
+            "-inf"
+        )
+        preds_dataset["confidence"] = preds_dataset["confidence"].apply(np.exp)
+
+        preds_dataset["prediction"] = preds_dataset["prediction"].apply(
             lambda peptide: peptide.split(", ") if isinstance(peptide, str) else peptide
         )
-
-        dataset.loc[dataset["confidence"] == -1.0, "confidence"] = float("-inf")
-        dataset["confidence"] = dataset["confidence"].apply(np.exp)
-
-        if has_labels:
-            dataset["sequence_untokenised"] = dataset["sequence_untokenised"].apply(
-                lambda peptide: peptide.replace("L", "I")
-                if isinstance(peptide, str)
-                else peptide
-            )
-            dataset["sequence"] = dataset["sequence_untokenised"].apply(
-                self.metrics._split_peptide
-            )
-        dataset["prediction"] = dataset["prediction"].apply(
+        preds_dataset["prediction"] = preds_dataset["prediction"].apply(
             lambda peptide: [
                 "I" if amino_acid == "L" else amino_acid for amino_acid in peptide
             ]
             if isinstance(peptide, list)
             else peptide
         )
-        dataset["prediction_untokenised"] = dataset["prediction_untokenised"].apply(
+
+        preds_dataset["prediction_untokenised"] = preds_dataset[
+            "prediction_untokenised"
+        ].apply(
             lambda peptide: peptide.replace("L", "I")
             if isinstance(peptide, str)
             else peptide
         )
 
-        return dataset
+        return preds_dataset
 
     def _evaluate_predictions(
         self, dataset: pd.DataFrame, has_labels: bool
