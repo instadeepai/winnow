@@ -855,7 +855,7 @@ class MassErrorFeature(CalibrationFeatures):
         Returns:
             List[str]: A list containing the feature name.
         """
-        return [self.name]
+        return ["mass_error"]
 
     @property
     def name(self) -> str:
@@ -894,7 +894,7 @@ class MassErrorFeature(CalibrationFeatures):
             if isinstance(peptide, list)
             else float("-inf")
         )
-        dataset.metadata[self.name] = dataset.metadata["precursor_mass"] - (
+        dataset.metadata[self.columns[0]] = dataset.metadata["precursor_mass"] - (
             theoretical_mass + self.h2o_mass + self.proton_mass
         )
 
@@ -929,7 +929,7 @@ class BeamFeatures(CalibrationFeatures):
         """Defines the column names for the computed features.
 
         Returns:
-            List[str]: A list of column names: ["margin", "median_margin", "entropy"].
+            List[str]: A list of column names: ["margin", "median_margin", "entropy", "z-score"].
         """
         return ["margin", "median_margin", "entropy", "z-score"]
 
@@ -1109,10 +1109,10 @@ class RetentionTimeFeature(CalibrationFeatures):
         """Defines the column names for the computed features.
 
         Returns:
-            List[str]: A list containing "iRT error" and optionally "is_missing_irt_error"
+            List[str]: A list containing "irt_error" and optionally "is_missing_irt_error"
                 if learn_from_missing is True.
         """
-        columns = ["iRT error"]
+        columns = ["irt_error"]
         if self.learn_from_missing:
             columns.append("is_missing_irt_error")
         return columns
@@ -1273,6 +1273,6 @@ class RetentionTimeFeature(CalibrationFeatures):
 
         # Compute iRT error
         # Set zeros for rows where "iRT" is missing
-        dataset.metadata["iRT error"] = np.abs(
+        dataset.metadata["irt_error"] = np.abs(
             dataset.metadata["predicted iRT"] - dataset.metadata["iRT"]
         ).fillna(0.0)
