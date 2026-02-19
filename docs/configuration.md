@@ -78,7 +78,7 @@ winnow train calibrator.seed=123
 winnow train calibrator.hidden_layer_sizes=[100,50,25]
 
 # Change feature parameters
-winnow train calibrator.features.prosit_features.mz_tolerance=0.01
+winnow train calibrator.features.fragment_match_features.mz_tolerance=0.01
 ```
 
 ### Dataset configuration
@@ -131,6 +131,19 @@ dataset_output_path: results/calibrated_dataset.csv
 Controls model architecture and calibration features:
 
 ```yaml
+# Shared Koina model inputs — applied to all intensity-based features.
+# To use a constant value tiled across all rows, specify it under koina_model_input_constants.
+# To use per-row values from a metadata column, add the column mapping under koina_model_input_columns.
+koina_model_input_constants:
+  collision_energies: 25
+  fragmentation_types: HCD
+
+# Shared Koina model constraints.
+# Change these to match the capabilities of your selected Koina models.
+koina_model_constraints:
+  max_precursor_charge: 6
+  max_peptide_length: 30
+
 calibrator:
   _target_: winnow.calibration.calibrator.ProbabilityCalibrator
 
@@ -147,33 +160,40 @@ calibrator:
       _target_: winnow.calibration.calibration_features.MassErrorFeature
       residue_masses: ${residue_masses}
 
-    prosit_features:
-      _target_: winnow.calibration.calibration_features.PrositFeatures
+    fragment_match_features:
+      _target_: winnow.calibration.calibration_features.FragmentMatchFeatures
       mz_tolerance: 0.02
-      learn_from_missing: true
-      invalid_prosit_residues: ${invalid_prosit_residues}
-      prosit_intensity_model_name: Prosit_2020_intensity_HCD
+      learn_from_missing: false
+      unsupported_residues: ${unsupported_residues}
+      intensity_model_name: Prosit_2025_intensity_22PTM
+      max_precursor_charge: ${koina_model_constraints.max_precursor_charge}
+      max_peptide_length: ${koina_model_constraints.max_peptide_length}
+      model_input_constants: ${koina_model_input_constants}
 
     retention_time_feature:
       _target_: winnow.calibration.calibration_features.RetentionTimeFeature
       hidden_dim: 10
       train_fraction: 0.1
-      learn_from_missing: true
+      learn_from_missing: false
       seed: 42
       learning_rate_init: 0.001
       alpha: 0.0001
       max_iter: 200
-      early_stopping: false
+      early_stopping: true
       validation_fraction: 0.1
-      invalid_prosit_residues: ${invalid_prosit_residues}
-      prosit_irt_model_name: Prosit_2019_irt
+      unsupported_residues: ${unsupported_residues}
+      irt_model_name: Prosit_2025_irt_22PTM
+      max_peptide_length: ${koina_model_constraints.max_peptide_length}
 
     chimeric_features:
       _target_: winnow.calibration.calibration_features.ChimericFeatures
       mz_tolerance: 0.02
-      learn_from_missing: true
-      invalid_prosit_residues: ${invalid_prosit_residues}
-      prosit_intensity_model_name: Prosit_2020_intensity_HCD
+      learn_from_missing: false
+      invalid_prosit_residues: ${unsupported_residues}
+      prosit_intensity_model_name: Prosit_2025_intensity_22PTM
+      max_precursor_charge: ${koina_model_constraints.max_precursor_charge}
+      max_peptide_length: ${koina_model_constraints.max_peptide_length}
+      model_input_constants: ${koina_model_input_constants}
 
     beam_features:
       _target_: winnow.calibration.calibration_features.BeamFeatures
@@ -189,6 +209,86 @@ calibrator:
 - `early_stopping`: Whether to use early stopping
 - `validation_fraction`: Proportion of data for validation
 - `features.*`: Individual calibration feature configurations
+
+### Koina model input validation
+
+`FragmentMatchFeatures`, `ChimericFeatures`, and `RetentionTimeFeature` all call external
+[Koina](https://koina.wilhelmlab.org/) models to generate theoretical spectra or iRT values.
+Before calling the model, each prediction is checked against a set of configurable validity
+filters. Predictions that fail any check are treated as **missing** rather than passed to Koina.
+
+#### Validity filters
+
+| Parameter | Applies to | Description |
+|---|---|---|
+| `max_precursor_charge` | `FragmentMatchFeatures`, `ChimericFeatures` | Predictions with a precursor charge strictly greater than this value are excluded. |
+| `max_peptide_length` | all three features | Predictions with more residue tokens than this limit are excluded. In `ChimericFeatures`, this limit is applied to the **runner-up (second-best) sequence**, not the top-1 prediction. |
+| `unsupported_residues` / `invalid_prosit_residues` | all three features | Predictions containing any of the listed ProForma tokens are excluded. |
+
+The defaults (charge ≤ 6, length ≤ 30) match the constraints of the Prosit model family.
+If you switch to a different Koina model, check its documentation and adjust these parameters
+accordingly.
+
+#### Interaction with `learn_from_missing`
+
+Each Koina feature has a `learn_from_missing` flag that controls what happens to invalid
+predictions:
+
+- **`learn_from_missing: true`** — Invalid predictions are recorded in a boolean indicator
+  column (`is_missing_fragment_match_features`, `is_missing_chimeric_features`, or
+  `is_missing_irt_error`). Their feature values are imputed to zero / NaN. The calibrator
+  receives this indicator as an additional feature, allowing it to distinguish genuinely
+  low-scoring predictions from those that were simply out of range for the Koina model.
+  Use this when your dataset is diverse and you expect a manageable proportion of peptides
+  to be out of range — the calibrator will learn to account for missingness automatically.
+
+- **`learn_from_missing: false`** — Invalid entries are automatically **filtered from the
+  dataset** before Koina is called. A warning is emitted reporting how many PSMs were
+  removed and which constraints were applied. The filtered PSMs are gone entirely — no
+  indicator column is added and the calibrator trains only on the remaining clean data.
+  Use this when you want the strictest possible data quality and are comfortable losing
+  some PSMs.
+
+#### User responsibility
+
+The built-in filters cover the most common Koina model constraints, but they cannot
+anticipate every model's requirements. **It is the user's responsibility to:**
+
+1. Consult the documentation of the selected Koina model (available at
+   [koina.wilhelmlab.org](https://koina.wilhelmlab.org/)) and verify which sequence lengths,
+   charge states and modifications it supports.
+2. Set `max_precursor_charge`, `max_peptide_length`, and `unsupported_residues` to match
+   those constraints, and update `koina_model_constraints` in `calibrator.yaml` so all
+   features stay consistent.
+3. Be aware that Koina model constraints which are not expressible via these three
+   parameters may still cause errors or silently incorrect results at prediction time,
+   and may require pre-filtering the dataset before running Winnow.
+
+Predictions that violate undocumented model constraints may cause Koina errors at prediction
+time or silently produce incorrect theoretical spectra.
+
+#### Shared Koina inputs (`koina_model_input_constants` / `koina_model_input_columns`)
+
+Some Koina intensity models require additional inputs beyond peptide sequence and
+precursor charge, typically experimental settings such as `collision_energies` or
+`fragmentation_types`. These can be supplied in two ways — both defined once at the top
+level and interpolated into every intensity feature to ensure they remain consistent:
+
+- **`koina_model_input_constants`**: A single constant value tiled across all rows.
+  Use this when the same collision energy applies to your whole dataset.
+- **`koina_model_input_columns`**: A metadata column name providing per-row values.
+  Use this when collision energy or fragmentation type varies per spectrum and is already
+  present in your spectrum metadata.
+
+Specifying the same key in both dicts raises a `ValueError` at construction time.
+
+#### Shared model constraints (`koina_model_constraints`)
+
+`max_precursor_charge` and `max_peptide_length` are defined once in the top-level
+`koina_model_constraints` block and interpolated via `${koina_model_constraints.*}` into
+every Koina feature. This ensures all features apply the same limits without requiring
+manual duplication. To override a constraint for a single feature only, replace the
+interpolation with a literal value directly in that feature's config block.
 
 ## Prediction configuration
 
@@ -273,7 +373,7 @@ Requires ground truth sequences in the dataset.
 
 ### Residues config (`configs/residues.yaml`)
 
-Defines amino acid masses, modifications and invalid tokens:
+Defines amino acid masses, modifications and residues unsupported by the configured Koina models:
 
 ```yaml
 residue_masses:
@@ -290,7 +390,7 @@ residue_masses:
   "[UNIMOD:5]": 43.005814     # Carbamylation (terminal)
   "[UNIMOD:385]": -17.026549  # NH3 loss (terminal)
 
-invalid_prosit_residues:
+unsupported_residues:
   # Residue modifications (amino acid + modification)
   - "N[UNIMOD:7]"   # Deamidated asparagine
   - "Q[UNIMOD:7]"   # Deamidated glutamine
@@ -307,16 +407,15 @@ invalid_prosit_residues:
   - "[UNIMOD:5]"    # N-terminal carbamylation
   - "[UNIMOD:385]"  # N-terminal ammonia loss
   - "(+25.98)"      # Carbamylation & NH3 loss (legacy notation)
+  # Unsupported residues
+  # - "C"  # Unmodified cysteine (must be explicitly carbamidomethylated for some Koina models)
 
-  # ... other unsupported modifications
+  # ... other unsupported residues
 ```
 
-**Important note on cysteine handling:**
-Prosit models require all cysteines to be carbamidomethylated (C[UNIMOD:4]). Peptides containing unmodified cysteine ("C") are automatically filtered out during Prosit feature computation. The carbamidomethylation annotation is passed explicitly to Prosit models.
+This configuration is shared across all pipelines and referenced via `${residue_masses}` and `${unsupported_residues}` interpolation.
 
-This configuration is shared across all pipelines and referenced via `${residue_masses}` and `${invalid_prosit_residues}` interpolation.
-
-Winnow represents PTMs using the UNIMOD format internally, so all residue masses and PTMs to be filtered from Prosit features must use this format. Please check that all PTMs unsupported by selected Prosit models will be filtered out.
+Winnow represents PTMs using the UNIMOD format internally, so all residue masses and PTMs to be filtered must use this format. Please check that all PTMs unsupported by your selected Koina models are included in `unsupported_residues`.
 
 ### Data loader configs
 
@@ -419,14 +518,20 @@ winnow predict fdr_method=nonparametric fdr_control.fdr_threshold=0.05
 ### Training with different features
 
 ```bash
-# Change Prosit tolerance
-winnow train calibrator.features.prosit_features.mz_tolerance=0.01
+# Change fragment match m/z tolerance
+winnow train calibrator.features.fragment_match_features.mz_tolerance=0.01
 
 # Disable missing value handling for a feature
-winnow train calibrator.features.prosit_features.learn_from_missing=false
+winnow train calibrator.features.fragment_match_features.learn_from_missing=false
 
 # Change retention time model architecture
 winnow train calibrator.features.retention_time_feature.hidden_dim=20
+
+# Use a different Koina intensity model with a higher charge/length limit
+winnow train \
+  calibrator.features.fragment_match_features.intensity_model_name=AlphaPept_ms2_generic \
+  calibrator.features.fragment_match_features.max_precursor_charge=10 \
+  calibrator.features.fragment_match_features.max_peptide_length=50
 ```
 
 ### Processing different data formats
@@ -463,7 +568,10 @@ defaults:
 
 Common interpolation patterns in Winnow configs:
 - `${residue_masses}` - References amino acid masses from residues.yaml
-- `${invalid_prosit_residues}` - References invalid tokens from residues.yaml
+- `${unsupported_residues}` - References Koina-unsupported residue tokens from residues.yaml
+- `${koina_model_input_constants}` - References shared Koina model inputs (e.g. collision energy) from calibrator.yaml
+- `${koina_model_constraints.max_precursor_charge}` - References shared charge limit from calibrator.yaml
+- `${koina_model_constraints.max_peptide_length}` - References shared length limit from calibrator.yaml
 - `${fdr_control.confidence_column}` - References FDR confidence column setting
 
 ## Creating custom configurations
@@ -622,12 +730,12 @@ calibrator:
     mass_error:
       _target_: winnow.calibration.calibration_features.MassErrorFeature
       residue_masses: ${residue_masses}
-    prosit_features:
+    fragment_match_features:
       # ... include all features you want to keep
     # Features you don't include will be missing (not using defaults)
 ```
 
-**Removing features**: To remove features, simply **don't include them** in your custom `calibrator.yaml`. Since your file completely replaces the package version, any features you omit will be absent from the final config. It is also possible to specify this using a tilde with CLI overrides (e.g., `~calibrator.prosit_features`).
+**Removing features**: To remove features, simply **don't include them** in your custom `calibrator.yaml`. Since your file completely replaces the package version, any features you omit will be absent from the final config. It is also possible to specify this using a tilde with CLI overrides (e.g., `~calibrator.features.fragment_match_features`).
 
 **New variables**: Adding new keys that don't exist in package configs will cause them to be ignored (Hydra is not strict by default). They won't cause errors, but they also won't be used unless your code explicitly accesses them. **Stick to overriding existing keys** from package configs.
 
