@@ -141,7 +141,7 @@ class TestMassErrorFeature:
     def test_properties(self, mass_error_feature):
         """Test MassErrorFeature properties."""
         assert mass_error_feature.name == "Mass Error"
-        assert mass_error_feature.columns == ["Mass Error"]
+        assert mass_error_feature.columns == ["mass_error"]
         assert mass_error_feature.dependencies == []
 
     def test_prepare_does_nothing(self, mass_error_feature, sample_dataset):
@@ -156,13 +156,13 @@ class TestMassErrorFeature:
         mass_error_feature.compute(sample_dataset)
 
         # Check that Mass Error column was added
-        assert "Mass Error" in sample_dataset.metadata.columns
+        assert "mass_error" in sample_dataset.metadata.columns
 
         # Verify calculations for known values
         # G + A = 57.021464 + 71.037114 = 128.058578
         # Expected mass error = 1000.0 - (128.058578 + 18.0106 + 1.007276) = 852.923546
         expected_first = 1000.0 - (128.058578 + 18.0106 + 1.007276)
-        assert sample_dataset.metadata.iloc[0]["Mass Error"] == pytest.approx(
+        assert sample_dataset.metadata.iloc[0]["mass_error"] == pytest.approx(
             expected_first, rel=1e-6, abs=1e-6
         )
 
@@ -180,7 +180,7 @@ class TestMassErrorFeature:
         mass_error_feature.compute(dataset)
 
         # Should result in +inf for invalid peptide (1000.0 - (-inf + constants) = +inf)
-        assert dataset.metadata.iloc[0]["Mass Error"] == float("inf")
+        assert dataset.metadata.iloc[0]["mass_error"] == float("inf")
 
     def test_residue_masses_parameter(self):
         """Test that custom residue masses are used correctly."""
@@ -200,7 +200,7 @@ class TestMassErrorFeature:
 
         # Expected: 1000.0 - (100.0 + 200.0 + 18.0106 + 1.007276)
         expected = 1000.0 - (300.0 + 18.0106 + 1.007276)
-        assert dataset.metadata.iloc[0]["Mass Error"] == pytest.approx(
+        assert dataset.metadata.iloc[0]["mass_error"] == pytest.approx(
             expected, rel=1e-6, abs=1e-6
         )
 
@@ -510,7 +510,7 @@ class TestRetentionTimeFeature:
     def test_properties(self, retention_time_feature):
         """Test RetentionTimeFeature properties."""
         assert retention_time_feature.name == "iRT Feature"
-        assert retention_time_feature.columns == ["iRT error", "is_missing_irt_error"]
+        assert retention_time_feature.columns == ["irt_error", "is_missing_irt_error"]
         assert retention_time_feature.dependencies == []
 
     def test_initialization_parameters(self):
@@ -594,16 +594,16 @@ class TestRetentionTimeFeature:
             # Check that columns were added
             assert "iRT" in sample_dataset_with_rt.metadata.columns
             assert "predicted iRT" in sample_dataset_with_rt.metadata.columns
-            assert "iRT error" in sample_dataset_with_rt.metadata.columns
+            assert "irt_error" in sample_dataset_with_rt.metadata.columns
             assert "is_missing_irt_error" in sample_dataset_with_rt.metadata.columns
 
             # Check that error is computed as absolute difference
-            assert len(sample_dataset_with_rt.metadata["iRT error"]) == 5
+            assert len(sample_dataset_with_rt.metadata["irt_error"]) == 5
             max_abs_diff = abs(
                 sample_dataset_with_rt.metadata["predicted iRT"]
                 - sample_dataset_with_rt.metadata["iRT"]
             ).max()
-            max_error = sample_dataset_with_rt.metadata["iRT error"].max()
+            max_error = sample_dataset_with_rt.metadata["irt_error"].max()
             assert max_abs_diff == pytest.approx(max_error, rel=1e-10, abs=1e-10)
 
             # Check that predict was called on both models
@@ -739,7 +739,7 @@ class TestRetentionTimeFeature:
         # Check iRT mapping
         assert "iRT" in dataset.metadata.columns
         assert "predicted iRT" in dataset.metadata.columns
-        assert "iRT error" in dataset.metadata.columns
+        assert "irt_error" in dataset.metadata.columns
 
         # Valid entries should have non-NaN iRT values
         irt_10 = dataset.metadata[spectrum_10_mask]["iRT"].iloc[0]
@@ -766,8 +766,8 @@ class TestRetentionTimeFeature:
 
         # Check iRT error
         # For valid entries, error should be computed
-        irt_error_10 = dataset.metadata[spectrum_10_mask]["iRT error"].iloc[0]
-        irt_error_40 = dataset.metadata[spectrum_40_mask]["iRT error"].iloc[0]
+        irt_error_10 = dataset.metadata[spectrum_10_mask]["irt_error"].iloc[0]
+        irt_error_40 = dataset.metadata[spectrum_40_mask]["irt_error"].iloc[0]
         assert not pd.isna(irt_error_10)
         assert not pd.isna(irt_error_40)
         assert isinstance(irt_error_10, (int, float))
@@ -779,7 +779,7 @@ class TestRetentionTimeFeature:
         assert irt_error_40 == pytest.approx(expected_error_40, rel=1e-10)
 
         # For invalid entries, error should be 0.0 (fillna(0.0) is used)
-        irt_error_20 = dataset.metadata[spectrum_20_mask]["iRT error"].iloc[0]
+        irt_error_20 = dataset.metadata[spectrum_20_mask]["irt_error"].iloc[0]
         assert irt_error_20 == 0.0
 
         assert len(dataset.metadata) == 3
@@ -2180,7 +2180,7 @@ class TestLearnFromMissingFiltering:
             len(dataset.metadata) == 2
         ), "Expected 2 rows after filtering the 1 invalid entry"
         assert 20 not in dataset.metadata["spectrum_id"].values
-        assert "iRT error" in dataset.metadata.columns
+        assert "irt_error" in dataset.metadata.columns
 
     def test_irt_false_columns_excludes_indicator(self):
         """learn_from_missing=False: is_missing_irt_error must not appear in feature.columns."""
@@ -2191,7 +2191,7 @@ class TestLearnFromMissingFiltering:
             learn_from_missing=False,
         )
         assert "is_missing_irt_error" not in feature.columns
-        assert feature.columns == ["iRT error"]
+        assert feature.columns == ["irt_error"]
 
 
 class ConcreteFeature(CalibrationFeatures):
