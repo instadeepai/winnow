@@ -9,6 +9,13 @@ koina_model_input_constants:
   fragmentation_types: HCD
 # koina_model_input_columns: {}
 
+# Shared Koina model constraints.
+# Adjust to match the capabilities of your configured Koina models.
+# See docs/configuration.md for guidance on choosing these values.
+koina_model_constraints:
+  max_precursor_charge: 6   # Maximum precursor charge accepted by the Koina intensity models.
+  max_peptide_length: 30    # Maximum peptide length (residue token count) accepted by the Koina intensity/iRT models.
+
 calibrator:
   _target_: winnow.calibration.calibrator.ProbabilityCalibrator
 
@@ -28,9 +35,11 @@ calibrator:
     fragment_match_features:
       _target_: winnow.calibration.calibration_features.FragmentMatchFeatures
       mz_tolerance: 0.02
-      learn_from_missing: false  # Whether to learn from missing fragment match features. If False, errors will be raised when invalid spectra are encountered.
+      learn_from_missing: false  # If True, impute missing features and add an indicator column. If False, filter invalid entries with a warning.
       unsupported_residues: ${unsupported_residues}  # Residues unsupported by the configured Koina intensity model.
       intensity_model_name: Prosit_2025_intensity_22PTM  # The name of the Koina intensity model to use.
+      max_precursor_charge: ${koina_model_constraints.max_precursor_charge}  # Maximum precursor charge accepted by the Koina intensity model.
+      max_peptide_length: ${koina_model_constraints.max_peptide_length}      # Maximum peptide length accepted by the Koina intensity model.
       model_input_constants: ${koina_model_input_constants}  # Shared Koina model inputs (e.g. collision_energies, fragmentation_types).
       # model_input_columns: ${koina_model_input_columns}  # Uncomment to use per-row metadata columns instead.
 
@@ -38,7 +47,7 @@ calibrator:
       _target_: winnow.calibration.calibration_features.RetentionTimeFeature
       hidden_dim: 10  # The hidden dimension size for the MLP regressor used to predict iRT from observed retention times.
       train_fraction: 0.1  # The fraction of the data to use for training the iRT predictor.
-      learn_from_missing: false  # Whether to learn from missing retention time features. If False, errors will be raised when invalid spectra are encountered.
+      learn_from_missing: false  # If True, impute missing features and add an indicator column. If False, filter invalid entries with a warning.
       seed: 42  # Random seed for the MLP regressor.
       learning_rate_init: 0.001  # The initial learning rate for the MLP regressor.
       alpha: 0.0001  # L2 regularisation parameter for the MLP regressor.
@@ -47,13 +56,16 @@ calibrator:
       validation_fraction: 0.1  # Proportion of training data to use for early stopping validation.
       unsupported_residues: ${unsupported_residues}  # Residues unsupported by the configured Koina iRT model.
       irt_model_name: Prosit_2025_irt_22PTM  # The name of the Koina iRT model to use.
+      max_peptide_length: ${koina_model_constraints.max_peptide_length}      # Maximum peptide length accepted by the Koina iRT model.
 
     chimeric_features:
       _target_: winnow.calibration.calibration_features.ChimericFeatures
       mz_tolerance: 0.02
-      learn_from_missing: false  # Whether to learn from missing chimeric features. If False, errors will be raised when invalid spectra are encountered.
+      learn_from_missing: false  # If True, impute missing features and add an indicator column. If False, filter invalid entries with a warning.
       invalid_prosit_residues: ${unsupported_residues}  # Residues unsupported by the configured Koina intensity model.
       prosit_intensity_model_name: Prosit_2025_intensity_22PTM  # The name of the Koina intensity model to use.
+      max_precursor_charge: ${koina_model_constraints.max_precursor_charge}  # Maximum precursor charge accepted by the Koina intensity model. Applied to the runner-up sequence.
+      max_peptide_length: ${koina_model_constraints.max_peptide_length}      # Maximum peptide length accepted by the Koina intensity model. Applied to the runner-up (second-best) sequence.
       model_input_constants: ${koina_model_input_constants}  # Shared Koina model inputs (e.g. collision_energies, fragmentation_types).
       # model_input_columns: ${koina_model_input_columns}  # Uncomment to use per-row metadata columns instead.
 
