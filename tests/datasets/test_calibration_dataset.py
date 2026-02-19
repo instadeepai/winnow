@@ -25,7 +25,8 @@ class TestCalibrationDataset:
                 "confidence": [0.9, 0.8, 0.7, 0.6, 0.0],
                 "prediction": [["A", "G"], ["G", "A"], ["S", "P"], ["V"], None],
                 "sequence": [["A", "G"], ["G", "A"], ["A", "P"], ["V"], ["P"]],
-                "precursor_mass": [200.0, 200.0, 250.0, 150.0, 180.0],
+                "precursor_mz": [100.508, 100.508, 125.511, 75.505, 90.507],
+                "precursor_charge": [2, 2, 2, 2, 2],
                 "correct": [True, True, False, True, False],
             }
         )
