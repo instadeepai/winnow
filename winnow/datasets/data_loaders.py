@@ -290,9 +290,6 @@ class InstaNovoDatasetLoader(DatasetLoader):
         }
         preds_dataset.rename(rename_dict, axis=1, inplace=True)
 
-        preds_dataset.loc[preds_dataset["confidence"] == -1.0, "confidence"] = float(
-            "-inf"
-        )
         preds_dataset["confidence"] = preds_dataset["confidence"].apply(np.exp)
 
         preds_dataset["prediction"] = preds_dataset["prediction"].apply(
