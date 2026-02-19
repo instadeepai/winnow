@@ -41,12 +41,11 @@ def generate_sample_data():
     ]
 
     # Generate spectrum data (IPC format)
-    # Calculate precursor_mass from mz and charge
+    # precursor_mass is derived at runtime by MassErrorFeature from precursor_mz and precursor_charge:
+    #   precursor_mass (MH+) = precursor_mz * charge - (charge - 1) * proton_mass
     np.random.seed(42)  # For reproducibility
     precursor_mz = np.random.uniform(400, 1200, n_samples)
     precursor_charge = np.random.choice([2, 3, 4], n_samples)
-    proton_mass = 1.007276
-    precursor_mass = precursor_mz * precursor_charge - proton_mass * precursor_charge
 
     # Generate spectrum arrays (mz_array and intensity_array)
     mz_arrays = []
@@ -64,7 +63,6 @@ def generate_sample_data():
             "spectrum_id": spectrum_ids,
             "precursor_mz": precursor_mz,
             "precursor_charge": precursor_charge.astype(int),
-            "precursor_mass": precursor_mass,
             "retention_time": np.random.uniform(10, 60, n_samples),
             "sequence": peptides,  # Ground truth for training
             "mz_array": mz_arrays,

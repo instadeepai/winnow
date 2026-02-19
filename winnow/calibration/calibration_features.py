@@ -422,6 +422,11 @@ class FragmentMatchFeatures(CalibrationFeatures):
         Args:
             dataset (CalibrationDataset): The dataset containing metadata required for predictions.
         """
+        if "precursor_charge" not in dataset.metadata.columns:
+            raise ValueError(
+                "precursor_charge column not found in dataset. This is required for fragment match features computation."
+            )
+
         # Check which predictions are valid for intensity prediction
         is_valid_prediction = self.check_valid_prediction(dataset)
         dataset.metadata["is_missing_fragment_match_features"] = ~is_valid_prediction
@@ -698,6 +703,11 @@ class ChimericFeatures(CalibrationFeatures):
         Args:
             dataset (CalibrationDataset): The dataset containing metadata for predictions.
         """
+        if "precursor_charge" not in dataset.metadata.columns:
+            raise ValueError(
+                "precursor_charge column not found in dataset. This is required for chimeric features computation."
+            )
+
         # Ensure dataset.predictions is not None
         _raise_value_error(dataset.predictions, "dataset.predictions")
 
@@ -866,7 +876,6 @@ class MassErrorFeature(CalibrationFeatures):
         Args:
             dataset (CalibrationDataset): The dataset to prepare.
         """
-        return
 
     def compute(
         self,
@@ -874,18 +883,43 @@ class MassErrorFeature(CalibrationFeatures):
     ) -> None:
         """Computes the mass error for each peptide.
 
-        The mass error is calculated as the difference between the observed precursor mass and the theoretical peptide mass, accounting for the mass of water (H2O) and a proton (H+), which are added during ionisation.
+        The mass error is calculated as the difference between the observed precursor mass and the theoretical peptide mass,
+        accounting for the mass of water (H2O) and a proton (H+), which are added during ionisation.
 
         Args:
-            dataset (CalibrationDataset): The dataset containing observed masses and peptide sequences.
+            dataset (CalibrationDataset): The dataset containing ``precursor_mz``,
+                ``precursor_charge``, and ``prediction`` columns.
         """
-        theoretical_mass = dataset.metadata["prediction"].apply(
+        if "precursor_mz" not in dataset.metadata.columns:
+            raise ValueError(
+                "precursor_mz column not found in dataset. This is required for mass error computation."
+            )
+        if "precursor_charge" not in dataset.metadata.columns:
+            raise ValueError(
+                "precursor_charge column not found in dataset. This is required for mass error computation."
+            )
+
+        # Compute MH+ precursor mass from precursor m/z and charge
+        dataset.metadata["precursor_mass"] = dataset.metadata[
+            "precursor_mz"
+        ] * dataset.metadata["precursor_charge"] - (
+            (dataset.metadata["precursor_charge"] - 1) * self.proton_mass
+        )
+
+        # Compute dehydrated theoretical mass from peptide sequence
+        dehydrated_theoretical_mass = dataset.metadata["prediction"].apply(
             lambda peptide: sum(self.residue_masses[residue] for residue in peptide)
             if isinstance(peptide, list)
             else float("-inf")
         )
-        dataset.metadata[self.columns[0]] = dataset.metadata["precursor_mass"] - (
-            theoretical_mass + self.h2o_mass + self.proton_mass
+        # Compute theoretical MH+ mass: residues + H2O (peptide backbone) + H+ (ionisation)
+        theoretical_mass = (
+            dehydrated_theoretical_mass + self.h2o_mass + self.proton_mass
+        )
+
+        # Compute mass error from precursor mass and theoretical mass
+        dataset.metadata[self.columns[0]] = (
+            dataset.metadata["precursor_mass"] - theoretical_mass
         )
 
 
@@ -1152,6 +1186,11 @@ class RetentionTimeFeature(CalibrationFeatures):
         Args:
             dataset (CalibrationDataset): The dataset containing peptide sequences and retention times.
         """
+        if "retention_time" not in dataset.metadata.columns:
+            raise ValueError(
+                "retention_time column not found in dataset. This is required for iRT features computation."
+            )
+
         # Create a copy of the dataset to avoid modifying the original
         dataset_copy = CalibrationDataset(
             metadata=dataset.metadata.copy(deep=True),

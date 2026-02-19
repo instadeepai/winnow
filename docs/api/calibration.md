@@ -100,7 +100,9 @@ class CustomFeature(CalibrationFeatures):
 
 ### MassErrorFeature
 
-Calculates the difference between observed precursor mass and theoretical mass based on peptide composition.
+Calculates the mass error (in Da) between the observed precursor MH⁺ mass and the theoretical MH⁺ mass based on peptide composition.
+
+This feature requires the columns `precursor_mz` and `precursor_charge` to be supplied in the spectrum dataset.
 
 ```python
 from winnow.calibration.calibration_features import MassErrorFeature
@@ -114,6 +116,8 @@ feature = MassErrorFeature(residue_masses=RESIDUE_MASSES)
 ### FragmentMatchFeatures
 
 Extracts features by calling a Koina intensity model to generate a theoretical fragmentation spectrum for the top-1 de novo predicted sequence and computing how well it matches the observed spectrum (ion match rate and ion match intensity).
+
+This feature requires the column `precursor_charge` to be supplied in the spectrum dataset.
 
 ```python
 from winnow.calibration.calibration_features import FragmentMatchFeatures
@@ -148,6 +152,8 @@ feature = BeamFeatures()
 
 Computes chimeric ion matches by predicting intensities for runner-up (second-best) peptide sequences using a Koina intensity model and comparing with observed spectra.
 
+This feature requires the column `precursor_charge` to be supplied in the spectrum dataset.
+
 ```python
 from winnow.calibration.calibration_features import ChimericFeatures
 
@@ -165,6 +171,8 @@ feature = ChimericFeatures(
 ### RetentionTimeFeature
 
 Uses a Koina iRT model to predict indexed retention times and calibrate against observed retention times.
+
+This feature requires the column `retention_time` to be supplied in the spectrum dataset.
 
 ```python
 from winnow.calibration.calibration_features import RetentionTimeFeature

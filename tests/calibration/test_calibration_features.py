@@ -128,10 +128,19 @@ class TestMassErrorFeature:
 
     @pytest.fixture()
     def sample_dataset(self):
-        """Create a sample CalibrationDataset for testing."""
+        """Create a sample CalibrationDataset for testing.
+
+        precursor_mz and precursor_charge are chosen so that the derived MH+ masses are
+        1000.0, 1200.0, and 800.0 Da respectively, enabling straightforward verification:
+            MH+ = precursor_mz * charge - (charge - 1) * proton_mass
+        """
         metadata = pd.DataFrame(
             {
-                "precursor_mass": [1000.0, 1200.0, 800.0],
+                # MH+ = 500.503638 * 2 - 1 * 1.007276 = 1000.0
+                # MH+ = 400.671517 * 3 - 2 * 1.007276 = 1200.0
+                # MH+ = 400.503638 * 2 - 1 * 1.007276 = 800.0
+                "precursor_mz": [500.503638, 400.671517, 400.503638],
+                "precursor_charge": [2, 3, 2],
                 "prediction": [["G", "A"], ["A", "S", "P"], ["V"]],
                 "confidence": [0.9, 0.8, 0.7],
             }
@@ -155,22 +164,37 @@ class TestMassErrorFeature:
         """Test mass error computation."""
         mass_error_feature.compute(sample_dataset)
 
-        # Check that Mass Error column was added
+        # Check that mass_error column was added and precursor_mass (MH+) was derived
         assert "mass_error" in sample_dataset.metadata.columns
+        assert "precursor_mass" in sample_dataset.metadata.columns
 
-        # Verify calculations for known values
-        # G + A = 57.021464 + 71.037114 = 128.058578
-        # Expected mass error = 1000.0 - (128.058578 + 18.0106 + 1.007276) = 852.923546
-        expected_first = 1000.0 - (128.058578 + 18.0106 + 1.007276)
+        # Verify first row: precursor_mz=500.503638, charge=2
+        #   MH+ observed = 500.503638 * 2 - (2-1) * 1.007276 = 1001.007276 - 1.007276 = 1000.0
+        #   G + A dehydrated = 57.021464 + 71.037114 = 128.058578
+        #   theoretical MH+ = 128.058578 + 18.0106 + 1.007276 = 147.076454
+        #   mass_error = 1000.0 - 147.076454 = 852.923546
+        proton_mass = 1.007276
+        mz, charge = 500.503638, 2
+        expected_precursor_mass = mz * charge - (charge - 1) * proton_mass
+        expected_theoretical = 128.058578 + 18.0106 + proton_mass
+        expected_first = expected_precursor_mass - expected_theoretical
+        assert sample_dataset.metadata.iloc[0]["precursor_mass"] == pytest.approx(
+            expected_precursor_mass, rel=1e-6, abs=1e-6
+        )
         assert sample_dataset.metadata.iloc[0]["mass_error"] == pytest.approx(
             expected_first, rel=1e-6, abs=1e-6
         )
 
     def test_compute_with_invalid_peptide(self, mass_error_feature):
-        """Test mass error computation with invalid peptide format."""
+        """Test mass error computation with invalid peptide format.
+
+        When the prediction is not a list, the dehydrated theoretical mass is set to
+        -inf, making the theoretical MH+ also -inf, and the resulting mass error +inf.
+        """
         metadata = pd.DataFrame(
             {
-                "precursor_mass": [1000.0],
+                "precursor_mz": [500.503638],
+                "precursor_charge": [2],
                 "prediction": ["invalid_string"],  # String instead of list
                 "confidence": [0.9],
             }
@@ -179,17 +203,23 @@ class TestMassErrorFeature:
 
         mass_error_feature.compute(dataset)
 
-        # Should result in +inf for invalid peptide (1000.0 - (-inf + constants) = +inf)
+        # MH+ observed is finite; theoretical MH+ is -inf → mass_error = +inf
         assert dataset.metadata.iloc[0]["mass_error"] == float("inf")
 
     def test_residue_masses_parameter(self):
-        """Test that custom residue masses are used correctly."""
+        """Test that custom residue masses are used correctly.
+
+        precursor_mz=500.503638 with charge=2 gives MH+=1000.0, so the mass error
+        is simply 1000.0 minus the theoretical MH+ built from the custom masses.
+        """
         custom_masses = {"A": 100.0, "G": 200.0}
         feature = MassErrorFeature(residue_masses=custom_masses)
 
+        proton_mass = 1.007276
         metadata = pd.DataFrame(
             {
-                "precursor_mass": [1000.0],
+                "precursor_mz": [500.503638],
+                "precursor_charge": [2],
                 "prediction": [["A", "G"]],
                 "confidence": [0.9],
             }
@@ -198,8 +228,10 @@ class TestMassErrorFeature:
 
         feature.compute(dataset)
 
-        # Expected: 1000.0 - (100.0 + 200.0 + 18.0106 + 1.007276)
-        expected = 1000.0 - (300.0 + 18.0106 + 1.007276)
+        # MH+ observed = 500.503638 * 2 - 1 * 1.007276 = 1000.0
+        # theoretical MH+ = 100.0 + 200.0 + 18.0106 + 1.007276 = 319.017876
+        # mass_error = 1000.0 - 319.017876
+        expected = 1000.0 - (300.0 + 18.0106 + proton_mass)
         assert dataset.metadata.iloc[0]["mass_error"] == pytest.approx(
             expected, rel=1e-6, abs=1e-6
         )

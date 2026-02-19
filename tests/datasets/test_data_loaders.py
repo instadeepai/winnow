@@ -438,15 +438,15 @@ class TestInstaNovoDatasetLoader:
                 "predictions": ["PEPTIDE"],
                 "predictions_tokenised": ["P, E, P, T, I, D, E"],
                 "log_probs": [-0.5],
-                "charge": [2],
-                "precursor_mass": [800.0],
+                "precursor_charge": [2],
+                "precursor_mz": [400.504],
             }
         )
-        input_cols = ["spectrum_id", "charge", "precursor_mass"]
+        input_cols = ["spectrum_id", "precursor_charge", "precursor_mz"]
         result = loader._process_predictions(preds_df, input_cols)
         assert "spectrum_id" in result.columns  # spectrum_id is always kept
-        assert "charge" not in result.columns
-        assert "precursor_mass" not in result.columns
+        assert "precursor_charge" not in result.columns
+        assert "precursor_mz" not in result.columns
 
     # ------------------------------------------------------------------
     # _evaluate_predictions
