@@ -101,7 +101,7 @@ You can customise the calibrator architecture and features using nested paramete
 winnow train calibrator.hidden_layer_sizes=[100,50,25]
 
 # Configure individual features
-winnow train calibrator.features.prosit_features.mz_tolerance=0.01
+winnow train calibrator.features.fragment_match_features.mz_tolerance=0.01
 ```
 
 For comprehensive calibrator configuration options, see:
@@ -312,7 +312,7 @@ winnow train \
     calibrator.hidden_layer_sizes=[100,50,25] \
     calibrator.learning_rate_init=0.01 \
     calibrator.max_iter=500 \
-    calibrator.features.prosit_features.mz_tolerance=0.01
+    calibrator.features.fragment_match_features.mz_tolerance=0.01
 
 # Predict with database-grounded FDR
 winnow predict \
@@ -328,7 +328,7 @@ winnow predict \
 Winnow comes with sensible default settings for all parameters:
 
 - **Calibrator**: 2-layer MLP with 50 hidden units per layer
-- **Features**: Mass error, Prosit features, retention time, chimeric features, beam features
+- **Features**: Mass error, fragment match features, retention time deviation, chimeric features, beam features
 - **FDR**: Non-parametric method with 5% threshold
 - **Model**: Pretrained general model from HuggingFace
 
@@ -366,9 +366,9 @@ winnow predict fdr_method=typo
 The CLI automatically filters out:
 
 - Empty predictions
-- Peptides longer than 30 amino acids (Prosit limitation)
-- Precursor charges above 6 (Prosit limitation)
-- Invalid modifications and tokens (defined in `configs/residues.yaml`)
+- Peptides exceeding `max_peptide_length` (default 30; configurable per feature)
+- Precursor charges exceeding `max_precursor_charge` (default 6; configurable per feature)
+- Residues listed in `unsupported_residues` (defined in `configs/residues.yaml`)
 
 ### Getting help
 
