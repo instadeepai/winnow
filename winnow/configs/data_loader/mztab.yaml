@@ -2,6 +2,12 @@
 _target_: winnow.datasets.data_loaders.MZTabDatasetLoader
 
 residue_masses: ${residue_masses}
+
+# Whether to load beam predictions. Set to false if you do not have beam predictions or if you only
+# need metadata features (e.g., MassErrorFeature, FragmentMatchFeatures, RetentionTimeFeature).
+# Defaults to true.
+load_beams: true
+
 residue_remapping:  # Used to map Casanovo-specific notations to UNIMOD tokens.
   "M+15.995": "M[UNIMOD:35]"  # Oxidation
   "Q+0.984": "Q[UNIMOD:7]"  # Deamidation
