@@ -36,7 +36,7 @@ residue_remapping:  # Used to map InstaNovo legacy notations to UNIMOD tokens.
 #   predictions_log_probability_beam_0, predictions_log_probability_beam_1, predictions_log_probability_beam_2,
 #   predictions_token_log_probabilities_0, predictions_token_log_probabilities_1, predictions_token_log_probabilities_2
 #
-# An error is raised if any prefix does not match at least one column.
+# Set `beam_columns` to null to disable beam loading entirely.
 beam_columns:
   sequence: "predictions_beam_"
   log_probability: "predictions_log_probability_beam_"
