@@ -134,13 +134,22 @@ set-ceph-credentials:
 sample-data:
 	uv run python scripts/generate_sample_data.py
 
-## Run winnow train with sample data (uses defaults from config)
+## Run winnow train with sample data
 train-sample:
-	uv run winnow train
+	uv run winnow train \
+	dataset.spectrum_path_or_directory=examples/example_data/spectra.ipc \
+	dataset.predictions_path=examples/example_data/predictions.csv \
+	model_output_dir=models/new_model \
+	dataset_output_path=results/calibrated_dataset.csv \
+	calibrator.features.retention_time_feature.train_fraction=0.3
 
 ## Run winnow predict with sample data (uses locally trained model from models/new_model)
 predict-sample:
-	uv run winnow predict calibrator.pretrained_model_name_or_path=models/new_model fdr_control.fdr_threshold=1.0
+	uv run winnow predict \
+	calibrator.pretrained_model_name_or_path=models/new_model \
+	fdr_control.fdr_threshold=1.0 \
+	dataset.spectrum_path_or_directory=examples/example_data/spectra.ipc \
+	dataset.predictions_path=examples/example_data/predictions.csv
 
 ## Clean output directories (does not delete sample data)
 clean:
