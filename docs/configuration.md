@@ -429,6 +429,41 @@ residue_remapping:
   "M(ox)": "M[UNIMOD:35]"
   "C(+57.02)": "C[UNIMOD:4]"
   # ... maps legacy notations to UNIMOD tokens
+beam_columns:
+  sequence: "predictions_beam_"
+  log_probability: "predictions_log_probability_beam_"
+  token_log_probabilities: "predictions_token_log_probabilities_"
+```
+
+#### Beam column configuration
+
+The InstaNovo loader reads beam search predictions from CSV columns that follow a naming convention: each beam column has a **prefix** that is appended with a **beam index** (0, 1, 2, ...).
+
+The `beam_columns` parameter specifies the prefix for each required column type:
+
+| Key | Description | Example columns |
+|-----|-------------|-----------------|
+| `sequence` | Peptide sequence for each beam | `predictions_beam_0`, `predictions_beam_1`, ... |
+| `log_probability` | Log probability score for each beam | `predictions_log_probability_beam_0`, ... |
+| `token_log_probabilities` | Per-token log probabilities | `predictions_token_log_probabilities_0`, ... |
+
+**Column naming requirements:**
+
+- Each prefix must match at least one column in the predictions CSV
+- Column names must be exactly `<prefix><beam_index>` (e.g., `predictions_beam_0`)
+- The beam index must be a non-negative integer (0, 1, 2, ...)
+- All three column types are required for each beam
+
+**Customising beam columns:**
+
+If your predictions CSV uses different column names (i.e., running InstaNovo with or without refinement), override `beam_columns` via CLI:
+
+```bash
+# Example: running InstaNovo with refinement
+winnow train \
+  data_loader.beam_columns.sequence="instanovo_predictions_beam_" \
+  data_loader.beam_columns.log_probability="instanovo_predictions_log_probability_beam_" \
+  data_loader.beam_columns.token_log_probabilities="instanovo_predictions_token_log_probabilities_beam_"
 ```
 
 **MZTab** (`configs/data_loader/mztab.yaml`):

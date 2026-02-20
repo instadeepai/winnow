@@ -174,16 +174,149 @@ class TestInstaNovoDatasetLoader:
         assert residue_set.residue_remapping["(-17.03)"] == "[UNIMOD:385]"
 
     # ------------------------------------------------------------------
+    # _validate_beam_columns
+    # ------------------------------------------------------------------
+
+    def test_validate_beam_columns_raises_for_missing_prefix(self, loader):
+        """Validation fails when a beam column prefix doesn't match any columns."""
+        columns = ["spectrum_id", "predictions", "wrong_beam_0", "wrong_log_prob_0"]
+        with pytest.raises(ValueError, match="Cannot find columns matching"):
+            loader._validate_beam_columns(columns)
+
+    def test_validate_beam_columns_error_lists_missing_prefixes(self, loader):
+        """Error message should list all missing prefixes."""
+        columns = [
+            "spectrum_id",
+            "predictions_beam_0",
+        ]  # missing log_probability and token_log_probabilities
+        with pytest.raises(ValueError, match="Cannot find columns") as exc_info:
+            loader._validate_beam_columns(columns)
+        error_msg = str(exc_info.value)
+        assert "predictions_log_probability_beam_" in error_msg
+        assert "predictions_token_log_probabilities_" in error_msg
+
+    def test_validate_beam_columns_error_shows_available_columns(self, loader):
+        """Error message should show available columns for debugging."""
+        columns = ["spectrum_id", "my_custom_beam_0"]
+        with pytest.raises(ValueError, match="Cannot find columns") as exc_info:
+            loader._validate_beam_columns(columns)
+        error_msg = str(exc_info.value)
+        assert "spectrum_id" in error_msg
+        assert "my_custom_beam_0" in error_msg
+
+    def test_validate_beam_columns_success_with_valid_columns(self, loader):
+        """Validation passes when all prefixes match at least one column."""
+        columns = [
+            "spectrum_id",
+            "predictions_beam_0",
+            "predictions_beam_1",
+            "predictions_log_probability_beam_0",
+            "predictions_log_probability_beam_1",
+            "predictions_token_log_probabilities_0",
+            "predictions_token_log_probabilities_1",
+        ]
+        # Should not raise
+        loader._validate_beam_columns(columns)
+
+    def test_validate_beam_columns_requires_exact_prefix_match(self, loader):
+        """Column must start with prefix and end with digits (not just contain prefix)."""
+        columns = [
+            "some_predictions_beam_0",  # prefix not at start
+            "predictions_beam_suffix",  # no trailing digits
+            "predictions_log_probability_beam_0",
+            "predictions_token_log_probabilities_0",
+        ]
+        with pytest.raises(ValueError, match="predictions_beam_"):
+            loader._validate_beam_columns(columns)
+
+    # ------------------------------------------------------------------
+    # Custom beam columns
+    # ------------------------------------------------------------------
+
+    def test_custom_beam_columns_are_used_in_validation(
+        self, residue_masses, residue_remapping, tmp_path
+    ):
+        """Loader should use custom beam_columns for validation."""
+        custom_beam_columns = {
+            "sequence": "my_seq_",
+            "log_probability": "my_logprob_",
+            "token_log_probabilities": "my_tokens_",
+        }
+        loader = InstaNovoDatasetLoader(
+            residue_masses=residue_masses,
+            residue_remapping=residue_remapping,
+            beam_columns=custom_beam_columns,
+        )
+        # These columns match our custom prefixes
+        columns = ["my_seq_0", "my_logprob_0", "my_tokens_0"]
+        # Should not raise
+        loader._validate_beam_columns(columns)
+
+    def test_custom_beam_columns_reject_default_columns(
+        self, residue_masses, residue_remapping
+    ):
+        """Loader with custom beam_columns should reject default column names."""
+        custom_beam_columns = {
+            "sequence": "my_seq_",
+            "log_probability": "my_logprob_",
+            "token_log_probabilities": "my_tokens_",
+        }
+        loader = InstaNovoDatasetLoader(
+            residue_masses=residue_masses,
+            residue_remapping=residue_remapping,
+            beam_columns=custom_beam_columns,
+        )
+        # Default columns should fail with custom beam_columns
+        columns = [
+            "predictions_beam_0",
+            "predictions_log_probability_beam_0",
+            "predictions_token_log_probabilities_0",
+        ]
+        with pytest.raises(ValueError, match="my_seq_"):
+            loader._validate_beam_columns(columns)
+
+    def test_custom_beam_columns_load_beam_preds(
+        self, residue_masses, residue_remapping, tmp_path
+    ):
+        """Custom beam columns should work end-to-end in _load_beam_preds."""
+        custom_beam_columns = {
+            "sequence": "seq_",
+            "log_probability": "logp_",
+            "token_log_probabilities": "tokp_",
+        }
+        loader = InstaNovoDatasetLoader(
+            residue_masses=residue_masses,
+            residue_remapping=residue_remapping,
+            beam_columns=custom_beam_columns,
+        )
+        df = pd.DataFrame(
+            {
+                "spectrum_id": [0],
+                "predictions": ["PEPTIDE"],
+                "seq_0": ["PEPTIDE"],
+                "logp_0": [-0.5],
+                "tokp_0": ["[-0.1, -0.2]"],
+            }
+        )
+        csv_path = tmp_path / "preds.csv"
+        df.to_csv(csv_path, index=False)
+
+        _preds_df, beam_df = loader._load_beam_preds(csv_path)
+        assert "seq_0" in beam_df.columns
+        assert "logp_0" in beam_df.columns
+        assert "tokp_0" in beam_df.columns
+
+    # ------------------------------------------------------------------
     # _load_beam_preds
     # ------------------------------------------------------------------
 
-    def test_load_beam_preds_raises_for_non_csv(self, tmp_path):
+    def test_load_beam_preds_raises_for_non_csv(self, loader, tmp_path):
         path = tmp_path / "preds.parquet"
         path.touch()
         with pytest.raises(ValueError, match="Unsupported file format"):
-            InstaNovoDatasetLoader._load_beam_preds(path)
+            loader._load_beam_preds(path)
 
-    def test_load_beam_preds_splits_beam_columns(self, tmp_path):
+    def test_load_beam_preds_splits_beam_columns(self, loader, tmp_path):
         """Beam-specific columns must end up in beam_df, not preds_df."""
         df = pd.DataFrame(
             {
@@ -193,16 +326,17 @@ class TestInstaNovoDatasetLoader:
                 "log_probs": [-0.5],
                 "predictions_beam_0": ["PEPTIDE"],
                 "predictions_log_probability_beam_0": [-0.5],
+                "predictions_token_log_probabilities_0": ["[-0.1]"],
             }
         )
         csv_path = tmp_path / "preds.csv"
         df.to_csv(csv_path, index=False)
 
-        preds_df, beam_df = InstaNovoDatasetLoader._load_beam_preds(csv_path)
+        _preds_df, beam_df = loader._load_beam_preds(csv_path)
         assert "predictions_beam_0" in beam_df.columns
         assert "predictions_log_probability_beam_0" in beam_df.columns
 
-    def test_load_beam_preds_preds_df_has_no_beam_columns(self, tmp_path):
+    def test_load_beam_preds_preds_df_has_no_beam_columns(self, loader, tmp_path):
         df = pd.DataFrame(
             {
                 "spectrum_id": [0],
@@ -211,12 +345,13 @@ class TestInstaNovoDatasetLoader:
                 "log_probs": [-0.5],
                 "predictions_beam_0": ["PEPTIDE"],
                 "predictions_log_probability_beam_0": [-0.5],
+                "predictions_token_log_probabilities_0": ["[-0.1]"],
             }
         )
         csv_path = tmp_path / "preds.csv"
         df.to_csv(csv_path, index=False)
 
-        preds_df, _ = InstaNovoDatasetLoader._load_beam_preds(csv_path)
+        preds_df, _ = loader._load_beam_preds(csv_path)
         assert "predictions_beam_0" not in preds_df.columns
         assert "predictions_log_probability_beam_0" not in preds_df.columns
 
@@ -299,6 +434,9 @@ class TestInstaNovoDatasetLoader:
             {
                 "predictions_beam_0": ["PEPTIDE"],
                 "predictions_log_probability_beam_0": [-0.5],
+                "predictions_token_log_probabilities_0": [
+                    "[-0.1, -0.2, -0.3, -0.4, -0.5, -0.6, -0.7]"
+                ],
             }
         )
         beams = loader._process_beams(beam_df)
@@ -314,6 +452,9 @@ class TestInstaNovoDatasetLoader:
             {
                 "predictions_beam_0": ["PEPTLDE"],
                 "predictions_log_probability_beam_0": [-0.5],
+                "predictions_token_log_probabilities_0": [
+                    "[-0.1, -0.2, -0.3, -0.4, -0.5, -0.6, -0.7]"
+                ],
             }
         )
         beams = loader._process_beams(beam_df)
@@ -328,6 +469,7 @@ class TestInstaNovoDatasetLoader:
             {
                 "predictions_beam_0": ["PEPTIDE"],
                 "predictions_log_probability_beam_0": [float("-inf")],
+                "predictions_token_log_probabilities_0": ["[-0.1]"],
             }
         )
         beams = loader._process_beams(beam_df)
@@ -353,6 +495,10 @@ class TestInstaNovoDatasetLoader:
             {
                 "predictions_beam_0": ["PEPTIDE", "ACGM"],
                 "predictions_log_probability_beam_0": [-0.5, -1.2],
+                "predictions_token_log_probabilities_0": [
+                    "[-0.1, -0.2, -0.3, -0.4, -0.5, -0.6, -0.7]",
+                    "[-0.1, -0.2, -0.3, -0.4]",
+                ],
             }
         )
         beams = loader._process_beams(beam_df)
