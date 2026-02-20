@@ -352,6 +352,13 @@ class InstaNovoDatasetLoader(DatasetLoader):
             "predictions_tokenised": "prediction",
             "log_probs": "confidence",
         }
+        missing_cols = [
+            col for col in rename_dict.keys() if col not in preds_dataset.columns
+        ]
+        if missing_cols:
+            raise ValueError(
+                f"Required columns {missing_cols} not found in predictions dataset."
+            )
         preds_dataset.rename(rename_dict, axis=1, inplace=True)
 
         preds_dataset["confidence"] = preds_dataset["confidence"].apply(np.exp)
