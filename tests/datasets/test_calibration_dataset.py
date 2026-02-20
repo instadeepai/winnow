@@ -116,7 +116,7 @@ class TestCalibrationDataset:
 
     def test_save_without_predictions(self, sample_metadata, tmp_path):
         """Test save functionality without predictions."""
-        dataset = CalibrationDataset(metadata=sample_metadata, predictions=[])
+        dataset = CalibrationDataset(metadata=sample_metadata, predictions=None)
         save_dir = tmp_path / "test_dataset_no_pred"
 
         dataset.save(save_dir)
@@ -391,3 +391,76 @@ class TestCalibrationDataset:
         _, modified_prediction = calibration_dataset[0]
         assert len(modified_prediction) == 1
         assert modified_prediction[0].sequence == ["X"]
+
+    # ------------------------------------------------------------------
+    # predictions=None (no beam predictions)
+    # ------------------------------------------------------------------
+
+    def test_predictions_none_initialization(self, sample_metadata):
+        """Test CalibrationDataset initialization with predictions=None."""
+        dataset = CalibrationDataset(metadata=sample_metadata, predictions=None)
+
+        assert dataset.predictions is None
+        assert len(dataset.metadata) == 5
+
+    def test_predictions_none_default(self):
+        """Test that predictions defaults to None."""
+        metadata = pd.DataFrame({"confidence": [0.9]})
+        dataset = CalibrationDataset(metadata=metadata)
+
+        assert dataset.predictions is None
+
+    def test_predictions_none_length(self, sample_metadata):
+        """Test __len__ with predictions=None."""
+        dataset = CalibrationDataset(metadata=sample_metadata, predictions=None)
+
+        # Length should be based on metadata
+        assert len(dataset) == 5
+
+    def test_predictions_none_getitem(self, sample_metadata):
+        """Test __getitem__ with predictions=None."""
+        dataset = CalibrationDataset(metadata=sample_metadata, predictions=None)
+
+        metadata_row, prediction = dataset[0]
+
+        assert isinstance(metadata_row, pd.Series)
+        assert prediction is None
+
+    def test_predictions_none_filter_entries_metadata_only(self, sample_metadata):
+        """Test filtering with predictions=None using only metadata predicate."""
+        dataset = CalibrationDataset(metadata=sample_metadata, predictions=None)
+
+        filtered = dataset.filter_entries(
+            metadata_predicate=lambda row: row["confidence"] <= 0.7
+        )
+
+        assert filtered.predictions is None
+        assert len(filtered) == 2
+
+    def test_predictions_none_filter_entries_raises_for_predictions_predicate(
+        self, sample_metadata
+    ):
+        """Test that using predictions_predicate with predictions=None raises error."""
+        dataset = CalibrationDataset(metadata=sample_metadata, predictions=None)
+
+        with pytest.raises(
+            ValueError,
+            match="Cannot use predictions_predicate when predictions is None",
+        ):
+            dataset.filter_entries(
+                predictions_predicate=lambda beam: beam is None or len(beam) < 2
+            )
+
+    def test_predictions_none_save(self, sample_metadata, tmp_path):
+        """Test save functionality with predictions=None."""
+        dataset = CalibrationDataset(metadata=sample_metadata, predictions=None)
+        save_dir = tmp_path / "test_dataset_none_pred"
+
+        dataset.save(save_dir)
+
+        # Check that metadata.csv was created but not predictions.pkl
+        metadata_file = save_dir / "metadata.csv"
+        predictions_file = save_dir / "predictions.pkl"
+
+        assert metadata_file.exists()
+        assert not predictions_file.exists()

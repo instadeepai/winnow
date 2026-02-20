@@ -16,10 +16,24 @@ from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.utils.peptide import tokens_to_proforma
 
 
-def _raise_value_error(value, name: str):
-    """Raise a ValueError if the given value is None."""
-    if value is None:
-        raise ValueError(f"{name} cannot be None")
+def _require_beam_predictions(dataset: CalibrationDataset, feature_name: str) -> None:
+    """Raise a ValueError if the dataset has no beam predictions.
+
+    Args:
+        dataset: The calibration dataset to check.
+        feature_name: Name of the feature requiring beams (for error message).
+
+    Raises:
+        ValueError: If dataset.predictions is None.
+    """
+    if dataset.predictions is None:
+        raise ValueError(
+            f"{feature_name} requires beam predictions, but dataset.predictions is None. "
+            "This dataset was loaded without beam predictions. "
+            "To use this feature, ensure your data loader is configured to load beams: "
+            "for InstaNovo, set beam_columns in instanovo.yaml; "
+            "for MZTab, set load_beams: true in mztab.yaml."
+        )
 
 
 def _validate_model_input_params(
@@ -710,8 +724,8 @@ class ChimericFeatures(CalibrationFeatures):
                 "precursor_charge column not found in dataset. This is required for chimeric features computation."
             )
 
-        # Ensure dataset.predictions is not None
-        _raise_value_error(dataset.predictions, "dataset.predictions")
+        # Ensure dataset.predictions is not None (beams required for runner-up sequences)
+        _require_beam_predictions(dataset, "ChimericFeatures")
 
         # Check which predictions are valid for Prosit intensity prediction
         is_valid_chimeric_prosit_prediction = (
@@ -753,6 +767,7 @@ class ChimericFeatures(CalibrationFeatures):
         )
 
         # Prepare input data
+        assert valid_chimeric_prosit_input.predictions is not None
         inputs = pd.DataFrame()
         inputs["peptide_sequences"] = np.array(
             [
@@ -982,8 +997,9 @@ class BeamFeatures(CalibrationFeatures):
         Args:
             dataset (CalibrationDataset): The dataset containing beam search predictions.
         """
-        # Ensure dataset.predictions is not None
-        _raise_value_error(dataset.predictions, "dataset.predictions")
+        # Ensure dataset.predictions is not None (beams required for margin/entropy calculations)
+        _require_beam_predictions(dataset, "BeamFeatures")
+        assert dataset.predictions is not None
 
         count = sum(len(prediction) < 2 for prediction in dataset.predictions)  # type: ignore
         if count > 0:
@@ -1196,7 +1212,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         # Create a copy of the dataset to avoid modifying the original
         dataset_copy = CalibrationDataset(
             metadata=dataset.metadata.copy(deep=True),
-            predictions=dataset.predictions.copy() if dataset.predictions else [],
+            predictions=dataset.predictions.copy() if dataset.predictions else None,
         )
 
         # Check which predictions are valid for iRT prediction

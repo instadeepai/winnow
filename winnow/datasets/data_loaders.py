@@ -48,11 +48,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
             ),
             isotope_error_range=isotope_error_range,
         )
-        self.beam_columns = beam_columns or {
-            "sequence": "predictions_beam_",
-            "log_probability": "predictions_log_probability_beam_",
-            "token_log_probabilities": "predictions_token_log_probabilities_",
-        }
+        self.beam_columns = beam_columns
 
     @staticmethod
     def _load_spectrum_data(spectrum_path: Path | str) -> Tuple[pl.DataFrame, bool]:
@@ -114,6 +110,29 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
         return merged_dataset
 
+    @staticmethod
+    def _load_predictions_without_beams(predictions_path: Path | str) -> pl.DataFrame:
+        """Load predictions CSV without parsing beam columns.
+
+        Used when beam_columns is None (beam predictions disabled).
+
+        Args:
+            predictions_path: Path to the CSV file containing predictions.
+
+        Returns:
+            pl.DataFrame: The predictions dataframe.
+
+        Raises:
+            ValueError: If the file format is not CSV.
+        """
+        predictions_path = Path(predictions_path)
+        if predictions_path.suffix != ".csv":
+            raise ValueError(
+                f"Unsupported file format for InstaNovo predictions: {predictions_path.suffix}. "
+                "Supported format is .csv."
+            )
+        return pl.read_csv(predictions_path)
+
     def load(
         self, *, data_path: Path, predictions_path: Optional[Path] = None, **kwargs: Any
     ) -> CalibrationDataset:
@@ -121,11 +140,12 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
         Args:
             data_path: Path to the spectrum data file
-            predictions_path: Path to the IPC or parquet beam predictions file
+            predictions_path: Path to the predictions CSV file
             **kwargs: Not used
 
         Returns:
-            CalibrationDataset: An instance of the CalibrationDataset class containing metadata and predictions.
+            CalibrationDataset: An instance of the CalibrationDataset class containing
+                metadata and optionally beam predictions (if beam_columns is configured).
 
         Raises:
             ValueError: If predictions_path is None
@@ -133,14 +153,20 @@ class InstaNovoDatasetLoader(DatasetLoader):
         if predictions_path is None:
             raise ValueError("predictions_path is required for InstaNovoDatasetLoader")
 
-        beam_predictions_path = predictions_path
         inputs, has_labels = self._load_spectrum_data(data_path)
         inputs = self._process_spectrum_data(inputs, has_labels)
 
-        predictions, beams = self._load_beam_preds(beam_predictions_path)
-        beams = self._process_beams(beams)
-        predictions = self._process_predictions(predictions.to_pandas(), inputs.columns)
+        # Load beam predictions only if beam_columns is configured
+        if self.beam_columns:
+            predictions_df, beams_df = self._load_beam_preds(predictions_path)
+            beams = self._process_beams(beams_df)
+        else:
+            predictions_df = self._load_predictions_without_beams(predictions_path)
+            beams = None
 
+        predictions = self._process_predictions(
+            predictions_df.to_pandas(), inputs.columns
+        )
         predictions = self._merge_spectrum_data(predictions, inputs)
         predictions = self._evaluate_predictions(predictions, has_labels)
 
@@ -160,6 +186,8 @@ class InstaNovoDatasetLoader(DatasetLoader):
             ValueError: If any beam column prefix does not match at least one column.
                 The error message lists all missing prefixes and the available columns.
         """
+        assert self.beam_columns is not None  # to pass type checking
+
         missing_prefixes = []
         for prefix in self.beam_columns.values():
             # Pattern: exact prefix followed by one or more digits at end of column name
@@ -168,9 +196,9 @@ class InstaNovoDatasetLoader(DatasetLoader):
                 missing_prefixes.append(prefix)
         if missing_prefixes:
             raise ValueError(
-                f"Cannot find columns matching the following beam column prefixes in predictions file: {missing_prefixes}. "
-                f"Expected column names of the form '<prefix><beam_index>' (e.g., '{missing_prefixes[0]}0'). "
-                f"Available columns: {columns}"
+                f"Cannot find columns matching the following beam column prefixes in predictions file: {missing_prefixes}. \n"
+                f"Expected column names of the form '<prefix><beam_index>' (e.g., '{missing_prefixes[0]}0'). \n"
+                f"Available columns: {columns}\n"
             )
 
     def _load_beam_preds(
@@ -197,6 +225,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
         df = pl.read_csv(predictions_path)
 
         self._validate_beam_columns(df.columns)
+        assert self.beam_columns is not None  # to pass type checking
 
         # Use polars column selectors to split dataframe
         beam_df = df.select(cs.contains(*self.beam_columns.values()))
@@ -215,10 +244,17 @@ class InstaNovoDatasetLoader(DatasetLoader):
         Returns:
             List[Optional[List[ScoredSequence]]]: A list of scored sequences for each row in the dataframe.
         """
+        assert (
+            self.beam_columns is not None
+        ), "beam_columns must be set"  # to pass type checking
 
         def convert_row_to_scored_sequences(
             row: dict,
         ) -> Optional[List[ScoredSequence]]:
+            assert (
+                self.beam_columns is not None
+            ), "beam_columns must be set"  # to pass type checking
+
             scored_sequences = []
             num_beams = len(row) // len(self.beam_columns)
 
@@ -411,6 +447,7 @@ class MZTabDatasetLoader(DatasetLoader):
         residue_masses: dict[str, float],
         residue_remapping: dict[str, str],
         isotope_error_range: Tuple[int, int] = (0, 1),
+        load_beams: bool = True,
     ) -> None:
         """Initialise the MZTabDatasetLoader.
 
@@ -418,6 +455,9 @@ class MZTabDatasetLoader(DatasetLoader):
             residue_masses: The mapping of residues to their masses (ProForma notation).
             residue_remapping: The mapping of input notations to ProForma notation.
             isotope_error_range: The range of isotope errors to consider when matching peptides.
+            load_beams: Whether to load beam predictions. If False, dataset.predictions
+                will be None. Set to False if you only need metadata features and want
+                to skip beam processing or do not have beams. Defaults to True.
         """
         self.metrics = Metrics(
             residue_set=ResidueSet(
@@ -425,6 +465,7 @@ class MZTabDatasetLoader(DatasetLoader):
             ),
             isotope_error_range=isotope_error_range,
         )
+        self.load_beams = load_beams
 
     @staticmethod
     def _load_spectrum_data(spectrum_path: Path | str) -> Tuple[pl.DataFrame, bool]:
@@ -495,7 +536,7 @@ class MZTabDatasetLoader(DatasetLoader):
 
         # Load and process predictions
         predictions = self._load_dataset(predictions_path)
-        predictions = self._process_predictions(predictions)
+        predictions = self._process_predictions(predictions, spectrum_data.columns)
         predictions = self._tokenize(
             predictions, "prediction_untokenised", "prediction"
         )
@@ -513,18 +554,26 @@ class MZTabDatasetLoader(DatasetLoader):
             lambda x: x.tolist() if isinstance(x, np.ndarray) else x
         )
 
-        # Create beam predictions in the same order as the final metadata
-        # Extract the indices from the merged metadata to ensure alignment
-        ordered_indices = metadata.get_column("index").to_list()
-        beam_predictions = self._create_beam_predictions(predictions, ordered_indices)
+        # Create beam predictions only if load_beams is enabled
+        if self.load_beams:
+            # Extract the indices from the merged metadata to ensure alignment
+            ordered_indices = metadata.get_column("index").to_list()
+            beam_predictions = self._create_beam_predictions(
+                predictions, ordered_indices
+            )
+        else:
+            beam_predictions = None
 
         return CalibrationDataset(metadata=metadata_pd, predictions=beam_predictions)
 
-    def _process_predictions(self, predictions: pl.DataFrame) -> pl.DataFrame:
+    def _process_predictions(
+        self, predictions: pl.DataFrame, spectrum_data_columns: List[str]
+    ) -> pl.DataFrame:
         """Process raw predictions into a standardized format.
 
         Args:
             predictions: Raw predictions from mzTab file
+            spectrum_data_columns: List of columns to drop from the predictions
 
         Returns:
             Processed predictions with standardized columns
@@ -570,6 +619,15 @@ class MZTabDatasetLoader(DatasetLoader):
         # Sort predictions by index and confidence to ensure correct ordering
         predictions = predictions.sort(
             ["index", "confidence"], descending=[False, True]
+        )
+
+        # Drop duplicate columns from the input dataset except index
+        predictions = predictions.drop(
+            [
+                col
+                for col in predictions.columns
+                if col in spectrum_data_columns and col != "index"
+            ]
         )
 
         return predictions
@@ -746,40 +804,41 @@ class MZTabDatasetLoader(DatasetLoader):
                 ]
             )
 
-        # Compute match statistics using struct to pass multiple columns to function
-        return metadata.with_columns(
-            [
-                # Count matching amino acids between prediction and ground truth
-                pl.struct(["sequence", "prediction"])
-                .map_elements(
-                    lambda row: self.metrics._novor_match(
-                        row["sequence"], row["prediction"]
-                    )
-                    if isinstance(row["sequence"], list)
-                    and isinstance(row["prediction"], list)
-                    else 0,
-                    return_dtype=pl.Int64,
-                )
-                .alias("num_matches"),
-            ]
-        ).with_columns(
-            [
-                # Check if prediction is completely correct (all amino acids match)
-                pl.struct(["sequence", "prediction", "num_matches"])
-                .map_elements(
-                    lambda row: (
-                        row["num_matches"]
-                        == len(row["sequence"])
-                        == len(row["prediction"])
+            # Compute match statistics using struct to pass multiple columns to function
+            metadata = metadata.with_columns(
+                [
+                    # Count matching amino acids between prediction and ground truth
+                    pl.struct(["sequence", "prediction"])
+                    .map_elements(
+                        lambda row: self.metrics._novor_match(
+                            row["sequence"], row["prediction"]
+                        )
                         if isinstance(row["sequence"], list)
                         and isinstance(row["prediction"], list)
-                        else False
-                    ),
-                    return_dtype=pl.Boolean,
-                )
-                .alias("correct")
-            ]
-        )
+                        else 0,
+                        return_dtype=pl.Int64,
+                    )
+                    .alias("num_matches"),
+                ]
+            ).with_columns(
+                [
+                    # Check if prediction is completely correct (all amino acids match)
+                    pl.struct(["sequence", "prediction", "num_matches"])
+                    .map_elements(
+                        lambda row: (
+                            row["num_matches"]
+                            == len(row["sequence"])
+                            == len(row["prediction"])
+                            if isinstance(row["sequence"], list)
+                            and isinstance(row["prediction"], list)
+                            else False
+                        ),
+                        return_dtype=pl.Boolean,
+                    )
+                    .alias("correct")
+                ]
+            )
+        return metadata
 
 
 class PointNovoDatasetLoader(DatasetLoader):

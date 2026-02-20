@@ -29,17 +29,18 @@ class CalibrationDataset:
 
     Attributes:
         metadata (pd.DataFrame): DataFrame containing metadata and predictions.
-        predictions (List[Optional[List[ScoredSequence]]]): List of beam search results.
+        predictions (Optional[List[Optional[List[ScoredSequence]]]]): List of beam search results.
+            Can be None if beam predictions were not loaded (e.g., single-prediction mode).
     """
 
     metadata: pd.DataFrame
-    predictions: List[Optional[List[ScoredSequence]]]
+    predictions: Optional[List[Optional[List[ScoredSequence]]]] = None
 
     def __post_init__(self):
         """Validate that metadata and predictions have matching lengths."""
-        # Allow empty predictions list (no predictions available)
+        # Allow predictions to be None (no beam predictions available)
         # But if predictions are provided, they must match metadata length
-        if self.predictions and len(self.metadata) != len(self.predictions):
+        if self.predictions is not None and len(self.metadata) != len(self.predictions):
             raise AssertionError("Length of metadata and predictions must match")
 
     def save(self, data_dir: Path) -> None:
@@ -77,14 +78,24 @@ class CalibrationDataset:
     ) -> "CalibrationDataset":
         """Filters the dataset based on the specified conditions for both metadata and predictions.
 
-        The filtering is done by using two predicates: one for the metadata (applied to each row) and one for the predictions (applied to each beam).
+        The filtering is done by using two predicates: one for the metadata (applied to each row)
+        and one for the predictions (applied to each beam).
 
         Args:
-            metadata_predicate (Callable[[Any], bool], optional): A function that takes a row from the metadata DataFrame and returns a boolean indicating whether the row should be kept. Defaults to a predicate that always returns False, keeping all rows.
-            predictions_predicate (Callable[[Any], bool], optional): A function that takes a beam (prediction) and returns a boolean indicating whether the prediction should be kept. Defaults to a predicate that always returns False, keeping all predictions.
+            metadata_predicate (Callable[[Any], bool], optional): A function that takes a row
+                from the metadata DataFrame and returns True if the row should be filtered OUT.
+                Defaults to a predicate that always returns False, keeping all rows.
+            predictions_predicate (Callable[[Any], bool], optional): A function that takes a
+                beam (prediction) and returns True if the prediction should be filtered OUT.
+                Defaults to a predicate that always returns False, keeping all predictions.
+                Cannot be used (with non-default value) if predictions is None.
 
         Returns:
-            CalibrationDataset: A new instance of `CalibrationDataset` containing only the entries for which the conditions specified by the predicates are False.
+            CalibrationDataset: A new instance of CalibrationDataset containing only the entries
+                for which the conditions specified by the predicates are False.
+
+        Raises:
+            ValueError: If predictions_predicate is non-default but predictions is None.
         """
         filter_idxs = []
 
@@ -100,24 +111,41 @@ class CalibrationDataset:
 
         # -- Get filter indices for predictions condition
         predictions_filter_idxs = []
-        for idx, beam in enumerate(self.predictions):
-            try:
-                # Pass None or empty beams as-is to the predicate, allowing it to handle them
-                if predictions_predicate(beam):
-                    predictions_filter_idxs.append(idx)
-            except (IndexError, AttributeError, TypeError) as e:
-                # Provide helpful error message if predicate crashes on None/empty/short beams
-                raise self._create_predicate_error_message(e, beam, idx) from e
-        filter_idxs.extend(predictions_filter_idxs)
+        # Check if user provided a non-default predictions_predicate
+        default_predicate = lambda beam: False  # noqa: E731
+        is_default_predicate = (
+            predictions_predicate.__code__.co_code == default_predicate.__code__.co_code
+        )
+
+        if self.predictions is None:
+            if not is_default_predicate:
+                raise ValueError(
+                    "Cannot use predictions_predicate when predictions is None. "
+                    "This dataset was loaded without beam predictions."
+                )
+            # No predictions to filter, skip
+        else:
+            for idx, beam in enumerate(self.predictions):
+                try:
+                    # Pass None or empty beams as-is to the predicate, allowing it to handle them
+                    if predictions_predicate(beam):
+                        predictions_filter_idxs.append(idx)
+                except (IndexError, AttributeError, TypeError) as e:
+                    # Provide helpful error message if predicate crashes on None/empty/short beams
+                    raise self._create_predicate_error_message(e, beam, idx) from e
+            filter_idxs.extend(predictions_filter_idxs)
 
         filter_idxs_set = set(filter_idxs)
 
         # -- Gather predictions
-        predictions = [
-            prediction
-            for idx, prediction in enumerate(self.predictions)
-            if idx not in filter_idxs_set
-        ]
+        if self.predictions is not None:
+            predictions: Optional[List[Optional[List[ScoredSequence]]]] = [
+                prediction
+                for idx, prediction in enumerate(self.predictions)
+                if idx not in filter_idxs_set
+            ]
+        else:
+            predictions = None
 
         # -- Gather metadata
         selection_idxs = [
@@ -214,16 +242,20 @@ class CalibrationDataset:
 
     def __len__(self) -> int:
         """Returns the number of entries in the dataset."""
-        assert self.metadata.shape[0] == len(self.predictions)
-        return len(self.predictions)
+        return len(self.metadata)
 
-    def __getitem__(self, index) -> Tuple[pd.Series, List[ScoredSequence]]:
+    def __getitem__(
+        self, index: int
+    ) -> Tuple[pd.Series, Optional[List[ScoredSequence]]]:
         """Retrieves a metadata row and its corresponding prediction.
 
         Args:
             index (int): Index of the desired entry.
 
         Returns:
-            Tuple[pd.Series, List[ScoredSequence]]: The metadata row and its associated predictions.
+            Tuple[pd.Series, Optional[List[ScoredSequence]]]: The metadata row and its
+                associated predictions. Predictions will be None if beam predictions
+                were not loaded for this dataset.
         """
-        return self.metadata.iloc[index], self.predictions[index]
+        predictions = self.predictions[index] if self.predictions is not None else None
+        return self.metadata.iloc[index], predictions

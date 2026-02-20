@@ -466,16 +466,29 @@ winnow train \
   data_loader.beam_columns.token_log_probabilities="instanovo_predictions_token_log_probabilities_beam_"
 ```
 
+**Disabling beam predictions:**
+
+If your predictions CSV doesn't have beam columns (single-prediction mode) or you only need
+metadata features, you can disable beam loading entirely by setting `beam_columns` to `null`:
+
+```bash
+winnow train data_loader.beam_columns=null
+```
+
 **MZTab** (`configs/data_loader/mztab.yaml`):
 ```yaml
 _target_: winnow.datasets.data_loaders.MZTabDatasetLoader
 residue_masses: ${residue_masses}
+load_beams: true  # Set to false to disable beam predictions
 residue_remapping:
   "M+15.995": "M[UNIMOD:35]"
   "C+57.021": "C[UNIMOD:4]"
   "C[Carbamidomethyl]": "C[UNIMOD:4]"
   # ... maps Casanovo notations to UNIMOD tokens
 ```
+
+The `load_beams` parameter controls whether beam predictions are created from multiple
+predictions per spectrum. Set to `false` if you only need metadata features.
 
 **PointNovo** (`configs/data_loader/pointnovo.yaml`):
 ```yaml

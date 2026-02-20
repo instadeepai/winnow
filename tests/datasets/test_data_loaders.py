@@ -136,6 +136,11 @@ class TestInstaNovoDatasetLoader:
         return InstaNovoDatasetLoader(
             residue_masses=_FULL_RESIDUE_MASSES,
             residue_remapping=_STANDARD_REMAPPING,
+            beam_columns={
+                "sequence": "predictions_beam_",
+                "log_probability": "predictions_log_probability_beam_",
+                "token_log_probabilities": "predictions_token_log_probabilities_",
+            },
         )
 
     # ------------------------------------------------------------------
@@ -305,6 +310,70 @@ class TestInstaNovoDatasetLoader:
         assert "seq_0" in beam_df.columns
         assert "logp_0" in beam_df.columns
         assert "tokp_0" in beam_df.columns
+
+    # ------------------------------------------------------------------
+    # beam_columns=None (disable beam loading)
+    # ------------------------------------------------------------------
+
+    def test_beam_columns_none_skips_beam_loading(
+        self, residue_masses, residue_remapping, tmp_path
+    ):
+        """When beam_columns=None, beams should not be loaded."""
+        loader = InstaNovoDatasetLoader(
+            residue_masses=residue_masses,
+            residue_remapping=residue_remapping,
+            beam_columns=None,
+        )
+        # Create minimal prediction CSV without beam columns
+        predictions_df = pd.DataFrame(
+            {
+                "spectrum_id": ["spectrum_0"],
+                "predictions": ["PEPTIDE"],
+                "predictions_tokenised": ["P, E, P, T, I, D, E"],
+                "log_probs": [-0.5],
+            }
+        )
+        predictions_path = tmp_path / "predictions.csv"
+        predictions_df.to_csv(predictions_path, index=False)
+
+        # Create spectrum data
+        spectrum_df = pl.DataFrame(
+            {
+                "spectrum_id": ["spectrum_0"],
+                "precursor_mz": [500.0],
+                "precursor_charge": [2],
+                "retention_time": [10.0],
+                "mz_array": [[100.0, 200.0]],
+                "intensity_array": [[1000.0, 2000.0]],
+            }
+        )
+        spectrum_path = tmp_path / "spectra.ipc"
+        spectrum_df.write_ipc(str(spectrum_path))
+
+        dataset = loader.load(
+            data_path=spectrum_path, predictions_path=predictions_path
+        )
+        assert dataset.predictions is None
+        assert len(dataset.metadata) == 1
+
+    def test_beam_columns_none_load_predictions_without_beams(
+        self, residue_masses, residue_remapping, tmp_path
+    ):
+        """_load_predictions_without_beams should load CSV without parsing beams."""
+        df = pd.DataFrame(
+            {
+                "spectrum_id": [0],
+                "predictions": ["PEPTIDE"],
+                "log_probs": [-0.5],
+            }
+        )
+        csv_path = tmp_path / "preds.csv"
+        df.to_csv(csv_path, index=False)
+
+        result = InstaNovoDatasetLoader._load_predictions_without_beams(csv_path)
+        assert "spectrum_id" in result.columns
+        assert "predictions" in result.columns
+        assert len(result) == 1
 
     # ------------------------------------------------------------------
     # _load_beam_preds
@@ -518,7 +587,7 @@ class TestInstaNovoDatasetLoader:
                 "log_probs": [-0.5],
             }
         )
-        result = loader._process_predictions(preds_df, [])
+        result = loader._process_predictions(preds_df, ["spectrum_id"])
         assert "prediction" in result.columns
         assert "prediction_untokenised" in result.columns
         assert "confidence" in result.columns
@@ -535,7 +604,7 @@ class TestInstaNovoDatasetLoader:
                 "log_probs": [log_prob],
             }
         )
-        result = loader._process_predictions(preds_df, [])
+        result = loader._process_predictions(preds_df, ["spectrum_id"])
         assert result["confidence"].iloc[0] == pytest.approx(np.exp(log_prob))
 
     def test_process_predictions_splits_comma_separated_prediction(self, loader):
@@ -547,7 +616,7 @@ class TestInstaNovoDatasetLoader:
                 "log_probs": [-0.5],
             }
         )
-        result = loader._process_predictions(preds_df, [])
+        result = loader._process_predictions(preds_df, ["spectrum_id"])
         assert result["prediction"].iloc[0] == ["P", "E", "P", "T", "I", "D", "E"]
 
     def test_process_predictions_replaces_l_with_i_in_prediction_list(self, loader):
@@ -559,7 +628,7 @@ class TestInstaNovoDatasetLoader:
                 "log_probs": [-0.5],
             }
         )
-        result = loader._process_predictions(preds_df, [])
+        result = loader._process_predictions(preds_df, ["spectrum_id"])
         assert "L" not in result["prediction"].iloc[0]
 
     def test_process_predictions_replaces_l_with_i_in_prediction_untokenised(
@@ -573,7 +642,7 @@ class TestInstaNovoDatasetLoader:
                 "log_probs": [-0.5],
             }
         )
-        result = loader._process_predictions(preds_df, [])
+        result = loader._process_predictions(preds_df, ["spectrum_id"])
         assert "L" not in result["prediction_untokenised"].iloc[0]
 
     def test_process_predictions_drops_duplicate_input_columns(self, loader):
@@ -1040,7 +1109,7 @@ class TestMZTabDatasetLoader:
     def test_process_predictions_extracts_index_from_spectra_ref(
         self, loader, minimal_predictions_df
     ):
-        result = loader._process_predictions(minimal_predictions_df)
+        result = loader._process_predictions(minimal_predictions_df, ["index"])
         assert result["index"].to_list() == [7, 42]  # sorted by index ASC
 
     def test_process_predictions_replaces_l_with_i(self, loader):
@@ -1051,13 +1120,13 @@ class TestMZTabDatasetLoader:
                 "search_engine_score[1]": [0.9],
             }
         )
-        result = loader._process_predictions(df)
+        result = loader._process_predictions(df, ["index"])
         assert "L" not in result["prediction_untokenised"][0]
 
     def test_process_predictions_renames_confidence_column(
         self, loader, minimal_predictions_df
     ):
-        result = loader._process_predictions(minimal_predictions_df)
+        result = loader._process_predictions(minimal_predictions_df, ["index"])
         assert "confidence" in result.columns
         assert "search_engine_score[1]" not in result.columns
 
@@ -1065,14 +1134,14 @@ class TestMZTabDatasetLoader:
         self, loader, minimal_predictions_df
     ):
         """Traditional search engines lack aa_scores; token_scores should be null."""
-        result = loader._process_predictions(minimal_predictions_df)
+        result = loader._process_predictions(minimal_predictions_df, ["index"])
         assert "token_scores" in result.columns
         assert result["token_scores"][0] is None
 
     def test_process_predictions_parses_aa_scores_as_list_of_floats(
         self, loader, predictions_df_with_aa_scores
     ):
-        result = loader._process_predictions(predictions_df_with_aa_scores)
+        result = loader._process_predictions(predictions_df_with_aa_scores, ["index"])
         token_scores = result["token_scores"][0].to_list()
         assert token_scores == pytest.approx([-0.1, -0.2, -0.3])
 
@@ -1088,7 +1157,7 @@ class TestMZTabDatasetLoader:
                 "search_engine_score[1]": [0.6, 0.9, 0.8],
             }
         )
-        result = loader._process_predictions(df)
+        result = loader._process_predictions(df, ["index"])
         indices = result["index"].to_list()
         assert indices == sorted(indices)  # index ascending
         # For index=1, confidence 0.8 should come before 0.6
@@ -1232,6 +1301,72 @@ class TestMZTabDatasetLoader:
     def test_load_raises_when_predictions_path_is_none(self, loader, tmp_path):
         with pytest.raises(ValueError, match="predictions_path is required"):
             loader.load(data_path=tmp_path)
+
+    # ------------------------------------------------------------------
+    # load_beams=False (disable beam loading)
+    # ------------------------------------------------------------------
+
+    @pytest.fixture()
+    def mztab_tmp_filepath(self, tmp_path):
+        """Creates a minimal, valid Casanovo mzTab file for testing.
+        Returns the Path object to the file.
+        """
+        content = (
+            "MTD\tmzTab-version\t1.0.0\n"
+            "MTD\tmzTab-mode\tSummary\n"
+            "MTD\tmzTab-type\tIdentification\n"
+            "MTD\tdescription\tCasanovo de novo output\n"
+            "MTD\tpsm_search_engine_score[1]\t[MS, MS:1003282, Casanovo score, ]\n"
+            "MTD\tms_run[1]-location\tfile://sample.mzML\n"
+            "\n"
+            "PSH\tsequence\tPSM_ID\taccession\tunique\tdatabase\tdatabase_version\tsearch_engine\tsearch_engine_score[1]\tmodifications\tretention_time\tcharge\texp_m/z\tcalc_m/z\tspectra_ref\n"
+            "PSM\tPEPTIDEK\t1\tnull\tnull\tnull\tnull\t[MS, MS:1003281, Casanovo, ]\t0.95\tnull\t100.0\t2\t455.732\t455.735\tms_run[1]:index=0\n"
+            "PSM\tM[UNIMOD:35]EVALK\t2\tnull\tnull\tnull\tnull\t[MS, MS:1003281, Casanovo, ]\t0.91\t1-UNIMOD:35\t120.5\t2\t389.210\t389.212\tms_run[1]:index=1\n"
+        )
+
+        # Define the file path within the pytest temp directory
+        mztab_path = tmp_path / Path("test_output.mztab")
+        mztab_path.write_text(content)
+
+        return mztab_path
+
+    @pytest.fixture()
+    def inputs_tmp_filepath(self, tmp_path):
+        """Creates a minimal spectrum data DataFrame for testing."""
+        df = pl.DataFrame(
+            {"charge": [2], "mz_array": [[100.0]], "intensity_array": [[1000.0]]}
+        )
+
+        filepath = tmp_path / "data.parquet"
+        df.write_parquet(filepath)
+
+        return filepath
+
+    def test_load_beams_false_initialization(
+        self, mztab_tmp_filepath, inputs_tmp_filepath
+    ):
+        """When load_beams=False, beams should not be created."""
+        loader = MZTabDatasetLoader(
+            residue_masses=_FULL_RESIDUE_MASSES,
+            residue_remapping=_STANDARD_REMAPPING,
+            load_beams=False,
+        )
+
+        dataset = loader.load(
+            data_path=inputs_tmp_filepath, predictions_path=mztab_tmp_filepath
+        )
+        assert dataset.predictions is None
+        assert len(dataset.metadata) == 1
+
+    def test_load_beams_true_by_default(
+        self, loader, mztab_tmp_filepath, inputs_tmp_filepath
+    ):
+        """load_beams should default to True."""
+        dataset = loader.load(
+            data_path=inputs_tmp_filepath, predictions_path=mztab_tmp_filepath
+        )
+        assert dataset.predictions is not None
+        assert len(dataset.metadata) == 1
 
 
 # ---------------------------------------------------------------------------

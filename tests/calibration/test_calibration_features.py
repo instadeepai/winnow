@@ -15,7 +15,6 @@ from winnow.calibration.calibration_features import (
     FragmentMatchFeatures,
     ChimericFeatures,
     find_matching_ions,
-    _raise_value_error,
     _validate_model_input_params,
     _resolve_model_inputs,
 )
@@ -24,18 +23,6 @@ from winnow.datasets.calibration_dataset import CalibrationDataset
 
 class TestUtilityFunctions:
     """Test utility functions used by calibration features."""
-
-    def test_raise_value_error_with_none(self):
-        """Test that _raise_value_error raises ValueError for None values."""
-        with pytest.raises(ValueError, match="test_param cannot be None"):
-            _raise_value_error(None, "test_param")
-
-    def test_raise_value_error_with_valid_value(self):
-        """Test that _raise_value_error does not raise for valid values."""
-        # Should not raise any exception
-        _raise_value_error("valid_value", "test_param")
-        _raise_value_error(42, "test_param")
-        _raise_value_error([], "test_param")
 
     def test_find_matching_ions_exact_match(self):
         """Test find_matching_ions with exact m/z matches."""
@@ -145,7 +132,7 @@ class TestMassErrorFeature:
                 "confidence": [0.9, 0.8, 0.7],
             }
         )
-        return CalibrationDataset(metadata=metadata, predictions=[])
+        return CalibrationDataset(metadata=metadata, predictions=None)
 
     def test_properties(self, mass_error_feature):
         """Test MassErrorFeature properties."""
@@ -199,7 +186,7 @@ class TestMassErrorFeature:
                 "confidence": [0.9],
             }
         )
-        dataset = CalibrationDataset(metadata=metadata, predictions=[])
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
         mass_error_feature.compute(dataset)
 
@@ -224,7 +211,7 @@ class TestMassErrorFeature:
                 "confidence": [0.9],
             }
         )
-        dataset = CalibrationDataset(metadata=metadata, predictions=[])
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
         feature.compute(dataset)
 
@@ -314,7 +301,10 @@ class TestBeamFeatures:
         metadata = pd.DataFrame({"confidence": [0.9]})
         dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
-        with pytest.raises(ValueError, match="dataset.predictions cannot be None"):
+        with pytest.raises(
+            ValueError,
+            match="requires beam predictions, but dataset.predictions is None",
+        ):
             beam_features.compute(dataset)
 
     def test_compute_with_insufficient_sequences_warning(self, beam_features):
@@ -499,6 +489,14 @@ class TestBeamFeatures:
             0.0, rel=1e-10, abs=1e-10
         )
 
+    def test_beam_features_raises_for_none_predictions(self, beam_features):
+        """BeamFeatures.compute should raise ValueError when predictions is None."""
+        metadata = pd.DataFrame({"confidence": [0.9]})
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
+
+        with pytest.raises(ValueError, match="BeamFeatures requires beam predictions"):
+            beam_features.compute(dataset)
+
 
 class TestCalibrationFeaturesInterface:
     """Test the abstract CalibrationFeatures interface."""
@@ -537,7 +535,7 @@ class TestRetentionTimeFeature:
                 "spectrum_id": [0, 1, 2, 3, 4],
             }
         )
-        return CalibrationDataset(metadata=metadata, predictions=[])
+        return CalibrationDataset(metadata=metadata, predictions=None)
 
     def test_properties(self, retention_time_feature):
         """Test RetentionTimeFeature properties."""
@@ -652,7 +650,7 @@ class TestRetentionTimeFeature:
                 "retention_time": [10.0, 15.0],
             }
         )
-        dataset = CalibrationDataset(metadata=metadata, predictions=[])
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
         # This would normally call the real Prosit model, but we're testing structure
         # Just ensure it doesn't crash on basic validation
@@ -700,7 +698,7 @@ class TestRetentionTimeFeature:
                 ],  # Non-contiguous spectrum IDs to test mapping
             }
         )
-        dataset = CalibrationDataset(metadata=metadata, predictions=[])
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
         # Mock Prosit model to return iRT predictions
         def mock_prosit_predict(inputs_df):
@@ -856,7 +854,7 @@ class TestFragmentMatchFeatures:
                 ],
             }
         )
-        return CalibrationDataset(metadata=metadata, predictions=[])
+        return CalibrationDataset(metadata=metadata, predictions=None)
 
     def test_properties(self, prosit_features):
         """Test FragmentMatchFeatures properties."""
@@ -1028,7 +1026,7 @@ class TestFragmentMatchFeatures:
                 ],
             }
         )
-        dataset = CalibrationDataset(metadata=metadata, predictions=[])
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
         # Run compute with mocked Prosit model
         with patch(
@@ -1292,7 +1290,10 @@ class TestChimericFeatures:
         metadata = pd.DataFrame({"confidence": [0.9], "precursor_charge": [2]})
         dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
-        with pytest.raises(ValueError, match="dataset.predictions cannot be None"):
+        with pytest.raises(
+            ValueError,
+            match="requires beam predictions, but dataset.predictions is None",
+        ):
             chimeric_features.compute(dataset)
 
     @patch("winnow.calibration.calibration_features.koinapy.Koina")
@@ -1440,6 +1441,21 @@ class TestChimericFeatures:
         # Verify dataset structure
         assert len(dataset.metadata) == 3
         assert set(dataset.metadata["spectrum_id"].values) == {10, 30, 40}
+
+    def test_chimeric_features_raises_for_none_predictions(self, chimeric_features):
+        """ChimericFeatures.compute should raise ValueError when predictions is None."""
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.9],
+                "precursor_charge": [2],
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
+
+        with pytest.raises(
+            ValueError, match="ChimericFeatures requires beam predictions"
+        ):
+            chimeric_features.compute(dataset)
 
     def _create_chimeric_prosit_mock_predict(self):
         """Create a mock Prosit predict function for chimeric testing."""
@@ -1787,7 +1803,7 @@ class TestModelInputHelpers:
                 "intensity_array": [[1000.0, 2000.0]],
             }
         )
-        dataset = CalibrationDataset(metadata=metadata, predictions=[])
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
         mock_predictions = pd.DataFrame(
             {
@@ -1834,7 +1850,7 @@ class TestModelInputHelpers:
                 "intensity_array": [[1000.0, 2000.0], [1100.0, 2100.0]],
             }
         )
-        dataset = CalibrationDataset(metadata=metadata, predictions=[])
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
         mock_predictions = pd.DataFrame(
             {
@@ -1958,7 +1974,7 @@ class TestLearnFromMissingFiltering:
                 "intensity_array": [[1000.0, 2000.0], [1200.0], [1100.0, 2100.0]],
             }
         )
-        dataset = CalibrationDataset(metadata=metadata, predictions=[])
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
         mock_model = mock_koina.return_value
         mock_model.model_inputs = [
@@ -2004,7 +2020,7 @@ class TestLearnFromMissingFiltering:
                 "intensity_array": [[1000.0, 2000.0], [1100.0, 2100.0]],
             }
         )
-        dataset = CalibrationDataset(metadata=metadata, predictions=[])
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
         mock_model = mock_koina.return_value
         mock_model.model_inputs = [
@@ -2069,7 +2085,7 @@ class TestLearnFromMissingFiltering:
                 "intensity_array": [[1000.0, 2000.0], [1200.0], [1100.0, 2100.0]],
             }
         )
-        dataset = CalibrationDataset(metadata=metadata, predictions=[])
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
         mock_model = mock_koina.return_value
         mock_model.model_inputs = [
@@ -2194,7 +2210,7 @@ class TestLearnFromMissingFiltering:
                 "spectrum_id": [10, 20, 30],
             }
         )
-        dataset = CalibrationDataset(metadata=metadata, predictions=[])
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
         mock_model = mock_koina.return_value
         mock_model.model_inputs = ["peptide_sequences"]
@@ -2262,7 +2278,7 @@ class TestConcreteFeatureImplementation:
         """Test that concrete feature can compute values."""
         feature = ConcreteFeature()
         metadata = pd.DataFrame({"existing_col": [1, 2, 3]})
-        dataset = CalibrationDataset(metadata=metadata, predictions=[])
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
         feature.compute(dataset)
 
