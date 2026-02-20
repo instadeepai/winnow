@@ -658,7 +658,9 @@ class ChimericFeatures(CalibrationFeatures):
                 passed to the Koina intensity model.
         """
         filtered_dataset = (
-            dataset.filter_entries(predictions_predicate=lambda beam: len(beam) < 2)
+            dataset.filter_entries(
+                predictions_predicate=lambda beam: beam is None or len(beam) < 2
+            )
             .filter_entries(
                 metadata_predicate=lambda row: row["precursor_charge"]
                 > self.max_precursor_charge
