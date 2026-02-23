@@ -744,7 +744,7 @@ class TestMZTabDatasetLoader:
         )
 
     @pytest.fixture()
-    def invalid_prosit_residues_unimod_only(self):
+    def unsupported_residues_unimod_only(self):
         """List of invalid residues using only UNIMOD notation."""
         return [
             "N[UNIMOD:7]",  # Deamidated asparagine
@@ -810,7 +810,7 @@ class TestMZTabDatasetLoader:
     # ------------------------------------------------------------------
 
     def test_casanovo_tokens_map_to_invalid_unimod(
-        self, residue_masses, invalid_prosit_residues_unimod_only
+        self, residue_masses, unsupported_residues_unimod_only
     ):
         """Test that Casanovo tokens are detected as invalid after tokenization and remapping."""
         residue_remapping = {
@@ -864,11 +864,11 @@ class TestMZTabDatasetLoader:
 
             # Verify that the token is in the invalid list
             assert (
-                expected_token in invalid_prosit_residues_unimod_only
-            ), f"Residue {expected_token} should be in invalid_prosit_residues list"
+                expected_token in unsupported_residues_unimod_only
+            ), f"Residue {expected_token} should be in unsupported_residues list"
 
     def test_valid_sequences_not_affected(
-        self, residue_masses, invalid_prosit_residues_unimod_only
+        self, residue_masses, unsupported_residues_unimod_only
     ):
         """Test that valid sequences without invalid modifications pass through."""
         residue_remapping = {
@@ -892,21 +892,20 @@ class TestMZTabDatasetLoader:
             tokens = loader.metrics._split_peptide(seq)
             remapped_tokens = loader._remap_tokens(tokens)
             contains_invalid = any(
-                token in invalid_prosit_residues_unimod_only
-                for token in remapped_tokens
+                token in unsupported_residues_unimod_only for token in remapped_tokens
             )
             assert (
                 not contains_invalid
             ), f"Valid sequence {remapped_tokens} should not contain invalid tokens"
 
     def test_only_unimod_notation_needed_in_invalid_list(
-        self, residue_masses, invalid_prosit_residues_unimod_only
+        self, residue_masses, unsupported_residues_unimod_only
     ):
-        """Test that we only need UNIMOD notation in invalid_prosit_residues list.
+        """Test that we only need UNIMOD notation in unsupported_residues list.
 
         This test demonstrates that after tokenization and remapping, we only need
         the actual tokenized forms (e.g., "Q[UNIMOD:7]", "[UNIMOD:1]") in the
-        invalid_prosit_residues list, not the Casanovo-specific notations.
+        unsupported_residues list, not the Casanovo-specific notations.
         """
         residue_remapping = {
             "Q+0.984": "Q[UNIMOD:7]",
@@ -942,8 +941,7 @@ class TestMZTabDatasetLoader:
             tokens = loader.metrics._split_peptide(seq)
             remapped_tokens = loader._remap_tokens(tokens)
             contains_invalid = any(
-                token in invalid_prosit_residues_unimod_only
-                for token in remapped_tokens
+                token in unsupported_residues_unimod_only for token in remapped_tokens
             )
 
             if should_be_invalid:

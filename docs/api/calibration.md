@@ -153,7 +153,7 @@ from winnow.calibration.calibration_features import ChimericFeatures
 
 feature = ChimericFeatures(
     mz_tolerance=0.02,
-    invalid_prosit_residues=["N[UNIMOD:7]", "Q[UNIMOD:7]"],
+    unsupported_residues=["N[UNIMOD:7]", "Q[UNIMOD:7]"],
     max_precursor_charge=6,
     max_peptide_length=30,  # Applied to the runner-up sequence
     model_input_constants={"collision_energies": 25, "fragmentation_types": "HCD"},
@@ -231,14 +231,14 @@ Or configure programmatically:
 from winnow.calibration.calibration_features import FragmentMatchFeatures, ChimericFeatures, RetentionTimeFeature
 
 # Learn from missingness (default)
-fragment_feat = FragmentMatchFeatures(mz_tolerance=0.02, unsupported_residues=[], learn_from_missing=True)
-chimeric_feat = ChimericFeatures(mz_tolerance=0.02, invalid_prosit_residues=[], learn_from_missing=True)
-rt_feat = RetentionTimeFeature(hidden_dim=10, train_fraction=0.1, unsupported_residues=[], learn_from_missing=True)
+fragment_feat = FragmentMatchFeatures(mz_tolerance=0.02, learn_from_missing=True)
+chimeric_feat = ChimericFeatures(mz_tolerance=0.02, learn_from_missing=True)
+rt_feat = RetentionTimeFeature(hidden_dim=10, train_fraction=0.1, learn_from_missing=True)
 
 # Require clean data (strict mode)
-fragment_feat = FragmentMatchFeatures(mz_tolerance=0.02, unsupported_residues=[], learn_from_missing=False)
-chimeric_feat = ChimericFeatures(mz_tolerance=0.02, invalid_prosit_residues=[], learn_from_missing=False)
-rt_feat = RetentionTimeFeature(hidden_dim=10, train_fraction=0.1, unsupported_residues=[], learn_from_missing=False)
+fragment_feat = FragmentMatchFeatures(mz_tolerance=0.02, learn_from_missing=False)
+chimeric_feat = ChimericFeatures(mz_tolerance=0.02, learn_from_missing=False)
+rt_feat = RetentionTimeFeature(hidden_dim=10, train_fraction=0.1, learn_from_missing=False)
 ```
 
 ## Workflow
