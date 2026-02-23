@@ -91,7 +91,7 @@ def generate_sample_data():
             np.log(np.random.uniform(0.1, 0.9)) for _ in range(n_samples)
         ]
         # Token log probabilities as string representation of list
-        predictions_data[f"predictions_token_log_probabilities_{beam_idx}"] = [
+        predictions_data[f"predictions_token_log_probabilities_beam_{beam_idx}"] = [
             str([float(np.log(np.random.uniform(0.5, 0.9))) for _ in range(len(p))])
             for p in peptides
         ]

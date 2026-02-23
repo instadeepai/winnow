@@ -40,4 +40,4 @@ residue_remapping:  # Used to map InstaNovo legacy notations to UNIMOD tokens.
 beam_columns:
   sequence: "predictions_beam_"
   log_probability: "predictions_log_probability_beam_"
-  token_log_probabilities: "predictions_token_log_probabilities_"
+  token_log_probabilities: "predictions_token_log_probabilities_beam_"
