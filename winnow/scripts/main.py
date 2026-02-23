@@ -213,6 +213,7 @@ def train_entry_point(
     ProbabilityCalibrator.save(calibrator, cfg.model_output_dir)
 
     # Save the training dataset results
+    logger.info(f"Final dataset: {len(annotated_dataset)} spectra")
     logger.info(f"Saving training dataset results to {cfg.dataset_output_path}")
     annotated_dataset.to_csv(cfg.dataset_output_path)
 
@@ -306,6 +307,7 @@ def predict_entry_point(
     )
 
     # Write output
+    logger.info(f"Final dataset: {len(dataset_metadata)} spectra")
     logger.info(f"Writing output to {cfg.output_folder}")
     dataset_metadata, dataset_preds_and_fdr_metrics = separate_metadata_and_predictions(
         dataset_metadata, fdr_control, cfg.fdr_control.confidence_column
