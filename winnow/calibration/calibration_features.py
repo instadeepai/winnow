@@ -289,11 +289,11 @@ class FragmentMatchFeatures(CalibrationFeatures):
     def __init__(
         self,
         mz_tolerance: float,
-        unsupported_residues: List[str],
         learn_from_missing: bool = True,
         intensity_model_name: str = "Prosit_2020_intensity_HCD",
         max_precursor_charge: int = 6,
         max_peptide_length: int = 30,
+        unsupported_residues: Optional[List[str]] = None,
         model_input_constants: Optional[Dict[str, Any]] = None,
         model_input_columns: Optional[Dict[str, str]] = None,
     ) -> None:
@@ -301,9 +301,6 @@ class FragmentMatchFeatures(CalibrationFeatures):
 
         Args:
             mz_tolerance (float): The mass-to-charge tolerance for ion matching.
-            unsupported_residues (List[str]): Residues unsupported by the configured Koina
-                intensity model, in ProForma format. Predictions containing any of these
-                residues are excluded from model input and treated as missing.
             learn_from_missing (bool): When True, invalid predictions are recorded in an
                 ``is_missing_fragment_match_features`` indicator column and imputed with
                 zeros, allowing the calibrator to learn from missingness. When False,
@@ -316,6 +313,10 @@ class FragmentMatchFeatures(CalibrationFeatures):
             max_peptide_length (int): Maximum peptide length (residue token count) accepted
                 by the Koina intensity model. Predictions exceeding this are treated as
                 missing. Defaults to 30.
+            unsupported_residues (List[str]): Residues unsupported by the configured Koina
+                intensity model, in ProForma format. Predictions containing any of these
+                residues are excluded from model input and treated as missing.
+                Defaults to an empty list.
             model_input_constants (Optional[Dict[str, Any]]): Mapping of Koina input name to a
                 constant value that will be tiled across all rows (e.g. {"collision_energies": 25}).
                 Defaults to None (no additional constants).
@@ -328,7 +329,9 @@ class FragmentMatchFeatures(CalibrationFeatures):
         """
         _validate_model_input_params(model_input_constants, model_input_columns)
         self.mz_tolerance = mz_tolerance
-        self.unsupported_residues = unsupported_residues
+        self.unsupported_residues = (
+            unsupported_residues if unsupported_residues is not None else []
+        )
         self.learn_from_missing = learn_from_missing
         self.intensity_model_name = intensity_model_name
         self.max_precursor_charge = max_precursor_charge
@@ -566,11 +569,11 @@ class ChimericFeatures(CalibrationFeatures):
     def __init__(
         self,
         mz_tolerance: float,
-        invalid_prosit_residues: List[str],
         learn_from_missing: bool = True,
         prosit_intensity_model_name: str = "Prosit_2020_intensity_HCD",
         max_precursor_charge: int = 6,
         max_peptide_length: int = 30,
+        unsupported_residues: Optional[List[str]] = None,
         model_input_constants: Optional[Dict[str, Any]] = None,
         model_input_columns: Optional[Dict[str, str]] = None,
     ) -> None:
@@ -578,9 +581,6 @@ class ChimericFeatures(CalibrationFeatures):
 
         Args:
             mz_tolerance (float): The mass-to-charge tolerance for ion matching.
-            invalid_prosit_residues (List[str]): Residues unsupported by the configured Koina
-                intensity model, in ProForma format. Runner-up predictions containing any of
-                these residues are excluded from model input and treated as missing.
             learn_from_missing (bool): When True, invalid runner-up predictions are recorded
                 in an ``is_missing_chimeric_features`` indicator column and imputed with
                 zeros, allowing the calibrator to learn from missingness. When False,
@@ -593,6 +593,9 @@ class ChimericFeatures(CalibrationFeatures):
                 by the Koina intensity model. Applied to the runner-up (second-best) predicted
                 sequence, not the top-1 prediction. Runner-up sequences exceeding this are
                 treated as missing. Defaults to 30.
+            unsupported_residues (List[str]): Residues unsupported by the configured Koina
+                intensity model, in ProForma format. Runner-up predictions containing any of
+                these residues are excluded from model input and treated as missing. Defaults to an empty list.
             model_input_constants (Optional[Dict[str, Any]]): Mapping of Koina input name to a
                 constant value that will be tiled across all rows (e.g. {"collision_energies": 25}).
                 Defaults to None (no additional constants).
@@ -606,7 +609,9 @@ class ChimericFeatures(CalibrationFeatures):
         _validate_model_input_params(model_input_constants, model_input_columns)
         self.mz_tolerance = mz_tolerance
         self.learn_from_missing = learn_from_missing
-        self.invalid_prosit_residues = invalid_prosit_residues
+        self.unsupported_residues = (
+            unsupported_residues if unsupported_residues is not None else []
+        )
         self.prosit_intensity_model_name = prosit_intensity_model_name
         self.max_precursor_charge = max_precursor_charge
         self.max_peptide_length = max_peptide_length
@@ -661,7 +666,7 @@ class ChimericFeatures(CalibrationFeatures):
         - The precursor charge exceeds ``max_precursor_charge``.
         - The runner-up (second-best) peptide sequence has more than ``max_peptide_length``
           residue tokens.
-        - The runner-up sequence contains a residue in ``invalid_prosit_residues``.
+        - The runner-up sequence contains a residue in ``unsupported_residues``.
 
         Args:
             dataset (CalibrationDataset): The dataset to check.
@@ -686,7 +691,7 @@ class ChimericFeatures(CalibrationFeatures):
             .filter_entries(
                 predictions_predicate=lambda beam: len(beam) > 1
                 and any(
-                    token in beam[1].sequence for token in self.invalid_prosit_residues
+                    token in beam[1].sequence for token in self.unsupported_residues
                 )
             )
         )
@@ -747,7 +752,7 @@ class ChimericFeatures(CalibrationFeatures):
                     f"  - Runner-up sequence required (beam search width >= 2)\n"
                     f"  - max_peptide_length={self.max_peptide_length} residue tokens (runner-up sequence)\n"
                     f"  - max_precursor_charge={self.max_precursor_charge}\n"
-                    f"  - unsupported_residues: {self.invalid_prosit_residues[:3]}{'...' if len(self.invalid_prosit_residues) > 3 else ''}\n"
+                    f"  - unsupported_residues: {self.unsupported_residues[:3]}{'...' if len(self.unsupported_residues) > 3 else ''}\n"
                     f"Set learn_from_missing=True to impute missing features instead of filtering.",
                     stacklevel=2,
                 )
@@ -1073,7 +1078,6 @@ class RetentionTimeFeature(CalibrationFeatures):
         self,
         hidden_dim: int,
         train_fraction: float,
-        unsupported_residues: List[str],
         learn_from_missing: bool = True,
         seed: int = 42,
         learning_rate_init: float = 0.001,
@@ -1083,15 +1087,13 @@ class RetentionTimeFeature(CalibrationFeatures):
         validation_fraction: float = 0.1,
         irt_model_name: str = "Prosit_2019_irt",
         max_peptide_length: int = 30,
+        unsupported_residues: Optional[List[str]] = None,
     ) -> None:
         """Initialize RetentionTimeFeature.
 
         Args:
             hidden_dim (int): Hidden dimension size for the MLP regressor.
             train_fraction (float): Fraction of data to use for training the iRT calibrator.
-            unsupported_residues (List[str]): Residues unsupported by the configured Koina iRT
-                model, in ProForma format. Predictions containing any of these residues are
-                excluded from model input and treated as missing.
             learn_from_missing (bool): When True, invalid predictions are recorded in an
                 ``is_missing_irt_error`` indicator column and imputed with zeros, allowing
                 the calibrator to learn from missingness. When False, invalid entries are
@@ -1107,11 +1109,16 @@ class RetentionTimeFeature(CalibrationFeatures):
             max_peptide_length (int): Maximum peptide length (residue token count) accepted
                 by the Koina iRT model. Predictions exceeding this are treated as missing.
                 Defaults to 30.
+            unsupported_residues (List[str]): Residues unsupported by the configured Koina iRT
+                model, in ProForma format. Predictions containing any of these residues are
+                excluded from model input and treated as missing. Defaults to an empty list.
         """
         self.train_fraction = train_fraction
         self.hidden_dim = hidden_dim
         self.learn_from_missing = learn_from_missing
-        self.unsupported_residues = unsupported_residues
+        self.unsupported_residues = (
+            unsupported_residues if unsupported_residues is not None else []
+        )
         self.irt_model_name = irt_model_name
         self.max_peptide_length = max_peptide_length
         self.irt_predictor = MLPRegressor(

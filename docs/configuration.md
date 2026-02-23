@@ -189,7 +189,7 @@ calibrator:
       _target_: winnow.calibration.calibration_features.ChimericFeatures
       mz_tolerance: 0.02
       learn_from_missing: false
-      invalid_prosit_residues: ${unsupported_residues}
+      unsupported_residues: ${unsupported_residues}
       prosit_intensity_model_name: Prosit_2025_intensity_22PTM
       max_precursor_charge: ${koina_model_constraints.max_precursor_charge}
       max_peptide_length: ${koina_model_constraints.max_peptide_length}
@@ -223,7 +223,7 @@ filters. Predictions that fail any check are treated as **missing** rather than 
 |---|---|---|
 | `max_precursor_charge` | `FragmentMatchFeatures`, `ChimericFeatures` | Predictions with a precursor charge strictly greater than this value are excluded. |
 | `max_peptide_length` | all three features | Predictions with more residue tokens than this limit are excluded. In `ChimericFeatures`, this limit is applied to the **runner-up (second-best) sequence**, not the top-1 prediction. |
-| `unsupported_residues` / `invalid_prosit_residues` | all three features | Predictions containing any of the listed ProForma tokens are excluded. |
+| `unsupported_residues` | all three features | Predictions containing any of the listed ProForma tokens are excluded. |
 
 The defaults (charge ≤ 6, length ≤ 30) match the constraints of the Prosit model family.
 If you switch to a different Koina model, check its documentation and adjust these parameters

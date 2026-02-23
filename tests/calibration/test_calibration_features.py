@@ -1211,7 +1211,7 @@ class TestChimericFeatures:
         """Create a ChimericFeatures instance for testing."""
         return ChimericFeatures(
             mz_tolerance=0.02,
-            invalid_prosit_residues=["U", "O", "X"],
+            unsupported_residues=["U", "O", "X"],
             model_input_constants={"collision_energies": 25},
         )
 
@@ -1268,7 +1268,7 @@ class TestChimericFeatures:
         """Test initialization with custom tolerance."""
         feature = ChimericFeatures(
             mz_tolerance=0.01,
-            invalid_prosit_residues=["U", "O", "X"],
+            unsupported_residues=["U", "O", "X"],
             model_input_constants={"collision_energies": 25},
         )
         assert feature.mz_tolerance == 0.01
@@ -1661,7 +1661,6 @@ class TestModelInputHelpers:
         with pytest.raises(ValueError, match="collision_energies"):
             FragmentMatchFeatures(
                 mz_tolerance=0.02,
-                unsupported_residues=[],
                 model_input_constants={"collision_energies": 25},
                 model_input_columns={"collision_energies": "ce_col"},
             )
@@ -1671,7 +1670,6 @@ class TestModelInputHelpers:
         with pytest.raises(ValueError, match="collision_energies"):
             ChimericFeatures(
                 mz_tolerance=0.02,
-                invalid_prosit_residues=[],
                 model_input_constants={"collision_energies": 25},
                 model_input_columns={"collision_energies": "ce_col"},
             )
@@ -1960,7 +1958,6 @@ class TestLearnFromMissingFiltering:
         surviving rows."""
         feature = FragmentMatchFeatures(
             mz_tolerance=0.02,
-            unsupported_residues=[],
             learn_from_missing=False,
             max_peptide_length=5,  # short limit so row 1 (len 6) is invalid
             model_input_constants={"collision_energies": 25},
@@ -2007,7 +2004,6 @@ class TestLearnFromMissingFiltering:
         """learn_from_missing=False: no UserWarning is emitted when every entry is valid."""
         feature = FragmentMatchFeatures(
             mz_tolerance=0.02,
-            unsupported_residues=[],
             learn_from_missing=False,
             model_input_constants={"collision_energies": 25},
         )
@@ -2047,7 +2043,6 @@ class TestLearnFromMissingFiltering:
         feature.columns (it is only a temporary intermediate, not a calibrator feature)."""
         feature = FragmentMatchFeatures(
             mz_tolerance=0.02,
-            unsupported_residues=[],
             learn_from_missing=False,
         )
         assert "is_missing_fragment_match_features" not in feature.columns
@@ -2058,7 +2053,6 @@ class TestLearnFromMissingFiltering:
         feature.columns so the calibrator can learn from missingness."""
         feature = FragmentMatchFeatures(
             mz_tolerance=0.02,
-            unsupported_residues=[],
             learn_from_missing=True,
         )
         assert "is_missing_fragment_match_features" in feature.columns
@@ -2071,7 +2065,6 @@ class TestLearnFromMissingFiltering:
         ion_match_intensity values are zero, and is_missing_* is True for those rows."""
         feature = FragmentMatchFeatures(
             mz_tolerance=0.02,
-            unsupported_residues=[],
             learn_from_missing=True,
             max_peptide_length=5,
             model_input_constants={"collision_energies": 25},
@@ -2125,7 +2118,6 @@ class TestLearnFromMissingFiltering:
         dataset and a UserWarning is emitted."""
         feature = ChimericFeatures(
             mz_tolerance=0.02,
-            invalid_prosit_residues=[],
             learn_from_missing=False,
             model_input_constants={"collision_energies": 25},
         )
@@ -2178,7 +2170,6 @@ class TestLearnFromMissingFiltering:
         feature.columns."""
         feature = ChimericFeatures(
             mz_tolerance=0.02,
-            invalid_prosit_residues=[],
             learn_from_missing=False,
         )
         assert "is_missing_chimeric_features" not in feature.columns
@@ -2198,7 +2189,6 @@ class TestLearnFromMissingFiltering:
         feature = RetentionTimeFeature(
             hidden_dim=10,
             train_fraction=0.8,
-            unsupported_residues=[],
             learn_from_missing=False,
             max_peptide_length=5,  # short limit so row 1 (len 6) is invalid
         )
@@ -2235,7 +2225,6 @@ class TestLearnFromMissingFiltering:
         feature = RetentionTimeFeature(
             hidden_dim=10,
             train_fraction=0.8,
-            unsupported_residues=[],
             learn_from_missing=False,
         )
         assert "is_missing_irt_error" not in feature.columns
