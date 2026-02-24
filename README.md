@@ -122,7 +122,7 @@ make train-sample
 make predict-sample
 ```
 
-**Note:** The sample data is minimal (20 spectra) and intended for testing only. The `make` commands shown above are configured for the sample data with adjusted settings (e.g., relaxed FDR threshold). For your own datasets, use the `winnow` commands outlined below.
+**Note:** The sample data is minimal (100 spectra) and intended for testing only. The `make` commands shown above are configured for the sample data with adjusted settings (e.g., relaxed FDR threshold). For your own datasets, use the `winnow` commands outlined below.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
