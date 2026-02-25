@@ -121,8 +121,8 @@ dataset_output_path: results/calibrated_dataset.csv
 **Key parameters:**
 
 - `data_loader`: Format of input data loader to use (via defaults: `instanovo`, `mztab`, `pointnovo`, `winnow`)
-- `dataset.spectrum_path_or_directory`: Path to spectrum/metadata file (or directory for winnow format)
-- `dataset.predictions_path`: Path to predictions file (set to null for winnow format)
+- `dataset.spectrum_path_or_directory`: Path to spectrum/metadata file (or directory for Winnow format)
+- `dataset.predictions_path`: Path to predictions file (set to null for Winnow format)
 - `model_output_dir`: Where to save trained model
 - `dataset_output_path`: Where to save calibrated training results
 
@@ -131,72 +131,94 @@ dataset_output_path: results/calibrated_dataset.csv
 Controls model architecture and calibration features:
 
 ```yaml
-# Shared Koina model inputs — applied to all intensity-based features.
-# To use a constant value tiled across all rows, specify it under koina_model_input_constants.
-# To use per-row values from a metadata column, add the column mapping under koina_model_input_columns.
-koina_model_input_constants:
-  collision_energies: 25
-  fragmentation_types: HCD
-
-# Shared Koina model constraints.
-# Change these to match the capabilities of your selected Koina models.
-koina_model_constraints:
-  max_precursor_charge: 6
-  max_peptide_length: 30
-
 calibrator:
   _target_: winnow.calibration.calibrator.ProbabilityCalibrator
 
   seed: 42
-  hidden_layer_sizes: [50, 50]  # The number of neurons in each hidden layer of the MLP classifier
-  learning_rate_init: 0.001  # The initial learning rate for the MLP classifier
-  alpha: 0.0001  # L2 regularisation parameter for the MLP classifier
-  max_iter: 1000  # Maximum number of training iterations for the MLP classifier
-  early_stopping: true  # Whether to use early stopping to terminate training
-  validation_fraction: 0.1  # Proportion of training data to use for early stopping validation
+  hidden_layer_sizes: [50, 50]  # The number of neurons in each hidden layer of the MLP classifier.
+  learning_rate_init: 0.001  # The initial learning rate for the MLP classifier.
+  alpha: 0.0001  # L2 regularisation parameter for the MLP classifier.
+  max_iter: 1000  # Maximum number of training iterations for the MLP classifier.
+  early_stopping: true  # Whether to use early stopping to terminate training.
+  validation_fraction: 0.1  # Proportion of training data to use for early stopping validation.
 
   features:
     mass_error:
       _target_: winnow.calibration.calibration_features.MassErrorFeature
-      residue_masses: ${residue_masses}
+      residue_masses: ${residue_masses}  # The residue masses to use for the mass error feature.
 
     fragment_match_features:
       _target_: winnow.calibration.calibration_features.FragmentMatchFeatures
       mz_tolerance: 0.02
-      learn_from_missing: false
-      unsupported_residues: ${unsupported_residues}
-      intensity_model_name: Prosit_2025_intensity_22PTM
-      max_precursor_charge: ${koina_model_constraints.max_precursor_charge}
-      max_peptide_length: ${koina_model_constraints.max_peptide_length}
-      model_input_constants: ${koina_model_input_constants}
+      learn_from_missing: false  # If True, impute missing features and add an indicator column. If False, filter invalid entries with a warning.
+      intensity_model_name: ${koina.intensity_model}  # The name of the Koina intensity model to use.
+      max_precursor_charge: ${koina.constraints.max_precursor_charge}  # Maximum precursor charge accepted by the Koina intensity model.
+      max_peptide_length: ${koina.constraints.max_peptide_length}      # Maximum peptide length accepted by the Koina intensity model.
+      unsupported_residues: ${koina.constraints.unsupported_residues}  # Residues unsupported by the configured Koina intensity model.
+      model_input_constants: ${koina.input_constants}  # Shared Koina model inputs (e.g. collision_energies, fragmentation_types).
+      # model_input_columns: ${koina.input_columns}  # Uncomment to use per-row metadata columns instead.
 
     retention_time_feature:
       _target_: winnow.calibration.calibration_features.RetentionTimeFeature
-      hidden_dim: 10
-      train_fraction: 0.1
-      learn_from_missing: false
-      seed: 42
-      learning_rate_init: 0.001
-      alpha: 0.0001
-      max_iter: 200
-      early_stopping: true
-      validation_fraction: 0.1
-      unsupported_residues: ${unsupported_residues}
-      irt_model_name: Prosit_2025_irt_22PTM
-      max_peptide_length: ${koina_model_constraints.max_peptide_length}
+      hidden_dim: 10  # The hidden dimension size for the MLP regressor used to predict iRT from observed retention times.
+      train_fraction: 0.1  # The fraction of the data to use for training the iRT predictor.
+      learn_from_missing: false  # If True, impute missing features and add an indicator column. If False, filter invalid entries with a warning.
+      seed: 42  # Random seed for the MLP regressor.
+      learning_rate_init: 0.001  # The initial learning rate for the MLP regressor.
+      alpha: 0.0001  # L2 regularisation parameter for the MLP regressor.
+      max_iter: 200  # Maximum number of training iterations for the MLP regressor.
+      early_stopping: true  # Whether to use early stopping for the MLP regressor.
+      validation_fraction: 0.1  # Proportion of training data to use for early stopping validation.
+      irt_model_name: ${koina.irt_model}  # The name of the Koina iRT model to use.
+      max_peptide_length: ${koina.constraints.max_peptide_length}      # Maximum peptide length accepted by the Koina iRT model.
+      unsupported_residues: ${koina.constraints.unsupported_residues}  # Residues unsupported by the configured Koina iRT model.
 
     chimeric_features:
       _target_: winnow.calibration.calibration_features.ChimericFeatures
       mz_tolerance: 0.02
-      learn_from_missing: false
-      unsupported_residues: ${unsupported_residues}
-      prosit_intensity_model_name: Prosit_2025_intensity_22PTM
-      max_precursor_charge: ${koina_model_constraints.max_precursor_charge}
-      max_peptide_length: ${koina_model_constraints.max_peptide_length}
-      model_input_constants: ${koina_model_input_constants}
+      learn_from_missing: false  # If True, impute missing features and add an indicator column. If False, filter invalid entries with a warning.
+      prosit_intensity_model_name: ${koina.intensity_model}  # The name of the Koina intensity model to use.
+      max_precursor_charge: ${koina.constraints.max_precursor_charge}  # Maximum precursor charge accepted by the Koina intensity model. Applied to the runner-up sequence.
+      max_peptide_length: ${koina.constraints.max_peptide_length}      # Maximum peptide length accepted by the Koina intensity model. Applied to the runner-up (second-best) sequence.
+      unsupported_residues: ${koina.constraints.unsupported_residues}  # Residues unsupported by the configured Koina intensity model.
+      model_input_constants: ${koina.input_constants}  # Shared Koina model inputs (e.g. collision_energies, fragmentation_types).
+      # model_input_columns: ${koina.input_columns}  # Uncomment to use per-row metadata columns instead.
 
     beam_features:
       _target_: winnow.calibration.calibration_features.BeamFeatures
+
+
+# Koina model configuration — shared settings for all intensity- and iRT-based features.
+koina:
+  # Model names
+  intensity_model: Prosit_2025_intensity_22PTM
+  irt_model: Prosit_2025_irt_22PTM
+
+  # Model inputs — applied to FragmentMatchFeatures and ChimericFeatures.
+  # To use a constant value tiled across all rows, specify it under input_constants.
+  # To use per-row values from a metadata column, add the column mapping under input_columns.
+  # Each input key must appear in at most one of these two dicts.
+  input_constants:
+    collision_energies: 27
+    fragmentation_types: HCD
+  input_columns: {}
+
+  # Model constraints — adjust to match the capabilities of your Koina models.
+  # See docs/configuration.md for guidance on choosing these values.
+  constraints:
+    max_precursor_charge: 6   # Maximum precursor charge accepted by the intensity models.
+    max_peptide_length: 30    # Maximum peptide length (residue token count) accepted by the intensity/iRT models.
+    # Residues unsupported by the configured Koina models.
+    # These residues must be specified using UNIMOD PTM IDs.
+    # Check that all PTMs unsupported by your selected Koina models but supported by Winnow are included.
+    unsupported_residues:
+      # Residue modifications (amino acid + modification)
+      - "N[UNIMOD:7]"   # Deamidated asparagine
+      - "Q[UNIMOD:7]"   # Deamidated glutamine
+      # ...
+      # N-terminal modifications (standalone tokens)
+      - "[UNIMOD:1]"    # N-terminal acetylation
+      # ...
 ```
 
 **Key parameters:**
@@ -240,11 +262,11 @@ predictions:
   receives this indicator as an additional feature, allowing it to distinguish genuinely
   low-scoring predictions from those that were simply out of range for the Koina model.
   Use this when your dataset is diverse and you expect a manageable proportion of peptides
-  to be out of range — the calibrator will learn to account for missingness automatically.
+  to be out of range; the calibrator will learn to account for missingness automatically.
 
 - **`learn_from_missing: false`** — Invalid entries are automatically **filtered from the
   dataset** before Koina is called. A warning is emitted reporting how many PSMs were
-  removed and which constraints were applied. The filtered PSMs are gone entirely — no
+  removed and which constraints were applied. The filtered PSMs are gone entirely; no
   indicator column is added and the calibrator trains only on the remaining clean data.
   Use this when you want the strictest possible data quality and are comfortable losing
   some PSMs.
@@ -254,9 +276,8 @@ predictions:
 The built-in filters cover the most common Koina model constraints, but they cannot
 anticipate every model's requirements. **It is the user's responsibility to:**
 
-1. Consult the documentation of the selected Koina model (available at
-   [koina.wilhelmlab.org](https://koina.wilhelmlab.org/)) and verify which sequence lengths,
-   charge states and modifications it supports.
+1. Consult the [documentation](https://koina.wilhelmlab.org/) of the selected Koina model
+   and verify which sequence lengths, charge states and modifications it supports.
 2. Set `max_precursor_charge`, `max_peptide_length`, and `unsupported_residues` to match
    those constraints, and update `koina_model_constraints` in `calibrator.yaml` so all
    features stay consistent.
@@ -265,7 +286,7 @@ anticipate every model's requirements. **It is the user's responsibility to:**
    and may require pre-filtering the dataset before running Winnow.
 
 Predictions that violate undocumented model constraints may cause Koina errors at prediction
-time or silently produce incorrect theoretical spectra.
+time or silently produce predictions.
 
 #### Shared Koina inputs (`koina_model_input_constants` / `koina_model_input_columns`)
 
@@ -331,7 +352,7 @@ output_folder: results/predictions
 **Key parameters:**
 
 - `data_loader`: Format of input data loader to use (via defaults: `instanovo`, `mztab`, `pointnovo`, `winnow`)
-- `dataset.spectrum_path_or_directory`: Path to spectrum/metadata file (or directory for winnow format)
+- `dataset.spectrum_path_or_directory`: Path to spectrum/metadata file (or directory for Winnow format)
 - `dataset.predictions_path`: Path to predictions file
 - `calibrator.pretrained_model_name_or_path`: HuggingFace model identifier or local model directory path
 - `calibrator.cache_dir`: Directory to cache HuggingFace models (null for default)
@@ -389,28 +410,6 @@ residue_masses:
   "[UNIMOD:1]": 42.010565     # Acetylation (terminal)
   "[UNIMOD:5]": 43.005814     # Carbamylation (terminal)
   "[UNIMOD:385]": -17.026549  # NH3 loss (terminal)
-
-unsupported_residues:
-  # Residue modifications (amino acid + modification)
-  - "N[UNIMOD:7]"   # Deamidated asparagine
-  - "Q[UNIMOD:7]"   # Deamidated glutamine
-  - "R[UNIMOD:7]"   # Arginine citrullination
-  - "P[UNIMOD:35]"  # Proline hydroxylation
-  - "S[UNIMOD:21]"  # Phosphorylated serine
-  - "T[UNIMOD:21]"  # Phosphorylated threonine
-  - "Y[UNIMOD:21]"  # Phosphorylated tyrosine
-  - "C[UNIMOD:312]"  # Cysteinylation
-  - "E[UNIMOD:27]"  # Pyro-glutamine
-  - "Q[UNIMOD:28]"  # Pyro-glutamine
-  # N-terminal modifications (standalone tokens)
-  - "[UNIMOD:1]"    # N-terminal acetylation
-  - "[UNIMOD:5]"    # N-terminal carbamylation
-  - "[UNIMOD:385]"  # N-terminal ammonia loss
-  - "(+25.98)"      # Carbamylation & NH3 loss (legacy notation)
-  # Unsupported residues
-  # - "C"  # Unmodified cysteine (must be explicitly carbamidomethylated for some Koina models)
-
-  # ... other unsupported residues
 ```
 
 This configuration is shared across all pipelines and referenced via `${residue_masses}` and `${unsupported_residues}` interpolation.
@@ -437,7 +436,10 @@ beam_columns:
 
 #### Beam column configuration
 
-The InstaNovo loader reads beam search predictions from CSV columns that follow a naming convention: each beam column has a **prefix** that is appended with a **beam index** (0, 1, 2, ...).
+The InstaNovo loader reads beam search predictions from CSV columns that follow a naming convention:
+each beam column has a **prefix** that is appended with a **beam index** (0, 1, 2, ...).
+Beam column configurability means that Winnow can be run on InstaNovo predictions made with or without refinement,
+a setting which changes the column names of saved beams.
 
 The `beam_columns` parameter specifies the prefix for each required column type:
 
@@ -445,7 +447,7 @@ The `beam_columns` parameter specifies the prefix for each required column type:
 |-----|-------------|-----------------|
 | `sequence` | Peptide sequence for each beam | `predictions_beam_0`, `predictions_beam_1`, ... |
 | `log_probability` | Log probability score for each beam | `predictions_log_probability_beam_0`, ... |
-| `token_log_probabilities` | Per-token log probabilities | `predictions_token_log_probabilities_0`, ... |
+| `token_log_probabilities` | Per-token log probabilities | `predictions_token_log_probabilities_beam_0`, ... |
 
 **Column naming requirements:**
 
@@ -453,18 +455,6 @@ The `beam_columns` parameter specifies the prefix for each required column type:
 - Column names must be exactly `<prefix><beam_index>` (e.g., `predictions_beam_0`)
 - The beam index must be a non-negative integer (0, 1, 2, ...)
 - All three column types are required for each beam
-
-**Customising beam columns:**
-
-If your predictions CSV uses different column names (i.e., running InstaNovo with or without refinement), override `beam_columns` via CLI:
-
-```bash
-# Example: running InstaNovo with refinement
-winnow train \
-  data_loader.beam_columns.sequence="instanovo_predictions_beam_" \
-  data_loader.beam_columns.log_probability="instanovo_predictions_log_probability_beam_" \
-  data_loader.beam_columns.token_log_probabilities="instanovo_predictions_token_log_probabilities_beam_"
-```
 
 **Disabling beam predictions:**
 
@@ -503,60 +493,6 @@ residue_masses: ${residue_masses}
 # Internal format uses UNIMOD tokens directly, no remapping needed
 ```
 
-## Common configuration patterns
-
-### Using a custom model
-
-```bash
-# Use a custom HuggingFace model
-winnow predict calibrator.pretrained_model_name_or_path=my-org/my-model
-
-# Use a locally trained model
-winnow predict calibrator.pretrained_model_name_or_path=models/my_model
-
-# Specify a custom HuggingFace cache directory
-winnow predict calibrator.cache_dir=/path/to/cache
-```
-
-### Changing FDR method and threshold
-
-```bash
-# Use database-grounded FDR at 1%
-winnow predict fdr_method=database_grounded fdr_control.fdr_threshold=0.01
-
-# Use non-parametric FDR at 5%
-winnow predict fdr_method=nonparametric fdr_control.fdr_threshold=0.05
-```
-
-### Training with different features
-
-```bash
-# Change fragment match m/z tolerance
-winnow train calibrator.features.fragment_match_features.mz_tolerance=0.01
-
-# Disable missing value handling for a feature
-winnow train calibrator.features.fragment_match_features.learn_from_missing=false
-
-# Change retention time model architecture
-winnow train calibrator.features.retention_time_feature.hidden_dim=20
-
-# Use a different Koina intensity model with a higher charge/length limit
-winnow train \
-  calibrator.features.fragment_match_features.intensity_model_name=AlphaPept_ms2_generic \
-  calibrator.features.fragment_match_features.max_precursor_charge=10 \
-  calibrator.features.fragment_match_features.max_peptide_length=50
-```
-
-### Processing different data formats
-
-```bash
-# MZTab format
-winnow train data_loader=mztab dataset.spectrum_path_or_directory=data/spectra.parquet dataset.predictions_path=data/results.mztab
-
-# Previously saved Winnow dataset
-winnow train data_loader=winnow dataset.spectrum_path_or_directory=data/winnow_dataset/ dataset.predictions_path=null
-```
-
 ## Config interpolation
 
 Hydra supports variable interpolation using `${...}` syntax:
@@ -580,6 +516,7 @@ defaults:
 ```
 
 Common interpolation patterns in Winnow configs:
+
 - `${residue_masses}` - References amino acid masses from residues.yaml
 - `${unsupported_residues}` - References Koina-unsupported residue tokens from residues.yaml
 - `${koina_model_input_constants}` - References shared Koina model inputs (e.g. collision energy) from calibrator.yaml
@@ -661,9 +598,10 @@ winnow predict fdr_method=typo
 
 ## Advanced: custom config directories
 
-For advanced users who have installed winnow as a package and need to customise multiple configuration files, you can use the `--config-dir` flag to specify a custom configuration directory. This is particularly useful when you have complex customisations that would be verbose to specify via command-line overrides.
+For advanced users who have installed Winnow as a package and need to customise multiple configuration files, you can use the `--config-dir` flag to specify a custom configuration directory. This is particularly useful when you have complex customisations that would be verbose to specify via command-line overrides.
 
 **When to use custom config directories:**
+
 - **CLI overrides**: For simple parameter changes (1-3 values) - use command-line overrides like `winnow train calibrator.seed=42`
 - **Custom config dirs**: For complex configurations with many custom settings (advanced users) - use `--config-dir`
 - **Cloning repo**: For extending Winnow (developers) - clone the repository, make changes, and modify configs directly
@@ -688,6 +626,7 @@ my_configs/
 ```
 
 **Important requirements:**
+
 - File names must match package config names **exactly** (case-sensitive)
 - Directory structure should mirror package structure (e.g., `data_loader/`, `fdr_method/`)
 - Only include files you want to override - you don't need to include everything
@@ -703,7 +642,8 @@ my_configs/
 └── calibrator.yaml    # Your custom calibrator config
 ```
 
-When you use `--config-dir`, winnow will:
+When you use `--config-dir`, Winnow will:
+
 1. Use your custom files for files present in your directory (these completely replace package versions)
 2. Use package defaults for files not in your directory
 
@@ -714,6 +654,7 @@ When you use `--config-dir`, winnow will:
 **How config files work**: When you provide a custom config file (e.g., `calibrator.yaml`), it **completely replaces** the package version of that file. Hydra does not merge keys within the same file - it uses your file exactly as written.
 
 **What this means:**
+
 - ✅ **Partial configs at file level**: You only need to include the files you want to override (e.g., just `residues.yaml` and `calibrator.yaml`). Files not in your custom directory use package defaults.
 - ❌ **Partial configs at key level don't work**: If you provide `calibrator.yaml` with only `seed: 999`, the other settings (`hidden_layer_sizes`, `features`, etc.) will be **missing**, not using package defaults. This will cause errors.
 
@@ -759,7 +700,7 @@ calibrator:
 Before creating custom configs, you need to know the structure of package configs. Here are ways to get them:
 
 1. **View resolved config**: Run `winnow config train` or `winnow config predict` to see the complete resolved configuration
-2. **Clone the repository**: Visit the winnow [repository](https://github.com/instadeepai/winnow) and check `winnow/configs/` directory
+2. **Clone the repository**: Visit the Winnow [repository](https://github.com/instadeepai/winnow) and check `winnow/configs/` directory
 3. **Inspect installed package**: Find the package location (e.g., `python -c "import winnow; print(winnow.__file__)"`) and navigate to `configs/`
 
 **Recommended workflow**: Start by creating a new config directory, copying in the package config file you want to customise, and then modify only the values you need.
@@ -769,24 +710,28 @@ Before creating custom configs, you need to know the structure of package config
 **Common mistakes:**
 
 1. **Wrong file names**: File names must match exactly (case-sensitive)
-   - ❌ `Residues.yaml` (wrong case)
-   - ✅ `residues.yaml` (correct)
+
+    - ❌ `Residues.yaml` (wrong case)
+    - ✅ `residues.yaml` (correct)
 
 2. **Incorrect structure**: Directory structure must match package structure
-   - ❌ `my_configs/data_loaders/` (wrong directory name)
-   - ✅ `my_configs/data_loader/` (correct)
+
+    - ❌ `my_configs/data_loaders/` (wrong directory name)
+    - ✅ `my_configs/data_loader/` (correct)
 
 3. **Typos in keys**: YAML keys must match package config keys exactly
-   - Check package configs for correct key names
+
+    - Check package configs for correct key names
 
 4. **Invalid YAML**: Ensure your YAML files are valid
-   - Use a YAML validator if unsure
+
+    - Use a YAML validator if unsure
 
 **How to check if custom config is being used:**
 
 1. Use `winnow config train --config-dir my_configs` and search for your custom values
 2. Compare output with `winnow config train` (without custom dir) to see differences
-3. Check logs - winnow logs which config directory is being used
+3. Check logs - Winnow logs which config directory is being used
 
 ## Additional resources
 
@@ -794,29 +739,3 @@ Before creating custom configs, you need to know the structure of package config
 - [OmegaConf documentation](https://omegaconf.readthedocs.io/)
 - [Winnow API documentation](api/calibration.md)
 - [Example notebook](https://github.com/instadeepai/winnow/blob/main/examples/getting_started_with_winnow.ipynb)
-
-## Migration from old CLI
-
-If you're migrating from the old argument-based CLI:
-
-| Old CLI Argument | New Hydra Config Parameter |
-|------------------|---------------------------|
-| `--data-source instanovo` | `data_loader=instanovo` |
-| `--model-output-folder models/X` | `model_output_dir=models/X` |
-| `--dataset-output-path results/X.csv` | `dataset_output_path=results/X.csv` |
-| `--fdr-threshold 0.01` | `fdr_control.fdr_threshold=0.01` |
-| `--method winnow` | `fdr_method=nonparametric` |
-| `--method database-ground` | `fdr_method=database_grounded` |
-| `--local-model-folder models/X` | `calibrator.pretrained_model_name_or_path=models/X` |
-| `--huggingface-model-name X` | `calibrator.pretrained_model_name_or_path=X` |
-| `--confidence-column X` | `fdr_control.confidence_column=X` |
-| `--output-folder results/` | `output_folder=results/` |
-
-**Key changes:**
-
-- `data_source` renamed to `data_loader` (references configs/data_loader/*.yaml)
-- `fdr_threshold` and `confidence_column` now nested under `fdr_control`
-- `local_model_folder` and `huggingface_model_name` merged into `pretrained_model_name_or_path`
-- Dataset paths are now specified directly as Hydra parameters instead of via separate YAML files:
-  - **Old**: Create `config.yaml` with `spectrum_path` and `predictions_path`, then use `--dataset-config-path config.yaml`
-  - **New**: Use `dataset.spectrum_path_or_directory=... dataset.predictions_path=...` directly on command line

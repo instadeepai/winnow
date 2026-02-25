@@ -29,23 +29,7 @@ make train-sample
 make predict-sample
 ```
 
-The sample data is pre-configured in the default config files (`configs/train.yaml` and `configs/predict.yaml`), pointing to `examples/example_data/`. You can also use the `winnow` commands directly:
-
-```bash
-# Train with sample data (uses defaults from configs/train.yaml)
-winnow train
-
-# Predict with pretrained HuggingFace model (uses defaults from configs/predict.yaml)
-winnow predict
-
-# Do not filter predictions on an FDR threshold
-winnow predict fdr_control.fdr_threshold=1.0
-
-# Predict with your locally trained model
-winnow predict calibrator.pretrained_model_name_or_path=models/new_model
-```
-
-**Note:** The sample data is minimal (100 spectra) and intended for testing only. When using the sample data, it's **recommended to use the `make` commands** (e.g., `make predict-sample`) as they include necessary configuration adjustments. Specifically, `make predict-sample` sets `fdr_control.fdr_threshold=1.0` because the sample data contains artificial PSMs with relatively high error rates, and using the default threshold (0.05) would filter out all predictions, resulting in empty output. For use with real datasets, use the standard FDR threshold (default 0.05) or adjust as appropriate for your application.
+**Note:** The sample data is minimal (100 spectra) and intended for testing only. When using the sample data, it's **recommended to use the `make` commands** (e.g., `make predict-sample`) as they include necessary configuration adjustments. Specifically, `make predict-sample` sets `fdr_control.fdr_threshold=1.0` because the sample data contains artificial PSMs with relatively high error rates, and using the default threshold (0.05) would filter out all predictions, resulting in empty output. In addition, we increase the validation fraction for the retention time feature in the calibrator's configuration, because with such a small training dataset, a higher validation fraction ensures that the validation set will contain enough samples for stable training and early stopping. For use with real datasets, use the standard FDR threshold (default 0.05) and default validation fractions, or adjust as appropriate for your application.
 
 ## Commands
 
@@ -87,8 +71,8 @@ winnow train dataset.spectrum_path_or_directory=data/spectra.parquet dataset.pre
 **Common Parameters:**
 
 - `data_loader`: Type of dataset loader (`instanovo`, `mztab`, `pointnovo`, `winnow`)
-- `dataset.spectrum_path_or_directory`: Path to spectrum/metadata file (or directory for winnow format)
-- `dataset.predictions_path`: Path to predictions file (set to `null` for winnow format)
+- `dataset.spectrum_path_or_directory`: Path to spectrum/metadata file (or directory for Winnow format)
+- `dataset.predictions_path`: Path to predictions file (set to `null` for Winnow format)
 - `model_output_dir`: Directory to save trained calibrator
 - `dataset_output_path`: Path to save training results CSV
 
@@ -105,6 +89,7 @@ winnow train calibrator.features.fragment_match_features.mz_tolerance=0.01
 ```
 
 For comprehensive calibrator configuration options, see:
+
 - [Configuration guide](configuration.md) - Complete parameter reference
 - [Calibration API](api/calibration.md#handling-missing-features) - Feature implementation details
 
@@ -132,7 +117,7 @@ winnow predict calibrator.pretrained_model_name_or_path=models/my_model
 **Common Parameters:**
 
 - `data_loader`: Type of dataset loader (`instanovo`, `mztab`, `pointnovo`, `winnow`)
-- `dataset.spectrum_path_or_directory`: Path to spectrum/metadata file (or directory for winnow format)
+- `dataset.spectrum_path_or_directory`: Path to spectrum/metadata file (or directory for Winnow format)
 - `dataset.predictions_path`: Path to predictions file
 - `fdr_method`: FDR estimation method (`nonparametric` or `database_grounded`)
 - `fdr_control.fdr_threshold`: Target FDR threshold (e.g. 0.01 for 1%)
@@ -224,29 +209,31 @@ winnow predict fdr_method=database_grounded fdr_control.fdr_threshold=0.05
 Training produces:
 
 1. **Model checkpoints** (`model_output_dir`):
-   - `calibrator.pkl`: Complete trained calibrator with all features and parameters
+    - `calibrator.pkl`: Complete trained calibrator with all features and parameters
 
 2. **Training results** (`dataset_output_path`):
-   - CSV with calibrated scores and evaluation metrics
+    - CSV file with calibrated scores and evaluation metrics
 
 ### Prediction output
 
 Prediction produces two CSV files in the `output-folder` directory:
 
 1. **`metadata.csv`**: Contains all metadata and feature columns from the input dataset
-   - Original metadata columns (spectrum information, precursors, etc.)
-   - All feature columns used for calibration
-   - Filtered to only include PSMs passing the FDR threshold
+
+    - Original metadata columns (spectrum information, precursors, etc.)
+    - All feature columns used for calibration
+    - Filtered to only include PSMs passing the FDR threshold
 
 2. **`preds_and_fdr_metrics.csv`**: Contains predictions and error metrics
-   - `spectrum_id`: Unique spectrum identifier
-   - `calibrated_confidence` (or specified confidence column): Calibrated confidence scores
-   - `prediction`: Predicted peptide sequences
-   - `psm_fdr`: PSM-specific FDR estimates
-   - `psm_q_value`: Q-values
-   - `psm_pep`: Posterior error probabilities (winnow method only)
-   - `sequence`: Ground truth sequences (if available, for database-ground method)
-   - Filtered to only include PSMs passing the FDR threshold
+
+    - `spectrum_id`: Unique spectrum identifier
+    - `calibrated_confidence` (or specified confidence column): Calibrated confidence scores
+    - `prediction`: Predicted peptide sequences
+    - `psm_fdr`: PSM-specific FDR estimates
+    - `psm_q_value`: Q-values
+    - `psm_pep`: Posterior error probabilities (non-parametric method only)
+    - `sequence`: Ground truth sequences (if available, for database-ground method)
+    - Filtered to only include PSMs passing the FDR threshold
 
 This separation allows users to work with metadata and features separately from predictions and error metrics, making downstream analysis more convenient.
 
@@ -333,42 +320,6 @@ Winnow comes with sensible default settings for all parameters:
 - **Model**: Pretrained general model from HuggingFace
 
 All defaults are defined in YAML files under `configs/` and can be overridden via command line. For a complete reference of all default parameters and configuration options, see the **[Configuration guide](configuration.md)**.
-
-## Troubleshooting
-
-### Common issues
-
-**Missing columns**: Ensure your data files contain expected columns:
-
-- `preds`: Main prediction
-- `confidence`: Confidence scores
-- `sequence`: Ground truth (for training/database-grounded FDR)
-
-**File paths**: Use absolute paths in dataset path overrides to avoid path resolution issues:
-```bash
-winnow predict dataset.spectrum_path_or_directory=/absolute/path/to/spectra.parquet
-```
-
-**Configuration errors**: If Hydra reports a missing config file:
-```bash
-winnow predict fdr_method=typo
-# Error: Could not find 'fdr/typo'
-# Available options in 'fdr': nonparametric, database_grounded
-```
-
-**Memory issues**: Large datasets may require more memory. Consider:
-- Filtering data before processing
-- Using a machine with more RAM
-- Processing in batches (requires custom Python script)
-
-### Dataset filtering
-
-The CLI automatically filters out:
-
-- Empty predictions
-- Peptides exceeding `max_peptide_length` (default 30; configurable per feature)
-- Precursor charges exceeding `max_precursor_charge` (default 6; configurable per feature)
-- Residues listed in `unsupported_residues` (defined in `configs/residues.yaml`)
 
 ### Getting help
 

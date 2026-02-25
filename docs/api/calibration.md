@@ -59,10 +59,11 @@ loaded_calibrator = ProbabilityCalibrator.load("calibrator_checkpoint")
 - `predict(dataset)`: Generate calibrated confidence scores
 - `save(calibrator, path)`: Save trained model to disk
 - `load(pretrained_model_name_or_path, cache_dir)`: Load trained model from HuggingFace Hub or local directory
-  - Default: Loads `"InstaDeepAI/winnow-general-model"` from HuggingFace
-  - HuggingFace: Pass a repository ID string (e.g., `"my-org/my-model"`)
-  - Local: Pass a `str` or `Path` object pointing to a model directory
-  - Models from HuggingFace are automatically cached in `~/.cache/huggingface/hub`
+
+    - Default: Loads `"InstaDeepAI/winnow-general-model"` from HuggingFace
+    - HuggingFace: Pass a repository ID string (e.g., `"my-org/my-model"`)
+    - Local: Pass a `str` or `Path` object pointing to a model directory
+    - Models from HuggingFace are automatically cached in `~/.cache/huggingface/hub`
 
 ### CalibrationFeatures
 
@@ -132,7 +133,7 @@ feature = FragmentMatchFeatures(
 
 **Purpose**: Leverages ML-based intensity predictions for spectral quality assessment.
 
-**Note:** Different Koina models support different charge states, peptide lengths and modifications. Consult the documentation for your chosen model at [koina.wilhelmlab.org](https://koina.wilhelmlab.org/) and configure `max_precursor_charge`, `max_peptide_length` and `unsupported_residues` accordingly. See the [configuration guide](../configuration.md#koina-model-input-validation) for full details.
+**Note:** Different Koina models support different charge states, peptide lengths and modifications. Consult the documentation for your chosen model and configure `max_precursor_charge`, `max_peptide_length` and `unsupported_residues` accordingly. See the [configuration guide](../configuration.md#koina-model-input-validation) for full details.
 
 ### BeamFeatures
 
@@ -194,16 +195,14 @@ The defaults match the constraints of the Prosit model family. If you use a diff
 
 Winnow provides two strategies for handling such cases:
 
-### Learn strategy (Default, `learn_from_missing=True`)
-
-**Recommended for most use cases.**
+### Learn strategy (`learn_from_missing=True`)
 
 - Includes `is_missing_*` indicator columns as features
 - Calibrator learns patterns associated with missing data
 - Uses all available data, maximising recall
 - More robust across diverse datasets
 
-### Filter strategy (`learn_from_missing=False`)
+### Filter strategy (Default; `learn_from_missing=False`)
 
 **Use when you want strict data quality requirements.**
 
@@ -211,23 +210,6 @@ Winnow provides two strategies for handling such cases:
 - A warning is emitted reporting how many PSMs were removed and which constraints applied
 - Filtered PSMs are gone entirely; no indicator column is added
 - Calibrator trains only on the remaining clean data
-
-### Configuration
-
-Configure via config overrides during training:
-
-```bash
-# Default: Learn from missingness
-winnow train
-
-# Strict: Require clean data
-winnow train \
-    calibrator.features.fragment_match_features.learn_from_missing=false \
-    calibrator.features.chimeric_features.learn_from_missing=false \
-    calibrator.features.retention_time_feature.learn_from_missing=false
-```
-
-Or configure programmatically:
 
 ```python
 from winnow.calibration.calibration_features import FragmentMatchFeatures, ChimericFeatures, RetentionTimeFeature
