@@ -40,20 +40,21 @@ class DatabaseGroundedFDRControl(FDRControl):
         Args:
             dataset (pd.DataFrame):
                 A DataFrame containing the following columns:
-                - 'peptide': Ground-truth peptide sequences.
+                - 'sequence': Ground-truth peptide sequences.
                 - 'prediction': Model-predicted peptide sequences.
-                - 'confidence': Confidence scores associated with predictions.
+                - Confidence column`confidence_feature` specified in the DatabaseGroundedFDRControl constructor.
         """
         assert len(dataset) > 0, "Fit method requires non-empty data"
 
-        dataset["sequence"] = dataset["sequence"].apply(self.metrics._split_peptide)
+        if isinstance(dataset["sequence"].iloc[0], str):
+            dataset["sequence"] = dataset["sequence"].apply(self.metrics._split_peptide)
+        if isinstance(dataset["prediction"].iloc[0], str):
+            dataset["prediction"] = dataset["prediction"].apply(
+                self.metrics._split_peptide
+            )
 
         dataset["num_matches"] = dataset.apply(
-            lambda row: (
-                self.metrics._novor_match(row["sequence"], row["prediction"])
-                if isinstance(row["prediction"], list)
-                else 0
-            ),
+            lambda row: (self.metrics._novor_match(row["sequence"], row["prediction"])),
             axis=1,
         )
         dataset["correct"] = dataset.apply(
