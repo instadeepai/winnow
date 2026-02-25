@@ -38,7 +38,8 @@ class TestDatabaseGroundedFDRControl:
                 "sequence": ["PEPTIDE", "PROTEIN", "SAMPLE"],
                 "prediction": ["PEPTIDE", "PROTIEN", "SAMPL"],  # One mismatch
                 "confidence": [0.9, 0.8, 0.7],
-                "precursor_mass": [1000.0, 1200.0, 800.0],
+                "precursor_mz": [500.504, 400.672, 400.504],
+                "precursor_charge": [2, 3, 2],
             }
         )
 
