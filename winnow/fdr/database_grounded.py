@@ -42,7 +42,7 @@ class DatabaseGroundedFDRControl(FDRControl):
                 A DataFrame containing the following columns:
                 - 'sequence': Ground-truth peptide sequences.
                 - 'prediction': Model-predicted peptide sequences.
-                - User-specified confidence column.
+                - Confidence column`confidence_feature` specified in the DatabaseGroundedFDRControl constructor.
         """
         assert len(dataset) > 0, "Fit method requires non-empty data"
 
