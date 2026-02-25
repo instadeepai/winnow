@@ -115,6 +115,8 @@ feature = MassErrorFeature(residue_masses=RESIDUE_MASSES)
 
 Extracts features by calling a Koina intensity model to generate a theoretical fragmentation spectrum for the top-1 de novo predicted sequence and computing how well it matches the observed spectrum (ion match rate and ion match intensity).
 
+For more information about Koina, please read the [documentation](https://koina.wilhelmlab.org/docs) or the [publication](https://www.nature.com/articles/s41467-025-64870-5).
+
 ```python
 from winnow.calibration.calibration_features import FragmentMatchFeatures
 
