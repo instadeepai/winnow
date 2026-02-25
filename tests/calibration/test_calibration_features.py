@@ -1,8 +1,10 @@
 """Unit tests for winnow calibration features."""
 
+import warnings
 import numpy as np
 import pandas as pd
 import pytest
+from typing import Optional
 from unittest.mock import Mock, patch
 from winnow.calibration.calibration_features import (
     CalibrationFeatures,
@@ -10,28 +12,17 @@ from winnow.calibration.calibration_features import (
     MassErrorFeature,
     BeamFeatures,
     RetentionTimeFeature,
-    PrositFeatures,
+    FragmentMatchFeatures,
     ChimericFeatures,
     find_matching_ions,
-    _raise_value_error,
+    _validate_model_input_params,
+    _resolve_model_inputs,
 )
 from winnow.datasets.calibration_dataset import CalibrationDataset
 
 
 class TestUtilityFunctions:
     """Test utility functions used by calibration features."""
-
-    def test_raise_value_error_with_none(self):
-        """Test that _raise_value_error raises ValueError for None values."""
-        with pytest.raises(ValueError, match="test_param cannot be None"):
-            _raise_value_error(None, "test_param")
-
-    def test_raise_value_error_with_valid_value(self):
-        """Test that _raise_value_error does not raise for valid values."""
-        # Should not raise any exception
-        _raise_value_error("valid_value", "test_param")
-        _raise_value_error(42, "test_param")
-        _raise_value_error([], "test_param")
 
     def test_find_matching_ions_exact_match(self):
         """Test find_matching_ions with exact m/z matches."""
@@ -132,12 +123,12 @@ class TestMassErrorFeature:
                 "confidence": [0.9, 0.8, 0.7],
             }
         )
-        return CalibrationDataset(metadata=metadata, predictions=[])
+        return CalibrationDataset(metadata=metadata, predictions=None)
 
     def test_properties(self, mass_error_feature):
         """Test MassErrorFeature properties."""
         assert mass_error_feature.name == "Mass Error"
-        assert mass_error_feature.columns == ["Mass Error"]
+        assert mass_error_feature.columns == ["mass_error"]
         assert mass_error_feature.dependencies == []
 
     def test_prepare_does_nothing(self, mass_error_feature, sample_dataset):
@@ -152,13 +143,13 @@ class TestMassErrorFeature:
         mass_error_feature.compute(sample_dataset)
 
         # Check that Mass Error column was added
-        assert "Mass Error" in sample_dataset.metadata.columns
+        assert "mass_error" in sample_dataset.metadata.columns
 
         # Verify calculations for known values
         # G + A = 57.021464 + 71.037114 = 128.058578
         # Expected mass error = 1000.0 - (128.058578 + 18.0106 + 1.007276) = 852.923546
         expected_first = 1000.0 - (128.058578 + 18.0106 + 1.007276)
-        assert sample_dataset.metadata.iloc[0]["Mass Error"] == pytest.approx(
+        assert sample_dataset.metadata.iloc[0]["mass_error"] == pytest.approx(
             expected_first, rel=1e-6, abs=1e-6
         )
 
@@ -171,12 +162,12 @@ class TestMassErrorFeature:
                 "confidence": [0.9],
             }
         )
-        dataset = CalibrationDataset(metadata=metadata, predictions=[])
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
         mass_error_feature.compute(dataset)
 
         # Should result in +inf for invalid peptide (1000.0 - (-inf + constants) = +inf)
-        assert dataset.metadata.iloc[0]["Mass Error"] == float("inf")
+        assert dataset.metadata.iloc[0]["mass_error"] == float("inf")
 
     def test_residue_masses_parameter(self):
         """Test that custom residue masses are used correctly."""
@@ -190,13 +181,13 @@ class TestMassErrorFeature:
                 "confidence": [0.9],
             }
         )
-        dataset = CalibrationDataset(metadata=metadata, predictions=[])
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
         feature.compute(dataset)
 
         # Expected: 1000.0 - (100.0 + 200.0 + 18.0106 + 1.007276)
         expected = 1000.0 - (300.0 + 18.0106 + 1.007276)
-        assert dataset.metadata.iloc[0]["Mass Error"] == pytest.approx(
+        assert dataset.metadata.iloc[0]["mass_error"] == pytest.approx(
             expected, rel=1e-6, abs=1e-6
         )
 
@@ -263,7 +254,11 @@ class TestBeamFeatures:
         self, beam_features, sample_dataset_with_predictions
     ):
         """Test beam features computation."""
-        beam_features.compute(sample_dataset_with_predictions)
+        with pytest.warns(
+            UserWarning,
+            match="1 beam search results have fewer than two sequences. This may affect the efficacy of computed beam features.",
+        ):
+            beam_features.compute(sample_dataset_with_predictions)
 
         # Check that all expected columns were added
         expected_columns = ["margin", "median_margin", "entropy", "z-score"]
@@ -278,7 +273,10 @@ class TestBeamFeatures:
         metadata = pd.DataFrame({"confidence": [0.9]})
         dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
-        with pytest.raises(ValueError, match="dataset.predictions cannot be None"):
+        with pytest.raises(
+            ValueError,
+            match="requires beam predictions, but dataset.predictions is None",
+        ):
             beam_features.compute(dataset)
 
     def test_compute_with_insufficient_sequences_warning(self, beam_features):
@@ -325,7 +323,11 @@ class TestBeamFeatures:
         ]
         dataset = CalibrationDataset(metadata=metadata, predictions=predictions)
 
-        beam_features.compute(dataset)
+        with pytest.warns(
+            UserWarning,
+            match="1 beam search results have fewer than two sequences. This may affect the efficacy of computed beam features.",
+        ):
+            beam_features.compute(dataset)
 
         # Detailed checks for single sequence:
         # top_prob = 0.8, second_prob = 0.0 (no second sequence)
@@ -463,6 +465,14 @@ class TestBeamFeatures:
             0.0, rel=1e-10, abs=1e-10
         )
 
+    def test_beam_features_raises_for_none_predictions(self, beam_features):
+        """BeamFeatures.compute should raise ValueError when predictions is None."""
+        metadata = pd.DataFrame({"confidence": [0.9]})
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
+
+        with pytest.raises(ValueError, match="BeamFeatures requires beam predictions"):
+            beam_features.compute(dataset)
+
 
 class TestCalibrationFeaturesInterface:
     """Test the abstract CalibrationFeatures interface."""
@@ -485,7 +495,7 @@ class TestRetentionTimeFeature:
     def retention_time_feature(self):
         """Create a RetentionTimeFeature instance for testing."""
         return RetentionTimeFeature(
-            hidden_dim=10, train_fraction=0.8, invalid_prosit_residues=["U", "O", "X"]
+            hidden_dim=10, train_fraction=0.8, unsupported_residues=["U", "O", "X"]
         )
 
     @pytest.fixture()
@@ -501,32 +511,33 @@ class TestRetentionTimeFeature:
                 "spectrum_id": [0, 1, 2, 3, 4],
             }
         )
-        return CalibrationDataset(metadata=metadata, predictions=[])
+        return CalibrationDataset(metadata=metadata, predictions=None)
 
     def test_properties(self, retention_time_feature):
         """Test RetentionTimeFeature properties."""
-        assert retention_time_feature.name == "Prosit iRT Features"
-        assert retention_time_feature.columns == ["iRT error", "is_missing_irt_error"]
+        assert retention_time_feature.name == "iRT Feature"
+        assert retention_time_feature.columns == ["irt_error", "is_missing_irt_error"]
         assert retention_time_feature.dependencies == []
 
     def test_initialization_parameters(self):
         """Test initialization with custom parameters."""
         feature = RetentionTimeFeature(
-            hidden_dim=10, train_fraction=0.8, invalid_prosit_residues=["U", "O", "X"]
+            hidden_dim=10, train_fraction=0.8, unsupported_residues=["U", "O", "X"]
         )
         assert feature.hidden_dim == 10
         assert feature.train_fraction == 0.8
-        assert feature.prosit_irt_model_name == "Prosit_2019_irt"
+        assert feature.irt_model_name == "Prosit_2019_irt"
         assert hasattr(feature, "irt_predictor")
 
     @patch("winnow.calibration.calibration_features.koinapy.Koina")
     def test_prepare_with_mock(
         self, mock_koina, retention_time_feature, sample_dataset_with_rt
     ):
-        """Test prepare method with mocked Prosit model."""
-        # Mock the Prosit model
+        """Test prepare method with mocked Koina iRT model."""
+        # Mock the Koina model
         mock_model_instance = Mock()
         mock_koina.return_value = mock_model_instance
+        mock_model_instance.model_inputs = ["peptide_sequences"]
 
         # Mock predict to return iRT values
         mock_model_instance.predict.return_value = pd.DataFrame(
@@ -568,9 +579,10 @@ class TestRetentionTimeFeature:
         self, mock_koina, retention_time_feature, sample_dataset_with_rt
     ):
         """Test compute method with mocked models."""
-        # Mock the Prosit model
+        # Mock the Koina iRT model
         mock_model_instance = Mock()
         mock_koina.return_value = mock_model_instance
+        mock_model_instance.model_inputs = ["peptide_sequences"]
 
         # Mock predict to return iRT values for all samples
         mock_model_instance.predict.return_value = pd.DataFrame(
@@ -588,16 +600,16 @@ class TestRetentionTimeFeature:
             # Check that columns were added
             assert "iRT" in sample_dataset_with_rt.metadata.columns
             assert "predicted iRT" in sample_dataset_with_rt.metadata.columns
-            assert "iRT error" in sample_dataset_with_rt.metadata.columns
+            assert "irt_error" in sample_dataset_with_rt.metadata.columns
             assert "is_missing_irt_error" in sample_dataset_with_rt.metadata.columns
 
             # Check that error is computed as absolute difference
-            assert len(sample_dataset_with_rt.metadata["iRT error"]) == 5
+            assert len(sample_dataset_with_rt.metadata["irt_error"]) == 5
             max_abs_diff = abs(
                 sample_dataset_with_rt.metadata["predicted iRT"]
                 - sample_dataset_with_rt.metadata["iRT"]
             ).max()
-            max_error = sample_dataset_with_rt.metadata["iRT error"].max()
+            max_error = sample_dataset_with_rt.metadata["irt_error"].max()
             assert max_abs_diff == pytest.approx(max_error, rel=1e-10, abs=1e-10)
 
             # Check that predict was called on both models
@@ -614,7 +626,7 @@ class TestRetentionTimeFeature:
                 "retention_time": [10.0, 15.0],
             }
         )
-        dataset = CalibrationDataset(metadata=metadata, predictions=[])
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
         # This would normally call the real Prosit model, but we're testing structure
         # Just ensure it doesn't crash on basic validation
@@ -638,34 +650,31 @@ class TestRetentionTimeFeature:
         """Test that computed iRT values are mapped to correct rows and missing values are imputed correctly."""
         # Create a dataset with mixed valid/invalid predictions
         # Based on check_valid_irt_prediction logic:
-        # Valid: len <= 30, no invalid tokens, NO C (C gets filtered out!)
-        # Invalid: len > 30 OR has invalid tokens OR has C
+        # Valid: len <= 30, no invalid tokens
+        # Invalid: len > 30 OR has invalid tokens
         metadata = pd.DataFrame(
             {
-                "confidence": [0.9, 0.8, 0.7, 0.6],
+                "confidence": [0.9, 0.7, 0.6],
                 "prediction": [
-                    ["A", "G"],  # Valid: no C, len 2
-                    ["G", "A", "C"],  # Invalid: has C
+                    ["A", "G"],  # Valid: len 2
                     ["A"] * 31,  # Invalid: len > 30
-                    ["A", "G"],  # Valid: no C, len 2
+                    ["A", "G"],  # Valid: len 2
                 ],
                 "prediction_untokenised": [
                     "AG",
-                    "GAC",
                     "A" * 31,
                     "AG",
                 ],
-                "retention_time": [10.5, 15.2, 20.1, 8.7],
-                "precursor_charge": [2, 2, 2, 2],
+                "retention_time": [10.5, 15.2, 8.7],
+                "precursor_charge": [2, 2, 2],
                 "spectrum_id": [
                     10,
                     20,
-                    30,
                     40,
                 ],  # Non-contiguous spectrum IDs to test mapping
             }
         )
-        dataset = CalibrationDataset(metadata=metadata, predictions=[])
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
         # Mock Prosit model to return iRT predictions
         def mock_prosit_predict(inputs_df):
@@ -698,11 +707,12 @@ class TestRetentionTimeFeature:
             # Simple linear mapping for testing
             return x.flatten() * 2.0
 
-        # Run compute with mocked Prosit model and MLPRegressor
+        # Run compute with mocked Koina iRT model and MLPRegressor
         with patch(
             "winnow.calibration.calibration_features.koinapy.Koina"
         ) as mock_koina:
             mock_model = mock_koina.return_value
+            mock_model.model_inputs = ["peptide_sequences"]
             mock_model.predict = mock_prosit_predict
 
             with patch.object(
@@ -726,18 +736,16 @@ class TestRetentionTimeFeature:
         # Check by spectrum_id to verify mapping works correctly
         spectrum_10_mask = dataset.metadata["spectrum_id"] == 10
         spectrum_20_mask = dataset.metadata["spectrum_id"] == 20
-        spectrum_30_mask = dataset.metadata["spectrum_id"] == 30
         spectrum_40_mask = dataset.metadata["spectrum_id"] == 40
 
-        assert valid_flags[spectrum_10_mask].iloc[0]  # Valid (no C, len <= 30)
-        assert not valid_flags[spectrum_20_mask].iloc[0]  # Invalid (has C)
-        assert not valid_flags[spectrum_30_mask].iloc[0]  # Invalid (len > 30)
-        assert valid_flags[spectrum_40_mask].iloc[0]  # Valid (no C, len <= 30)
+        assert valid_flags[spectrum_10_mask].iloc[0]  # Valid (len <= 30)
+        assert not valid_flags[spectrum_20_mask].iloc[0]  # Invalid (has len > 30)
+        assert valid_flags[spectrum_40_mask].iloc[0]  # Valid (len <= 30)
 
         # Check iRT mapping
         assert "iRT" in dataset.metadata.columns
         assert "predicted iRT" in dataset.metadata.columns
-        assert "iRT error" in dataset.metadata.columns
+        assert "irt_error" in dataset.metadata.columns
 
         # Valid entries should have non-NaN iRT values
         irt_10 = dataset.metadata[spectrum_10_mask]["iRT"].iloc[0]
@@ -751,9 +759,7 @@ class TestRetentionTimeFeature:
 
         # Invalid entries should have NaN iRT values
         irt_20 = dataset.metadata[spectrum_20_mask]["iRT"].iloc[0]
-        irt_30 = dataset.metadata[spectrum_30_mask]["iRT"].iloc[0]
         assert pd.isna(irt_20)
-        assert pd.isna(irt_30)
 
         # Check predicted iRT (from MLPRegressor)
         predicted_irt_10 = dataset.metadata[spectrum_10_mask]["predicted iRT"].iloc[0]
@@ -766,8 +772,8 @@ class TestRetentionTimeFeature:
 
         # Check iRT error
         # For valid entries, error should be computed
-        irt_error_10 = dataset.metadata[spectrum_10_mask]["iRT error"].iloc[0]
-        irt_error_40 = dataset.metadata[spectrum_40_mask]["iRT error"].iloc[0]
+        irt_error_10 = dataset.metadata[spectrum_10_mask]["irt_error"].iloc[0]
+        irt_error_40 = dataset.metadata[spectrum_40_mask]["irt_error"].iloc[0]
         assert not pd.isna(irt_error_10)
         assert not pd.isna(irt_error_40)
         assert isinstance(irt_error_10, (int, float))
@@ -779,27 +785,27 @@ class TestRetentionTimeFeature:
         assert irt_error_40 == pytest.approx(expected_error_40, rel=1e-10)
 
         # For invalid entries, error should be 0.0 (fillna(0.0) is used)
-        irt_error_20 = dataset.metadata[spectrum_20_mask]["iRT error"].iloc[0]
-        irt_error_30 = dataset.metadata[spectrum_30_mask]["iRT error"].iloc[0]
+        irt_error_20 = dataset.metadata[spectrum_20_mask]["irt_error"].iloc[0]
         assert irt_error_20 == 0.0
-        assert irt_error_30 == 0.0
 
-        assert len(dataset.metadata) == 4
+        assert len(dataset.metadata) == 3
         assert all(
-            sid in dataset.metadata["spectrum_id"].values for sid in [10, 20, 30, 40]
+            sid in dataset.metadata["spectrum_id"].values for sid in [10, 20, 40]
         )
         # Verify that spectrum_id values match the expected mapping
-        assert set(dataset.metadata["spectrum_id"].values) == {10, 20, 30, 40}
+        assert set(dataset.metadata["spectrum_id"].values) == {10, 20, 40}
 
 
-class TestPrositFeatures:
-    """Test the PrositFeatures class."""
+class TestFragmentMatchFeatures:
+    """Test the FragmentMatchFeatures class."""
 
     @pytest.fixture()
     def prosit_features(self):
-        """Create a PrositFeatures instance for testing."""
-        return PrositFeatures(
-            mz_tolerance=0.02, invalid_prosit_residues=["U", "O", "X"]
+        """Create a FragmentMatchFeatures instance for testing."""
+        return FragmentMatchFeatures(
+            mz_tolerance=0.02,
+            unsupported_residues=["U", "O", "X"],
+            model_input_constants={"collision_energies": 25},
         )
 
     @pytest.fixture()
@@ -824,26 +830,30 @@ class TestPrositFeatures:
                 ],
             }
         )
-        return CalibrationDataset(metadata=metadata, predictions=[])
+        return CalibrationDataset(metadata=metadata, predictions=None)
 
     def test_properties(self, prosit_features):
-        """Test PrositFeatures properties."""
-        assert prosit_features.name == "Prosit Features"
+        """Test FragmentMatchFeatures properties."""
+        assert prosit_features.name == "Fragment Match Features"
         assert prosit_features.columns == [
             "ion_matches",
             "ion_match_intensity",
-            "is_missing_prosit_features",
+            "is_missing_fragment_match_features",
         ]
         assert prosit_features.dependencies == []
         assert prosit_features.mz_tolerance == 0.02
 
     def test_initialization_with_tolerance(self):
         """Test initialization with custom tolerance."""
-        feature = PrositFeatures(
-            mz_tolerance=0.01, invalid_prosit_residues=["U", "O", "X"]
+        feature = FragmentMatchFeatures(
+            mz_tolerance=0.01,
+            unsupported_residues=["U", "O", "X"],
+            model_input_constants={"collision_energies": 25},
         )
         assert feature.mz_tolerance == 0.01
-        assert feature.prosit_intensity_model_name == "Prosit_2020_intensity_HCD"
+        assert feature.intensity_model_name == "Prosit_2020_intensity_HCD"
+        assert feature.model_input_constants == {"collision_energies": 25}
+        assert feature.model_input_columns is None
 
     def test_prepare_does_nothing(self, prosit_features, sample_dataset_with_spectra):
         """Test that prepare method does nothing."""
@@ -862,10 +872,15 @@ class TestPrositFeatures:
         prosit_features,
         sample_dataset_with_spectra,
     ):
-        """Test compute method with mocked Prosit model and ion computation."""
-        # Mock the Prosit model
+        """Test compute method with mocked Koina intensity model and ion computation."""
+        # Mock the Koina intensity model
         mock_model_instance = Mock()
         mock_koina.return_value = mock_model_instance
+        mock_model_instance.model_inputs = [
+            "peptide_sequences",
+            "precursor_charges",
+            "collision_energies",
+        ]
 
         # Mock the prediction result with proper pandas index for grouping and multiple rows per peptide
         mock_predictions = pd.DataFrame(
@@ -943,12 +958,13 @@ class TestPrositFeatures:
         prosit_features.compute(sample_dataset_with_spectra)
 
         # Check that new columns were added
-        assert "prosit_mz" in sample_dataset_with_spectra.metadata.columns
-        assert "prosit_intensity" in sample_dataset_with_spectra.metadata.columns
+        assert "theoretical_mz" in sample_dataset_with_spectra.metadata.columns
+        assert "theoretical_intensity" in sample_dataset_with_spectra.metadata.columns
         assert "ion_matches" in sample_dataset_with_spectra.metadata.columns
         assert "ion_match_intensity" in sample_dataset_with_spectra.metadata.columns
         assert (
-            "is_missing_prosit_features" in sample_dataset_with_spectra.metadata.columns
+            "is_missing_fragment_match_features"
+            in sample_dataset_with_spectra.metadata.columns
         )
 
         # Check that the model was called
@@ -965,52 +981,54 @@ class TestPrositFeatures:
         # Create a dataset with mixed valid/invalid predictions
         metadata = pd.DataFrame(
             {
-                "confidence": [0.9, 0.8, 0.7, 0.6],
+                "confidence": [0.9, 0.7, 0.6],
                 "prediction": [
-                    ["A", "G"],  # Valid: no C, charge 2, len 2
-                    ["G", "A", "C"],  # Invalid: has C
+                    ["A", "G"],  # Valid: len 2
                     ["A"] * 31,  # Invalid: len > 30
-                    ["A", "G"],  # Valid: no C, charge 2, len 2
+                    ["A", "G"],  # Valid: len 2
                 ],
-                "precursor_charge": [2, 2, 2, 2],
-                "spectrum_id": [10, 20, 30, 40],
-                "prediction_untokenised": ["AG", "GAC", "A" * 31, "AG"],
+                "precursor_charge": [2, 2, 2],
+                "spectrum_id": [10, 20, 40],
+                "prediction_untokenised": ["AG", "A" * 31, "AG"],
                 "mz_array": [
                     [100.0, 200.0, 300.0],
-                    [150.0, 250.0],
                     [120.0, 220.0],
                     [110.0, 210.0, 310.0],
                 ],
                 "intensity_array": [
                     [1000.0, 2000.0, 3000.0],
-                    [1500.0, 2500.0],
                     [1200.0, 2200.0],
                     [1100.0, 2100.0, 3100.0],
                 ],
             }
         )
-        dataset = CalibrationDataset(metadata=metadata, predictions=[])
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
         # Run compute with mocked Prosit model
         with patch(
             "winnow.calibration.calibration_features.koinapy.Koina"
         ) as mock_koina:
             mock_model = mock_koina.return_value
+            mock_model.model_inputs = [
+                "peptide_sequences",
+                "precursor_charges",
+                "collision_energies",
+            ]
             mock_model.predict = self._create_prosit_mock_predict()
             prosit_features.compute(dataset)
 
         # Verify results
-        assert "is_missing_prosit_features" in dataset.metadata.columns
+        assert "is_missing_fragment_match_features" in dataset.metadata.columns
         spectrum_masks = self._assert_valid_invalid_flags(dataset)
-        self._assert_prosit_mz_intensity(dataset, spectrum_masks)
+        self._assert_theoretical_mz_intensity(dataset, spectrum_masks)
         self._assert_ion_matches(dataset, spectrum_masks)
 
         # Verify dataset structure
-        assert len(dataset.metadata) == 4
-        assert set(dataset.metadata["spectrum_id"].values) == {10, 20, 30, 40}
+        assert len(dataset.metadata) == 3
+        assert set(dataset.metadata["spectrum_id"].values) == {10, 20, 40}
 
     def _create_prosit_mock_predict(self):
-        """Create a mock Prosit predict function for testing."""
+        """Create a mock Koina intensity predict function for testing."""
 
         def mock_prosit_predict(inputs_df):
             """Mock Prosit predict that returns realistic predictions matching experimental m/z values."""
@@ -1075,50 +1093,58 @@ class TestPrositFeatures:
         return mz_values, intensities, annotations
 
     def _assert_valid_invalid_flags(self, dataset):
-        """Assert valid/invalid flags for prosit features."""
-        valid_flags = ~dataset.metadata["is_missing_prosit_features"]
+        """Assert valid/invalid flags for fragment match features."""
+        valid_flags = ~dataset.metadata["is_missing_fragment_match_features"]
         spectrum_masks = {
             10: dataset.metadata["spectrum_id"] == 10,
             20: dataset.metadata["spectrum_id"] == 20,
-            30: dataset.metadata["spectrum_id"] == 30,
             40: dataset.metadata["spectrum_id"] == 40,
         }
 
         assert valid_flags[spectrum_masks[10]].iloc[0]  # Valid
-        assert not valid_flags[spectrum_masks[20]].iloc[0]  # Invalid (has C)
-        assert not valid_flags[spectrum_masks[30]].iloc[0]  # Invalid (len > 30)
+        assert not valid_flags[spectrum_masks[20]].iloc[0]  # Invalid (has len > 30)
         assert valid_flags[spectrum_masks[40]].iloc[0]  # Valid
 
         return spectrum_masks
 
-    def _assert_prosit_mz_intensity(self, dataset, spectrum_masks):
-        """Assert prosit_mz and prosit_intensity values."""
-        assert "prosit_mz" in dataset.metadata.columns
-        assert "prosit_intensity" in dataset.metadata.columns
+    def _assert_theoretical_mz_intensity(self, dataset, spectrum_masks):
+        """Assert theoretical_mz and theoretical_intensity values."""
+        assert "theoretical_mz" in dataset.metadata.columns
+        assert "theoretical_intensity" in dataset.metadata.columns
 
         # Valid entries
         for sid in [10, 40]:
-            prosit_mz = dataset.metadata[spectrum_masks[sid]]["prosit_mz"].iloc[0]
-            assert prosit_mz is not None
-            assert hasattr(prosit_mz, "__iter__") or isinstance(prosit_mz, list)
-            mz_list = list(prosit_mz) if hasattr(prosit_mz, "__iter__") else [prosit_mz]
+            theoretical_mz = dataset.metadata[spectrum_masks[sid]][
+                "theoretical_mz"
+            ].iloc[0]
+            assert theoretical_mz is not None
+            assert hasattr(theoretical_mz, "__iter__") or isinstance(
+                theoretical_mz, list
+            )
+            mz_list = (
+                list(theoretical_mz)
+                if hasattr(theoretical_mz, "__iter__")
+                else [theoretical_mz]
+            )
             assert mz_list == sorted(mz_list)
             assert len(mz_list) > 0
 
-            prosit_intensity = dataset.metadata[spectrum_masks[sid]][
-                "prosit_intensity"
+            theoretical_intensity = dataset.metadata[spectrum_masks[sid]][
+                "theoretical_intensity"
             ].iloc[0]
-            assert prosit_intensity is not None
-            assert len(prosit_intensity) == len(mz_list)
+            assert theoretical_intensity is not None
+            assert len(theoretical_intensity) == len(mz_list)
 
         # Invalid entries
-        for sid in [20, 30]:
-            prosit_mz = dataset.metadata[spectrum_masks[sid]]["prosit_mz"].iloc[0]
-            prosit_intensity = dataset.metadata[spectrum_masks[sid]][
-                "prosit_intensity"
+        for sid in [20]:
+            theoretical_mz = dataset.metadata[spectrum_masks[sid]][
+                "theoretical_mz"
             ].iloc[0]
-            assert pd.isna(prosit_mz) or prosit_mz is None
-            assert pd.isna(prosit_intensity) or prosit_intensity is None
+            theoretical_intensity = dataset.metadata[spectrum_masks[sid]][
+                "theoretical_intensity"
+            ].iloc[0]
+            assert pd.isna(theoretical_mz) or theoretical_mz is None
+            assert pd.isna(theoretical_intensity) or theoretical_intensity is None
 
     def _assert_ion_matches(self, dataset, spectrum_masks):
         """Assert ion_matches and ion_match_intensity values."""
@@ -1144,7 +1170,7 @@ class TestPrositFeatures:
             ), f"Expected non-zero ion_match_intensity for spectrum {sid}"
 
         # Invalid entries
-        for sid in [20, 30]:
+        for sid in [20]:
             ion_matches = dataset.metadata[spectrum_masks[sid]]["ion_matches"].iloc[0]
             ion_match_intensity = dataset.metadata[spectrum_masks[sid]][
                 "ion_match_intensity"
@@ -1160,7 +1186,9 @@ class TestChimericFeatures:
     def chimeric_features(self):
         """Create a ChimericFeatures instance for testing."""
         return ChimericFeatures(
-            mz_tolerance=0.02, invalid_prosit_residues=["U", "O", "X"]
+            mz_tolerance=0.02,
+            unsupported_residues=["U", "O", "X"],
+            model_input_constants={"collision_energies": 25},
         )
 
     @pytest.fixture()
@@ -1215,9 +1243,13 @@ class TestChimericFeatures:
     def test_initialization_with_tolerance(self):
         """Test initialization with custom tolerance."""
         feature = ChimericFeatures(
-            mz_tolerance=0.01, invalid_prosit_residues=["U", "O", "X"]
+            mz_tolerance=0.01,
+            unsupported_residues=["U", "O", "X"],
+            model_input_constants={"collision_energies": 25},
         )
         assert feature.mz_tolerance == 0.01
+        assert feature.model_input_constants == {"collision_energies": 25}
+        assert feature.model_input_columns is None
 
     def test_prepare_does_nothing(
         self, chimeric_features, sample_dataset_with_beam_predictions
@@ -1234,7 +1266,10 @@ class TestChimericFeatures:
         metadata = pd.DataFrame({"confidence": [0.9], "precursor_charge": [2]})
         dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
-        with pytest.raises(ValueError, match="dataset.predictions cannot be None"):
+        with pytest.raises(
+            ValueError,
+            match="requires beam predictions, but dataset.predictions is None",
+        ):
             chimeric_features.compute(dataset)
 
     @patch("winnow.calibration.calibration_features.koinapy.Koina")
@@ -1327,32 +1362,26 @@ class TestChimericFeatures:
         """Test that computed chimeric values are mapped to correct rows and missing values are imputed correctly."""
         metadata = pd.DataFrame(
             {
-                "confidence": [0.9, 0.8, 0.7, 0.6],
-                "precursor_charge": [2, 2, 2, 7],  # Last one has charge > 6
-                "spectrum_id": [10, 20, 30, 40],
+                "confidence": [0.9, 0.7, 0.6],
+                "precursor_charge": [2, 2, 7],  # Last one has charge > 6
+                "spectrum_id": [10, 30, 40],
                 "mz_array": [
                     [100.0, 200.0, 300.0],
                     [150.0, 250.0],
-                    [120.0, 220.0],
                     [110.0, 210.0, 310.0],
                 ],
                 "intensity_array": [
                     [1000.0, 2000.0, 3000.0],
                     [1500.0, 2500.0],
-                    [1200.0, 2200.0],
                     [1100.0, 2100.0, 3100.0],
                 ],
             }
         )
 
         predictions = [
-            [  # Spectrum 10: Valid - has runner-up, no C, charge 2, len 2
+            [  # Spectrum 10: Valid - has runner-up, charge 2, len 2
                 MockScoredSequence(["A", "G"], np.log(0.8)),
                 MockScoredSequence(["G", "A"], np.log(0.6)),  # Runner-up
-            ],
-            [  # Spectrum 20: Invalid - runner-up has C
-                MockScoredSequence(["V", "T"], np.log(0.9)),
-                MockScoredSequence(["T", "C"], np.log(0.7)),  # Runner-up has C
             ],
             [  # Spectrum 30: Invalid - runner-up len > 30
                 MockScoredSequence(["K"], np.log(0.95)),
@@ -1366,11 +1395,16 @@ class TestChimericFeatures:
 
         dataset = CalibrationDataset(metadata=metadata, predictions=predictions)
 
-        # Run compute with mocked Prosit model
+        # Run compute with mocked Koina model
         with patch(
             "winnow.calibration.calibration_features.koinapy.Koina"
         ) as mock_koina:
             mock_model = mock_koina.return_value
+            mock_model.model_inputs = [
+                "peptide_sequences",
+                "precursor_charges",
+                "collision_energies",
+            ]
             mock_model.predict = self._create_chimeric_prosit_mock_predict()
             chimeric_features.compute(dataset)
 
@@ -1381,8 +1415,23 @@ class TestChimericFeatures:
         self._assert_chimeric_ion_matches(dataset, spectrum_masks)
 
         # Verify dataset structure
-        assert len(dataset.metadata) == 4
-        assert set(dataset.metadata["spectrum_id"].values) == {10, 20, 30, 40}
+        assert len(dataset.metadata) == 3
+        assert set(dataset.metadata["spectrum_id"].values) == {10, 30, 40}
+
+    def test_chimeric_features_raises_for_none_predictions(self, chimeric_features):
+        """ChimericFeatures.compute should raise ValueError when predictions is None."""
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.9],
+                "precursor_charge": [2],
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
+
+        with pytest.raises(
+            ValueError, match="ChimericFeatures requires beam predictions"
+        ):
+            chimeric_features.compute(dataset)
 
     def _create_chimeric_prosit_mock_predict(self):
         """Create a mock Prosit predict function for chimeric testing."""
@@ -1450,13 +1499,11 @@ class TestChimericFeatures:
         valid_flags = ~dataset.metadata["is_missing_chimeric_features"]
         spectrum_masks = {
             10: dataset.metadata["spectrum_id"] == 10,
-            20: dataset.metadata["spectrum_id"] == 20,
             30: dataset.metadata["spectrum_id"] == 30,
             40: dataset.metadata["spectrum_id"] == 40,
         }
 
         assert valid_flags[spectrum_masks[10]].iloc[0]  # Valid
-        assert not valid_flags[spectrum_masks[20]].iloc[0]  # Invalid (runner-up has C)
         assert not valid_flags[spectrum_masks[30]].iloc[
             0
         ]  # Invalid (runner-up len > 30)
@@ -1488,7 +1535,7 @@ class TestChimericFeatures:
         assert len(prosit_intensity_10) == len(mz_10_list)
 
         # Invalid entries
-        for sid in [20, 30, 40]:
+        for sid in [30, 40]:
             prosit_mz = dataset.metadata[spectrum_masks[sid]][
                 "runner_up_prosit_mz"
             ].iloc[0]
@@ -1523,7 +1570,7 @@ class TestChimericFeatures:
         ), f"Expected non-zero chimeric_ion_match_intensity for spectrum 10, got {ion_match_intensity_10}"
 
         # Invalid entries
-        for sid in [20, 30, 40]:
+        for sid in [30, 40]:
             ion_matches = dataset.metadata[spectrum_masks[sid]][
                 "chimeric_ion_matches"
             ].iloc[0]
@@ -1534,11 +1581,630 @@ class TestChimericFeatures:
             assert ion_match_intensity == 0.0
 
     def _setup_prosit_mock(self, mock_koina, mock_predictions_df):
-        """Helper method to set up Prosit model mock with given predictions."""
+        """Helper method to set up Koina model mock with given predictions."""
         mock_model_instance = Mock()
         mock_koina.return_value = mock_model_instance
+        mock_model_instance.model_inputs = [
+            "peptide_sequences",
+            "precursor_charges",
+            "collision_energies",
+        ]
         mock_model_instance.predict.return_value = mock_predictions_df
         return mock_model_instance
+
+
+class TestModelInputHelpers:
+    """Tests for _validate_model_input_params and _resolve_model_inputs helpers."""
+
+    # --- _validate_model_input_params ---
+
+    def test_validate_no_conflict_passes(self):
+        """No error when constants and columns have disjoint keys."""
+        _validate_model_input_params(
+            {"collision_energies": 25},
+            {"fragmentation_types": "col_frag"},
+        )
+
+    def test_validate_one_none_passes(self):
+        """No error when one of the dicts is None."""
+        _validate_model_input_params({"collision_energies": 25}, None)
+        _validate_model_input_params(None, {"collision_energies": "ce_col"})
+
+    def test_validate_both_none_passes(self):
+        """No error when both dicts are None."""
+        _validate_model_input_params(None, None)
+
+    def test_validate_conflict_raises(self):
+        """ValueError raised when the same key appears in both dicts."""
+        with pytest.raises(ValueError, match="collision_energies"):
+            _validate_model_input_params(
+                {"collision_energies": 25},
+                {"collision_energies": "ce_col"},
+            )
+
+    def test_validate_conflict_lists_all_conflicting_keys(self):
+        """Error message includes all conflicting keys."""
+        with pytest.raises(ValueError, match="fragmentation_types") as exc_info:
+            _validate_model_input_params(
+                {"collision_energies": 25, "fragmentation_types": "HCD"},
+                {"collision_energies": "ce_col", "fragmentation_types": "frag_col"},
+            )
+        assert "collision_energies" in str(exc_info.value)
+        assert "fragmentation_types" in str(exc_info.value)
+
+    def test_conflict_detected_at_construction_time_fragment_match_feature(self):
+        """FragmentMatchFeatures raises ValueError at construction when keys conflict."""
+        with pytest.raises(ValueError, match="collision_energies"):
+            FragmentMatchFeatures(
+                mz_tolerance=0.02,
+                model_input_constants={"collision_energies": 25},
+                model_input_columns={"collision_energies": "ce_col"},
+            )
+
+    def test_conflict_detected_at_construction_time_chimeric_features(self):
+        """ChimericFeatures raises ValueError at construction when keys conflict."""
+        with pytest.raises(ValueError, match="collision_energies"):
+            ChimericFeatures(
+                mz_tolerance=0.02,
+                model_input_constants={"collision_energies": 25},
+                model_input_columns={"collision_energies": "ce_col"},
+            )
+
+    # --- _resolve_model_inputs ---
+
+    def test_resolve_constant_is_tiled(self):
+        """A constant value is tiled across all rows."""
+        inputs = self._make_inputs(3)
+        metadata = self._make_metadata(3)
+        result = _resolve_model_inputs(
+            inputs=inputs,
+            metadata=metadata,
+            required_model_inputs=[
+                "peptide_sequences",
+                "precursor_charges",
+                "collision_energies",
+            ],
+            auto_populated={"peptide_sequences", "precursor_charges"},
+            constants={"collision_energies": 30},
+            columns=None,
+            model_name="TestModel",
+        )
+        assert list(result["collision_energies"]) == [30, 30, 30]
+
+    def test_resolve_column_is_used_per_row(self):
+        """Values are pulled per-row from the named metadata column."""
+        inputs = self._make_inputs(3)
+        metadata = self._make_metadata(3, extra={"nce": [20, 25, 30]})
+        result = _resolve_model_inputs(
+            inputs=inputs,
+            metadata=metadata,
+            required_model_inputs=[
+                "peptide_sequences",
+                "precursor_charges",
+                "collision_energies",
+            ],
+            auto_populated={"peptide_sequences", "precursor_charges"},
+            constants=None,
+            columns={"collision_energies": "nce"},
+            model_name="TestModel",
+        )
+        assert list(result["collision_energies"]) == [20, 25, 30]
+
+    def test_resolve_auto_populated_are_skipped(self):
+        """Auto-populated inputs are not touched even if listed in required_model_inputs."""
+        original_sequences = ["AG", "GA", "SP"]
+        inputs = pd.DataFrame(
+            {
+                "peptide_sequences": original_sequences,
+                "precursor_charges": [2, 2, 3],
+            }
+        )
+        metadata = self._make_metadata(3)
+        result = _resolve_model_inputs(
+            inputs=inputs,
+            metadata=metadata,
+            required_model_inputs=["peptide_sequences", "precursor_charges"],
+            auto_populated={"peptide_sequences", "precursor_charges"},
+            constants={"peptide_sequences": "SHOULD_NOT_OVERWRITE"},
+            columns=None,
+            model_name="TestModel",
+        )
+        assert list(result["peptide_sequences"]) == original_sequences
+
+    def test_resolve_missing_input_raises(self):
+        """ValueError is raised when a required input is not covered."""
+        inputs = self._make_inputs(2)
+        metadata = self._make_metadata(2)
+        with pytest.raises(ValueError, match="collision_energies"):
+            _resolve_model_inputs(
+                inputs=inputs,
+                metadata=metadata,
+                required_model_inputs=[
+                    "peptide_sequences",
+                    "precursor_charges",
+                    "collision_energies",
+                ],
+                auto_populated={"peptide_sequences", "precursor_charges"},
+                constants=None,
+                columns=None,
+                model_name="MyModel",
+            )
+
+    def test_resolve_missing_input_error_names_the_model(self):
+        """The missing-input error message includes the model name."""
+        inputs = self._make_inputs(2)
+        metadata = self._make_metadata(2)
+        with pytest.raises(ValueError, match="MySpecificModel"):
+            _resolve_model_inputs(
+                inputs=inputs,
+                metadata=metadata,
+                required_model_inputs=["peptide_sequences", "collision_energies"],
+                auto_populated={"peptide_sequences"},
+                constants=None,
+                columns=None,
+                model_name="MySpecificModel",
+            )
+
+    def test_resolve_no_extra_inputs_needed(self):
+        """No error when all required inputs are auto-populated."""
+        inputs = self._make_inputs(2)
+        metadata = self._make_metadata(2)
+        result = _resolve_model_inputs(
+            inputs=inputs,
+            metadata=metadata,
+            required_model_inputs=["peptide_sequences", "precursor_charges"],
+            auto_populated={"peptide_sequences", "precursor_charges"},
+            constants=None,
+            columns=None,
+            model_name="iRTModel",
+        )
+        assert list(result.columns) == ["peptide_sequences", "precursor_charges"]
+
+    def test_fragment_match_feature_passes_constant_to_model(self):
+        """FragmentMatchFeatures correctly passes model_input_constants to the Koina model call."""
+        feature = FragmentMatchFeatures(
+            mz_tolerance=0.02,
+            unsupported_residues=["U", "O", "X"],
+            model_input_constants={"collision_energies": 30},
+        )
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.9],
+                "prediction": [["A", "G"]],
+                "precursor_charge": [2],
+                "spectrum_id": [0],
+                "mz_array": [[100.0, 200.0]],
+                "intensity_array": [[1000.0, 2000.0]],
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
+
+        mock_predictions = pd.DataFrame(
+            {
+                "peptide_sequences": ["AG"],
+                "precursor_charges": [2],
+                "collision_energies": [30],
+                "intensities": [0.5],
+                "mz": [100.0],
+                "annotation": ["b1"],
+            },
+            index=[0],
+        )
+
+        with patch(
+            "winnow.calibration.calibration_features.koinapy.Koina"
+        ) as mock_koina:
+            mock_model = mock_koina.return_value
+            mock_model.model_inputs = [
+                "peptide_sequences",
+                "precursor_charges",
+                "collision_energies",
+            ]
+            mock_model.predict.return_value = mock_predictions
+            feature.compute(dataset)
+
+        call_args_df = mock_model.predict.call_args[0][0]
+        assert list(call_args_df["collision_energies"]) == [30]
+
+    def test_fragment_match_feature_passes_column_to_model(self):
+        """FragmentMatchFeatures uses per-row metadata column values when model_input_columns is set."""
+        feature = FragmentMatchFeatures(
+            mz_tolerance=0.02,
+            unsupported_residues=["U", "O", "X"],
+            model_input_columns={"collision_energies": "nce"},
+        )
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.9, 0.8],
+                "prediction": [["A", "G"], ["G", "A"]],
+                "precursor_charge": [2, 2],
+                "spectrum_id": [0, 1],
+                "nce": [28, 35],
+                "mz_array": [[100.0, 200.0], [110.0, 210.0]],
+                "intensity_array": [[1000.0, 2000.0], [1100.0, 2100.0]],
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
+
+        mock_predictions = pd.DataFrame(
+            {
+                "peptide_sequences": ["AG", "GA"],
+                "precursor_charges": [2, 2],
+                "collision_energies": [28, 35],
+                "intensities": [0.5, 0.6],
+                "mz": [100.0, 110.0],
+                "annotation": ["b1", "b1"],
+            },
+            index=[0, 1],
+        )
+
+        with patch(
+            "winnow.calibration.calibration_features.koinapy.Koina"
+        ) as mock_koina:
+            mock_model = mock_koina.return_value
+            mock_model.model_inputs = [
+                "peptide_sequences",
+                "precursor_charges",
+                "collision_energies",
+            ]
+            mock_model.predict.return_value = mock_predictions
+            feature.compute(dataset)
+
+        call_args_df = mock_model.predict.call_args[0][0]
+        assert list(call_args_df["collision_energies"]) == [28, 35]
+
+    def _make_inputs(self, n: int) -> pd.DataFrame:
+        """Return a minimal inputs DataFrame with auto-populated columns."""
+        return pd.DataFrame(
+            {
+                "peptide_sequences": ["AG"] * n,
+                "precursor_charges": [2] * n,
+            }
+        )
+
+    def _make_metadata(self, n: int, extra: Optional[dict] = None) -> pd.DataFrame:
+        """Return a minimal metadata DataFrame, optionally with extra columns."""
+        data = {"spectrum_id": list(range(n))}
+        if extra:
+            data.update(extra)
+        return pd.DataFrame(data)
+
+
+class TestLearnFromMissingFiltering:
+    """Tests for the learn_from_missing=False filtering behaviour.
+
+    When learn_from_missing=False, invalid entries must be **dropped** from the
+    dataset before Koina is called.  A UserWarning reporting the count of removed
+    PSMs must be emitted.  The feature columns (ion_matches, iRT error, …) must
+    be present on the surviving rows.  The is_missing_* indicator column must NOT
+    appear in feature.columns (though it may be present in metadata as a temporary
+    intermediate).
+
+    When learn_from_missing=True (the default), all rows are retained: invalid
+    rows get their feature values imputed to zero and the is_missing_* indicator
+    column is added to feature.columns so the calibrator can learn from the gap.
+    """
+
+    # ------------------------------------------------------------------
+    # Shared helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _make_intensity_mock(spectrum_id_to_ions: dict):
+        """Return a callable that mimics koinapy.Koina.predict for intensity models.
+
+        Args:
+            spectrum_id_to_ions: mapping from spectrum_id to a list of
+                (mz, intensity, annotation) tuples to return.
+        """
+
+        def _predict(inputs_df):
+            rows, idx = [], []
+            for sid in inputs_df.index:
+                for mz, intensity, ann in spectrum_id_to_ions.get(sid, []):
+                    rows.append(
+                        {
+                            "peptide_sequences": inputs_df.loc[
+                                sid, "peptide_sequences"
+                            ],
+                            "precursor_charges": inputs_df.loc[
+                                sid, "precursor_charges"
+                            ],
+                            "collision_energies": inputs_df.loc[
+                                sid, "collision_energies"
+                            ],
+                            "intensities": intensity,
+                            "mz": mz,
+                            "annotation": ann,
+                        }
+                    )
+                    idx.append(sid)
+            return pd.DataFrame(rows, index=idx)
+
+        return _predict
+
+    # ------------------------------------------------------------------
+    # FragmentMatchFeatures
+    # ------------------------------------------------------------------
+
+    @patch("winnow.calibration.calibration_features.koinapy.Koina")
+    def test_fragment_match_false_drops_invalid_rows_and_warns(self, mock_koina):
+        """learn_from_missing=False: invalid rows are removed from the dataset and a warning is
+        emitted. Feature columns (ion_matches, ion_match_intensity) must be present on the
+        surviving rows."""
+        feature = FragmentMatchFeatures(
+            mz_tolerance=0.02,
+            learn_from_missing=False,
+            max_peptide_length=5,  # short limit so row 1 (len 6) is invalid
+            model_input_constants={"collision_energies": 25},
+        )
+        metadata = pd.DataFrame(
+            {
+                "prediction": [["A", "G"], ["A"] * 6, ["S", "P"]],
+                "precursor_charge": [2, 2, 2],
+                "spectrum_id": [10, 20, 30],
+                "mz_array": [[100.0, 200.0], [120.0], [110.0, 210.0]],
+                "intensity_array": [[1000.0, 2000.0], [1200.0], [1100.0, 2100.0]],
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
+
+        mock_model = mock_koina.return_value
+        mock_model.model_inputs = [
+            "peptide_sequences",
+            "precursor_charges",
+            "collision_energies",
+        ]
+        mock_model.predict = self._make_intensity_mock(
+            {
+                10: [(100.0, 0.8, "b1"), (200.0, 0.6, "y1")],
+                30: [(110.0, 0.7, "b1"), (210.0, 0.5, "y1")],
+            }
+        )
+
+        with pytest.warns(UserWarning, match="Filtered 1 spectra"):
+            feature.compute(dataset)
+
+        # The invalid row (spectrum_id=20) must be gone from the caller's dataset.
+        assert (
+            len(dataset.metadata) == 2
+        ), "Expected 2 rows after filtering the 1 invalid entry"
+        assert 20 not in dataset.metadata["spectrum_id"].values
+
+        # Feature values must be computed for the 2 remaining valid rows.
+        assert "ion_matches" in dataset.metadata.columns
+        assert "ion_match_intensity" in dataset.metadata.columns
+
+    @patch("winnow.calibration.calibration_features.koinapy.Koina")
+    def test_fragment_match_false_no_warning_when_all_valid(self, mock_koina):
+        """learn_from_missing=False: no UserWarning is emitted when every entry is valid."""
+        feature = FragmentMatchFeatures(
+            mz_tolerance=0.02,
+            learn_from_missing=False,
+            model_input_constants={"collision_energies": 25},
+        )
+        metadata = pd.DataFrame(
+            {
+                "prediction": [["A", "G"], ["S", "P"]],
+                "precursor_charge": [2, 2],
+                "spectrum_id": [10, 30],
+                "mz_array": [[100.0, 200.0], [110.0, 210.0]],
+                "intensity_array": [[1000.0, 2000.0], [1100.0, 2100.0]],
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
+
+        mock_model = mock_koina.return_value
+        mock_model.model_inputs = [
+            "peptide_sequences",
+            "precursor_charges",
+            "collision_energies",
+        ]
+        mock_model.predict = self._make_intensity_mock(
+            {
+                10: [(100.0, 0.8, "b1"), (200.0, 0.6, "y1")],
+                30: [(110.0, 0.7, "b1"), (210.0, 0.5, "y1")],
+            }
+        )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            feature.compute(dataset)  # Must not raise
+
+        assert len(dataset.metadata) == 2
+        assert "ion_matches" in dataset.metadata.columns
+
+    def test_fragment_match_false_columns_excludes_indicator(self):
+        """learn_from_missing=False: is_missing_fragment_match_features must not appear in
+        feature.columns (it is only a temporary intermediate, not a calibrator feature)."""
+        feature = FragmentMatchFeatures(
+            mz_tolerance=0.02,
+            learn_from_missing=False,
+        )
+        assert "is_missing_fragment_match_features" not in feature.columns
+        assert feature.columns == ["ion_matches", "ion_match_intensity"]
+
+    def test_fragment_match_true_columns_includes_indicator(self):
+        """learn_from_missing=True: is_missing_fragment_match_features must appear in
+        feature.columns so the calibrator can learn from missingness."""
+        feature = FragmentMatchFeatures(
+            mz_tolerance=0.02,
+            learn_from_missing=True,
+        )
+        assert "is_missing_fragment_match_features" in feature.columns
+
+    @patch("winnow.calibration.calibration_features.koinapy.Koina")
+    def test_fragment_match_true_retains_invalid_rows_with_zero_features(
+        self, mock_koina
+    ):
+        """learn_from_missing=True: invalid rows stay in the dataset, their ion_matches and
+        ion_match_intensity values are zero, and is_missing_* is True for those rows."""
+        feature = FragmentMatchFeatures(
+            mz_tolerance=0.02,
+            learn_from_missing=True,
+            max_peptide_length=5,
+            model_input_constants={"collision_energies": 25},
+        )
+        metadata = pd.DataFrame(
+            {
+                "prediction": [["A", "G"], ["A"] * 6, ["S", "P"]],
+                "precursor_charge": [2, 2, 2],
+                "spectrum_id": [10, 20, 30],
+                "mz_array": [[100.0, 200.0], [120.0], [110.0, 210.0]],
+                "intensity_array": [[1000.0, 2000.0], [1200.0], [1100.0, 2100.0]],
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
+
+        mock_model = mock_koina.return_value
+        mock_model.model_inputs = [
+            "peptide_sequences",
+            "precursor_charges",
+            "collision_energies",
+        ]
+        mock_model.predict = self._make_intensity_mock(
+            {
+                10: [(100.0, 0.8, "b1"), (200.0, 0.6, "y1")],
+                30: [(110.0, 0.7, "b1"), (210.0, 0.5, "y1")],
+            }
+        )
+
+        feature.compute(dataset)
+
+        # All 3 rows must be present.
+        assert len(dataset.metadata) == 3
+        assert set(dataset.metadata["spectrum_id"].values) == {10, 20, 30}
+
+        # Indicator column must exist and correctly flag the invalid row.
+        assert "is_missing_fragment_match_features" in dataset.metadata.columns
+        row20 = dataset.metadata[dataset.metadata["spectrum_id"] == 20].iloc[0]
+        assert row20["is_missing_fragment_match_features"]
+
+        # Invalid row must have zero ion matches.
+        assert row20["ion_matches"] == 0.0
+        assert row20["ion_match_intensity"] == 0.0
+
+    # ------------------------------------------------------------------
+    # ChimericFeatures
+    # ------------------------------------------------------------------
+
+    @patch("winnow.calibration.calibration_features.koinapy.Koina")
+    def test_chimeric_false_drops_entries_without_runnerup_and_warns(self, mock_koina):
+        """learn_from_missing=False: spectra without a runner-up beam are removed from the
+        dataset and a UserWarning is emitted."""
+        feature = ChimericFeatures(
+            mz_tolerance=0.02,
+            learn_from_missing=False,
+            model_input_constants={"collision_energies": 25},
+        )
+        metadata = pd.DataFrame(
+            {
+                "precursor_charge": [2, 2, 2],
+                "spectrum_id": [10, 20, 30],
+                "mz_array": [[100.0, 200.0], [120.0], [110.0, 210.0]],
+                "intensity_array": [[1000.0, 2000.0], [1200.0], [1100.0, 2100.0]],
+            }
+        )
+        predictions = [
+            [  # spectrum 10: valid (has runner-up)
+                MockScoredSequence(["A", "G"], np.log(0.8)),
+                MockScoredSequence(["G", "A"], np.log(0.6)),
+            ],
+            [  # spectrum 20: invalid (only one beam, no runner-up)
+                MockScoredSequence(["V", "T"], np.log(0.9)),
+            ],
+            [  # spectrum 30: valid (has runner-up)
+                MockScoredSequence(["S", "P"], np.log(0.7)),
+                MockScoredSequence(["P", "S"], np.log(0.5)),
+            ],
+        ]
+        dataset = CalibrationDataset(metadata=metadata, predictions=predictions)
+
+        mock_model = mock_koina.return_value
+        mock_model.model_inputs = [
+            "peptide_sequences",
+            "precursor_charges",
+            "collision_energies",
+        ]
+        mock_model.predict = self._make_intensity_mock(
+            {
+                10: [(100.0, 0.8, "b1"), (200.0, 0.6, "y1")],
+                30: [(110.0, 0.7, "b1"), (210.0, 0.5, "y1")],
+            }
+        )
+
+        with pytest.warns(UserWarning, match="Filtered 1 spectra"):
+            feature.compute(dataset)
+
+        assert len(dataset.metadata) == 2
+        assert 20 not in dataset.metadata["spectrum_id"].values
+        assert "chimeric_ion_matches" in dataset.metadata.columns
+        assert "chimeric_ion_match_intensity" in dataset.metadata.columns
+
+    def test_chimeric_false_columns_excludes_indicator(self):
+        """learn_from_missing=False: is_missing_chimeric_features must not appear in
+        feature.columns."""
+        feature = ChimericFeatures(
+            mz_tolerance=0.02,
+            learn_from_missing=False,
+        )
+        assert "is_missing_chimeric_features" not in feature.columns
+        assert feature.columns == [
+            "chimeric_ion_matches",
+            "chimeric_ion_match_intensity",
+        ]
+
+    # ------------------------------------------------------------------
+    # RetentionTimeFeature
+    # ------------------------------------------------------------------
+
+    @patch("winnow.calibration.calibration_features.koinapy.Koina")
+    def test_irt_false_drops_invalid_rows_and_warns(self, mock_koina):
+        """learn_from_missing=False: invalid rows are removed from the dataset and a
+        UserWarning is emitted. The iRT error column must be present on the surviving rows."""
+        feature = RetentionTimeFeature(
+            hidden_dim=10,
+            train_fraction=0.8,
+            learn_from_missing=False,
+            max_peptide_length=5,  # short limit so row 1 (len 6) is invalid
+        )
+        metadata = pd.DataFrame(
+            {
+                "prediction": [["A", "G"], ["A"] * 6, ["S", "P"]],
+                "retention_time": [10.5, 15.2, 8.7],
+                "precursor_charge": [2, 2, 2],
+                "spectrum_id": [10, 20, 30],
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
+
+        mock_model = mock_koina.return_value
+        mock_model.model_inputs = ["peptide_sequences"]
+        mock_model.predict.return_value = pd.DataFrame(
+            {"irt": [25.5, 30.2]}, index=[10, 30]
+        )
+
+        with patch.object(
+            feature.irt_predictor, "predict", return_value=np.array([21.0, 16.0])
+        ):
+            with pytest.warns(UserWarning, match="Filtered 1 spectra"):
+                feature.compute(dataset)
+
+        assert (
+            len(dataset.metadata) == 2
+        ), "Expected 2 rows after filtering the 1 invalid entry"
+        assert 20 not in dataset.metadata["spectrum_id"].values
+        assert "irt_error" in dataset.metadata.columns
+
+    def test_irt_false_columns_excludes_indicator(self):
+        """learn_from_missing=False: is_missing_irt_error must not appear in feature.columns."""
+        feature = RetentionTimeFeature(
+            hidden_dim=10,
+            train_fraction=0.8,
+            learn_from_missing=False,
+        )
+        assert "is_missing_irt_error" not in feature.columns
+        assert feature.columns == ["irt_error"]
 
 
 class ConcreteFeature(CalibrationFeatures):
@@ -1577,7 +2243,7 @@ class TestConcreteFeatureImplementation:
         """Test that concrete feature can compute values."""
         feature = ConcreteFeature()
         metadata = pd.DataFrame({"existing_col": [1, 2, 3]})
-        dataset = CalibrationDataset(metadata=metadata, predictions=[])
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
         feature.compute(dataset)
 

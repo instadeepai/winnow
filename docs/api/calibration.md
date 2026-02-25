@@ -11,7 +11,7 @@ The main calibration model that transforms raw confidence scores into calibrated
 ```python
 from winnow.calibration import ProbabilityCalibrator
 from winnow.calibration.calibration_features import (
-    MassErrorFeature, PrositFeatures, BeamFeatures
+    MassErrorFeature, FragmentMatchFeatures, BeamFeatures
 )
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.constants import RESIDUE_MASSES
@@ -21,7 +21,7 @@ calibrator = ProbabilityCalibrator(seed=42)
 
 # Add features for calibration
 calibrator.add_feature(MassErrorFeature(residue_masses=RESIDUE_MASSES))
-calibrator.add_feature(PrositFeatures(mz_tolerance=0.02))
+calibrator.add_feature(FragmentMatchFeatures(mz_tolerance=0.02))
 calibrator.add_feature(BeamFeatures())
 
 # Train the calibrator
@@ -111,22 +111,28 @@ feature = MassErrorFeature(residue_masses=RESIDUE_MASSES)
 
 **Purpose**: Provides mass accuracy information as a calibration signal.
 
-### PrositFeatures
+### FragmentMatchFeatures
 
-Extracts features using Prosit intensity prediction models to compare predicted vs observed fragment ion intensities.
+Extracts features by calling a Koina intensity model to generate a theoretical fragmentation spectrum for the top-1 de novo predicted sequence and computing how well it matches the observed spectrum (ion match rate and ion match intensity).
+
+For more information about Koina, please read the [documentation](https://koina.wilhelmlab.org/docs) or the [publication](https://www.nature.com/articles/s41467-025-64870-5).
 
 ```python
-from winnow.calibration.calibration_features import PrositFeatures
+from winnow.calibration.calibration_features import FragmentMatchFeatures
 
-feature = PrositFeatures(
+feature = FragmentMatchFeatures(
     mz_tolerance=0.02,
-    invalid_prosit_residues=["N[UNIMOD:7]", "Q[UNIMOD:7]"],  # Residues not supported by Prosit
+    unsupported_residues=["N[UNIMOD:7]", "Q[UNIMOD:7]"],  # Residues not supported by the model
+    intensity_model_name="Prosit_2025_intensity_22PTM",
+    max_precursor_charge=6,   # Upper charge limit of the Koina model
+    max_peptide_length=30,    # Upper length limit of the Koina model
+    model_input_constants={"collision_energies": 25, "fragmentation_types": "HCD"},
 )
 ```
 
 **Purpose**: Leverages ML-based intensity predictions for spectral quality assessment.
 
-**Important:** Prosit models require all cysteines to be carbamidomethylated (C[UNIMOD:4]). Peptides with unmodified cysteine ("C") are automatically filtered out and cannot have Prosit features computed. The carbamidomethylation is passed explicitly to Prosit models.
+**Note:** Different Koina models support different charge states, peptide lengths and modifications. Consult the documentation for your chosen model at [koina.wilhelmlab.org](https://koina.wilhelmlab.org/) and configure `max_precursor_charge`, `max_peptide_length` and `unsupported_residues` accordingly. See the [configuration guide](../configuration.md#koina-model-input-validation) for full details.
 
 ### BeamFeatures
 
@@ -142,37 +148,49 @@ feature = BeamFeatures()
 
 ### ChimericFeatures
 
-Computes chimeric ion matches by predicting intensities for runner-up peptide sequences and comparing with observed spectra.
+Computes chimeric ion matches by predicting intensities for runner-up (second-best) peptide sequences using a Koina intensity model and comparing with observed spectra.
 
 ```python
 from winnow.calibration.calibration_features import ChimericFeatures
 
-feature = ChimericFeatures(mz_tolerance=0.02)
+feature = ChimericFeatures(
+    mz_tolerance=0.02,
+    unsupported_residues=["N[UNIMOD:7]", "Q[UNIMOD:7]"],
+    max_precursor_charge=6,
+    max_peptide_length=30,  # Applied to the runner-up sequence
+    model_input_constants={"collision_energies": 25, "fragmentation_types": "HCD"},
+)
 ```
 
 **Purpose**: Detects chimeric spectra that may affect confidence estimates.
 
 ### RetentionTimeFeature
 
-Uses Prosit iRT models to predict indexed retention times and calibrate against observed retention times.
+Uses a Koina iRT model to predict indexed retention times and calibrate against observed retention times.
 
 ```python
 from winnow.calibration.calibration_features import RetentionTimeFeature
 
-feature = RetentionTimeFeature(hidden_dim=10, train_fraction=0.1)
+feature = RetentionTimeFeature(
+    hidden_dim=10,
+    train_fraction=0.1,
+    unsupported_residues=["N[UNIMOD:7]", "Q[UNIMOD:7]"],
+    max_peptide_length=30,
+)
 ```
 
 **Purpose**: Incorporates chromatographic information for confidence calibration.
 
 ## Handling missing features
 
-Prosit-dependent features (PrositFeatures, ChimericFeatures, RetentionTimeFeature) may not be computable for all peptides due to limitations like:
+Koina-dependent features (`FragmentMatchFeatures`, `ChimericFeatures`, `RetentionTimeFeature`) may not be computable for all peptides due to model-specific constraints such as:
 
-- Peptides longer than 30 amino acids (Prosit limitation)
-- Precursor charges greater than 6 (Prosit limitation)
-- Unsupported modifications (Prosit limitation)
-- Unmodified cysteine residues (Prosit requires C[UNIMOD:4])
+- Peptides exceeding the model's maximum length
+- Precursor charges exceeding the model's maximum
+- Unsupported modifications or residue types
 - Lack of runner-up sequences for chimeric features
+
+The defaults match the constraints of the Prosit model family. If you use a different Koina model, adjust these parameters accordingly — see the [configuration guide](../configuration.md#koina-model-input-validation) for details.
 
 Winnow provides two strategies for handling such cases:
 
@@ -189,9 +207,10 @@ Winnow provides two strategies for handling such cases:
 
 **Use when you want strict data quality requirements.**
 
-- Raises an error immediately when invalid PSMs are encountered
-- Forces users to pre-filter datasets before training/prediction
-- Cleaner feature space with no missingness indicators
+- Invalid PSMs are automatically filtered from the dataset before Koina is called
+- A warning is emitted reporting how many PSMs were removed and which constraints applied
+- Filtered PSMs are gone entirely; no indicator column is added
+- Calibrator trains only on the remaining clean data
 
 ### Configuration
 
@@ -203,7 +222,7 @@ winnow train
 
 # Strict: Require clean data
 winnow train \
-    calibrator.features.prosit_features.learn_from_missing=false \
+    calibrator.features.fragment_match_features.learn_from_missing=false \
     calibrator.features.chimeric_features.learn_from_missing=false \
     calibrator.features.retention_time_feature.learn_from_missing=false
 ```
@@ -211,15 +230,15 @@ winnow train \
 Or configure programmatically:
 
 ```python
-from winnow.calibration.calibration_features import PrositFeatures, ChimericFeatures, RetentionTimeFeature
+from winnow.calibration.calibration_features import FragmentMatchFeatures, ChimericFeatures, RetentionTimeFeature
 
 # Learn from missingness (default)
-prosit_feat = PrositFeatures(mz_tolerance=0.02, learn_from_missing=True)
+fragment_feat = FragmentMatchFeatures(mz_tolerance=0.02, learn_from_missing=True)
 chimeric_feat = ChimericFeatures(mz_tolerance=0.02, learn_from_missing=True)
 rt_feat = RetentionTimeFeature(hidden_dim=10, train_fraction=0.1, learn_from_missing=True)
 
 # Require clean data (strict mode)
-prosit_feat = PrositFeatures(mz_tolerance=0.02, learn_from_missing=False)
+fragment_feat = FragmentMatchFeatures(mz_tolerance=0.02, learn_from_missing=False)
 chimeric_feat = ChimericFeatures(mz_tolerance=0.02, learn_from_missing=False)
 rt_feat = RetentionTimeFeature(hidden_dim=10, train_fraction=0.1, learn_from_missing=False)
 ```
