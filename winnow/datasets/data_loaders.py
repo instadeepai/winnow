@@ -32,6 +32,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
         residue_masses: dict[str, float],
         residue_remapping: dict[str, str],
         isotope_error_range: Tuple[int, int] = (0, 1),
+        beam_columns: Optional[dict[str, str]] = None,
     ) -> None:
         """Initialise the InstaNovoDatasetLoader.
 
@@ -39,6 +40,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
             residue_masses: The mapping of residues to their masses (ProForma notation).
             residue_remapping: The mapping of input notations to ProForma notation.
             isotope_error_range: The range of isotope errors to consider when matching peptides.
+            beam_columns: The names of the beam columns to substring match in the predictions file.
         """
         self.metrics = Metrics(
             residue_set=ResidueSet(
@@ -46,37 +48,11 @@ class InstaNovoDatasetLoader(DatasetLoader):
             ),
             isotope_error_range=isotope_error_range,
         )
-
-    @staticmethod
-    def _load_beam_preds(
-        predictions_path: Path | str,
-    ) -> Tuple[pl.DataFrame, pl.DataFrame]:
-        """Loads a dataset from a CSV file and optionally filters it.
-
-        Args:
-            predictions_path (Path | str): The path to the CSV file containing the predictions.
-
-        Returns:
-            Tuple[pl.DataFrame, pl.DataFrame]: A tuple containing the predictions and beams dataframes.
-        """
-        predictions_path = Path(predictions_path)
-        if predictions_path.suffix != ".csv":
-            raise ValueError(
-                f"Unsupported file format for InstaNovo beam predictions: {predictions_path.suffix}. Supported format is .csv."
-            )
-        df = pl.read_csv(predictions_path)
-        # Use polars column selectors to split dataframe
-        beam_df = df.select(
-            cs.contains(
-                "instanovo_predictions_beam", "instanovo_log_probabilities_beam"
-            )
-        )
-        preds_df = df.select(
-            ~cs.contains(
-                ["instanovo_predictions_beam", "instanovo_log_probabilities_beam"]
-            )
-        )
-        return preds_df, beam_df
+        self.beam_columns = beam_columns or {
+            "sequence": "predictions_beam_",
+            "log_probability": "predictions_log_probability_beam_",
+            "token_log_probabilities": "predictions_token_log_probabilities_",
+        }
 
     @staticmethod
     def _load_spectrum_data(spectrum_path: Path | str) -> Tuple[pl.DataFrame, bool]:
@@ -108,38 +84,35 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
     @staticmethod
     def _merge_spectrum_data(
-        beam_dataset: pd.DataFrame, spectrum_dataset: pd.DataFrame
+        preds_dataset: pd.DataFrame, spectrum_dataset: pd.DataFrame
     ) -> pd.DataFrame:
         """Merge the input and output data from the de novo sequencing model.
 
         Args:
-            beam_dataset (pd.DataFrame): The dataframe containing the beam predictions.
+            preds_dataset (pd.DataFrame): The dataframe containing the beam predictions.
             spectrum_dataset (pd.DataFrame): The dataframe containing the spectrum data.
 
         Returns:
             pd.DataFrame: The merged dataframe.
         """
-        merged_df = pd.merge(
-            beam_dataset,
+        # Merge the predictions and input datasets on the spectrum_id column
+        # There should be no duplicate columns between the two datasets except for spectrum_id
+        merged_dataset = pd.merge(
+            preds_dataset,
             spectrum_dataset,
             on=["spectrum_id"],
-            suffixes=("_from_beams", ""),
-        )
-        merged_df = merged_df.drop(
-            columns=[
-                col + "_from_beams"
-                for col in beam_dataset.columns
-                if col in spectrum_dataset.columns and col != "spectrum_id"
-            ],
-            axis=1,
+            suffixes=("_from_preds", "_from_inputs"),
+            how="inner",
         )
 
-        if len(merged_df) != len(beam_dataset):
+        # If the number of rows in the merged dataset is not equal to the number of rows in the predictions dataset, it is likely that spectrum_id is not unique in the input dataset.
+        # It is possible for the inputs dataset to have more rows than the predictions dataset if the DNS model filtered out some spectra before prediction.
+        if len(merged_dataset) != len(preds_dataset):
             raise ValueError(
-                f"Merge conflict: Expected {len(beam_dataset)} rows, but got {len(merged_df)}."
+                f"Merge conflict: Expected {len(preds_dataset)} rows, but got {len(merged_dataset)}."
             )
 
-        return merged_df
+        return merged_dataset
 
     def load(
         self, *, data_path: Path, predictions_path: Optional[Path] = None, **kwargs: Any
@@ -166,15 +139,73 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
         predictions, beams = self._load_beam_preds(beam_predictions_path)
         beams = self._process_beams(beams)
-        predictions = self._process_predictions(predictions.to_pandas(), has_labels)
+        predictions = self._process_predictions(predictions.to_pandas(), inputs.columns)
 
         predictions = self._merge_spectrum_data(predictions, inputs)
         predictions = self._evaluate_predictions(predictions, has_labels)
 
         return CalibrationDataset(metadata=predictions, predictions=beams)
 
+    def _validate_beam_columns(self, columns: List[str]) -> None:
+        """Validate that each beam column prefix matches at least one column in the dataframe.
+
+        Each prefix in self.beam_columns must match one or more columns in the form
+        <prefix><beam_index>, where <beam_index> is a non-negative integer
+        (e.g., predictions_beam_0, predictions_beam_1).
+
+        Args:
+            columns: List of column names from the predictions dataframe.
+
+        Raises:
+            ValueError: If any beam column prefix does not match at least one column.
+                The error message lists all missing prefixes and the available columns.
+        """
+        missing_prefixes = []
+        for prefix in self.beam_columns.values():
+            # Pattern: exact prefix followed by one or more digits at end of column name
+            pattern = re.compile(rf"^{re.escape(prefix)}\d+$")
+            if not any(pattern.match(col) for col in columns):
+                missing_prefixes.append(prefix)
+        if missing_prefixes:
+            raise ValueError(
+                f"Cannot find columns matching the following beam column prefixes in predictions file: {missing_prefixes}. "
+                f"Expected column names of the form '<prefix><beam_index>' (e.g., '{missing_prefixes[0]}0'). "
+                f"Available columns: {columns}"
+            )
+
+    def _load_beam_preds(
+        self,
+        predictions_path: Path | str,
+    ) -> Tuple[pl.DataFrame, pl.DataFrame]:
+        """Load beam predictions from a CSV file and split into predictions and beams dataframes.
+
+        Args:
+            predictions_path: Path to the CSV file containing the predictions.
+
+        Returns:
+            A tuple of (predictions_df, beams_df) where beams_df contains only the
+            beam-indexed columns and predictions_df contains the remaining columns.
+
+        Raises:
+            ValueError: If the file format is not CSV or if beam column validation fails.
+        """
+        predictions_path = Path(predictions_path)
+        if predictions_path.suffix != ".csv":
+            raise ValueError(
+                f"Unsupported file format for InstaNovo beam predictions: {predictions_path.suffix}. Supported format is .csv."
+            )
+        df = pl.read_csv(predictions_path)
+
+        self._validate_beam_columns(df.columns)
+
+        # Use polars column selectors to split dataframe
+        beam_df = df.select(cs.contains(*self.beam_columns.values()))
+        preds_df = df.select(~cs.contains([*self.beam_columns.values()]))
+        return preds_df, beam_df
+
     def _process_beams(
-        self, beam_df: pl.DataFrame
+        self,
+        beam_df: pl.DataFrame,
     ) -> List[Optional[List[ScoredSequence]]]:
         """Processes beam predictions into scored sequences.
 
@@ -189,13 +220,13 @@ class InstaNovoDatasetLoader(DatasetLoader):
             row: dict,
         ) -> Optional[List[ScoredSequence]]:
             scored_sequences = []
-            num_beams = len(row) // 2
+            num_beams = len(row) // len(self.beam_columns)
 
             for beam in range(num_beams):
                 seq_col, log_prob_col, token_log_prob_col = (
-                    f"instanovo_predictions_beam_{beam}",
-                    f"instanovo_log_probabilities_beam_{beam}",
-                    f"token_log_probabilities_beam_{beam}",
+                    f"{self.beam_columns['sequence']}{beam}",
+                    f"{self.beam_columns['log_probability']}{beam}",
+                    f"{self.beam_columns['token_log_probabilities']}{beam}",
                 )
                 sequence, log_prob, token_log_prob = (
                     row.get(seq_col),
@@ -209,7 +240,9 @@ class InstaNovoDatasetLoader(DatasetLoader):
                             sequence=self.metrics._split_peptide(sequence),
                             mass_error=None,
                             sequence_log_probability=log_prob,
-                            token_log_probabilities=token_log_prob,
+                            token_log_probabilities=ast.literal_eval(token_log_prob)
+                            if isinstance(token_log_prob, str)
+                            else token_log_prob,
                         )
                     )
 
@@ -220,7 +253,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
             [
                 pl.col(col).str.replace_all("L", "I")
                 for col in beam_df.columns
-                if "instanovo_predictions_beam" in col
+                if self.beam_columns["sequence"] in col
             ]
         )
 
@@ -258,56 +291,62 @@ class InstaNovoDatasetLoader(DatasetLoader):
         return df
 
     def _process_predictions(
-        self, dataset: pd.DataFrame, has_labels: bool
+        self, preds_dataset: pd.DataFrame, input_dataset_columns: List[str]
     ) -> pd.DataFrame:
         """Processes the predictions obtained from saved beams.
 
         Args:
-            dataset (pd.DataFrame): The dataframe containing the predictions.
-            has_labels (bool): Whether the dataset has ground truth labels.
+            preds_dataset (pd.DataFrame): The dataframe containing the predictions.
+            input_dataset_columns (List[str]): The columns of the input dataset.
 
         Returns:
             pd.DataFrame: The processed dataframe.
         """
+        # Drop duplicate columns from the input dataset except spectrum_id
+        preds_dataset = preds_dataset.drop(
+            columns=[
+                col
+                for col in preds_dataset.columns
+                if col in input_dataset_columns and col != "spectrum_id"
+            ]
+        )
+
         rename_dict = {
             "predictions": "prediction_untokenised",
             "predictions_tokenised": "prediction",
             "log_probs": "confidence",
         }
-        if has_labels:
-            rename_dict["sequence"] = "sequence_untokenised"
-        dataset.rename(rename_dict, axis=1, inplace=True)
+        missing_cols = [
+            col for col in rename_dict.keys() if col not in preds_dataset.columns
+        ]
+        if missing_cols:
+            raise ValueError(
+                f"Required columns {missing_cols} not found in predictions dataset."
+            )
+        preds_dataset.rename(rename_dict, axis=1, inplace=True)
 
-        dataset["prediction"] = dataset["prediction"].apply(
+        preds_dataset["confidence"] = preds_dataset["confidence"].apply(np.exp)
+
+        preds_dataset["prediction"] = preds_dataset["prediction"].apply(
             lambda peptide: peptide.split(", ") if isinstance(peptide, str) else peptide
         )
-
-        dataset.loc[dataset["confidence"] == -1.0, "confidence"] = float("-inf")
-        dataset["confidence"] = dataset["confidence"].apply(np.exp)
-
-        if has_labels:
-            dataset["sequence_untokenised"] = dataset["sequence_untokenised"].apply(
-                lambda peptide: peptide.replace("L", "I")
-                if isinstance(peptide, str)
-                else peptide
-            )
-            dataset["sequence"] = dataset["sequence_untokenised"].apply(
-                self.metrics._split_peptide
-            )
-        dataset["prediction"] = dataset["prediction"].apply(
+        preds_dataset["prediction"] = preds_dataset["prediction"].apply(
             lambda peptide: [
                 "I" if amino_acid == "L" else amino_acid for amino_acid in peptide
             ]
             if isinstance(peptide, list)
             else peptide
         )
-        dataset["prediction_untokenised"] = dataset["prediction_untokenised"].apply(
+
+        preds_dataset["prediction_untokenised"] = preds_dataset[
+            "prediction_untokenised"
+        ].apply(
             lambda peptide: peptide.replace("L", "I")
             if isinstance(peptide, str)
             else peptide
         )
 
-        return dataset
+        return preds_dataset
 
     def _evaluate_predictions(
         self, dataset: pd.DataFrame, has_labels: bool
@@ -815,7 +854,7 @@ class WinnowDatasetLoader(DatasetLoader):
         if predictions_path is not None:
             raise ValueError("predictions_path is not used for WinnowDatasetLoader")
 
-        metadata_csv_path = data_path / "metadata.csv"
+        metadata_csv_path = data_path / Path("metadata.csv")
         if not metadata_csv_path.exists():
             raise FileNotFoundError(
                 f"Winnow dataset loader expects a CSV file containing metadata at {metadata_csv_path}. "
@@ -850,7 +889,7 @@ class WinnowDatasetLoader(DatasetLoader):
             else ast.literal_eval(re.sub(r"(\n?)(\s+)", ", ", re.sub(r"\[\s+", "[", s)))
         )
 
-        predictions_pkl_path = data_path / "predictions.pkl"
+        predictions_pkl_path = data_path / Path("predictions.pkl")
         if predictions_pkl_path.exists():
             try:
                 with predictions_pkl_path.open(mode="rb") as predictions_file:

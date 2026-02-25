@@ -21,3 +21,23 @@ residue_remapping:  # Used to map InstaNovo legacy notations to UNIMOD tokens.
   "(+42.01)": "[UNIMOD:1]"  # Acetylation
   "(+43.01)": "[UNIMOD:5]"  # Carbamylation
   "(-17.03)": "[UNIMOD:385]"  # Ammonia loss
+# Beam column prefixes for matching columns in the predictions CSV file.
+#
+# Each prefix is appended with a beam index (0, 1, 2, ...) to form the full column name.
+# The predictions CSV must contain columns matching EXACTLY: <prefix><beam_index>
+#
+# Required columns per beam (where N is 0, 1, 2, ...):
+#   - {sequence}N         → peptide sequence for beam N (e.g., "predictions_beam_0")
+#   - {log_probability}N  → log probability for beam N  (e.g., "predictions_log_probability_beam_0")
+#   - {token_log_probabilities}N → per-token log probs  (e.g., "predictions_token_log_probabilities_0")
+#
+# Example CSV columns for 3 beams:
+#   predictions_beam_0, predictions_beam_1, predictions_beam_2,
+#   predictions_log_probability_beam_0, predictions_log_probability_beam_1, predictions_log_probability_beam_2,
+#   predictions_token_log_probabilities_0, predictions_token_log_probabilities_1, predictions_token_log_probabilities_2
+#
+# An error is raised if any prefix does not match at least one column.
+beam_columns:
+  sequence: "predictions_beam_"
+  log_probability: "predictions_log_probability_beam_"
+  token_log_probabilities: "predictions_token_log_probabilities_beam_"
