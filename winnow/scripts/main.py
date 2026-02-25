@@ -193,8 +193,12 @@ def train_entry_point(
 
     annotated_dataset = data_loader.load(**dataset_params)
 
-    logger.info("Filtering dataset.")
+    logger.info(f"Loaded: {len(annotated_dataset.metadata)} spectra")
+
+    logger.info("Filtering dataset for empty predictions.")
     annotated_dataset = filter_dataset(annotated_dataset)
+
+    logger.info(f"After filtering: {len(annotated_dataset.metadata)} spectra")
 
     # Instantiate the calibrator from the config
     logger.info("Instantiating calibrator from config.")
@@ -209,6 +213,7 @@ def train_entry_point(
     ProbabilityCalibrator.save(calibrator, cfg.model_output_dir)
 
     # Save the training dataset results
+    logger.info(f"Final dataset: {len(annotated_dataset)} spectra")
     logger.info(f"Saving training dataset results to {cfg.dataset_output_path}")
     annotated_dataset.to_csv(cfg.dataset_output_path)
 
@@ -266,8 +271,12 @@ def predict_entry_point(
 
     dataset = data_loader.load(**dataset_params)
 
-    logger.info("Filtering dataset.")
+    logger.info(f"Loaded: {len(dataset.metadata)} spectra")
+
+    logger.info("Filtering dataset for empty predictions.")
     dataset = filter_dataset(dataset)
+
+    logger.info(f"After filtering: {len(dataset.metadata)} spectra")
 
     # Load trained calibrator
     logger.info("Loading trained calibrator.")
@@ -298,6 +307,7 @@ def predict_entry_point(
     )
 
     # Write output
+    logger.info(f"Final dataset: {len(dataset_metadata)} spectra")
     logger.info(f"Writing output to {cfg.output_folder}")
     dataset_metadata, dataset_preds_and_fdr_metrics = separate_metadata_and_predictions(
         dataset_metadata, fdr_control, cfg.fdr_control.confidence_column
