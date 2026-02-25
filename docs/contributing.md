@@ -15,53 +15,54 @@ If you have ideas for enhancements, you can:
 ## Contribution process
 
 1. **Fork the repository**
-   ```bash
-   git clone https://github.com/instadeepai/winnow.git
-   cd winnow
-   ```
 
+    ```bash
+    git clone https://github.com/instadeepai/winnow.git
+    cd winnow
+    ```
 2. **Create a feature branch**
-   ```bash
-   git checkout -b feat-amazing-feature
-   ```
 
+    ```bash
+    git checkout -b feat-amazing-feature
+    ```
 3. **Set up development environment**
-   ```bash
-   # Install development dependencies
-   uv sync --dev
 
-   # Set up pre-commit hooks
-   pre-commit install
-   ```
+    ```bash
+    # Install development dependencies
+    uv sync --dev
 
+    # Set up pre-commit hooks
+    pre-commit install
+    ```
 4. **Make your changes**
-   - Follow the existing code style
-   - Add tests for new functionality
-   - Update documentation as needed
 
+    - Follow the existing code style
+    - Add tests for new functionality
+    - Update documentation as needed
 5. **Test your changes**
-   ```bash
-   # Run tests
-   pytest
 
-   # Check code formatting
-   pre-commit run --all-files
-   ```
+    ```bash
+    # Run tests
+    pytest
 
+    # Check code formatting
+    pre-commit run --all-files
+    ```
 6. **Commit your changes**
-   ```bash
-   git commit -m 'feat: add some amazing feature'
-   ```
 
+    ```bash
+    git commit -m 'feat: add some amazing feature'
+    ```
 7. **Push to your branch**
-   ```bash
-   git push origin feat-amazing-feature
-   ```
 
+    ```bash
+    git push origin feat-amazing-feature
+    ```
 8. **Open a Pull Request**
-   - Provide a clear description of your changes
-   - Reference any related issues
-   - Include examples if applicable
+
+    - Provide a clear description of your changes
+    - Reference any related issues
+    - Include examples if applicable
 
 ## Development guidelines
 
@@ -116,4 +117,4 @@ If you need help or have questions:
 
 Contributors are recognised in the project's contributor list. Don't forget to give the project a star! ⭐
 
-Thank you for considering contributing to winnow!
+Thank you for considering contributing to Winnow!
