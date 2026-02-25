@@ -45,7 +45,7 @@ winnow predict fdr_control.fdr_threshold=1.0
 winnow predict calibrator.pretrained_model_name_or_path=models/new_model
 ```
 
-**Note:** The sample data is minimal (20 spectra) and intended for testing only. When using the sample data, it's **recommended to use the `make` commands** (e.g., `make predict-sample`) as they include necessary configuration adjustments. Specifically, `make predict-sample` sets `fdr_control.fdr_threshold=1.0` because the sample data contains artificial PSMs with relatively high error rates, and using the default threshold (0.05) would filter out all predictions, resulting in empty output. For use with real datasets, use the standard FDR threshold (default 0.05) or adjust as appropriate for your application.
+**Note:** The sample data is minimal (100 spectra) and intended for testing only. When using the sample data, it's **recommended to use the `make` commands** (e.g., `make predict-sample`) as they include necessary configuration adjustments. Specifically, `make predict-sample` sets `fdr_control.fdr_threshold=1.0` because the sample data contains artificial PSMs with relatively high error rates, and using the default threshold (0.05) would filter out all predictions, resulting in empty output. For use with real datasets, use the standard FDR threshold (default 0.05) or adjust as appropriate for your application.
 
 ## Commands
 

@@ -12,37 +12,24 @@ def generate_sample_data():
     output_dir = Path("examples/example_data")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    n_samples = 20
+    n_samples = 100
     spectrum_ids = [f"spectrum_{i}" for i in range(n_samples)]
 
-    # Generate peptides using only valid amino acids (A, C, D, E, F, G, H, I, K, L, M, N, P, Q, R, S, T, V, W, Y)
-    # Note: Must avoid O, U, X, Z, B, J which are not standard amino acids
+    np.random.seed(42)  # For reproducibility
+
+    # Generate peptides using only valid amino acids
+    # (A, C, D, E, F, G, H, I, K, L, M, N, P, Q, R, S, T, V, W, Y)
     peptides = [
-        "PEPTIDEK",
-        "MASSIVE",
-        "PEPTIDES",
-        "SEQQENCR",
-        "PEPTIDE",
-        "MASSIVE",
-        "PEPTIDES",
-        "SEQQENCR",
-        "PEPTIDEK",
-        "MASSIVE",
-        "PEPTIDES",
-        "SEQQENCR",
-        "PEPTIDE",
-        "MASSIVE",
-        "PEPTIDES",
-        "SEQQENCR",
-        "PEPTIDEK",
-        "MASSIVE",
-        "PEPTIDES",
-        "SEQQENCR",
+        "".join(
+            np.random.choice(
+                list("ACDEFGHIKLMNPQRSTVWY"), size=np.random.randint(5, 10)
+            )
+        )
+        for _ in range(n_samples)
     ]
 
     # Generate spectrum data (IPC format)
     # Calculate precursor_mass from mz and charge
-    np.random.seed(42)  # For reproducibility
     precursor_mz = np.random.uniform(400, 1200, n_samples)
     precursor_charge = np.random.choice([2, 3, 4], n_samples)
     proton_mass = 1.007276
@@ -98,12 +85,12 @@ def generate_sample_data():
                 "".join(np.random.choice(valid_aa, size=len(peptides[i])))
                 for i in range(n_samples)
             ]
-        predictions_data[f"instanovo_predictions_beam_{beam_idx}"] = beam_predictions
-        predictions_data[f"instanovo_log_probabilities_beam_{beam_idx}"] = [
+        predictions_data[f"predictions_beam_{beam_idx}"] = beam_predictions
+        predictions_data[f"predictions_log_probability_beam_{beam_idx}"] = [
             np.log(np.random.uniform(0.1, 0.9)) for _ in range(n_samples)
         ]
         # Token log probabilities as string representation of list
-        predictions_data[f"token_log_probabilities_beam_{beam_idx}"] = [
+        predictions_data[f"predictions_token_log_probabilities_beam_{beam_idx}"] = [
             str([float(np.log(np.random.uniform(0.5, 0.9))) for _ in range(len(p))])
             for p in peptides
         ]
@@ -121,7 +108,8 @@ def generate_sample_data():
     print(f"  - {spectrum_path}")
     print(f"  - {predictions_path}")
     print("\n✓ You can now run:")
-    print("  winnow train  # Uses sample data from config defaults")
+    print("  make train-sample")
+    print("  make predict-sample")
 
 
 if __name__ == "__main__":
