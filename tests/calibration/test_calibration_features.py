@@ -254,7 +254,11 @@ class TestBeamFeatures:
         self, beam_features, sample_dataset_with_predictions
     ):
         """Test beam features computation."""
-        beam_features.compute(sample_dataset_with_predictions)
+        with pytest.warns(
+            UserWarning,
+            match="1 beam search results have fewer than two sequences. This may affect the efficacy of computed beam features.",
+        ):
+            beam_features.compute(sample_dataset_with_predictions)
 
         # Check that all expected columns were added
         expected_columns = ["margin", "median_margin", "entropy", "z-score"]
@@ -319,7 +323,11 @@ class TestBeamFeatures:
         ]
         dataset = CalibrationDataset(metadata=metadata, predictions=predictions)
 
-        beam_features.compute(dataset)
+        with pytest.warns(
+            UserWarning,
+            match="1 beam search results have fewer than two sequences. This may affect the efficacy of computed beam features.",
+        ):
+            beam_features.compute(dataset)
 
         # Detailed checks for single sequence:
         # top_prob = 0.8, second_prob = 0.0 (no second sequence)
