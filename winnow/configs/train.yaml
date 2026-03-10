@@ -19,3 +19,4 @@ dataset:
 # Output paths:
 model_output_dir: models/new_model
 dataset_output_path: results/calibrated_dataset.csv
+training_history_path: results/training_history.json
