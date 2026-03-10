@@ -19,7 +19,7 @@ The sample data is automatically configured in the default config files. See the
 
 ## Comprehensive Example Notebook
 
-For a comprehensive example demonstrating the full winnow workflow, see our example notebook:
+For a comprehensive example demonstrating the full Winnow workflow, see our example notebook:
 
 📓 **[FDR plots example notebook](https://github.com/instadeepai/winnow/blob/main/examples/getting_started_with_winnow.ipynb)**
 

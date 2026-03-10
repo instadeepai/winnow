@@ -31,7 +31,7 @@ dataset = mztab_loader.load(
 winnow_loader = WinnowDatasetLoader()
 dataset = winnow_loader.load(data_path=Path("saved_dataset_directory"))
 
-# Save dataset (winnow's internal format)
+# Save dataset (Winnow's internal format)
 dataset.save(Path("output_directory"))
 ```
 
@@ -81,7 +81,7 @@ loader = MZTabDatasetLoader(residue_remapping=custom_mapping)
 
 #### WinnowDatasetLoader
 
-Loads previously saved CalibrationDataset instances from winnow's internal format.
+Loads previously saved CalibrationDataset instances from Winnow's internal format.
 
 ```python
 from winnow.datasets.data_loaders import WinnowDatasetLoader

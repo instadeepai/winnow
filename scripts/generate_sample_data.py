@@ -15,27 +15,23 @@ def generate_sample_data():
     n_samples = 100
     spectrum_ids = [f"spectrum_{i}" for i in range(n_samples)]
 
-    # Generate peptides using only valid amino acids (A, C, D, E, F, G, H, I, K, L, M, N, P, Q, R, S, T, V, W, Y)
-    # Note: Must avoid O, U, X, Z, B, J which are not standard amino acids
+    np.random.seed(42)  # For reproducibility
+
+    # Generate peptides using only valid amino acids
+    # (A, C, D, E, F, G, H, I, K, L, M, N, P, Q, R, S, T, V, W, Y)
     peptides = [
-        "PEPTIDEK",
-        "MASSIVE",
-        "PEPTIDES",
-        "SEQQENCR",
-        "PEPTIDE",
-        "MASSIVE",
-        "PEPTIDES",
-        "SEQQENCR",
-        "PEPTIDEK",
-        "MASSIVE",
-    ] * 10
+        "".join(
+            np.random.choice(
+                list("ACDEFGHIKLMNPQRSTVWY"), size=np.random.randint(5, 10)
+            )
+        )
+        for _ in range(n_samples)
+    ]
 
     # Generate spectrum data (IPC format)
-    # precursor_mass is derived at runtime by MassErrorFeature from precursor_mz and precursor_charge:
-    #   precursor_mass (MH+) = precursor_mz * charge - (charge - 1) * proton_mass
-    np.random.seed(42)  # For reproducibility
     precursor_mz = np.random.uniform(400, 1200, n_samples)
     precursor_charge = np.random.choice([2, 3, 4], n_samples)
+    retention_time = np.random.uniform(10, 60, n_samples)
 
     # Generate spectrum arrays (mz_array and intensity_array)
     mz_arrays = []
@@ -53,7 +49,7 @@ def generate_sample_data():
             "spectrum_id": spectrum_ids,
             "precursor_mz": precursor_mz,
             "precursor_charge": precursor_charge.astype(int),
-            "retention_time": np.random.uniform(10, 60, n_samples),
+            "retention_time": retention_time,
             "sequence": peptides,  # Ground truth for training
             "mz_array": mz_arrays,
             "intensity_array": intensity_arrays,

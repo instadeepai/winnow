@@ -116,11 +116,11 @@ class ProbabilityCalibrator:
         ] = "InstaDeepAI/winnow-general-model",
         cache_dir: Optional[Path] = None,
     ) -> "ProbabilityCalibrator":
-        """Load a pretrained calibrator from a local path or HuggingFace repository. If the path is a local directory path, it will be used directly. If it is a HuggingFace repository identifier, it will be downloaded from HuggingFace.
+        """Load a pretrained calibrator from a local path or Hugging Face repository. If the path is a local directory path, it will be used directly. If it is a Hugging Face repository identifier, it will be downloaded from Hugging Face.
 
         Args:
-            pretrained_model_name_or_path (Union[Path, str]): The local directory path (e.g., "./my-model-directory") or the HuggingFace repository identifier (e.g., "InstaDeepAI/winnow-general-model").
-            cache_dir (Optional[Path]): Directory to cache the HuggingFace model.
+            pretrained_model_name_or_path (Union[Path, str]): The local directory path (e.g., "./my-model-directory") or the Hugging Face repository identifier (e.g., "InstaDeepAI/winnow-general-model").
+            cache_dir (Optional[Path]): Directory to cache the Hugging Face model.
         """
         dir_path = Path(pretrained_model_name_or_path)
 
@@ -128,12 +128,12 @@ class ProbabilityCalibrator:
         if dir_path.exists():
             # Resolve relative paths to absolute, canonical paths
             dir_path = dir_path.resolve()
-        # Otherwise download it from HuggingFace.
+        # Otherwise download it from Hugging Face.
         else:
             # If no cache directory is provided, use the default cache directory.
             if cache_dir is None:
                 cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
-            # Download from HuggingFace
+            # Download from Hugging Face
             dir_path = Path(
                 snapshot_download(
                     repo_id=pretrained_model_name_or_path,
