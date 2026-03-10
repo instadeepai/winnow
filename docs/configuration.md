@@ -131,19 +131,6 @@ dataset_output_path: results/calibrated_dataset.csv
 Controls model architecture and calibration features:
 
 ```yaml
-# Shared Koina model inputs — applied to all intensity-based features.
-# To use a constant value tiled across all rows, specify it under koina_model_input_constants.
-# To use per-row values from a metadata column, add the column mapping under koina_model_input_columns.
-koina_model_input_constants:
-  collision_energies: 25
-  fragmentation_types: HCD
-
-# Shared Koina model constraints.
-# Change these to match the capabilities of your selected Koina models.
-koina_model_constraints:
-  max_precursor_charge: 6
-  max_peptide_length: 30
-
 calibrator:
   _target_: winnow.calibration.calibrator.ProbabilityCalibrator
 
