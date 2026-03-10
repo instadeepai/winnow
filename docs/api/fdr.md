@@ -6,7 +6,7 @@ The `winnow.fdr` module implements false discovery rate (FDR) estimation and con
 
 ### FDRControl
 
-Abstract base class that defines the interface for all FDR control methods in winnow.
+Abstract base class that defines the interface for all FDR control methods in Winnow.
 
 ```python
 from winnow.fdr.base import FDRControl
