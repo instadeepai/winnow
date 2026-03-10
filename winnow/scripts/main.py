@@ -207,7 +207,19 @@ def train_entry_point(
 
     # Fit the calibrator to the dataset
     logger.info("Fitting calibrator to dataset.")
-    calibrator.fit(annotated_dataset)
+    training_history = calibrator.fit(annotated_dataset)
+
+    # Log final training metrics
+    logger.info(f"Training completed in {training_history.n_iter} iterations.")
+    logger.info(f"Final training loss: {training_history.final_training_loss:.6f}")
+    if training_history.final_validation_score is not None:
+        logger.info(
+            f"Final validation score: {training_history.final_validation_score:.6f}"
+        )
+
+    # Save training history
+    logger.info(f"Saving training history to {cfg.training_history_path}")
+    training_history.save(cfg.training_history_path)
 
     # Save the model
     logger.info(f"Saving model to {cfg.model_output_dir}")

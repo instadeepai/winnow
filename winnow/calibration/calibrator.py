@@ -2,6 +2,7 @@
 
 from typing import Dict, List, Tuple, Union, Optional
 from pathlib import Path
+from dataclasses import dataclass
 import pickle
 import numpy as np
 from sklearn.neural_network import MLPClassifier
@@ -15,6 +16,148 @@ from winnow.calibration.calibration_features import (
     FeatureDependency,
 )
 from winnow.datasets.calibration_dataset import CalibrationDataset
+
+
+@dataclass
+class TrainingHistory:
+    """Container for training history metrics from calibrator fitting.
+
+    Attributes:
+        loss_curve: List of training loss values at each iteration.
+        validation_scores: List of validation scores at each iteration (only if early_stopping=True).
+        final_training_loss: The final training loss value.
+        final_validation_score: The final validation score (only if early_stopping=True).
+        n_iter: Number of iterations the solver ran.
+    """
+
+    loss_curve: List[float]
+    validation_scores: Optional[List[float]]
+    final_training_loss: float
+    final_validation_score: Optional[float]
+    n_iter: int
+
+    def save(self, path: Union[Path, str]) -> None:
+        """Save the training history to a JSON file.
+
+        Args:
+            path: Path to save the JSON file.
+        """
+        import json
+
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        data = {
+            "loss_curve": self.loss_curve,
+            "validation_scores": self.validation_scores,
+            "final_training_loss": self.final_training_loss,
+            "final_validation_score": self.final_validation_score,
+            "n_iter": self.n_iter,
+        }
+
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+
+    @classmethod
+    def load(cls, path: Union[Path, str]) -> "TrainingHistory":
+        """Load training history from a JSON file.
+
+        Args:
+            path: Path to the JSON file.
+
+        Returns:
+            TrainingHistory: The loaded training history.
+        """
+        import json
+
+        with open(path) as f:
+            data = json.load(f)
+
+        return cls(
+            loss_curve=data["loss_curve"],
+            validation_scores=data.get("validation_scores"),
+            final_training_loss=data["final_training_loss"],
+            final_validation_score=data.get("final_validation_score"),
+            n_iter=data["n_iter"],
+        )
+
+    def plot(
+        self,
+        output_path: Optional[Union[Path, str]] = None,
+        show: bool = False,
+    ) -> None:
+        """Plot the training and validation loss curves.
+
+        Creates a visualization of the training progress showing the loss curve
+        and validation scores (if available) over training iterations.
+
+        Args:
+            output_path (Optional[Union[Path, str]]): Path to save the plot image.
+                If None, the plot is not saved. Defaults to None.
+            show (bool): Whether to display the plot interactively. Defaults to False.
+        """
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        iterations = range(1, len(self.loss_curve) + 1)
+        ax.plot(
+            iterations,
+            self.loss_curve,
+            label="Training Loss",
+            color="#2563eb",
+            linewidth=2,
+        )
+
+        if self.validation_scores is not None:
+            # Validation scores are accuracy-like (higher is better), so we plot them on a secondary axis
+            ax2 = ax.twinx()
+            ax2.plot(
+                iterations,
+                self.validation_scores,
+                label="Validation Score",
+                color="#dc2626",
+                linewidth=2,
+                linestyle="--",
+            )
+            ax2.set_ylabel("Validation Score", color="#dc2626", fontsize=12)
+            ax2.tick_params(axis="y", labelcolor="#dc2626")
+            ax2.legend(loc="upper right")
+
+        ax.set_xlabel("Iteration", fontsize=12)
+        ax.set_ylabel("Training Loss", color="#2563eb", fontsize=12)
+        ax.tick_params(axis="y", labelcolor="#2563eb")
+        ax.set_title("Calibrator Training Progress", fontsize=14, fontweight="bold")
+        ax.legend(loc="upper left")
+        ax.grid(True, alpha=0.3)
+
+        # Add text annotation with final metrics
+        final_text = f"Final Training Loss: {self.final_training_loss:.6f}"
+        if self.final_validation_score is not None:
+            final_text += f"\nFinal Validation Score: {self.final_validation_score:.6f}"
+        final_text += f"\nIterations: {self.n_iter}"
+
+        ax.text(
+            0.02,
+            0.02,
+            final_text,
+            transform=ax.transAxes,
+            fontsize=10,
+            verticalalignment="bottom",
+            bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.8},
+        )
+
+        plt.tight_layout()
+
+        if output_path is not None:
+            output_path = Path(output_path)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            plt.savefig(output_path, dpi=150, bbox_inches="tight")
+
+        if show:
+            plt.show()
+
+        plt.close(fig)
 
 
 class ProbabilityCalibrator:
@@ -209,18 +352,46 @@ class ProbabilityCalibrator:
                 self.dependency_reference_counter.pop(dependency.name)
                 self.dependencies.pop(dependency.name)
 
-    def fit(self, dataset: CalibrationDataset) -> None:
+    def fit(self, dataset: CalibrationDataset) -> TrainingHistory:
         """Fit the MLP classifier using the given calibration dataset.
 
         This method computes the features from the dataset, prepares the labels, and trains an MLP classifier for recalibrating probabilities.
 
         Args:
             dataset (CalibrationDataset): The dataset used for training the classifier.
+
+        Returns:
+            TrainingHistory: A dataclass containing training metrics including loss curves
+                and validation scores (if early_stopping is enabled).
         """
         features, labels = self.compute_features(dataset=dataset, labelled=True)
         # Fit and transform features with scaler
         features_scaled = self.scaler.fit_transform(features)
         self.classifier.fit(features_scaled, labels)
+
+        # Extract training history from the fitted classifier
+        loss_curve = list(self.classifier.loss_curve_)
+        final_training_loss = loss_curve[-1] if loss_curve else float("nan")
+
+        # Validation scores are only available if early_stopping was enabled
+        validation_scores: Optional[List[float]] = None
+        final_validation_score: Optional[float] = None
+        if (
+            hasattr(self.classifier, "validation_scores_")
+            and self.classifier.validation_scores_
+        ):
+            validation_scores = list(self.classifier.validation_scores_)
+            final_validation_score = (
+                validation_scores[-1] if validation_scores else None
+            )
+
+        return TrainingHistory(
+            loss_curve=loss_curve,
+            validation_scores=validation_scores,
+            final_training_loss=final_training_loss,
+            final_validation_score=final_validation_score,
+            n_iter=self.classifier.n_iter_,
+        )
 
     def compute_features(
         self, dataset: CalibrationDataset, labelled: bool

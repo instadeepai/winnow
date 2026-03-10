@@ -1,10 +1,12 @@
 """Unit tests for winnow ProbabilityCalibrator."""
 
+import warnings
 import pickle
 import numpy as np
 import pandas as pd
 import pytest
-from winnow.calibration.calibrator import ProbabilityCalibrator
+from sklearn.exceptions import ConvergenceWarning
+from winnow.calibration.calibrator import ProbabilityCalibrator, TrainingHistory
 from winnow.calibration.calibration_features import (
     CalibrationFeatures,
     FeatureDependency,
@@ -238,12 +240,24 @@ class TestProbabilityCalibrator:
         feature = MockCalibrationFeature("test_feature", ["test_col"])
         calibrator.add_feature(feature)
 
-        # Should not raise any exception
-        calibrator.fit(labelled_dataset)
+        # Should not raise any exception and return TrainingHistory
+        history = calibrator.fit(labelled_dataset)
 
         # Check that scaler and classifier were fitted (basic smoke test)
         assert hasattr(calibrator.scaler, "mean_")  # Scaler fitted
         assert hasattr(calibrator.classifier, "classes_")  # Classifier fitted
+
+        # Check that TrainingHistory is returned with expected attributes
+        assert isinstance(history, TrainingHistory)
+        assert isinstance(history.loss_curve, list)
+        assert len(history.loss_curve) > 0
+        assert isinstance(history.final_training_loss, float)
+        assert history.n_iter > 0
+
+        # Early stopping is True by default, so validation scores should be available
+        assert history.validation_scores is not None
+        assert isinstance(history.validation_scores, list)
+        assert history.final_validation_score is not None
 
     def test_predict_after_fit(self, calibrator, labelled_dataset, sample_dataset):
         """Test prediction after fitting."""
@@ -323,3 +337,106 @@ class TestProbabilityCalibrator:
             assert "MLPClassifier" in error_msg
             assert "cannot correctly infer the trained feature set" in error_msg
             assert "retrain" in error_msg.lower() or "retraining" in error_msg.lower()
+
+    def test_fit_without_early_stopping(self, labelled_dataset):
+        """Test fitting the calibrator without early stopping."""
+        calibrator = ProbabilityCalibrator(seed=42, early_stopping=False, max_iter=10)
+        feature = MockCalibrationFeature("test_feature", ["test_col"])
+        calibrator.add_feature(feature)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", ConvergenceWarning)
+            history = calibrator.fit(labelled_dataset)
+
+        # Check that TrainingHistory is returned
+        assert isinstance(history, TrainingHistory)
+        assert isinstance(history.loss_curve, list)
+        assert len(history.loss_curve) > 0
+        assert isinstance(history.final_training_loss, float)
+
+        # Without early stopping, validation scores should be None
+        assert history.validation_scores is None
+        assert history.final_validation_score is None
+
+    def test_plot_training_history(self, tmp_path, labelled_dataset):
+        """Test plotting training history."""
+        calibrator = ProbabilityCalibrator(seed=42)
+        feature = MockCalibrationFeature("test_feature", ["test_col"])
+        calibrator.add_feature(feature)
+
+        history = calibrator.fit(labelled_dataset)
+
+        # Test saving plot to file
+        plot_path = tmp_path / "training_plot.png"
+        history.plot(output_path=plot_path)
+
+        # Check that the plot file was created
+        assert plot_path.exists()
+        assert plot_path.stat().st_size > 0
+
+    def test_plot_training_history_no_early_stopping(self, tmp_path, labelled_dataset):
+        """Test plotting training history without validation scores."""
+        calibrator = ProbabilityCalibrator(seed=42, early_stopping=False, max_iter=10)
+        feature = MockCalibrationFeature("test_feature", ["test_col"])
+        calibrator.add_feature(feature)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", ConvergenceWarning)
+            history = calibrator.fit(labelled_dataset)
+
+        # Test saving plot to file (should work even without validation scores)
+        plot_path = tmp_path / "training_plot_no_val.png"
+        history.plot(output_path=plot_path)
+
+        # Check that the plot file was created
+        assert plot_path.exists()
+        assert plot_path.stat().st_size > 0
+
+    def test_training_history_save_load(self, tmp_path, labelled_dataset):
+        """Test saving and loading training history."""
+        calibrator = ProbabilityCalibrator(seed=42)
+        feature = MockCalibrationFeature("test_feature", ["test_col"])
+        calibrator.add_feature(feature)
+
+        history = calibrator.fit(labelled_dataset)
+
+        # Save the history
+        history_path = tmp_path / "training_history.json"
+        history.save(history_path)
+
+        # Check that the file was created
+        assert history_path.exists()
+
+        # Load the history
+        loaded_history = TrainingHistory.load(history_path)
+
+        # Check that the loaded history matches the original
+        assert loaded_history.loss_curve == history.loss_curve
+        assert loaded_history.validation_scores == history.validation_scores
+        assert loaded_history.final_training_loss == history.final_training_loss
+        assert loaded_history.final_validation_score == history.final_validation_score
+        assert loaded_history.n_iter == history.n_iter
+
+    def test_training_history_save_load_no_early_stopping(
+        self, tmp_path, labelled_dataset
+    ):
+        """Test saving and loading training history without early stopping."""
+        calibrator = ProbabilityCalibrator(seed=42, early_stopping=False, max_iter=10)
+        feature = MockCalibrationFeature("test_feature", ["test_col"])
+        calibrator.add_feature(feature)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", ConvergenceWarning)
+            history = calibrator.fit(labelled_dataset)
+
+        # Save the history
+        history_path = tmp_path / "training_history_no_val.json"
+        history.save(history_path)
+
+        # Load the history
+        loaded_history = TrainingHistory.load(history_path)
+
+        # Check that validation_scores is None
+        assert loaded_history.validation_scores is None
+        assert loaded_history.final_validation_score is None
+        assert loaded_history.loss_curve == history.loss_curve

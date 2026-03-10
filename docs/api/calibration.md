@@ -24,8 +24,14 @@ calibrator.add_feature(MassErrorFeature(residue_masses=RESIDUE_MASSES))
 calibrator.add_feature(FragmentMatchFeatures(mz_tolerance=0.02))
 calibrator.add_feature(BeamFeatures())
 
-# Train the calibrator
-calibrator.fit(training_dataset)
+# Train the calibrator and get training history
+training_history = calibrator.fit(training_dataset)
+print(f"Final training loss: {training_history.final_training_loss:.6f}")
+if training_history.final_validation_score is not None:
+    print(f"Final validation score: {training_history.final_validation_score:.6f}")
+
+# Plot training progress
+training_history.plot(output_path="training_progress.png")
 
 # Make predictions
 calibrator.predict(test_dataset)
@@ -55,15 +61,56 @@ loaded_calibrator = ProbabilityCalibrator.load("calibrator_checkpoint")
 **Main Methods:**
 
 - `add_feature(feature)`: Add a calibration feature
-- `fit(dataset)`: Train the calibrator on a labelled dataset
+- `fit(dataset)`: Train the calibrator on a labelled dataset. Returns a `TrainingHistory` object containing training metrics.
 - `predict(dataset)`: Generate calibrated confidence scores
 - `save(calibrator, path)`: Save trained model to disk
 - `load(pretrained_model_name_or_path, cache_dir)`: Load trained model from Hugging Face Hub or local directory
 
-    - Default: Loads `"InstaDeepAI/winnow-general-model"` from Hugging Face
-    - Hugging Face: Pass a repository ID string (e.g., `"my-org/my-model"`)
-    - Local: Pass a `str` or `Path` object pointing to a model directory
-    - Models from Hugging Face are automatically cached in `~/.cache/huggingface/hub`
+  - Default: Loads `"InstaDeepAI/winnow-general-model"` from Hugging Face
+  - Hugging Face: Pass a repository ID string (e.g., `"my-org/my-model"`)
+  - Local: Pass a `str` or `Path` object pointing to a model directory
+  - Models from Hugging Face are automatically cached in `~/.cache/huggingface/hub`
+
+### TrainingHistory
+
+A dataclass containing training metrics from calibrator fitting. The training history is automatically saved to a JSON file during training (configurable via `training_history_path`).
+
+```python
+from winnow.calibration import TrainingHistory
+
+# Returned from calibrator.fit()
+training_history = calibrator.fit(training_dataset)
+
+# Access training metrics
+print(training_history.loss_curve)            # List of training loss at each iteration
+print(training_history.validation_scores)      # List of validation scores (if early_stopping=True)
+print(training_history.final_training_loss)    # Final training loss value
+print(training_history.final_validation_score) # Final validation score (if early_stopping=True)
+print(training_history.n_iter)                 # Number of training iterations
+
+# Save training history to JSON
+training_history.save("training_history.json")
+
+# Load training history from JSON (e.g., for later analysis or plotting)
+loaded_history = TrainingHistory.load("training_history.json")
+
+# Plot training progress
+loaded_history.plot(output_path="training_plot.png")
+```
+
+**Attributes:**
+
+- `loss_curve`: List of training loss values at each iteration
+- `validation_scores`: List of validation classification accuracy scores at each iteration (only if `early_stopping=True`)
+- `final_training_loss`: The final training loss value
+- `final_validation_score`: The final validation score (only if `early_stopping=True`)
+- `n_iter`: Number of iterations the solver ran
+
+**Methods:**
+
+- `save(path)`: Save training history to a JSON file
+- `load(path)`: Load training history from a JSON file (class method)
+- `plot(output_path, show)`: Plot training and validation loss curves
 
 ### CalibrationFeatures
 
@@ -245,6 +292,7 @@ rt_feat = RetentionTimeFeature(hidden_dim=10, train_fraction=0.1, learn_from_mis
 ### Prediction workflow
 
 1. **Load Calibrator**: Use `load()` to restore trained model from a Hugging Face repository or a local directory
+
    ```python
    # Option 1: Use default pretrained model
    calibrator = ProbabilityCalibrator.load()
@@ -255,6 +303,7 @@ rt_feat = RetentionTimeFeature(hidden_dim=10, train_fraction=0.1, learn_from_mis
    # Option 3: Use local model
    calibrator = ProbabilityCalibrator.load("./my_calibrator")
    ```
+
 2. **Predict**: Call `predict()` with unlabelled `CalibrationDataset`
 3. **Access Results**: Calibrated scores stored in dataset's "calibrated_confidence" column
 
