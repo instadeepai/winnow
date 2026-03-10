@@ -24,3 +24,4 @@ spec:
       resources:
         cpus: 12
         ramRatio: 4 # >= 2
+
