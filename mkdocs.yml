@@ -71,6 +71,15 @@ nav:
   - API reference:
     - Datasets: api/datasets.md
     - Calibration: api/calibration.md
+    - Calibration Features:
+      - Overview: api/features/index.md
+      - MassErrorFeature: api/features/mass_error.md
+      - BeamFeatures: api/features/beam.md
+      - FragmentMatchFeatures: api/features/fragment_match.md
+      - ChimericFeatures: api/features/chimeric.md
+      - RetentionTimeFeature: api/features/retention_time.md
+      - SequenceFeatures: api/features/sequence.md
+      - TokenScoreFeatures: api/features/token_score.md
     - FDR: api/fdr.md
   - Contributing: contributing.md
   - License: license.md
