@@ -157,3 +157,42 @@ clean:
 
 ## Clean outputs and regenerate sample data
 clean-all: clean sample-data
+
+#################################################################################
+## Copy datasets
+#################################################################################
+
+.PHONY: copy-data-from-ceph
+
+copy-data-from-ceph:
+	uv pip install awscli
+	uv run python scripts/set_ceph_credentials.py
+	aws s3 cp --recursive s3://winnow-g88rh/revisions/datasets/ datasets/ --profile winnow
+
+#################################################################################
+## Ablation study
+#################################################################################
+
+.PHONY: ablation-study
+
+ablation-study: copy-data-from-ceph
+	uv run python scripts/ablation_study.py \
+	--train-spectra datasets/train.parquet \
+	--train-predictions datasets/instanovo_preds/train_preds.csv \
+	--indomain-spectra datasets/val.parquet \
+	--indomain-predictions datasets/instanovo_preds/val_preds.csv \
+	--ood-spectra datasets/immuno2_labelled.parquet \
+	--ood-predictions datasets/instanovo_preds/immuno2_labelled_preds.csv \
+	--output-dir results/ablation
+
+#################################################################################
+## Train general model
+#################################################################################
+
+.PHONY: train-general-model
+
+train-general-model: copy-data-from-ceph
+	uv run winnow train \
+	dataset.spectrum_path_or_directory=datasets/train.parquet \
+	dataset.predictions_path=datasets/instanovo_preds/train_preds.csv \
+	model_output_dir=models/general_model
