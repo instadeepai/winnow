@@ -1330,3 +1330,90 @@ class RetentionTimeFeature(CalibrationFeatures):
         dataset.metadata["irt_error"] = np.abs(
             dataset.metadata["predicted iRT"] - dataset.metadata["iRT"]
         ).fillna(0.0)
+
+
+class SequenceFeatures(CalibrationFeatures):
+    """Computes basic sequence features intended to help the calibrator distinguish between tryptic and non-tryptic peptides."""
+
+    def __init__(self) -> None:
+        """Initialize SequenceFeatures."""
+        pass
+
+    @property
+    def dependencies(self) -> List[FeatureDependency]:
+        """Returns a list of dependencies required before computing the feature."""
+        return []
+
+    @property
+    def name(self) -> str:
+        """Returns the name of the feature."""
+        return "Sequence Features"
+
+    @property
+    def columns(self) -> List[str]:
+        """Returns the columns of the feature."""
+        return ["sequence_length", "precursor_charge", "is_c_term_tryptic"]
+
+    def prepare(self, dataset: CalibrationDataset) -> None:
+        """Prepares the dataset for the feature computation."""
+        pass
+
+    def compute(self, dataset: CalibrationDataset) -> None:
+        """Computes the feature for the dataset."""
+        dataset.metadata["sequence_length"] = len(dataset.metadata["prediction"])
+        dataset.metadata["is_c_term_tryptic"] = dataset.metadata["prediction"][-1] in [
+            "K",
+            "R",
+        ]
+
+
+class TokenScoreFeatures(CalibrationFeatures):
+    """Computes token score features from the peptide sequencer scores."""
+
+    def __init__(self) -> None:
+        """Initialize TokenScoreFeatures."""
+
+    @property
+    def dependencies(self) -> List[FeatureDependency]:
+        """Returns a list of dependencies required before computing the feature."""
+        return []
+
+    @property
+    def name(self) -> str:
+        """Returns the name of the feature."""
+        return "Token Score Features"
+
+    @property
+    def columns(self) -> List[str]:
+        """Returns the columns of the feature."""
+        return ["min_token_score", "std_token_score"]
+
+    def prepare(self, dataset: CalibrationDataset) -> None:
+        """Prepares the dataset for the feature computation."""
+        metadata_not_contains_token_scores = (
+            "token_scores" not in dataset.metadata.columns
+            and "token_log_probabilities" not in dataset.metadata.columns
+        )
+        token_score_column_is_empty = (
+            dataset.metadata["token_scores"].isna().all()
+            or dataset.metadata["token_log_probabilities"].isna().all()
+        )
+        if metadata_not_contains_token_scores or token_score_column_is_empty:
+            raise ValueError(
+                "Token-level scores are not available for the dataset. This is required for token score features computation."
+            )
+
+        # Check which token score column is available
+        if "token_scores" in dataset.metadata.columns:
+            self.token_score_column = "token_scores"
+        elif "token_log_probabilities" in dataset.metadata.columns:
+            self.token_score_column = "token_log_probabilities"
+
+    def compute(self, dataset: CalibrationDataset) -> None:
+        """Computes the feature for the dataset."""
+        dataset.metadata["min_token_score"] = dataset.metadata[
+            self.token_score_column
+        ].min()
+        dataset.metadata["std_token_score"] = dataset.metadata[
+            self.token_score_column
+        ].std()
