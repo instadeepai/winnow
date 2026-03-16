@@ -13,6 +13,7 @@ from winnow.calibration.features.utils import (
     compute_complementary_ion_count,
     compute_max_ion_gap,
     compute_b_y_intensity_ratio,
+    compute_spectral_angle,
 )
 from winnow.calibration.features.fragment_match import FragmentMatchFeatures
 from winnow.calibration.features.chimeric import ChimericFeatures
@@ -168,6 +169,63 @@ class TestIonMatchFunctions:
         assert matched_annotations[0] == "b1+1"
         # Intensity should include M0 (1000) + isotope (500) = 1500 / 3500 total
         assert average_intensity == pytest.approx(1500.0 / 3500.0)
+
+    def test_find_matching_ions_returns_aligned_m0_intensities(self):
+        """Test that aligned_m0_intensities has same length as source_mz."""
+        source_mz = [100.0, 200.0, 300.0]
+        target_mz = [100.0, 200.0, 400.0]  # 300.0 has no match
+        target_intensities = [1000.0, 2000.0, 4000.0]
+        tolerance = 0.01
+
+        (
+            _match_fraction,
+            _average_intensity,
+            _matched_annotations,
+            _matched_mz,
+            _matched_intensities_isotopic,
+            aligned_m0_intensities,
+        ) = find_matching_ions(
+            source_mz,
+            target_mz,
+            target_intensities,
+            source_annotations=["b1+1", "b2+1", "b3+1"],
+            mz_tolerance=tolerance,
+        )
+
+        # aligned_m0_intensities should have same length as source_mz
+        assert len(aligned_m0_intensities) == len(source_mz)
+        # First two should have M0 intensities, third should be 0.0 (no match)
+        assert aligned_m0_intensities[0] == 1000.0  # M0 intensity for 100.0
+        assert aligned_m0_intensities[1] == 2000.0  # M0 intensity for 200.0
+        assert aligned_m0_intensities[2] == 0.0  # No match for 300.0
+
+    def test_find_matching_ions_aligned_intensities_are_m0_only(self):
+        """Test that aligned_m0_intensities contains only M0, not isotope intensities."""
+        source_mz = [100.0]
+        # Observed: M0 at 100.0 and M+1 isotope at ~101.003
+        target_mz = [100.0, 101.003]
+        target_intensities = [1000.0, 500.0]
+        tolerance = 0.02
+
+        (
+            _match_fraction,
+            _average_intensity,
+            _matched_annotations,
+            _matched_mz,
+            matched_intensities_isotopic,
+            aligned_m0_intensities,
+        ) = find_matching_ions(
+            source_mz,
+            target_mz,
+            target_intensities,
+            source_annotations=["b1+1"],  # +1 charge
+            mz_tolerance=tolerance,
+        )
+
+        # aligned_m0_intensities should only have M0 intensity
+        assert aligned_m0_intensities[0] == 1000.0
+        # matched_intensities_isotopic should include M0 + isotope
+        assert matched_intensities_isotopic[0] == 1500.0  # 1000 + 500
 
 
 class TestModelInputHelpers:
@@ -528,3 +586,65 @@ class TestSpectrumMatchQualityFunctions:
         """Test b/y ratio when no ions are matched."""
         ratio = compute_b_y_intensity_ratio([], [])
         assert ratio == 0.0
+
+    # --- Spectral Angle ---
+
+    def test_compute_spectral_angle_perfect_match(self):
+        """Test spectral angle with identical intensity vectors."""
+        theoretical = [1.0, 2.0, 3.0]
+        observed = [1.0, 2.0, 3.0]
+        angle = compute_spectral_angle(theoretical, observed)
+        # Perfect match should give 1.0
+        assert angle == pytest.approx(1.0, abs=1e-10)
+
+    def test_compute_spectral_angle_scaled_match(self):
+        """Test spectral angle with proportionally scaled intensities."""
+        theoretical = [1.0, 2.0, 3.0]
+        observed = [2.0, 4.0, 6.0]  # Scaled by 2x
+        angle = compute_spectral_angle(theoretical, observed)
+        # Proportional vectors should give 1.0 (same direction)
+        assert angle == pytest.approx(1.0, abs=1e-10)
+
+    def test_compute_spectral_angle_orthogonal(self):
+        """Test spectral angle with orthogonal vectors."""
+        theoretical = [1.0, 0.0]
+        observed = [0.0, 1.0]
+        angle = compute_spectral_angle(theoretical, observed)
+        # Orthogonal vectors should give 0.0
+        assert angle == pytest.approx(0.0, abs=1e-10)
+
+    def test_compute_spectral_angle_partial_match(self):
+        """Test spectral angle with partial match."""
+        theoretical = [1.0, 1.0, 1.0]
+        observed = [1.0, 0.0, 0.0]  # Only first ion matched
+        angle = compute_spectral_angle(theoretical, observed)
+        # Should be between 0 and 1
+        assert 0.0 < angle < 1.0
+
+    def test_compute_spectral_angle_no_observed_matches(self):
+        """Test spectral angle when no ions are observed (all zeros)."""
+        theoretical = [1.0, 2.0, 3.0]
+        observed = [0.0, 0.0, 0.0]
+        angle = compute_spectral_angle(theoretical, observed)
+        # No matches should give 0.0
+        assert angle == 0.0
+
+    def test_compute_spectral_angle_missing_data(self):
+        """Test spectral angle with NaN theoretical intensities."""
+        import math
+
+        angle = compute_spectral_angle(math.nan, [1.0, 2.0])
+        # Missing data should return 0.0
+        assert angle == 0.0
+
+    def test_compute_spectral_angle_empty_lists(self):
+        """Test spectral angle with empty lists."""
+        angle = compute_spectral_angle([], [])
+        assert angle == 0.0
+
+    def test_compute_spectral_angle_length_mismatch_raises(self):
+        """Test that mismatched lengths raise ValueError."""
+        theoretical = [1.0, 2.0, 3.0]
+        observed = [1.0, 2.0]  # Different length
+        with pytest.raises(ValueError, match="must align"):
+            compute_spectral_angle(theoretical, observed)
