@@ -12,6 +12,7 @@ from winnow.calibration.features.utils import (
     compute_longest_ion_series,
     compute_complementary_ion_count,
     compute_max_ion_gap,
+    compute_b_y_intensity_ratio,
 )
 from winnow.calibration.features.fragment_match import FragmentMatchFeatures
 from winnow.calibration.features.chimeric import ChimericFeatures
@@ -28,7 +29,7 @@ class TestIonMatchFunctions:
         target_intensities = [1000.0, 2000.0, 4000.0]
         tolerance = 0.01
 
-        match_fraction, average_intensity, _, _ = find_matching_ions(
+        match_fraction, average_intensity, *_ = find_matching_ions(
             source_mz,
             target_mz,
             target_intensities,
@@ -54,7 +55,7 @@ class TestIonMatchFunctions:
         target_intensities = [1000.0, 2000.0]
         tolerance = 0.02
 
-        match_fraction, average_intensity, _, _ = find_matching_ions(
+        match_fraction, average_intensity, *_ = find_matching_ions(
             source_mz,
             target_mz,
             target_intensities,
@@ -74,7 +75,7 @@ class TestIonMatchFunctions:
         target_intensities = [1000.0, 2000.0]
         tolerance = 0.01
 
-        match_fraction, average_intensity, _, _ = find_matching_ions(
+        match_fraction, average_intensity, *_ = find_matching_ions(
             source_mz,
             target_mz,
             target_intensities,
@@ -91,7 +92,7 @@ class TestIonMatchFunctions:
         target_mz = [200.0]  # No match within tolerance
         target_intensities = [1000.0]
 
-        match_fraction, average_intensity, _, _ = find_matching_ions(
+        match_fraction, average_intensity, *_ = find_matching_ions(
             source_mz,
             target_mz,
             target_intensities,
@@ -109,7 +110,7 @@ class TestIonMatchFunctions:
         target_intensities = [1000.0]
         tolerance = 0.02
 
-        match_fraction, average_intensity, matched_annotations, _ = find_matching_ions(
+        match_fraction, average_intensity, matched_annotations, *_ = find_matching_ions(
             source_mz,
             target_mz,
             target_intensities,
@@ -130,7 +131,7 @@ class TestIonMatchFunctions:
         target_intensities = [1000.0, 2000.0]
         tolerance = 0.02
 
-        match_fraction, average_intensity, matched_annotations, _ = find_matching_ions(
+        match_fraction, average_intensity, matched_annotations, *_ = find_matching_ions(
             source_mz,
             target_mz,
             target_intensities,
@@ -152,7 +153,7 @@ class TestIonMatchFunctions:
         target_intensities = [1000.0, 500.0, 2000.0]
         tolerance = 0.02
 
-        match_fraction, average_intensity, matched_annotations, _ = find_matching_ions(
+        match_fraction, average_intensity, matched_annotations, *_ = find_matching_ions(
             source_mz,
             target_mz,
             target_intensities,
@@ -497,3 +498,33 @@ class TestSpectrumMatchQualityFunctions:
         """Test max ion gap with fewer than 2 ions."""
         assert compute_max_ion_gap([100.0]) == 0.0
         assert compute_max_ion_gap([]) == 0.0
+
+    # --- B/Y Intensity Ratio ---
+
+    def test_compute_b_y_intensity_ratio_both_ion_types(self):
+        """Test b/y intensity ratio with both b and y ions."""
+        annotations = ["b1+1", "b2+1", "y1+1", "y2+1"]
+        intensities = [1000.0, 2000.0, 500.0, 500.0]  # b=3000, y=1000
+        ratio = compute_b_y_intensity_ratio(annotations, intensities)
+        assert ratio == pytest.approx(3.0, rel=1e-6)
+
+    def test_compute_b_y_intensity_ratio_only_b_ions(self):
+        """Test b/y ratio when only b ions are matched (y=0, uses epsilon)."""
+        annotations = ["b1+1", "b2+1", "b3+1"]
+        intensities = [1000.0, 2000.0, 3000.0]  # b=6000, y=0
+        ratio = compute_b_y_intensity_ratio(annotations, intensities, epsilon=1e-8)
+        # Should be very large: 6000 / 1e-8 = 6e11
+        assert ratio == pytest.approx(6000.0 / 1e-8, rel=1e-6)
+
+    def test_compute_b_y_intensity_ratio_only_y_ions(self):
+        """Test b/y ratio when only y ions are matched."""
+        annotations = ["y1+1", "y2+1"]
+        intensities = [1000.0, 2000.0]  # b=0, y=3000
+        ratio = compute_b_y_intensity_ratio(annotations, intensities)
+        # Should be ~0: 0 / (3000 + epsilon)
+        assert ratio == pytest.approx(0.0, abs=1e-10)
+
+    def test_compute_b_y_intensity_ratio_no_ions(self):
+        """Test b/y ratio when no ions are matched."""
+        ratio = compute_b_y_intensity_ratio([], [])
+        assert ratio == 0.0
