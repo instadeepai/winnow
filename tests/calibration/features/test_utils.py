@@ -101,6 +101,73 @@ class TestIonMatchFunctions:
         assert match_fraction == 0.0  # 0 matches / 1 source ion
         assert average_intensity == 0.0  # 0 match intensity / 1000 total intensity
 
+    def test_find_matching_ions_prevents_double_matching(self):
+        """Test that each observed peak can only be matched once."""
+        # Two theoretical ions very close together, only one observed peak
+        source_mz = [100.0, 100.005]
+        target_mz = [100.002]  # Within tolerance of both source ions
+        target_intensities = [1000.0]
+        tolerance = 0.02
+
+        match_fraction, average_intensity, matched_annotations, _ = find_matching_ions(
+            source_mz,
+            target_mz,
+            target_intensities,
+            source_annotations=["b1+1", "b2+1"],
+            mz_tolerance=tolerance,
+        )
+
+        # Only one source ion should match (the first one gets the peak)
+        assert match_fraction == pytest.approx(0.5)  # 1 match / 2 source ions
+        assert len(matched_annotations) == 1
+        assert matched_annotations[0] == "b1+1"
+
+    def test_find_matching_ions_fallback_to_second_best(self):
+        """Test fallback to next nearest peak when closest is already matched."""
+        # First source ion takes the middle peak, second should fall back to the other
+        source_mz = [100.0, 100.01]
+        target_mz = [100.002, 100.015]  # Both within tolerance of second source
+        target_intensities = [1000.0, 2000.0]
+        tolerance = 0.02
+
+        match_fraction, average_intensity, matched_annotations, _ = find_matching_ions(
+            source_mz,
+            target_mz,
+            target_intensities,
+            source_annotations=["b1+1", "b2+1"],
+            mz_tolerance=tolerance,
+        )
+
+        # Both source ions should match (to different observed peaks)
+        assert match_fraction == 1.0  # 2 matches / 2 source ions
+        assert len(matched_annotations) == 2
+
+    def test_find_matching_ions_isotope_masking(self):
+        """Test that isotope peaks are masked and not available for subsequent M0 matches."""
+        # First source ion at 100.0 has isotope at ~101.003 (for +1 charge)
+        # Second source ion at 101.0 should NOT match the isotope peak
+        source_mz = [100.0, 101.0]
+        # Observed peaks: M0 at 100.0, M+1 isotope at 101.003, and another at 150.0
+        target_mz = [100.0, 101.003, 150.0]
+        target_intensities = [1000.0, 500.0, 2000.0]
+        tolerance = 0.02
+
+        match_fraction, average_intensity, matched_annotations, _ = find_matching_ions(
+            source_mz,
+            target_mz,
+            target_intensities,
+            source_annotations=["b1+1", "b2+1"],  # +1 charge, isotope spacing ~1.003
+            mz_tolerance=tolerance,
+        )
+
+        # First ion matches (M0 at 100.0, isotope at 101.003)
+        # Second ion at 101.0 should NOT match 101.003 (already claimed as isotope)
+        assert match_fraction == pytest.approx(0.5)  # Only 1 M0 match / 2 source ions
+        assert len(matched_annotations) == 1
+        assert matched_annotations[0] == "b1+1"
+        # Intensity should include M0 (1000) + isotope (500) = 1500 / 3500 total
+        assert average_intensity == pytest.approx(1500.0 / 3500.0)
+
 
 class TestModelInputHelpers:
     """Tests for validate_model_input_params and resolve_model_inputs utility functions."""
