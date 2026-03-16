@@ -56,6 +56,7 @@ For each theoretical peak, we search for the nearest observed peak using binary 
 | `complementary_ion_count` | Count (integer) | Number of peptide bond positions where **both** the b-ion and complementary y-ion are matched. For a peptide of length n, bond position i produces b_i and y_(n-i). Finding both provides stronger evidence of a correct identification. |
 | `max_ion_gap` | Daltons (Da) | Largest m/z difference between two consecutive matched theoretical peaks when sorted by m/z. Large gaps may indicate missing fragmentation coverage. |
 | `b_y_intensity_ratio` | Ratio | Ratio of total matched b-ion intensity to total matched y-ion intensity (including isotopic envelopes). |
+| `spectral_angle` | Score (0-1) | Normalized spectral angle similarity between theoretical and matched observed intensity vectors. A value of 1 indicates perfect correlation, 0 indicates orthogonal vectors. |
 
 ## Usage
 
@@ -106,3 +107,4 @@ For some Koina-hosted intensity prediction models, the dataset may also require:
 - Different Koina models have different constraints. See [configuration guide](../../configuration.md#koina-model-input-validation) for details.
 - When `learn_from_missing=True`, invalid rows get zero feature values and an `is_missing_fragment_match_features` indicator column.
 - `b_y_intensity_ratio` is computed as `b_total / (y_total + epsilon)` where epsilon is a small constant providing numerical stability when no y-ions are matched.
+- Spectral angle calculations do not take into account isotopic envelopes. Only the first matching peak's intensity is compared against the corresponding theoretical intensity value.
