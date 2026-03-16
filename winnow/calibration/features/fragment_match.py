@@ -20,7 +20,7 @@ class FragmentMatchFeatures(CalibrationFeatures):
 
     Uses a Koina intensity model to generate a theoretical fragmentation spectrum for the top-1
     de novo predicted peptide sequence, then computes how well that theoretical spectrum matches
-    the observed spectrum (ion match rate and ion match intensity).
+    the observed spectrum.
     """
 
     def __init__(
@@ -121,6 +121,7 @@ class FragmentMatchFeatures(CalibrationFeatures):
             "complementary_ion_count",
             "max_ion_gap",
             "b_y_intensity_ratio",
+            "spectral_angle",
         ]
         if self.learn_from_missing:
             columns.append("is_missing_fragment_match_features")
@@ -287,10 +288,12 @@ class FragmentMatchFeatures(CalibrationFeatures):
             complementary_ion_count,
             max_ion_gap,
             b_y_intensity_ratio,
+            spectral_angle,
         ) = compute_ion_identifications(
             dataset=dataset.metadata,
-            source_column="theoretical_mz",
+            source_mz_column="theoretical_mz",
             source_annotation_column="theoretical_annotation",
+            source_intensity_column="theoretical_intensity",
             mz_tolerance=self.mz_tolerance,
         )
 
@@ -301,3 +304,4 @@ class FragmentMatchFeatures(CalibrationFeatures):
         dataset.metadata["complementary_ion_count"] = complementary_ion_count
         dataset.metadata["max_ion_gap"] = max_ion_gap
         dataset.metadata["b_y_intensity_ratio"] = b_y_intensity_ratio
+        dataset.metadata["spectral_angle"] = spectral_angle
