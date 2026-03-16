@@ -115,6 +115,18 @@ clean-build:
 ## Build the package and then clean up (safe test build)
 test-build: build-package clean-build
 
+# Build the documentation
+build-docs:
+	uv run mkdocs build
+
+## Serve the documentation
+serve-docs:
+	uv run mkdocs serve
+
+## Clean the documentation
+clean-docs:
+	rm -rf docs_public/
+
 ## Set the GCP credentials
 set-gcp-credentials:
 	uv run python scripts/set_gcp_credentials.py
