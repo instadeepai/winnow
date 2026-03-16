@@ -47,7 +47,7 @@ All columns from `FragmentMatchFeatures` with `chimeric_` prefix:
 | `chimeric_complementary_ion_count` | Count (integer) | Bond positions with both b and y ions for runner-up |
 | `chimeric_max_ion_gap` | Daltons (Da) | Largest gap between matched runner-up ions |
 | `chimeric_b_y_intensity_ratio` | Ratio | Ratio of b-ion to y-ion intensity for runner-up (including isotopic envelopes) |
-
+| `chimeric_spectral_angle` | Score (0-1) | Spectral angle similarity between runner-up theoretical and observed intensities |
 
 ```python
 from winnow.calibration.features import ChimericFeatures
