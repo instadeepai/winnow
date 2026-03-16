@@ -105,7 +105,7 @@ class FragmentMatchFeatures(CalibrationFeatures):
         The columns include:
             - Basic match metrics: ion_matches, ion_match_intensity
             - Ion coverage: longest_b_series, longest_y_series,
-              complementary_ion_count, max_ion_gap
+              complementary_ion_count, max_ion_gap, b_y_intensity_ratio
 
         Returns:
             List[str]: A list of column names for all computed features, and optionally
@@ -120,6 +120,7 @@ class FragmentMatchFeatures(CalibrationFeatures):
             "longest_y_series",
             "complementary_ion_count",
             "max_ion_gap",
+            "b_y_intensity_ratio",
         ]
         if self.learn_from_missing:
             columns.append("is_missing_fragment_match_features")
@@ -285,6 +286,7 @@ class FragmentMatchFeatures(CalibrationFeatures):
             longest_y_series,
             complementary_ion_count,
             max_ion_gap,
+            b_y_intensity_ratio,
         ) = compute_ion_identifications(
             dataset=dataset.metadata,
             source_column="theoretical_mz",
@@ -298,3 +300,4 @@ class FragmentMatchFeatures(CalibrationFeatures):
         dataset.metadata["longest_y_series"] = longest_y_series
         dataset.metadata["complementary_ion_count"] = complementary_ion_count
         dataset.metadata["max_ion_gap"] = max_ion_gap
+        dataset.metadata["b_y_intensity_ratio"] = b_y_intensity_ratio
