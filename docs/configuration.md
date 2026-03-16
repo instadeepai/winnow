@@ -242,7 +242,7 @@ filters. Predictions that fail any check are treated as **missing** rather than 
 #### Validity filters
 
 | Parameter | Applies to | Description |
-|---|---|---|
+| --- | --- | --- |
 | `max_precursor_charge` | `FragmentMatchFeatures`, `ChimericFeatures` | Predictions with a precursor charge strictly greater than this value are excluded. |
 | `max_peptide_length` | all three features | Predictions with more residue tokens than this limit are excluded. In `ChimericFeatures`, this limit is applied to the **runner-up (second-best) sequence**, not the top-1 prediction. |
 | `unsupported_residues` | all three features | Predictions containing any of the listed ProForma tokens are excluded. |
@@ -421,6 +421,7 @@ Winnow represents PTMs using the UNIMOD format internally, so all residue masses
 Each data format has a dedicated loader configuration in `configs/data_loader/`:
 
 **InstaNovo** (`configs/data_loader/instanovo.yaml`):
+
 ```yaml
 _target_: winnow.datasets.data_loaders.InstaNovoDatasetLoader
 residue_masses: ${residue_masses}
@@ -444,7 +445,7 @@ a setting which changes the column names of saved beams.
 The `beam_columns` parameter specifies the prefix for each required column type:
 
 | Key | Description | Example columns |
-|-----|-------------|-----------------|
+| ----- | ------------- | ----------------- |
 | `sequence` | Peptide sequence for each beam | `predictions_beam_0`, `predictions_beam_1`, ... |
 | `log_probability` | Log probability score for each beam | `predictions_log_probability_beam_0`, ... |
 | `token_log_probabilities` | Per-token log probabilities | `predictions_token_log_probabilities_beam_0`, ... |
@@ -466,6 +467,7 @@ winnow train data_loader.beam_columns=null
 ```
 
 **MZTab** (`configs/data_loader/mztab.yaml`):
+
 ```yaml
 _target_: winnow.datasets.data_loaders.MZTabDatasetLoader
 residue_masses: ${residue_masses}
@@ -481,12 +483,14 @@ The `load_beams` parameter controls whether beam predictions are created from mu
 predictions per spectrum. Set to `false` if you only need metadata features.
 
 **PointNovo** (`configs/data_loader/pointnovo.yaml`):
+
 ```yaml
 _target_: winnow.datasets.data_loaders.PointNovoDatasetLoader
 residue_masses: ${residue_masses}
 ```
 
 **Winnow** (`configs/data_loader/winnow.yaml`):
+
 ```yaml
 _target_: winnow.datasets.data_loaders.WinnowDatasetLoader
 residue_masses: ${residue_masses}
@@ -533,6 +537,7 @@ Common interpolation patterns in Winnow configs:
 3. Use with: `winnow train data_loader=custom`
 
 Example `configs/data_loader/custom.yaml`:
+
 ```yaml
 _target_: my_module.CustomDatasetLoader
 residue_masses: ${residue_masses}
@@ -543,6 +548,7 @@ custom_param: value
 
 1. Create feature class inheriting from `CalibrationFeatures`
 2. Add to `configs/calibrator.yaml`:
+
    ```yaml
    features:
      custom_feature:
@@ -558,6 +564,7 @@ custom_param: value
 3. Use with: `winnow predict fdr_method=custom_method`
 
 Example `configs/fdr_method/custom_method.yaml`:
+
 ```yaml
 _target_: my_module.CustomFDRControl
 confidence_feature: ${fdr_control.confidence_column}
@@ -659,6 +666,7 @@ When you use `--config-dir`, Winnow will:
 - ❌ **Partial configs at key level don't work**: If you provide `calibrator.yaml` with only `seed: 999`, the other settings (`hidden_layer_sizes`, `features`, etc.) will be **missing**, not using package defaults. This will cause errors.
 
 **Example - What happens with minimal config:**
+
 ```yaml
 # custom/calibrator.yaml - TOO MINIMAL
 calibrator:
@@ -669,6 +677,7 @@ calibrator:
 **Result**: Only `_target_` and `seed` are present. All other keys (`hidden_layer_sizes`, `learning_rate_init`, `features`, etc.) are **missing** from the final config. This will cause errors when running the pipeline in most cases.
 
 **Example - What you need (complete structure):**
+
 ```yaml
 # custom/calibrator.yaml - COMPLETE STRUCTURE REQUIRED
 calibrator:
