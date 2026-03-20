@@ -208,3 +208,35 @@ train-general-model: copy-data-from-ceph
 	dataset.spectrum_path_or_directory=datasets/train.parquet \
 	dataset.predictions_path=datasets/instanovo_preds/train_preds.csv \
 	model_output_dir=models/general_model
+
+#################################################################################
+## Evaluate general model
+#################################################################################
+
+.PHONY: evaluate-general-model
+
+evaluate-general-model: copy-data-from-ceph
+# Evaluate on validation set
+	uv run winnow predict \
+	dataset.spectrum_path_or_directory=datasets/val.parquet \
+	dataset.predictions_path=datasets/instanovo_preds/val_preds.csv \
+	calibrator.pretrained_model_name_or_path=models/general_model \
+	fdr_control.fdr_threshold=1.0
+
+# Evaluate on immuno2 dataset
+	uv run winnow predict \
+	dataset.spectrum_path_or_directory=datasets/immuno2_labelled.parquet \
+	dataset.predictions_path=datasets/instanovo_preds/immuno2_labelled_preds.csv \
+	calibrator.pretrained_model_name_or_path=models/general_model \
+	fdr_control.fdr_threshold=1.0
+
+# Evaluate on C elegans dataset
+	uv run winnow predict \
+	dataset.spectrum_path_or_directory=datasets/celegans_labelled.parquet \
+	dataset.predictions_path=datasets/instanovo_preds/celegans_labelled_preds.csv \
+	calibrator.pretrained_model_name_or_path=models/general_model \
+	fdr_control.fdr_threshold=1.0
+
+# Copy results to Ceph
+	aws s3 cp models/general_model/calibrator.pkl s3://winnow-g88rh/revisions/models/general_model/calibrator.pkl --profile winnow
+	aws s3 cp --recursive results/ s3://winnow-g88rh/revisions/results/general_model/ --profile winnow
