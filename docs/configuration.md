@@ -121,7 +121,7 @@ dataset_output_path: results/calibrated_dataset.csv
 **Key parameters:**
 
 - `data_loader`: Format of input data loader to use (via defaults: `instanovo`, `mztab`, `pointnovo`, `winnow`)
-- `dataset.spectrum_path_or_directory`: Path to spectrum/metadata file (or directory for Winnow format)
+- `dataset.spectrum_path_or_directory`: Path to spectrum/metadata file (InstaNovo: `.parquet`, `.ipc`, or `.mgf`; or directory for Winnow format)
 - `dataset.predictions_path`: Path to predictions file (set to null for Winnow format)
 - `model_output_dir`: Where to save trained model
 - `dataset_output_path`: Where to save calibrated training results
@@ -423,6 +423,7 @@ Each data format has a dedicated loader configuration in `configs/data_loader/`:
 **InstaNovo** (`configs/data_loader/instanovo.yaml`):
 ```yaml
 _target_: winnow.datasets.data_loaders.InstaNovoDatasetLoader
+add_index_cols: false  # If true, add experiment_name + spectrum_id for parquet/ipc (InstaNovo-style). MGF always gets these columns.
 residue_masses: ${residue_masses}
 residue_remapping:
   "M(ox)": "M[UNIMOD:35]"
