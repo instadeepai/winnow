@@ -444,7 +444,7 @@ def train(
     help=(
         "Compute calibration features and write enriched metadata to CSV.\n\n"
         "Loads the dataset using the same options as training, instantiates the calibrator "
-        "feature stack from config, runs feature computation (and optional ``prepare``), "
+        "feature stack from config, runs feature computation (``prepare`` when labelled=true), "
         "and saves the result without fitting the MLP or saving a model.\n\n"
         "[bold cyan]Quick start:[/bold cyan]\n"
         "  [dim]winnow compute-features[/dim]  # Uses config/compute_features.yaml\n\n"
