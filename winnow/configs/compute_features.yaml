@@ -1,0 +1,17 @@
+# --- Compute calibration features (no MLP fit / no model save) ---
+defaults:
+  - _self_
+  - residues
+  - calibrator
+  - data_loader: instanovo  # Options: instanovo, mztab, pointnovo, winnow
+
+dataset:
+  # Dataset paths (same as train):
+  spectrum_path_or_directory: examples/example_data/spectra.ipc
+  predictions_path: examples/example_data/predictions.csv
+
+dataset_output_path: results/metadata.csv
+# Drop rows with empty or non-list predictions (same helper as train/predict).
+filter_empty_predictions: true
+# If true, compute features for a labelled dataset (needed for RetentionTimeFeature iRT mapping, where we train a model to predict iRT from retention time using a high-confidence labelled subset of the dataset).
+labelled: true
