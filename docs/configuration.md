@@ -108,7 +108,7 @@ defaults:
 
 dataset:
   # Path to the spectrum data file or to folder containing saved internal Winnow dataset
-  spectrum_path_or_directory: data/spectra.ipc
+  spectrum_path_or_directory: data/spectra.mgf
   # Path to the beam predictions file
   # Leave as null if data source is winnow, or loading will fail
   predictions_path: data/predictions.csv
@@ -326,7 +326,7 @@ defaults:
 
 dataset:
   # Path to the spectrum data file or to folder containing saved internal Winnow dataset
-  spectrum_path_or_directory: data/spectra.ipc
+  spectrum_path_or_directory: data/spectra.mgf
   # Path to the beam predictions file
   # Leave as null if data source is winnow, or loading will fail
   predictions_path: data/predictions.csv
