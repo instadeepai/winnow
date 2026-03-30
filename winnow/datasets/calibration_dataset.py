@@ -50,21 +50,10 @@ class CalibrationDataset:
             data_dir (Path): Directory to save the dataset. This will contain `metadata.csv` and
                             optionally, `predictions.pkl` for serialized beam search results.
         """
-        data_dir.mkdir(parents=True, exist_ok=True)
-        with (data_dir / "metadata.csv").open(mode="w") as metadata_file:
-            output_metadata = self.metadata.copy(deep=True)
-            if "sequence" in output_metadata.columns:
-                output_metadata["sequence"] = output_metadata["sequence"].apply(
-                    tokens_to_proforma
-                )
-            output_metadata["prediction"] = output_metadata["prediction"].apply(
-                tokens_to_proforma
-            )
-            output_metadata.to_csv(metadata_file, index=False)
+        self.save_metadata(data_dir / "metadata.csv")
 
         if self.predictions:
-            with (data_dir / "predictions.pkl").open(mode="wb") as predictions_file:
-                pickle.dump(self.predictions, predictions_file)
+            self.save_predictions(data_dir / "predictions.pkl")
 
     @property
     def confidence_column(self) -> str:
@@ -155,6 +144,47 @@ class CalibrationDataset:
         metadata = metadata.reset_index(drop=True)
 
         return CalibrationDataset(predictions=predictions, metadata=metadata)
+
+    def save_metadata(self, path: Union[Path, str]) -> None:
+        """Save the dataset metadata to a CSV file.
+
+        Args:
+            path (Union[Path, str]): Path to the output CSV file.
+        """
+        if isinstance(path, str):
+            path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        output_metadata = self.metadata.copy(deep=True)
+
+        if "sequence" in output_metadata.columns:
+            output_metadata["sequence"] = output_metadata["sequence"].apply(
+                tokens_to_proforma
+            )
+        if "prediction" in output_metadata.columns:
+            output_metadata["prediction"] = output_metadata["prediction"].apply(
+                tokens_to_proforma
+            )
+        if "prediction_untokenised" in output_metadata.columns:
+            output_metadata = output_metadata.drop(columns=["prediction_untokenised"])
+        if "valid_sequence" in output_metadata.columns:
+            output_metadata = output_metadata.drop(columns=["valid_sequence"])
+        if "valid_prediction" in output_metadata.columns:
+            output_metadata = output_metadata.drop(columns=["valid_prediction"])
+        output_metadata.to_csv(path, index=False)
+
+    def save_predictions(self, path: Union[Path, str]) -> None:
+        """Save the dataset predictions to a pickle file.
+
+        Args:
+            path (Union[Path, str]): Path to the output pickle file.
+        """
+        if isinstance(path, str):
+            path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        with path.open(mode="wb") as predictions_file:
+            pickle.dump(self.predictions, predictions_file)
 
     def to_csv(self, path: Union[Path, str]) -> None:
         """Saves the dataset metadata to a CSV file.
