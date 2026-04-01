@@ -14,6 +14,7 @@ from winnow.calibration.features.utils import (
     compute_max_ion_gap,
     compute_b_y_intensity_ratio,
     compute_spectral_angle,
+    compute_xcorr,
 )
 from winnow.calibration.features.fragment_match import FragmentMatchFeatures
 from winnow.calibration.features.chimeric import ChimericFeatures
@@ -648,3 +649,100 @@ class TestSpectrumMatchQualityFunctions:
         observed = [1.0, 2.0]  # Different length
         with pytest.raises(ValueError, match="must align"):
             compute_spectral_angle(theoretical, observed)
+
+
+class TestXcorr:
+    """Test the fast xcorr score function."""
+
+    def test_matching_peaks_positive_score(self):
+        """Peaks exactly at theoretical positions should produce a positive xcorr."""
+        theoretical_mz = [200.0, 400.0, 600.0]
+        observed_mz = [200.0, 400.0, 600.0]
+        observed_intensities = [1000.0, 2000.0, 1500.0]
+
+        score = compute_xcorr(observed_mz, observed_intensities, theoretical_mz)
+        assert score > 0.0
+
+    def test_no_matching_peaks_low_score(self):
+        """Peaks far from theoretical positions should yield a low or negative xcorr."""
+        theoretical_mz = [200.0, 400.0, 600.0]
+        observed_mz = [250.0, 450.0, 650.0]
+        observed_intensities = [1000.0, 2000.0, 1500.0]
+
+        matching_score = compute_xcorr(
+            [200.0, 400.0, 600.0], observed_intensities, [200.0, 400.0, 600.0]
+        )
+        non_matching_score = compute_xcorr(
+            observed_mz, observed_intensities, theoretical_mz
+        )
+        assert non_matching_score < matching_score
+
+    def test_nan_theoretical_returns_zero(self):
+        """NaN theoretical m/z (missing prediction) returns 0.0."""
+        import math
+
+        score = compute_xcorr([100.0], [1000.0], math.nan)
+        assert score == 0.0
+
+    def test_empty_theoretical_returns_zero(self):
+        """Empty theoretical m/z list returns 0.0."""
+        score = compute_xcorr([100.0], [1000.0], [])
+        assert score == 0.0
+
+    def test_empty_observed_returns_zero(self):
+        """Empty observed spectrum returns 0.0."""
+        score = compute_xcorr([], [], [100.0, 200.0])
+        assert score == 0.0
+
+    def test_uniform_spectrum_much_lower_than_matching(self):
+        """A uniform observed spectrum should score much lower than a matching one.
+
+        When every bin has the same intensity, the background subtraction
+        largely cancels the signal. Some residual remains due to edge effects
+        in the background window near spectrum boundaries, but the score
+        should be much lower than when peaks align with theoretical positions.
+        """
+        observed_mz = [float(i) for i in range(50, 500)]
+        observed_intensities = [100.0] * len(observed_mz)
+        theoretical_mz = [100.0, 200.0, 300.0]
+
+        uniform_score = compute_xcorr(observed_mz, observed_intensities, theoretical_mz)
+
+        sparse_mz = [100.0, 200.0, 300.0]
+        sparse_intensities = [1000.0, 1000.0, 1000.0]
+        matching_score = compute_xcorr(sparse_mz, sparse_intensities, theoretical_mz)
+
+        assert uniform_score < matching_score * 0.25
+
+    def test_scale_invariance(self):
+        """Xcorr should be the same regardless of observed intensity scale.
+
+        Window normalization rescales each region to a fixed value, so
+        multiplying all intensities by a constant should not change the score.
+        """
+        theoretical_mz = [200.0, 400.0, 600.0]
+        observed_mz = [200.0, 300.0, 400.0, 500.0, 600.0]
+        intensities_1x = [1000.0, 500.0, 2000.0, 300.0, 1500.0]
+        intensities_100x = [i * 100.0 for i in intensities_1x]
+
+        score_1x = compute_xcorr(observed_mz, intensities_1x, theoretical_mz)
+        score_100x = compute_xcorr(observed_mz, intensities_100x, theoretical_mz)
+        assert score_1x == pytest.approx(score_100x, rel=1e-10)
+
+    def test_more_matches_higher_score(self):
+        """More matching peaks should produce a higher xcorr than fewer matches."""
+        observed_mz = [100.0, 200.0, 300.0, 400.0, 500.0]
+        observed_intensities = [1000.0] * 5
+
+        score_2_matches = compute_xcorr(
+            observed_mz, observed_intensities, [100.0, 200.0]
+        )
+        score_4_matches = compute_xcorr(
+            observed_mz, observed_intensities, [100.0, 200.0, 300.0, 400.0]
+        )
+        assert score_4_matches > score_2_matches
+
+    def test_single_peak_positive(self):
+        """A single observed peak matching a single theoretical ion should score positive."""
+        score = compute_xcorr([300.0], [5000.0], [300.0])
+        assert score > 0.0
