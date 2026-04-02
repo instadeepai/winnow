@@ -7,6 +7,9 @@ on:
 jobs:
   tests:
     runs-on: ubuntu-latest
+    env:
+      # secrets cannot be referenced in step `if:` (schema); expose a boolean via env instead.
+      HAS_BOT_TOKEN: ${{ secrets.BOT_ACCESS_TOKEN != '' }}
     permissions:
       contents: write
       pull-requests: write
@@ -27,7 +30,9 @@ jobs:
         with:
           pytest-xml-coverage-path: ./coverage.xml
           junitxml-path: ./pytest.xml
+      # Dependabot (and some fork PRs) do not receive Actions secrets; skip gist update to avoid 401.
       - name: Create the badge
+        if: env.HAS_BOT_TOKEN == 'true'
         uses: schneegans/dynamic-badges-action@v1.7.0
         with:
           auth: ${{ secrets.BOT_ACCESS_TOKEN }}
