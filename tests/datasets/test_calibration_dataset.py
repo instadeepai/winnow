@@ -190,8 +190,9 @@ class TestCalibrationDataset:
     def test_filter_entries_empty_result(self, calibration_dataset):
         """Test filtering that results in empty dataset."""
         filtered = calibration_dataset.filter_entries(
-            metadata_predicate=lambda row: row["confidence"]
-            >= 0.0  # Filter out everything
+            metadata_predicate=lambda row: (
+                row["confidence"] >= 0.0
+            )  # Filter out everything
         )
 
         assert len(filtered) == 0
@@ -210,8 +211,9 @@ class TestCalibrationDataset:
         """Test that filtering resets the DataFrame index."""
         # Filter out specific confidence values to get non-contiguous remaining indices
         filtered = calibration_dataset.filter_entries(
-            metadata_predicate=lambda row: row["confidence"]
-            in [0.8, 0.6]  # Remove indices 1, 3
+            metadata_predicate=lambda row: (
+                row["confidence"] in [0.8, 0.6]
+            )  # Remove indices 1, 3
         )
 
         # Check that the index was reset to be contiguous
@@ -235,8 +237,9 @@ class TestCalibrationDataset:
         """Test that accessing beam[0] on None beam raises helpful error."""
         with pytest.raises(ValueError, match="beam is None"):
             calibration_dataset.filter_entries(
-                predictions_predicate=lambda beam: beam[0].sequence_log_probability
-                <= np.log(0.7)
+                predictions_predicate=lambda beam: (
+                    beam[0].sequence_log_probability <= np.log(0.7)
+                )
             )
 
     def test_filter_entries_predictions_raises_error_on_none_len(
@@ -258,8 +261,9 @@ class TestCalibrationDataset:
         )
         with pytest.raises(ValueError, match="beam is empty"):
             empty_beam_dataset.filter_entries(
-                predictions_predicate=lambda beam: beam[0].sequence_log_probability
-                <= np.log(0.7)
+                predictions_predicate=lambda beam: (
+                    beam[0].sequence_log_probability <= np.log(0.7)
+                )
             )
 
     def test_filter_entries_predictions_raises_error_on_too_short_beam(
@@ -273,8 +277,9 @@ class TestCalibrationDataset:
         )
         with pytest.raises(ValueError, match="too short"):
             short_beam_dataset.filter_entries(
-                predictions_predicate=lambda beam: beam[1].sequence_log_probability
-                <= np.log(0.7)
+                predictions_predicate=lambda beam: (
+                    beam[1].sequence_log_probability <= np.log(0.7)
+                )
             )
 
     def test_filter_entries_handles_empty_dataset(self):

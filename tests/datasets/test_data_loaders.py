@@ -501,7 +501,7 @@ class TestInstaNovoDatasetLoader:
         from matchms.importing import load_from_mgf
 
         mgf_path = tmp_path / "minimal.mgf"
-        mgf_path.write_text("BEGIN IONS\n" "110.0 0.5\n" "END IONS\n", encoding="utf-8")
+        mgf_path.write_text("BEGIN IONS\n110.0 0.5\nEND IONS\n", encoding="utf-8")
         spectra = list(load_from_mgf(str(mgf_path)))
         df = InstaNovoDatasetLoader._df_from_matchms(spectra)
         assert set(df.columns) == {
@@ -1053,9 +1053,9 @@ class TestMZTabDatasetLoader:
             )
 
             # Verify that the token is in the invalid list
-            assert (
-                expected_token in unsupported_residues_unimod_only
-            ), f"Residue {expected_token} should be in unsupported_residues list"
+            assert expected_token in unsupported_residues_unimod_only, (
+                f"Residue {expected_token} should be in unsupported_residues list"
+            )
 
     def test_valid_sequences_not_affected(
         self, residue_masses, unsupported_residues_unimod_only
@@ -1084,9 +1084,9 @@ class TestMZTabDatasetLoader:
             contains_invalid = any(
                 token in unsupported_residues_unimod_only for token in remapped_tokens
             )
-            assert (
-                not contains_invalid
-            ), f"Valid sequence {remapped_tokens} should not contain invalid tokens"
+            assert not contains_invalid, (
+                f"Valid sequence {remapped_tokens} should not contain invalid tokens"
+            )
 
     def test_only_unimod_notation_needed_in_invalid_list(
         self, residue_masses, unsupported_residues_unimod_only
@@ -1135,16 +1135,16 @@ class TestMZTabDatasetLoader:
             )
 
             if should_be_invalid:
-                assert (
-                    contains_invalid
-                ), f"Sequence {seq} -> {remapped_tokens} should be caught as invalid"
-                assert (
-                    expected_token in remapped_tokens
-                ), f"Expected invalid token {expected_token} in {remapped_tokens}"
+                assert contains_invalid, (
+                    f"Sequence {seq} -> {remapped_tokens} should be caught as invalid"
+                )
+                assert expected_token in remapped_tokens, (
+                    f"Expected invalid token {expected_token} in {remapped_tokens}"
+                )
             else:
-                assert (
-                    not contains_invalid
-                ), f"Sequence {seq} -> {remapped_tokens} should be valid"
+                assert not contains_invalid, (
+                    f"Sequence {seq} -> {remapped_tokens} should be valid"
+                )
 
     # ------------------------------------------------------------------
     # _load_spectrum_data
