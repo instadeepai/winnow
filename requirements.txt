@@ -299,7 +299,7 @@ pandas==2.3.3
     #   neptune
 pickydict==0.5.0
     # via matchms
-pillow==12.1.0
+pillow==12.1.1
     # via
     #   matplotlib
     #   neptune
@@ -315,7 +315,7 @@ propcache==0.4.1
     # via
     #   aiohttp
     #   yarl
-protobuf==5.29.5
+protobuf==5.29.6
     # via
     #   tensorboard
     #   tritonclient
@@ -510,7 +510,7 @@ websocket-client==1.9.0
     # via
     #   neptune
     #   signalrcore
-werkzeug==3.1.5
+werkzeug==3.1.6
     # via tensorboard
 wrapt==1.17.3
     # via
