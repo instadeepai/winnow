@@ -86,7 +86,7 @@ install-all:
 ## Development commands														 	#
 #################################################################################
 
-.PHONY: tests clean-coverage test-docker bash build-package clean-build clean-workspace test-build clean-all-build test-cli-isolated test-cli-config set-gcp-credentials set-ceph-credentials
+.PHONY: tests clean-coverage test-docker bash build-package clean-build clean-workspace test-build clean-all-build test-cli-isolated test-cli-config set-gcp-credentials check-ceph-credentials
 
 ## Run all tests
 tests:
@@ -120,8 +120,8 @@ set-gcp-credentials:
 	uv run python scripts/set_gcp_credentials.py
 	gcloud auth activate-service-account dtu-denovo-sa@ext-dtu-denovo-sequencing-gcp.iam.gserviceaccount.com --key-file=ext-dtu-denovo-sequencing-gcp.json --project=ext-dtu-denovo-sequencing-gcp
 
-## Set the Ceph credentials
-set-ceph-credentials:
+## Verify the S3 Ceph credentials
+check-ceph-credentials:
 	uv run python scripts/set_ceph_credentials.py
 
 #################################################################################

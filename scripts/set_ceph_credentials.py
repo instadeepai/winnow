@@ -1,64 +1,55 @@
-"""Set Ceph credentials for S3-compatible storage."""
+"""Verify Ceph / S3-compatible credentials are available from the environment.
+
+Do not write secrets to ``~/.aws`` — that duplicates credentials on disk (broader
+exposure, backups, shared filesystems). On clusters where
+``AWS_ACCESS_KEY_ID`` and ``AWS_SECRET_ACCESS_KEY`` are injected into the job
+environment, boto3, the AWS CLI, s3fs, and most S3 clients use them via the
+default credential provider chain with no extra files.
+
+Optional: set ``AWS_ENDPOINT_URL`` (or legacy ``AWS_ENDPOINT_URL_S3``) for a
+custom S3 endpoint (typical for Ceph RGW).
+"""
 
 from __future__ import annotations
 
 import os
-from pathlib import Path
+import sys
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
+_REQUIRED = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY")
+_ENDPOINT_VARS = "AWS_ENDPOINT_URL"
 
-def set_credentials() -> None:
-    """Set the Ceph credentials.
 
-    - To access Ceph storage, the credentials are stored in AWS config and credentials files
-    - The credentials are read from environment variables AWS_ACCESS_KEY_ID
-      and AWS_SECRET_ACCESS_KEY
+def check_credentials() -> None:
+    """Ensure required AWS-compatible env vars are set; print a short summary.
 
     Raises:
         OSError: if required environment variables are not set
     """
-    try:
-        access_key = os.environ["AWS_ACCESS_KEY_ID"]
-        secret_key = os.environ["AWS_SECRET_ACCESS_KEY"]
-    except KeyError as e:
+    missing = [name for name in _REQUIRED if not os.environ.get(name)]
+    if missing:
         msg = (
-            "To use Ceph storage you should set both 'AWS_ACCESS_KEY_ID' "
-            "and 'AWS_SECRET_ACCESS_KEY' environment variables."
+            "Ceph/S3 access needs these environment variables set (e.g. by your "
+            "scheduler or shell): " + ", ".join(_REQUIRED)
         )
-        raise OSError(msg) from e
+        raise OSError(msg)
 
-    # Create credentials directory if it doesn't exist
-    credentials_dir = Path.home() / ".aws"
-    credentials_dir.mkdir(exist_ok=True)
-
-    # Set up config file
-    config_path = credentials_dir / "config"
-    config_content = """[profile winnow]
-output = json
-
-[winnow]
-aws_access_key_id = {access_key}
-aws_secret_access_key = {secret_key}
-""".format(access_key=access_key, secret_key=secret_key)
-
-    with open(config_path, "w") as f:
-        f.write(config_content)
-    print(f"Created {config_path}")
-
-    # Set up credentials file
-    credentials_path = credentials_dir / "credentials"
-    credentials_content = """[winnow]
-aws_access_key_id = {access_key}
-aws_secret_access_key = {secret_key}
-""".format(access_key=access_key, secret_key=secret_key)
-
-    with open(credentials_path, "w") as f:
-        f.write(credentials_content)
-    print(f"Created {credentials_path}")
+    endpoint_set = next((v for v in _ENDPOINT_VARS if os.environ.get(v)), None)
+    print("Ceph/S3 credentials: OK")
+    if endpoint_set:
+        print(f"Custom endpoint: {endpoint_set} is set.")
+    else:
+        print(
+            "Note: no AWS_ENDPOINT_URL set — use that (or AWS_ENDPOINT_URL_S3) if you use a non-AWS S3 endpoint."
+        )
 
 
 if __name__ == "__main__":
-    set_credentials()
+    try:
+        check_credentials()
+    except OSError as e:
+        print(e, file=sys.stderr)
+        sys.exit(1)
