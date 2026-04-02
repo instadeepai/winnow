@@ -44,6 +44,9 @@ winnow config train
 # Show prediction configuration
 winnow config predict
 
+# Show compute-features configuration
+winnow config compute-features
+
 # Check configuration with overrides
 winnow config train data_loader=mztab model_output_dir=models/my_model
 winnow config predict fdr_method=database_grounded fdr_control.fdr_threshold=0.01
@@ -92,6 +95,30 @@ For comprehensive calibrator configuration options, see:
 
 - [Configuration guide](configuration.md) - Complete parameter reference
 - [Calibration API](api/calibration.md#handling-missing-features) - Feature implementation details
+
+### `winnow compute-features`
+
+Compute calibration features and write one enriched metadata CSV. Uses the same `data_loader`, `dataset` paths and `calibrator.features` stack as training, but does **not** fit the MLP or save a model.
+
+```bash
+# Defaults (configs/compute_features.yaml)
+winnow compute-features
+
+# Paths and output file
+winnow compute-features dataset.spectrum_path_or_directory=data/spectra.ipc dataset.predictions_path=data/preds.csv dataset_output_path=results/features.csv
+
+# De novo spectra (no ground truth): labelled=false; remove retention_time_feature if present
+winnow compute-features labelled=false '~calibrator.features.retention_time_feature'
+```
+
+**Common parameters:**
+
+- `data_loader`, `dataset.*`: Same as `winnow train`
+- `dataset_output_path`: Output CSV path
+- `filter_empty_predictions`: Drop empty or invalid predictions (default: true)
+- `labelled`: If true (default), spectrum data must include a `sequence` column; runs each feature's `prepare()` (e.g. iRT calibrator).
+
+Feature selection matches training: override `calibrator.features` or use `~calibrator.features.<name>` to drop entries. See [Configuration guide](configuration.md#compute-features-configuration).
 
 ### `winnow predict`
 
@@ -153,6 +180,10 @@ For training (`winnow train`), you need:
 - **Predictions**: Model predictions with confidence scores
 - **Spectral data**: MS/MS spectra and metadata
 - **Unique identifiers**: Each PSM must have a unique `spectrum_id` in both input files
+
+### Feature export (`winnow compute-features`)
+
+Same inputs as training for loading spectra and predictions. With default `labelled=true`, the spectrum file must include a `sequence` column (as for training). With `labelled=false`, pure *de novo* inputs are allowed if the configured feature set does not include `retention_time_feature`, which requires labelled data to fit an iRT predictor model.
 
 ### Prediction data
 
@@ -231,9 +262,15 @@ Prediction produces two CSV files in the `output-folder` directory:
     - `psm_q_value`: Q-values
     - `psm_pep`: Posterior error probabilities (non-parametric method only)
     - `sequence`: Ground truth sequences (if available, for database-ground method)
+    - `num_matches`: Number of matched residues between the predicted and ground-truth peptide (if labelled)
+    - `correct`: Whether the predicted sequence is correct (if labelled)
     - Filtered to only include PSMs passing the FDR threshold
 
 This separation allows users to work with metadata and features separately from predictions and error metrics, making downstream analysis more convenient.
+
+### Compute-features output
+
+A single CSV at `dataset_output_path`: full metadata after feature computation. No calibrated scores, FDR columns or FDR row filtering (unlike `winnow predict`).
 
 ## Example workflows
 
@@ -326,10 +363,12 @@ View available options:
 ```bash
 winnow --help           # List all commands
 winnow train --help     # Command-specific help
+winnow compute-features --help
 winnow predict --help
 winnow config --help    # Config command help
 
 winnow config train     # View resolved training configuration
+winnow config compute-features  # View resolved feature computation configuration
 winnow config predict   # View resolved prediction configuration
 ```
 

@@ -488,7 +488,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
             pd.DataFrame: The processed dataframe.
         """
         if has_labels:
-            dataset["valid_peptide"] = dataset["sequence"].apply(
+            dataset["valid_sequence"] = dataset["sequence"].apply(
                 lambda peptide: isinstance(peptide, list)
             )
         dataset["valid_prediction"] = dataset["prediction"].apply(
@@ -898,7 +898,7 @@ class MZTabDatasetLoader(DatasetLoader):
                     .map_elements(
                         lambda x: isinstance(x, pl.Series), return_dtype=pl.Boolean
                     )
-                    .alias("valid_peptide"),
+                    .alias("valid_sequence"),
                 ]
             )
 
