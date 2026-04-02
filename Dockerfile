@@ -50,10 +50,11 @@ RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.
 RUN apt-get clean && \
     rm -rf /var/lib/{apt,dpkg,cache,log}
 
-# AWS CLI v1 from PyPI (boto/awscli). Executables go to UV_TOOL_BIN_DIR so they stay on
-# PATH for non-root users; without this, older uv images put tools under /root/.local/bin only.
-# If this step fails on the cluster, the build usually cannot reach PyPI (firewall/proxy) —
-# set HTTPS_PROXY/HTTP_PROXY and/or UV_NATIVE_TLS=1, or install AWS CLI v2 from AWS's bundle.
+# AWS CLI v1 from PyPI. `uv tool install` as root puts the tool env under /root/.local/share/uv/tools;
+# /usr/local/bin/aws is a symlink there, so non-root users get "Permission denied". Install tools
+# under a shared path instead.
+RUN mkdir -p /opt/uv-tools && chmod 755 /opt/uv-tools
+ENV UV_TOOL_DIR=/opt/uv-tools
 ENV UV_TOOL_BIN_DIR=/usr/local/bin
 RUN uv tool install awscli && aws --version
 
