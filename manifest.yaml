@@ -24,4 +24,3 @@ spec:
       resources:
         cpus: 1
         ramRatio: 1 # >= 2
-
