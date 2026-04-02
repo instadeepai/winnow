@@ -2,6 +2,10 @@
 
 _target_: winnow.datasets.data_loaders.InstaNovoDatasetLoader
 
+# When true, add experiment_name + spectrum_id to parquet/ipc spectrum files.
+# MGF files always receive these columns regardless of this setting.
+add_index_cols: false
+
 residue_masses: ${residue_masses}
 residue_remapping:  # Used to map InstaNovo legacy notations to UNIMOD tokens.
   "M(ox)": "M[UNIMOD:35]"  # Oxidation
