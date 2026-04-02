@@ -4,11 +4,13 @@ This module provides concrete implementations of the DatasetLoader interface for
 file formats and data sources used in peptide sequencing tasks.
 """
 
+from __future__ import annotations
+
 import ast
 import pickle
 import re
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import polars as pl
@@ -16,6 +18,9 @@ import polars.selectors as cs
 from pyteomics import mztab
 from instanovo.utils.residues import ResidueSet
 from instanovo.utils.metrics import Metrics
+
+if TYPE_CHECKING:
+    from matchms import Spectrum
 
 from winnow.datasets.interfaces import DatasetLoader
 from winnow.datasets.calibration_dataset import (
@@ -33,6 +38,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
         residue_remapping: dict[str, str],
         isotope_error_range: Tuple[int, int] = (0, 1),
         beam_columns: Optional[dict[str, str]] = None,
+        add_index_cols: bool = False,
     ) -> None:
         """Initialise the InstaNovoDatasetLoader.
 
@@ -41,6 +47,8 @@ class InstaNovoDatasetLoader(DatasetLoader):
             residue_remapping: The mapping of input notations to ProForma notation.
             isotope_error_range: The range of isotope errors to consider when matching peptides.
             beam_columns: The names of the beam columns to substring match in the predictions file.
+            add_index_cols: If True, add ``experiment_name`` and ``spectrum_id`` to parquet/ipc
+                inputs. MGF inputs always get these columns regardless of this flag.
         """
         self.metrics = Metrics(
             residue_set=ResidueSet(
@@ -49,34 +57,85 @@ class InstaNovoDatasetLoader(DatasetLoader):
             isotope_error_range=isotope_error_range,
         )
         self.beam_columns = beam_columns
+        self.add_index_cols = add_index_cols
 
     @staticmethod
-    def _load_spectrum_data(spectrum_path: Path | str) -> Tuple[pl.DataFrame, bool]:
-        """Loads spectrum data from either a Parquet or IPC file.
+    def _df_from_matchms(spectra: list[Spectrum]) -> pl.DataFrame:
+        """Convert a list of Matchms spectra to a polars DataFrame.
+
+        Includes only metadata columns that matchms exposes for at least one spectrum.
+        ``scan_number`` is always a 0-based enumerate index.
 
         Args:
-            spectrum_path (Path | str): The path to the spectrum data file.
+            spectra: List of Matchms spectrum objects.
 
         Returns:
-            Tuple[pl.DataFrame, bool]: A tuple containing the spectrum data and a boolean indicating whether the dataset has ground truth labels.
+            The polars DataFrame.
         """
-        spectrum_path = Path(spectrum_path)
+        metadata_map = {
+            "precursor_mz": "precursor_mz",
+            "charge": "precursor_charge",
+            "retention_time": "retention_time",
+        }
+        sequence_keys = ("seq", "peptide_sequence")
 
-        if spectrum_path.suffix == ".parquet":
-            df = pl.read_parquet(spectrum_path)
-        elif spectrum_path.suffix == ".ipc":
-            df = pl.read_ipc(spectrum_path)
-        else:
-            raise ValueError(
-                f"Unsupported file format for spectrum data: {spectrum_path.suffix}. Supported formats are .parquet and .ipc."
+        all_metadata_keys: set[str] = set()
+        for spectrum in spectra:
+            all_metadata_keys.update(spectrum.metadata.keys())
+
+        active_columns = {
+            mgf_key: col_name
+            for mgf_key, col_name in metadata_map.items()
+            if mgf_key in all_metadata_keys
+        }
+
+        sequence_key = next((k for k in sequence_keys if k in all_metadata_keys), None)
+
+        data: dict[str, list[Any]] = {"scan_number": []}
+        for col_name in active_columns.values():
+            data[col_name] = []
+        if sequence_key:
+            data["sequence"] = []
+        data["mz_array"] = []
+        data["intensity_array"] = []
+
+        for i, spectrum in enumerate(spectra):
+            data["scan_number"].append(i)
+            for mgf_key, col_name in active_columns.items():
+                data[col_name].append(spectrum.metadata.get(mgf_key))
+            if sequence_key:
+                data["sequence"].append(spectrum.metadata.get(sequence_key))
+            data["mz_array"].append(spectrum.peaks.mz)
+            data["intensity_array"].append(spectrum.peaks.intensities)
+
+        return pl.DataFrame(data)
+
+    @staticmethod
+    def _add_index_cols(df: pl.DataFrame, fp: Path | str) -> pl.DataFrame:
+        """Add ``experiment_name`` and ``spectrum_id`` to align with InstaNovo CSV output.
+
+        If ``scan_number`` is present, ``spectrum_id`` is ``experiment_name:scan_number``.
+        Otherwise uses a row index, matching InstaNovo's data_handler fallback.
+        """
+        exp_name = Path(fp).stem
+        df = df.with_columns(pl.lit(exp_name).alias("experiment_name").cast(pl.Utf8))
+        if "scan_number" in df.columns:
+            df = df.with_columns(
+                (
+                    pl.col("experiment_name")
+                    + ":"
+                    + pl.col("scan_number").cast(pl.Utf8)
+                ).alias("spectrum_id")
             )
-
-        if "sequence" in df.columns:
-            has_labels = True
         else:
-            has_labels = False
-
-        return df, has_labels
+            df = df.with_row_index("idx")
+            df = df.with_columns(
+                (pl.col("experiment_name") + ":" + pl.col("idx").cast(pl.Utf8)).alias(
+                    "spectrum_id"
+                )
+            )
+            df = df.drop("idx")
+        return df
 
     @staticmethod
     def _merge_spectrum_data(
@@ -171,6 +230,43 @@ class InstaNovoDatasetLoader(DatasetLoader):
         predictions = self._evaluate_predictions(predictions, has_labels)
 
         return CalibrationDataset(metadata=predictions, predictions=beams)
+
+    def _load_spectrum_data(
+        self, spectrum_path: Path | str
+    ) -> Tuple[pl.DataFrame, bool]:
+        """Loads spectrum data from either a Parquet, IPC or MGF file.
+
+        Args:
+            spectrum_path (Path | str): The path to the spectrum data file.
+
+        Returns:
+            Tuple[pl.DataFrame, bool]: A tuple containing the spectrum data and a boolean indicating whether the dataset has ground truth labels.
+        """
+        spectrum_path = Path(spectrum_path)
+
+        if spectrum_path.suffix == ".parquet":
+            df = pl.read_parquet(spectrum_path)
+        elif spectrum_path.suffix == ".ipc":
+            df = pl.read_ipc(spectrum_path)
+        elif spectrum_path.suffix == ".mgf":
+            from matchms.importing import load_from_mgf
+
+            spectra = list(load_from_mgf(str(spectrum_path)))
+            df = self._df_from_matchms(spectra)
+        else:
+            raise ValueError(
+                f"Unsupported file format for spectrum data: {spectrum_path.suffix}. Supported formats are .parquet, .ipc and .mgf."
+            )
+
+        if spectrum_path.suffix == ".mgf" or self.add_index_cols:
+            df = self._add_index_cols(df, spectrum_path)
+
+        if "sequence" in df.columns:
+            has_labels = True
+        else:
+            has_labels = False
+
+        return df, has_labels
 
     def _validate_beam_columns(self, columns: List[str]) -> None:
         """Validate that each beam column prefix matches at least one column in the dataframe.
@@ -397,7 +493,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
             pd.DataFrame: The processed dataframe.
         """
         if has_labels:
-            dataset["valid_peptide"] = dataset["sequence"].apply(
+            dataset["valid_sequence"] = dataset["sequence"].apply(
                 lambda peptide: isinstance(peptide, list)
             )
         dataset["valid_prediction"] = dataset["prediction"].apply(
@@ -807,7 +903,7 @@ class MZTabDatasetLoader(DatasetLoader):
                     .map_elements(
                         lambda x: isinstance(x, pl.Series), return_dtype=pl.Boolean
                     )
-                    .alias("valid_peptide"),
+                    .alias("valid_sequence"),
                 ]
             )
 

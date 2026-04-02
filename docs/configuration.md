@@ -40,6 +40,7 @@ configs/
 │   ├── nonparametric.yaml
 │   └── database_grounded.yaml
 ├── train.yaml                 # Main training config
+├── compute_features.yaml      # Feature-only export (no MLP fit)
 ├── calibrator.yaml            # Model architecture and features
 └── predict.yaml               # Main prediction config
 ```
@@ -64,6 +65,9 @@ winnow train model_output_dir=models/my_model
 
 # Change multiple parameters
 winnow predict data_loader=mztab fdr_control.fdr_threshold=0.01 fdr_method=database_grounded
+
+# Compute-features overrides
+winnow compute-features dataset_output_path=results/features.csv labelled=false
 ```
 
 ### Nested parameters
@@ -121,10 +125,41 @@ dataset_output_path: results/calibrated_dataset.csv
 **Key parameters:**
 
 - `data_loader`: Format of input data loader to use (via defaults: `instanovo`, `mztab`, `pointnovo`, `winnow`)
-- `dataset.spectrum_path_or_directory`: Path to spectrum/metadata file (or directory for Winnow format)
+- `dataset.spectrum_path_or_directory`: Path to spectrum/metadata file (InstaNovo: `.parquet`, `.ipc`, or `.mgf`; or directory for Winnow format)
 - `dataset.predictions_path`: Path to predictions file (set to null for Winnow format)
 - `model_output_dir`: Where to save trained model
 - `dataset_output_path`: Where to save calibrated training results
+
+## Compute-features configuration
+
+### Main config (`configs/compute_features.yaml`)
+
+Loads data like `train.yaml` (same `defaults`: `residues`, `calibrator`, `data_loader`), runs `ProbabilityCalibrator.compute_features` only, and writes one CSV. No `model_output_dir` and no MLP training.
+
+```yaml
+defaults:
+  - _self_
+  - residues
+  - calibrator
+  - data_loader: instanovo
+
+dataset:
+  spectrum_path_or_directory: data/spectra.ipc
+  predictions_path: data/predictions.csv
+
+dataset_output_path: results/metadata.csv
+filter_empty_predictions: true
+labelled: true
+```
+
+**Key parameters:**
+
+- `dataset.*`, `data_loader`: Same meaning as in training config
+- `dataset_output_path`: CSV path for metadata after feature computation
+- `filter_empty_predictions`: If true, apply the same empty-prediction filter as train/predict
+- `labelled`: If true, spectrum data must include `sequence` (ground truth); runs feature `prepare()` (needed for e.g. `RetentionTimeFeature`). If false, you must not include `retention_time_feature` in `calibrator.features` (validation error otherwise)
+
+The feature set is the `calibrator.features` block from `calibrator.yaml` (shared with training). Override or drop features with Hydra the same way as for `winnow train`.
 
 ### Calibrator config (`configs/calibrator.yaml`)
 
@@ -424,6 +459,7 @@ Each data format has a dedicated loader configuration in `configs/data_loader/`:
 
 ```yaml
 _target_: winnow.datasets.data_loaders.InstaNovoDatasetLoader
+add_index_cols: false  # If true, add experiment_name + spectrum_id for parquet/ipc (InstaNovo-style). MGF always gets these columns.
 residue_masses: ${residue_masses}
 residue_remapping:
   "M(ox)": "M[UNIMOD:35]"
@@ -584,6 +620,9 @@ winnow config train
 # View prediction configuration
 winnow config predict
 
+# View compute-features configuration
+winnow config compute-features
+
 # View configuration with overrides
 winnow config train data_loader=mztab model_output_dir=custom/path
 winnow config predict fdr_method=database_grounded fdr_control.fdr_threshold=0.01
@@ -622,6 +661,7 @@ my_configs/
 ├── residues.yaml              # Override residue masses/modifications
 ├── calibrator.yaml            # Override calibrator features
 ├── train.yaml                 # Override training config (if needed)
+├── compute_features.yaml      # Override compute-features config (if needed)
 ├── predict.yaml               # Override prediction config (if needed)
 ├── data_loader/               # Override data loaders (if needed)
 │   └── instanovo.yaml

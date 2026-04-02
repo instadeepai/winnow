@@ -11,7 +11,6 @@ from typing import Union, Tuple, Optional, List, TYPE_CHECKING, Annotated
 import typer
 import logging
 from rich.logging import RichHandler
-from pathlib import Path
 
 # Lazy imports for heavy dependencies - only imported when actually needed
 if TYPE_CHECKING:
@@ -127,18 +126,20 @@ def separate_metadata_and_predictions(
 
     # Separate out metadata from prediction and FDR metrics
     preds_and_fdr_metrics_cols = [
-        confidence_column,
         "prediction",
+        confidence_column,
         "psm_fdr",
         "psm_q_value",
     ]
-    if "sequence" in dataset_metadata.columns:
-        preds_and_fdr_metrics_cols.append("sequence")
     # NonParametricFDRControl adds psm_pep column
     if isinstance(fdr_control, NonParametricFDRControl):
         preds_and_fdr_metrics_cols.append("psm_pep")
+    if "sequence" in dataset_metadata.columns:
+        preds_and_fdr_metrics_cols.append("sequence")
+        preds_and_fdr_metrics_cols.append("num_matches")
+        preds_and_fdr_metrics_cols.append("correct")
     dataset_preds_and_fdr_metrics = dataset_metadata[
-        preds_and_fdr_metrics_cols + ["spectrum_id"]
+        ["spectrum_id"] + preds_and_fdr_metrics_cols
     ]
     dataset_metadata = dataset_metadata.drop(columns=preds_and_fdr_metrics_cols)
     return dataset_metadata, dataset_preds_and_fdr_metrics
@@ -227,9 +228,83 @@ def train_entry_point(
     # Save the training dataset results
     logger.info(f"Final dataset: {len(annotated_dataset)} spectra")
     logger.info(f"Saving training dataset results to {cfg.dataset_output_path}")
-    annotated_dataset.to_csv(cfg.dataset_output_path)
+    annotated_dataset.save_metadata(cfg.dataset_output_path)
 
     logger.info("Training pipeline completed successfully.")
+
+
+def compute_features_entry_point(
+    overrides: Optional[List[str]] = None,
+    execute: bool = True,
+    config_dir: Optional[str] = None,
+) -> None:
+    """Load a dataset, compute calibration features into metadata, and save CSV.
+
+    Does not fit the MLP or write a calibrator checkpoint; reuses ``calibrator.features`` from Hydra like training.
+
+    Args:
+        overrides: Optional list of config overrides.
+        execute: If False, only print the configuration and return.
+        config_dir: Optional path to custom config directory.
+    """
+    from hydra import initialize_config_dir, compose
+    from hydra.utils import instantiate
+    from winnow.utils.config_path import get_primary_config_dir
+
+    primary_config_dir = get_primary_config_dir(config_dir)
+
+    with initialize_config_dir(
+        config_dir=str(primary_config_dir),
+        version_base="1.3",
+        job_name="winnow_compute_features",
+    ):
+        cfg = compose(config_name="compute_features", overrides=overrides)
+
+    if not execute:
+        print_config(cfg)
+        return
+
+    logger.info("Starting compute-features pipeline.")
+    logger.info(f"Compute-features configuration: {cfg}")
+
+    labelled = bool(cfg.labelled)
+    if not labelled and cfg.calibrator.features.retention_time_feature is not None:
+        raise ValueError(
+            f"Compute-features config setting labelled={labelled}, but standalone feature computation for RetentionTimeFeature is not supported for unlabelled datasets.\n"
+            f"Please remove RetentionTimeFeature from the calibration feature set or use a labelled dataset with labelled=True."
+        )
+
+    logger.info("Loading dataset.")
+    data_loader = instantiate(cfg.data_loader)
+
+    dataset_params = dict(cfg.dataset)
+    dataset_params["data_path"] = dataset_params.pop("spectrum_path_or_directory")
+    dataset_params["predictions_path"] = dataset_params.pop("predictions_path", None)
+
+    dataset = data_loader.load(**dataset_params)
+
+    logger.info(f"Loaded: {len(dataset.metadata)} spectra")
+
+    if labelled and "sequence" not in dataset.metadata.columns:
+        raise ValueError(
+            "Labelled dataset must contain a 'sequence' column with ground-truth sequences."
+        )
+
+    if cfg.filter_empty_predictions:
+        logger.info("Filtering dataset for empty predictions.")
+        dataset = filter_dataset(dataset)
+        logger.info(f"After filtering: {len(dataset.metadata)} spectra")
+
+    logger.info("Instantiating calibrator from config.")
+    calibrator = instantiate(cfg.calibrator)
+
+    logger.info(f"Computing features with labelled={labelled}.")
+    calibrator.compute_features(dataset, labelled=labelled)
+
+    logger.info(f"Saving dataset with features to {cfg.dataset_output_path}")
+    dataset.save_metadata(cfg.dataset_output_path)
+
+    logger.info("Compute-features pipeline completed successfully.")
 
 
 def predict_entry_point(
@@ -266,6 +341,7 @@ def predict_entry_point(
         return
 
     from winnow.calibration.calibrator import ProbabilityCalibrator
+    from winnow.datasets.calibration_dataset import CalibrationDataset
     from winnow.fdr.database_grounded import DatabaseGroundedFDRControl
 
     logger.info("Starting prediction pipeline.")
@@ -324,11 +400,12 @@ def predict_entry_point(
     dataset_metadata, dataset_preds_and_fdr_metrics = separate_metadata_and_predictions(
         dataset_metadata, fdr_control, cfg.fdr_control.confidence_column
     )
-    output_folder = Path(cfg.output_folder)
-    output_folder.mkdir(parents=True, exist_ok=True)
-    dataset_metadata.to_csv(output_folder.joinpath("metadata.csv"))
-    dataset_preds_and_fdr_metrics.to_csv(
-        output_folder.joinpath("preds_and_fdr_metrics.csv")
+
+    CalibrationDataset(metadata=dataset_metadata).save_metadata(
+        cfg.output_folder + "/" + "metadata.csv"
+    )
+    CalibrationDataset(metadata=dataset_preds_and_fdr_metrics).save_metadata(
+        cfg.output_folder + "/" + "preds_and_fdr_metrics.csv"
     )
 
     logger.info("Prediction pipeline completed successfully.")
@@ -372,6 +449,44 @@ def train(
     # Capture extra arguments as Hydra overrides (--config-dir already parsed out by Typer)
     overrides = ctx.args if ctx.args else None
     train_entry_point(overrides, config_dir=config_dir)
+
+
+@app.command(
+    name="compute-features",
+    help=(
+        "Compute calibration features and write enriched metadata to CSV.\n\n"
+        "Loads the dataset using the same options as training, instantiates the calibrator "
+        "feature stack from config, runs feature computation (``prepare`` when labelled=true), "
+        "and saves the result without fitting the MLP or saving a model.\n\n"
+        "[bold cyan]Quick start:[/bold cyan]\n"
+        "  [dim]winnow compute-features[/dim]  # Uses config/compute_features.yaml\n\n"
+        "[bold cyan]Override parameters:[/bold cyan]\n"
+        "  [dim]winnow compute-features dataset_output_path=results/my_features.csv[/dim]\n"
+        "  [dim]winnow compute-features run_prepare=false[/dim]  # Skip feature.prepare()\n"
+        "  [dim]winnow compute-features filter_empty_predictions=false[/dim]\n\n"
+        "[bold cyan]Custom config directory:[/bold cyan]\n"
+        "  [dim]winnow compute-features --config-dir /path/to/configs[/dim]\n"
+        "  [dim]winnow compute-features -cp ./my_configs[/dim]\n\n"
+        "[bold cyan]Feature set:[/bold cyan]\n"
+        "  Reuses [dim]calibrator.features[/dim] from calibrator.yaml; override with Hydra "
+        "(e.g. drop a feature with [dim]'~calibrator.features.retention_time_feature'[/dim])."
+    ),
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def compute_features(
+    ctx: typer.Context,
+    config_dir: Annotated[
+        Optional[str],
+        typer.Option(
+            "--config-dir",
+            "-cp",
+            help="Path to custom config directory (relative or absolute). See documentation for advanced usage.",
+        ),
+    ] = None,
+) -> None:
+    """Compute calibration features and save metadata CSV."""
+    overrides = ctx.args if ctx.args else None
+    compute_features_entry_point(overrides, config_dir=config_dir)
 
 
 @app.command(
@@ -445,6 +560,34 @@ def config_train(
     """Display the resolved training configuration."""
     overrides = ctx.args if ctx.args else None
     train_entry_point(overrides, execute=False, config_dir=config_dir)
+
+
+@config_app.command(
+    name="compute-features",
+    help=(
+        "Display the resolved compute-features configuration without running the pipeline.\n\n"
+        "[bold cyan]Usage:[/bold cyan]\n"
+        "  [dim]winnow config compute-features[/dim]\n"
+        "  [dim]winnow config compute-features dataset_output_path=out.csv[/dim]\n"
+        "  [dim]winnow config compute-features --config-dir /path/to/configs[/dim]\n"
+        "  [dim]winnow config compute-features -cp ./my_configs[/dim]"
+    ),
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def config_compute_features(
+    ctx: typer.Context,
+    config_dir: Annotated[
+        Optional[str],
+        typer.Option(
+            "--config-dir",
+            "-cp",
+            help="Path to custom config directory (relative or absolute). See documentation for advanced usage.",
+        ),
+    ] = None,
+) -> None:
+    """Display the resolved compute-features configuration."""
+    overrides = ctx.args if ctx.args else None
+    compute_features_entry_point(overrides, execute=False, config_dir=config_dir)
 
 
 @config_app.command(

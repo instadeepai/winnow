@@ -428,43 +428,164 @@ class TestInstaNovoDatasetLoader:
     # _load_spectrum_data
     # ------------------------------------------------------------------
 
-    def test_load_spectrum_data_raises_for_unsupported_extension(self, tmp_path):
+    def test_load_spectrum_data_raises_for_unsupported_extension(
+        self, instanovo_loader, tmp_path
+    ):
         path = tmp_path / "data.csv"
         path.touch()
         with pytest.raises(ValueError, match="Unsupported file format"):
-            InstaNovoDatasetLoader._load_spectrum_data(path)
+            instanovo_loader._load_spectrum_data(path)
 
-    def test_load_spectrum_data_reads_parquet(self, tmp_path):
+    def test_load_spectrum_data_reads_parquet(self, instanovo_loader, tmp_path):
         df = pl.DataFrame({"mz_array": [[100.0, 200.0]], "charge": [2]})
         path = tmp_path / "data.parquet"
         df.write_parquet(path)
 
-        result_df, _ = InstaNovoDatasetLoader._load_spectrum_data(path)
+        result_df, _ = instanovo_loader._load_spectrum_data(path)
         assert "mz_array" in result_df.columns
 
-    def test_load_spectrum_data_reads_ipc(self, tmp_path):
+    def test_load_spectrum_data_reads_ipc(self, instanovo_loader, tmp_path):
         df = pl.DataFrame({"mz_array": [[100.0, 200.0]], "charge": [2]})
         path = tmp_path / "data.ipc"
         df.write_ipc(path)
 
-        result_df, _ = InstaNovoDatasetLoader._load_spectrum_data(path)
+        result_df, _ = instanovo_loader._load_spectrum_data(path)
         assert "mz_array" in result_df.columns
 
-    def test_load_spectrum_data_detects_labels_when_sequence_present(self, tmp_path):
+    def test_load_spectrum_data_detects_labels_when_sequence_present(
+        self, instanovo_loader, tmp_path
+    ):
         df = pl.DataFrame({"sequence": ["PEPTIDE"], "charge": [2]})
         path = tmp_path / "data.parquet"
         df.write_parquet(path)
 
-        _, has_labels = InstaNovoDatasetLoader._load_spectrum_data(path)
+        _, has_labels = instanovo_loader._load_spectrum_data(path)
         assert has_labels is True
 
-    def test_load_spectrum_data_no_labels_when_sequence_absent(self, tmp_path):
+    def test_load_spectrum_data_no_labels_when_sequence_absent(
+        self, instanovo_loader, tmp_path
+    ):
         df = pl.DataFrame({"charge": [2], "mz_array": [[100.0]]})
         path = tmp_path / "data.parquet"
         df.write_parquet(path)
 
-        _, has_labels = InstaNovoDatasetLoader._load_spectrum_data(path)
+        _, has_labels = instanovo_loader._load_spectrum_data(path)
         assert has_labels is False
+
+    def test_df_from_matchms_includes_only_present_metadata(self, tmp_path):
+        """Columns match what matchms exposes; scan_number is always enumerate index."""
+        from matchms.importing import load_from_mgf
+
+        mgf_path = tmp_path / "one.mgf"
+        mgf_path.write_text(
+            "BEGIN IONS\n"
+            "PEPMASS=500.0\n"
+            "CHARGE=2+\n"
+            "RTINSECONDS=100.0\n"
+            "SEQ=PEPTIDE\n"
+            "100.0 1.0\n"
+            "END IONS\n",
+            encoding="utf-8",
+        )
+        spectra = list(load_from_mgf(str(mgf_path)))
+        df = InstaNovoDatasetLoader._df_from_matchms(spectra)
+        assert df["scan_number"].to_list() == [0]
+        assert "precursor_mz" in df.columns
+        assert "precursor_charge" in df.columns
+        assert "retention_time" in df.columns
+        assert "sequence" in df.columns
+        assert "mz_array" in df.columns
+        assert "intensity_array" in df.columns
+
+    def test_df_from_matchms_peaks_only_spectrum(self, tmp_path):
+        from matchms.importing import load_from_mgf
+
+        mgf_path = tmp_path / "minimal.mgf"
+        mgf_path.write_text("BEGIN IONS\n" "110.0 0.5\n" "END IONS\n", encoding="utf-8")
+        spectra = list(load_from_mgf(str(mgf_path)))
+        df = InstaNovoDatasetLoader._df_from_matchms(spectra)
+        assert set(df.columns) == {
+            "scan_number",
+            "mz_array",
+            "intensity_array",
+        }
+        assert df["scan_number"].to_list() == [0]
+
+    def test_add_index_cols_uses_scan_number(self, tmp_path):
+        df = pl.DataFrame({"scan_number": [0, 1]})
+        fp = tmp_path / "experiment.mgf"
+        fp.touch()
+        out = InstaNovoDatasetLoader._add_index_cols(df, fp)
+        assert out["experiment_name"].to_list() == ["experiment", "experiment"]
+        assert out["spectrum_id"].to_list() == ["experiment:0", "experiment:1"]
+
+    def test_add_index_cols_row_index_when_no_scan_number(self, tmp_path):
+        df = pl.DataFrame({"precursor_mz": [400.0, 500.0]})
+        fp = tmp_path / "run.parquet"
+        fp.touch()
+        out = InstaNovoDatasetLoader._add_index_cols(df, fp)
+        assert out["spectrum_id"].to_list() == ["run:0", "run:1"]
+
+    def test_load_spectrum_data_parquet_add_index_cols_when_enabled(
+        self, residue_masses, residue_remapping, tmp_path
+    ):
+        loader = InstaNovoDatasetLoader(
+            residue_masses=residue_masses,
+            residue_remapping=residue_remapping,
+            add_index_cols=True,
+        )
+        df = pl.DataFrame(
+            {
+                "scan_number": [0],
+                "mz_array": [[100.0]],
+                "intensity_array": [[1.0]],
+            }
+        )
+        path = tmp_path / "spec.parquet"
+        df.write_parquet(path)
+        result, _ = loader._load_spectrum_data(path)
+        assert "experiment_name" in result.columns
+        assert "spectrum_id" in result.columns
+        assert result["spectrum_id"][0] == "spec:0"
+
+    def test_load_spectrum_data_parquet_no_index_cols_by_default(
+        self, instanovo_loader, tmp_path
+    ):
+        df = pl.DataFrame({"mz_array": [[100.0]], "intensity_array": [[1.0]]})
+        path = tmp_path / "data.parquet"
+        df.write_parquet(path)
+        result, _ = instanovo_loader._load_spectrum_data(path)
+        assert "experiment_name" not in result.columns
+        assert "spectrum_id" not in result.columns
+
+    def test_load_spectrum_data_mgf_always_adds_index_cols(
+        self, residue_masses, residue_remapping, tmp_path
+    ):
+        from matchms.importing import load_from_mgf
+
+        loader = InstaNovoDatasetLoader(
+            residue_masses=residue_masses,
+            residue_remapping=residue_remapping,
+            add_index_cols=False,
+        )
+        mgf_path = tmp_path / "spectra.mgf"
+        mgf_path.write_text(
+            "BEGIN IONS\n"
+            "PEPMASS=451.25\n"
+            "CHARGE=2+\n"
+            "RTINSECONDS=824.5\n"
+            "SEQ=PEPTIDE\n"
+            "100.0 1.0\n"
+            "END IONS\n",
+            encoding="utf-8",
+        )
+        result, has_labels = loader._load_spectrum_data(mgf_path)
+        assert "experiment_name" in result.columns
+        assert "spectrum_id" in result.columns
+        assert result["spectrum_id"][0] == "spectra:0"
+        assert has_labels is True
+        # Smoke: round-trip through matchms
+        assert len(list(load_from_mgf(str(mgf_path)))) == 1
 
     # ------------------------------------------------------------------
     # _merge_spectrum_data
@@ -686,14 +807,14 @@ class TestInstaNovoDatasetLoader:
         dataset = pd.DataFrame({"prediction": [["A", "G"]]})
         result = loader._evaluate_predictions(dataset, has_labels=False)
         assert "correct" not in result.columns
-        assert "valid_peptide" not in result.columns
+        assert "valid_sequence" not in result.columns
         assert "num_matches" not in result.columns
 
-    def test_evaluate_adds_valid_peptide_when_has_labels(self, loader):
+    def test_evaluate_adds_valid_sequence_when_has_labels(self, loader):
         dataset = pd.DataFrame({"sequence": [["A", "G"]], "prediction": [["A", "G"]]})
         result = loader._evaluate_predictions(dataset, has_labels=True)
-        assert "valid_peptide" in result.columns
-        assert result["valid_peptide"].iloc[0]
+        assert "valid_sequence" in result.columns
+        assert result["valid_sequence"].iloc[0]
 
     def test_evaluate_correct_flag_true_on_full_match(self, loader):
         seq = ["P", "E", "P"]

@@ -179,7 +179,9 @@ markupsafe==3.0.3
     #   jinja2
     #   werkzeug
 matchms==0.31.0
-    # via instanovo
+    # via
+    #   winnow-fdr (pyproject.toml)
+    #   instanovo
 matplotlib==3.10.8
     # via
     #   matchms
