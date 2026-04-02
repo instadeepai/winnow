@@ -50,8 +50,12 @@ RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.
 RUN apt-get clean && \
     rm -rf /var/lib/{apt,dpkg,cache,log}
 
-# Install AWS CLI
-RUN uv tool install awscli
+# AWS CLI v1 from PyPI (boto/awscli). Executables go to UV_TOOL_BIN_DIR so they stay on
+# PATH for non-root users; without this, older uv images put tools under /root/.local/bin only.
+# If this step fails on the cluster, the build usually cannot reach PyPI (firewall/proxy) —
+# set HTTPS_PROXY/HTTP_PROXY and/or UV_NATIVE_TLS=1, or install AWS CLI v2 from AWS's bundle.
+ENV UV_TOOL_BIN_DIR=/usr/local/bin
+RUN uv tool install awscli && aws --version
 
 # Create group and user
 RUN groupadd --force --gid $GID $USER && \
@@ -83,3 +87,6 @@ RUN uv sync --frozen --no-cache --dev
 ENV PATH="$VENV_DIRECTORY/bin:$PATH"
 
 COPY --from=vscode-installer /aichor /aichor
+
+# Source the virtual environment
+RUN source $VENV_DIRECTORY/bin/activate
