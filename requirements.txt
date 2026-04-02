@@ -8,7 +8,7 @@ aiobotocore==2.26.0
     # via s3fs
 aiohappyeyeballs==2.6.1
     # via aiohttp
-aiohttp==3.13.3
+aiohttp==3.13.4
     # via
     #   aiobotocore
     #   fsspec
@@ -378,7 +378,7 @@ referencing==0.37.0
     # via
     #   jsonschema
     #   jsonschema-specifications
-requests==2.32.5
+requests==2.33.0
     # via
     #   bravado
     #   bravado-core
