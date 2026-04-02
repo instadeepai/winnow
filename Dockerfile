@@ -87,6 +87,3 @@ RUN uv sync --frozen --no-cache --dev
 ENV PATH="$VENV_DIRECTORY/bin:$PATH"
 
 COPY --from=vscode-installer /aichor /aichor
-
-# Source the virtual environment
-RUN source $VENV_DIRECTORY/bin/activate
