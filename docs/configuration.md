@@ -144,7 +144,7 @@ defaults:
   - data_loader: instanovo
 
 dataset:
-  spectrum_path_or_directory: data/spectra.ipc
+  spectrum_path_or_directory: data/spectra.mgf
   predictions_path: data/predictions.csv
 
 dataset_output_path: results/metadata.csv
