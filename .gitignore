@@ -30,6 +30,7 @@ examples/output
 # Sample data files
 examples/example_data/*.ipc
 examples/example_data/*.csv
+examples/example_data/*.mgf
 examples/example_data/*.parquet
 
 build/
