@@ -4,20 +4,23 @@ This module provides concrete implementations of the DatasetLoader interface for
 file formats and data sources used in peptide sequencing tasks.
 """
 
+from __future__ import annotations
+
 import ast
 import pickle
 import re
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import polars as pl
 import polars.selectors as cs
 from pyteomics import mztab
-from matchms.importing import load_from_mgf
-from matchms import Spectrum
 from instanovo.utils.residues import ResidueSet
 from instanovo.utils.metrics import Metrics
+
+if TYPE_CHECKING:
+    from matchms import Spectrum
 
 from winnow.datasets.interfaces import DatasetLoader
 from winnow.datasets.calibration_dataset import (
@@ -246,6 +249,8 @@ class InstaNovoDatasetLoader(DatasetLoader):
         elif spectrum_path.suffix == ".ipc":
             df = pl.read_ipc(spectrum_path)
         elif spectrum_path.suffix == ".mgf":
+            from matchms.importing import load_from_mgf
+
             spectra = list(load_from_mgf(str(spectrum_path)))
             df = self._df_from_matchms(spectra)
         else:
@@ -488,7 +493,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
             pd.DataFrame: The processed dataframe.
         """
         if has_labels:
-            dataset["valid_peptide"] = dataset["sequence"].apply(
+            dataset["valid_sequence"] = dataset["sequence"].apply(
                 lambda peptide: isinstance(peptide, list)
             )
         dataset["valid_prediction"] = dataset["prediction"].apply(
@@ -898,7 +903,7 @@ class MZTabDatasetLoader(DatasetLoader):
                     .map_elements(
                         lambda x: isinstance(x, pl.Series), return_dtype=pl.Boolean
                     )
-                    .alias("valid_peptide"),
+                    .alias("valid_sequence"),
                 ]
             )
 

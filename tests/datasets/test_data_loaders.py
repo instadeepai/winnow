@@ -807,14 +807,14 @@ class TestInstaNovoDatasetLoader:
         dataset = pd.DataFrame({"prediction": [["A", "G"]]})
         result = loader._evaluate_predictions(dataset, has_labels=False)
         assert "correct" not in result.columns
-        assert "valid_peptide" not in result.columns
+        assert "valid_sequence" not in result.columns
         assert "num_matches" not in result.columns
 
-    def test_evaluate_adds_valid_peptide_when_has_labels(self, loader):
+    def test_evaluate_adds_valid_sequence_when_has_labels(self, loader):
         dataset = pd.DataFrame({"sequence": [["A", "G"]], "prediction": [["A", "G"]]})
         result = loader._evaluate_predictions(dataset, has_labels=True)
-        assert "valid_peptide" in result.columns
-        assert result["valid_peptide"].iloc[0]
+        assert "valid_sequence" in result.columns
+        assert result["valid_sequence"].iloc[0]
 
     def test_evaluate_correct_flag_true_on_full_match(self, loader):
         seq = ["P", "E", "P"]
