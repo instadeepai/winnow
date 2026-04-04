@@ -1150,43 +1150,143 @@ class TestMZTabDatasetLoader:
     # _load_spectrum_data
     # ------------------------------------------------------------------
 
-    def test_load_spectrum_data_raises_for_unsupported_extension(self, tmp_path):
+    def test_load_spectrum_data_raises_for_unsupported_extension(
+        self, loader, tmp_path
+    ):
         path = tmp_path / "data.tsv"
         path.touch()
         with pytest.raises(ValueError, match="Unsupported file format"):
-            MZTabDatasetLoader._load_spectrum_data(path)
+            loader._load_spectrum_data(path)
 
-    def test_load_spectrum_data_reads_parquet(self, tmp_path):
+    def test_load_spectrum_data_reads_parquet(self, loader, tmp_path):
         df = pl.DataFrame({"charge": [2], "mz_array": [[100.0]]})
         path = tmp_path / "data.parquet"
         df.write_parquet(path)
 
-        result_df, _ = MZTabDatasetLoader._load_spectrum_data(path)
+        result_df, _ = loader._load_spectrum_data(path)
         assert "charge" in result_df.columns
 
-    def test_load_spectrum_data_reads_ipc(self, tmp_path):
+    def test_load_spectrum_data_reads_ipc(self, loader, tmp_path):
         df = pl.DataFrame({"charge": [2], "mz_array": [[100.0]]})
         path = tmp_path / "data.ipc"
         df.write_ipc(path)
 
-        result_df, _ = MZTabDatasetLoader._load_spectrum_data(path)
+        result_df, _ = loader._load_spectrum_data(path)
         assert "charge" in result_df.columns
 
-    def test_load_spectrum_data_detects_labels_when_sequence_present(self, tmp_path):
+    def test_load_spectrum_data_detects_labels_when_sequence_present(
+        self, loader, tmp_path
+    ):
         df = pl.DataFrame({"sequence": ["PEPTIDE"], "charge": [2]})
         path = tmp_path / "data.parquet"
         df.write_parquet(path)
 
-        _, has_labels = MZTabDatasetLoader._load_spectrum_data(path)
+        _, has_labels = loader._load_spectrum_data(path)
         assert has_labels is True
 
-    def test_load_spectrum_data_no_labels_when_sequence_absent(self, tmp_path):
+    def test_load_spectrum_data_no_labels_when_sequence_absent(self, loader, tmp_path):
         df = pl.DataFrame({"charge": [2]})
         path = tmp_path / "data.parquet"
         df.write_parquet(path)
 
-        _, has_labels = MZTabDatasetLoader._load_spectrum_data(path)
+        _, has_labels = loader._load_spectrum_data(path)
         assert has_labels is False
+
+    def test_load_spectrum_data_reads_mgf(self, loader, tmp_path):
+        mgf_path = tmp_path / "spectra.mgf"
+        mgf_path.write_text(
+            "BEGIN IONS\n"
+            "PEPMASS=500.0\n"
+            "CHARGE=2+\n"
+            "RTINSECONDS=100.0\n"
+            "100.0 1.0\n"
+            "END IONS\n",
+            encoding="utf-8",
+        )
+        result_df, has_labels = loader._load_spectrum_data(mgf_path)
+        assert "mz_array" in result_df.columns
+        assert "intensity_array" in result_df.columns
+        assert "precursor_mz" in result_df.columns
+        assert "precursor_charge" in result_df.columns
+        assert has_labels is False
+
+    def test_load_spectrum_data_mgf_always_adds_index_cols(self, tmp_path):
+        """MGF inputs get experiment_name and spectrum_id regardless of add_index_cols."""
+        loader = MZTabDatasetLoader(
+            residue_masses=_FULL_RESIDUE_MASSES,
+            residue_remapping=_STANDARD_REMAPPING,
+            add_index_cols=False,
+        )
+        mgf_path = tmp_path / "spectra.mgf"
+        mgf_path.write_text(
+            "BEGIN IONS\n" "PEPMASS=500.0\n" "CHARGE=2+\n" "100.0 1.0\n" "END IONS\n",
+            encoding="utf-8",
+        )
+        result_df, _ = loader._load_spectrum_data(mgf_path)
+        assert "experiment_name" in result_df.columns
+        assert "spectrum_id" in result_df.columns
+        assert result_df["spectrum_id"][0] == "spectra:0"
+
+    def test_load_spectrum_data_mgf_has_labels(self, loader, tmp_path):
+        mgf_path = tmp_path / "labeled.mgf"
+        mgf_path.write_text(
+            "BEGIN IONS\n"
+            "PEPMASS=500.0\n"
+            "CHARGE=2+\n"
+            "SEQ=PEPTIDE\n"
+            "100.0 1.0\n"
+            "END IONS\n",
+            encoding="utf-8",
+        )
+        _, has_labels = loader._load_spectrum_data(mgf_path)
+        assert has_labels is True
+
+    def test_load_spectrum_data_mgf_no_labels(self, loader, tmp_path):
+        mgf_path = tmp_path / "unlabeled.mgf"
+        mgf_path.write_text(
+            "BEGIN IONS\n" "PEPMASS=500.0\n" "CHARGE=2+\n" "100.0 1.0\n" "END IONS\n",
+            encoding="utf-8",
+        )
+        _, has_labels = loader._load_spectrum_data(mgf_path)
+        assert has_labels is False
+
+    def test_load_spectrum_data_parquet_adds_index_cols_when_enabled(self, tmp_path):
+        loader = MZTabDatasetLoader(
+            residue_masses=_FULL_RESIDUE_MASSES,
+            residue_remapping=_STANDARD_REMAPPING,
+            add_index_cols=True,
+        )
+        df = pl.DataFrame({"charge": [2], "mz_array": [[100.0]]})
+        path = tmp_path / "spec.parquet"
+        df.write_parquet(path)
+        result_df, _ = loader._load_spectrum_data(path)
+        assert "experiment_name" in result_df.columns
+        assert "spectrum_id" in result_df.columns
+        assert result_df["spectrum_id"][0] == "spec:0"
+
+    def test_load_spectrum_data_ipc_adds_index_cols_when_enabled(self, tmp_path):
+        loader = MZTabDatasetLoader(
+            residue_masses=_FULL_RESIDUE_MASSES,
+            residue_remapping=_STANDARD_REMAPPING,
+            add_index_cols=True,
+        )
+        df = pl.DataFrame({"charge": [2], "mz_array": [[100.0]]})
+        path = tmp_path / "spec.ipc"
+        df.write_ipc(path)
+        result_df, _ = loader._load_spectrum_data(path)
+        assert "experiment_name" in result_df.columns
+        assert "spectrum_id" in result_df.columns
+        assert result_df["spectrum_id"][0] == "spec:0"
+
+    def test_load_spectrum_data_parquet_no_index_cols_by_default(
+        self, loader, tmp_path
+    ):
+        df = pl.DataFrame({"charge": [2], "mz_array": [[100.0]]})
+        path = tmp_path / "data.parquet"
+        df.write_parquet(path)
+        result_df, _ = loader._load_spectrum_data(path)
+        assert "experiment_name" not in result_df.columns
+        assert "spectrum_id" not in result_df.columns
 
     # ------------------------------------------------------------------
     # _load_dataset
