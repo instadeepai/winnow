@@ -295,8 +295,8 @@ class InstaNovoDatasetLoader(DatasetLoader):
             dfs.append(self._load_single_spectrum_file(Path(fp)))
 
         df = (
-            pl.concat(dfs) if len(dfs) > 1 else dfs[0]
-        )  # TODO throw error if partially annotated?
+            pl.concat(dfs, how="diagonal") if len(dfs) > 1 else dfs[0]
+        )
 
         if "sequence" in df.columns:
             has_labels = True
