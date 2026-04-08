@@ -231,19 +231,18 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
         return CalibrationDataset(metadata=predictions, predictions=beams)
 
-    def _load_spectrum_data(
-        self, spectrum_path: Path | str
-    ) -> Tuple[pl.DataFrame, bool]:
-        """Loads spectrum data from either a Parquet, IPC or MGF file.
+    def _load_single_spectrum_file(self, spectrum_path: Path) -> pl.DataFrame:
+        """Load a single spectrum data file.
 
         Args:
-            spectrum_path (Path | str): The path to the spectrum data file.
+            spectrum_path: Path to a .parquet, .ipc, or .mgf file.
 
         Returns:
-            Tuple[pl.DataFrame, bool]: A tuple containing the spectrum data and a boolean indicating whether the dataset has ground truth labels.
-        """
-        spectrum_path = Path(spectrum_path)
+            pl.DataFrame: The loaded spectrum data.
 
+        Raises:
+            ValueError: If the file format is unsupported.
+        """
         if spectrum_path.suffix == ".parquet":
             df = pl.read_parquet(spectrum_path)
         elif spectrum_path.suffix == ".ipc":
@@ -255,11 +254,47 @@ class InstaNovoDatasetLoader(DatasetLoader):
             df = self._df_from_matchms(spectra)
         else:
             raise ValueError(
-                f"Unsupported file format for spectrum data: {spectrum_path.suffix}. Supported formats are .parquet, .ipc and .mgf."
+                f"Unsupported file format for spectrum data: {spectrum_path.suffix}. "
+                "Supported formats are .parquet, .ipc and .mgf."
             )
 
         if spectrum_path.suffix == ".mgf" or self.add_index_cols:
             df = self._add_index_cols(df, spectrum_path)
+
+        return df
+
+    def _load_spectrum_data(
+        self, spectrum_path: Path | str
+    ) -> Tuple[pl.DataFrame, bool]:
+        """Loads spectrum data from one or more Parquet, IPC, or MGF files.
+
+        Supports glob patterns (e.g. ``/data/*.ipc``) to load multiple files at
+        once.  Each file gets its own ``experiment_name`` / ``spectrum_id``
+        derived from the file stem.
+
+        Args:
+            spectrum_path (Path | str): A path to a single file **or** a glob
+                pattern matching one or more files.
+
+        Returns:
+            Tuple[pl.DataFrame, bool]: The (concatenated) spectrum data and a
+                boolean indicating whether the dataset has ground truth labels.
+        """
+        import glob
+
+        spectrum_path = str(spectrum_path)
+        matched_files = sorted(glob.glob(spectrum_path))
+
+        if not matched_files:
+            raise FileNotFoundError(
+                f"No files matched the spectrum data path: {spectrum_path}"
+            )
+
+        dfs: list[pl.DataFrame] = []
+        for fp in matched_files:
+            dfs.append(self._load_single_spectrum_file(Path(fp)))
+
+        df = pl.concat(dfs, how="diagonal") if len(dfs) > 1 else dfs[0]
 
         if "sequence" in df.columns:
             has_labels = True
