@@ -1243,17 +1243,49 @@ class RetentionTimeFeature(CalibrationFeatures):
                     "MGF format (which derives it from the filename).",
                     stacklevel=2,
                 )
-                self.irt_predictors["__global__"] = self._fit_regressor(
-                    dataset.metadata, experiment_name="__global__"
-                )
-            return
+                experiments_to_fit = {"__global__": dataset.metadata}
+            else:
+                return
+        else:
+            experiments_to_fit = {
+                str(exp_name): group
+                for exp_name, group in dataset.metadata.groupby("experiment_name")
+                if exp_name not in self.irt_predictors
+            }
+            if not experiments_to_fit:
+                return
 
-        for exp_name, group in dataset.metadata.groupby("experiment_name"):
-            if exp_name in self.irt_predictors:
-                continue
-            self.irt_predictors[exp_name] = self._fit_regressor(
-                group, experiment_name=str(exp_name)
-            )
+        # Select training data per experiment, validate counts, collect into
+        # a single DataFrame for one batched Koina call.
+        per_exp_train: Dict[str, pd.DataFrame] = {}
+        for exp_name, group in experiments_to_fit.items():
+            train_data = self._select_training_data(group, exp_name)
+            per_exp_train[exp_name] = train_data
+
+        all_train = pd.concat(per_exp_train.values(), ignore_index=True)
+
+        inputs = pd.DataFrame()
+        inputs["peptide_sequences"] = np.array(
+            [tokens_to_proforma(peptide) for peptide in all_train["prediction"]]
+        )
+
+        koina_model = koinapy.Koina(self.irt_model_name)
+        irt_predictions = koina_model.predict(inputs)
+        all_irt = irt_predictions["irt"].values
+
+        # Distribute iRT values back per experiment and fit regressors
+        offset = 0
+        for exp_name, train_data in per_exp_train.items():
+            n = len(train_data)
+            train_data = train_data.copy()
+            train_data["iRT"] = all_irt[offset : offset + n]
+            offset += n
+
+            x = train_data["retention_time"].values.reshape(-1, 1)
+            y = train_data["iRT"].values
+            regressor = LinearRegression()
+            regressor.fit(x, y)
+            self.irt_predictors[exp_name] = regressor
 
     def compute(self, dataset: CalibrationDataset) -> None:
         """Compute the iRT error feature for each spectrum.
@@ -1343,21 +1375,20 @@ class RetentionTimeFeature(CalibrationFeatures):
             dataset.metadata["predicted iRT"] - dataset.metadata["iRT"]
         ).fillna(0.0)
 
-    def _fit_regressor(
+    def _select_training_data(
         self, metadata: pd.DataFrame, experiment_name: str
-    ) -> LinearRegression:
-        """Fit an RT->iRT linear regressor on high-confidence spectra.
+    ) -> pd.DataFrame:
+        """Select the top high-confidence spectra for regressor training.
 
-        Selects the top ``train_fraction`` of valid spectra by confidence, calls the
-        Koina iRT model to obtain pseudo-labels, and fits a ``LinearRegression`` mapping
-        observed retention time to predicted iRT.
+        Filters to valid iRT predictions, sorts by confidence descending, and
+        takes the top ``train_fraction``. Raises early if there are too few points.
 
         Args:
             metadata: DataFrame subset for one experiment (or the full dataset for global).
             experiment_name: Identifier for this experiment, used in error messages.
 
         Returns:
-            A fitted ``LinearRegression`` instance.
+            A DataFrame subset of high-confidence training rows.
 
         Raises:
             ValueError: If the number of training points after applying
@@ -1388,22 +1419,7 @@ class RetentionTimeFeature(CalibrationFeatures):
                 f"Adjust train_fraction, min_train_points, or provide more data."
             )
 
-        inputs = pd.DataFrame()
-        inputs["peptide_sequences"] = np.array(
-            [tokens_to_proforma(peptide) for peptide in train_data["prediction"]]
-        )
-        inputs = inputs.set_index(train_data.index)
-
-        koina_model = koinapy.Koina(self.irt_model_name)
-        predictions = koina_model.predict(inputs)
-        train_data = train_data.copy()
-        train_data["iRT"] = predictions["irt"].values
-
-        x = train_data["retention_time"].values.reshape(-1, 1)
-        y = train_data["iRT"].values
-        regressor = LinearRegression()
-        regressor.fit(x, y)
-        return regressor
+        return train_data
 
     def __getstate__(self) -> dict:
         """Exclude transient regressor state from pickle serialisation."""

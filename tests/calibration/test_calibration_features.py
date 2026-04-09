@@ -593,7 +593,9 @@ class TestRetentionTimeFeature:
         mock_model_instance = Mock()
         mock_koina.return_value = mock_model_instance
         mock_model_instance.model_inputs = ["peptide_sequences"]
-        mock_model_instance.predict.return_value = pd.DataFrame({"irt": [35.1, 20.7]})
+        mock_model_instance.predict.return_value = pd.DataFrame(
+            {"irt": [35.1, 20.7, 12.4, 5.3]}
+        )
 
         metadata = pd.DataFrame(
             {
