@@ -19,3 +19,8 @@ dataset:
 # Output paths:
 model_output_dir: models/new_model
 dataset_output_path: results/calibrated_dataset.csv
+# Optional: save per-experiment iRT regressors for reuse at inference time.
+# Useful when training on well-characterised data and predicting on unlabelled data
+# from the same experiment(s), where the inference confidence distribution may be
+# unreliable for training a new RT->iRT regressor.
+irt_regressor_output_path: null

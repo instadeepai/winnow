@@ -260,6 +260,10 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
         if spectrum_path.suffix == ".mgf" or self.add_index_cols:
             df = self._add_index_cols(df, spectrum_path)
+        elif "experiment_name" not in df.columns:
+            df = df.with_columns(
+                pl.lit(Path(spectrum_path).stem).alias("experiment_name").cast(pl.Utf8)
+            )
 
         if "sequence" in df.columns:
             has_labels = True
@@ -590,6 +594,11 @@ class MZTabDatasetLoader(DatasetLoader):
         else:
             raise ValueError(
                 f"Unsupported file format for spectrum data: {spectrum_path.suffix}. Supported formats are .parquet and .ipc."
+            )
+
+        if "experiment_name" not in df.columns:
+            df = df.with_columns(
+                pl.lit(Path(spectrum_path).stem).alias("experiment_name").cast(pl.Utf8)
             )
 
         if "sequence" in df.columns:
