@@ -555,7 +555,9 @@ class TestInstaNovoDatasetLoader:
         path = tmp_path / "data.parquet"
         df.write_parquet(path)
         result, _ = instanovo_loader._load_spectrum_data(path)
-        assert "experiment_name" not in result.columns
+        # experiment_name is always derived (from file stem) even without add_index_cols
+        assert "experiment_name" in result.columns
+        assert result["experiment_name"][0] == "data"
         assert "spectrum_id" not in result.columns
 
     def test_load_spectrum_data_mgf_always_adds_index_cols(
