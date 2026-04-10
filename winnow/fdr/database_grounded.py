@@ -54,13 +54,13 @@ class DatabaseGroundedFDRControl(FDRControl):
             )
 
         dataset["num_matches"] = dataset.apply(
-            lambda row: (self.metrics._novor_match(row["sequence"], row["prediction"])),
+            lambda row: self.metrics._novor_match(row["sequence"], row["prediction"]),
             axis=1,
         )
         dataset["correct"] = dataset.apply(
-            lambda row: row["num_matches"]
-            == len(row["sequence"])
-            == len(row["prediction"]),
+            lambda row: (
+                row["num_matches"] == len(row["sequence"]) == len(row["prediction"])
+            ),
             axis=1,
         )
         self.preds = dataset[["correct", self.confidence_feature]]

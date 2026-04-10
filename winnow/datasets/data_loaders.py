@@ -340,16 +340,16 @@ class InstaNovoDatasetLoader(DatasetLoader):
         Returns:
             List[Optional[List[ScoredSequence]]]: A list of scored sequences for each row in the dataframe.
         """
-        assert (
-            self.beam_columns is not None
-        ), "beam_columns must be set"  # to pass type checking
+        assert self.beam_columns is not None, (
+            "beam_columns must be set"
+        )  # to pass type checking
 
         def convert_row_to_scored_sequences(
             row: dict,
         ) -> Optional[List[ScoredSequence]]:
-            assert (
-                self.beam_columns is not None
-            ), "beam_columns must be set"  # to pass type checking
+            assert self.beam_columns is not None, (
+                "beam_columns must be set"
+            )  # to pass type checking
 
             scored_sequences = []
             num_beams = len(row) // len(self.beam_columns)
@@ -414,9 +414,11 @@ class InstaNovoDatasetLoader(DatasetLoader):
             df["sequence"] = (
                 df["sequence"]
                 .apply(
-                    lambda peptide: peptide.replace("L", "I")
-                    if isinstance(peptide, str)
-                    else peptide
+                    lambda peptide: (
+                        peptide.replace("L", "I")
+                        if isinstance(peptide, str)
+                        else peptide
+                    )
                 )
                 .apply(self.metrics._split_peptide)
             )
@@ -463,19 +465,19 @@ class InstaNovoDatasetLoader(DatasetLoader):
             lambda peptide: peptide.split(", ") if isinstance(peptide, str) else peptide
         )
         preds_dataset["prediction"] = preds_dataset["prediction"].apply(
-            lambda peptide: [
-                "I" if amino_acid == "L" else amino_acid for amino_acid in peptide
-            ]
-            if isinstance(peptide, list)
-            else peptide
+            lambda peptide: (
+                ["I" if amino_acid == "L" else amino_acid for amino_acid in peptide]
+                if isinstance(peptide, list)
+                else peptide
+            )
         )
 
         preds_dataset["prediction_untokenised"] = preds_dataset[
             "prediction_untokenised"
         ].apply(
-            lambda peptide: peptide.replace("L", "I")
-            if isinstance(peptide, str)
-            else peptide
+            lambda peptide: (
+                peptide.replace("L", "I") if isinstance(peptide, str) else peptide
+            )
         )
 
         return preds_dataset
@@ -501,12 +503,12 @@ class InstaNovoDatasetLoader(DatasetLoader):
         )
         if has_labels:
             dataset["num_matches"] = dataset.apply(
-                lambda row: self.metrics._novor_match(
-                    row["sequence"], row["prediction"]
-                )
-                if isinstance(row["sequence"], list)
-                and isinstance(row["prediction"], list)
-                else 0,
+                lambda row: (
+                    self.metrics._novor_match(row["sequence"], row["prediction"])
+                    if isinstance(row["sequence"], list)
+                    and isinstance(row["prediction"], list)
+                    else 0
+                ),
                 axis=1,
             )
             dataset["correct"] = dataset.apply(
@@ -913,12 +915,14 @@ class MZTabDatasetLoader(DatasetLoader):
                     # Count matching amino acids between prediction and ground truth
                     pl.struct(["sequence", "prediction"])
                     .map_elements(
-                        lambda row: self.metrics._novor_match(
-                            row["sequence"], row["prediction"]
-                        )
-                        if isinstance(row["sequence"], list)
-                        and isinstance(row["prediction"], list)
-                        else 0,
+                        lambda row: (
+                            self.metrics._novor_match(
+                                row["sequence"], row["prediction"]
+                            )
+                            if isinstance(row["sequence"], list)
+                            and isinstance(row["prediction"], list)
+                            else 0
+                        ),
                         return_dtype=pl.Int64,
                     )
                     .alias("num_matches"),
@@ -1034,14 +1038,22 @@ class WinnowDatasetLoader(DatasetLoader):
             self.metrics._split_peptide
         )
         metadata["mz_array"] = metadata["mz_array"].apply(
-            lambda s: ast.literal_eval(s)
-            if "," in s
-            else ast.literal_eval(re.sub(r"(\n?)(\s+)", ", ", re.sub(r"\[\s+", "[", s)))
+            lambda s: (
+                ast.literal_eval(s)
+                if "," in s
+                else ast.literal_eval(
+                    re.sub(r"(\n?)(\s+)", ", ", re.sub(r"\[\s+", "[", s))
+                )
+            )
         )
         metadata["intensity_array"] = metadata["intensity_array"].apply(
-            lambda s: ast.literal_eval(s)
-            if "," in s
-            else ast.literal_eval(re.sub(r"(\n?)(\s+)", ", ", re.sub(r"\[\s+", "[", s)))
+            lambda s: (
+                ast.literal_eval(s)
+                if "," in s
+                else ast.literal_eval(
+                    re.sub(r"(\n?)(\s+)", ", ", re.sub(r"\[\s+", "[", s))
+                )
+            )
         )
 
         predictions_pkl_path = data_path / Path("predictions.pkl")

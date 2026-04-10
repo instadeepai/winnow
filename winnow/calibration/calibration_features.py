@@ -394,12 +394,14 @@ class FragmentMatchFeatures(CalibrationFeatures):
         """
         filtered_dataset = (
             dataset.filter_entries(
-                metadata_predicate=lambda row: row["precursor_charge"]
-                > self.max_precursor_charge
+                metadata_predicate=lambda row: (
+                    row["precursor_charge"] > self.max_precursor_charge
+                )
             )
             .filter_entries(
-                metadata_predicate=lambda row: len(row["prediction"])
-                > self.max_peptide_length
+                metadata_predicate=lambda row: (
+                    len(row["prediction"]) > self.max_peptide_length
+                )
             )
             .filter_entries(
                 metadata_predicate=lambda row: any(
@@ -681,17 +683,21 @@ class ChimericFeatures(CalibrationFeatures):
                 predictions_predicate=lambda beam: beam is None or len(beam) < 2
             )
             .filter_entries(
-                metadata_predicate=lambda row: row["precursor_charge"]
-                > self.max_precursor_charge
+                metadata_predicate=lambda row: (
+                    row["precursor_charge"] > self.max_precursor_charge
+                )
             )
             .filter_entries(
-                predictions_predicate=lambda beam: len(beam) > 1
-                and len(beam[1].sequence) > self.max_peptide_length
+                predictions_predicate=lambda beam: (
+                    len(beam) > 1 and len(beam[1].sequence) > self.max_peptide_length
+                )
             )
             .filter_entries(
-                predictions_predicate=lambda beam: len(beam) > 1
-                and any(
-                    token in beam[1].sequence for token in self.unsupported_residues
+                predictions_predicate=lambda beam: (
+                    len(beam) > 1
+                    and any(
+                        token in beam[1].sequence for token in self.unsupported_residues
+                    )
                 )
             )
         )
@@ -930,9 +936,11 @@ class MassErrorFeature(CalibrationFeatures):
 
         # Compute dehydrated theoretical mass from peptide sequence
         dehydrated_theoretical_mass = dataset.metadata["prediction"].apply(
-            lambda peptide: sum(self.residue_masses[residue] for residue in peptide)
-            if isinstance(peptide, list)
-            else float("-inf")
+            lambda peptide: (
+                sum(self.residue_masses[residue] for residue in peptide)
+                if isinstance(peptide, list)
+                else float("-inf")
+            )
         )
         # Compute theoretical MH+ mass: residues + H2O (peptide backbone) + H+ (ionisation)
         theoretical_mass = (
@@ -1182,8 +1190,9 @@ class RetentionTimeFeature(CalibrationFeatures):
                 the Koina iRT model.
         """
         filtered_dataset = dataset.filter_entries(
-            metadata_predicate=lambda row: len(row["prediction"])
-            > self.max_peptide_length
+            metadata_predicate=lambda row: (
+                len(row["prediction"]) > self.max_peptide_length
+            )
         ).filter_entries(
             metadata_predicate=lambda row: any(
                 token in row["prediction"] for token in self.unsupported_residues

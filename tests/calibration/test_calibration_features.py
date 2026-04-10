@@ -1194,12 +1194,12 @@ class TestFragmentMatchFeatures:
             assert not pd.isna(ion_match_intensity)
             assert isinstance(ion_matches, (int, float))
             assert isinstance(ion_match_intensity, (int, float))
-            assert (
-                ion_matches > 0.0
-            ), f"Expected non-zero ion_matches for spectrum {sid}"
-            assert (
-                ion_match_intensity > 0.0
-            ), f"Expected non-zero ion_match_intensity for spectrum {sid}"
+            assert ion_matches > 0.0, (
+                f"Expected non-zero ion_matches for spectrum {sid}"
+            )
+            assert ion_match_intensity > 0.0, (
+                f"Expected non-zero ion_match_intensity for spectrum {sid}"
+            )
 
         # Invalid entries
         for sid in [20]:
@@ -1594,12 +1594,12 @@ class TestChimericFeatures:
         assert not pd.isna(ion_match_intensity_10)
         assert isinstance(ion_matches_10, (int, float))
         assert isinstance(ion_match_intensity_10, (int, float))
-        assert (
-            ion_matches_10 > 0.0
-        ), f"Expected non-zero chimeric_ion_matches for spectrum 10, got {ion_matches_10}"
-        assert (
-            ion_match_intensity_10 > 0.0
-        ), f"Expected non-zero chimeric_ion_match_intensity for spectrum 10, got {ion_match_intensity_10}"
+        assert ion_matches_10 > 0.0, (
+            f"Expected non-zero chimeric_ion_matches for spectrum 10, got {ion_matches_10}"
+        )
+        assert ion_match_intensity_10 > 0.0, (
+            f"Expected non-zero chimeric_ion_match_intensity for spectrum 10, got {ion_match_intensity_10}"
+        )
 
         # Invalid entries
         for sid in [30, 40]:
@@ -1998,9 +1998,9 @@ class TestLearnFromMissingFiltering:
             feature.compute(dataset)
 
         # The invalid row (spectrum_id=20) must be gone from the caller's dataset.
-        assert (
-            len(dataset.metadata) == 2
-        ), "Expected 2 rows after filtering the 1 invalid entry"
+        assert len(dataset.metadata) == 2, (
+            "Expected 2 rows after filtering the 1 invalid entry"
+        )
         assert 20 not in dataset.metadata["spectrum_id"].values
 
         # Feature values must be computed for the 2 remaining valid rows.
@@ -2222,9 +2222,9 @@ class TestLearnFromMissingFiltering:
             with pytest.warns(UserWarning, match="Filtered 1 spectra"):
                 feature.compute(dataset)
 
-        assert (
-            len(dataset.metadata) == 2
-        ), "Expected 2 rows after filtering the 1 invalid entry"
+        assert len(dataset.metadata) == 2, (
+            "Expected 2 rows after filtering the 1 invalid entry"
+        )
         assert 20 not in dataset.metadata["spectrum_id"].values
         assert "irt_error" in dataset.metadata.columns
 
