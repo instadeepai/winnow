@@ -244,7 +244,15 @@ class InstaNovoDatasetLoader(DatasetLoader):
         """
         spectrum_path = Path(spectrum_path)
 
-        if spectrum_path.suffix == ".parquet":
+        if spectrum_path.is_dir():
+            # Directory input: read all parquet files (supports InstaNovo sharded output)
+            parquet_files = sorted(spectrum_path.glob("*.parquet"))
+            if not parquet_files:
+                raise ValueError(
+                    f"No .parquet files found in directory: {spectrum_path}"
+                )
+            df = pl.concat([pl.read_parquet(f) for f in parquet_files])
+        elif spectrum_path.suffix == ".parquet":
             df = pl.read_parquet(spectrum_path)
         elif spectrum_path.suffix == ".ipc":
             df = pl.read_ipc(spectrum_path)
@@ -255,7 +263,8 @@ class InstaNovoDatasetLoader(DatasetLoader):
             df = self._df_from_matchms(spectra)
         else:
             raise ValueError(
-                f"Unsupported file format for spectrum data: {spectrum_path.suffix}. Supported formats are .parquet, .ipc and .mgf."
+                f"Unsupported file format for spectrum data: {spectrum_path.suffix}. "
+                "Supported formats are .parquet, .ipc, .mgf, or a directory of .parquet files."
             )
 
         if spectrum_path.suffix == ".mgf" or self.add_index_cols:

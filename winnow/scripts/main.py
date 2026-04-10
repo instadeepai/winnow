@@ -385,16 +385,32 @@ def predict_entry_point(
     # Write output
     logger.info(f"Final dataset: {len(dataset_metadata)} spectra")
     logger.info(f"Writing output to {cfg.output_folder}")
-    dataset_metadata, dataset_preds_and_fdr_metrics = separate_metadata_and_predictions(
-        dataset_metadata, fdr_control, cfg.fdr_control.confidence_column
-    )
 
-    CalibrationDataset(metadata=dataset_metadata).save_metadata(
-        cfg.output_folder + "/" + "metadata.csv"
-    )
-    CalibrationDataset(metadata=dataset_preds_and_fdr_metrics).save_metadata(
-        cfg.output_folder + "/" + "preds_and_fdr_metrics.csv"
-    )
+    import os
+
+    os.makedirs(cfg.output_folder, exist_ok=True)
+
+    output_format = getattr(cfg, "output_format", "split")
+
+    if output_format == "merged":
+        # Single merged output: all columns in one file
+        merged_path = cfg.output_folder + "/" + "calibrated_psms.tsv"
+        dataset_metadata.to_csv(merged_path, sep="\t", index=False)
+        logger.info(f"Wrote merged calibrated PSM table to {merged_path}")
+    else:
+        # Legacy split output: metadata.csv + preds_and_fdr_metrics.csv
+        dataset_metadata, dataset_preds_and_fdr_metrics = (
+            separate_metadata_and_predictions(
+                dataset_metadata, fdr_control, cfg.fdr_control.confidence_column
+            )
+        )
+
+        CalibrationDataset(metadata=dataset_metadata).save_metadata(
+            cfg.output_folder + "/" + "metadata.csv"
+        )
+        CalibrationDataset(metadata=dataset_preds_and_fdr_metrics).save_metadata(
+            cfg.output_folder + "/" + "preds_and_fdr_metrics.csv"
+        )
 
     logger.info("Prediction pipeline completed successfully.")
 
