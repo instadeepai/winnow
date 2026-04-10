@@ -32,7 +32,12 @@ fdr_control:
   confidence_column: calibrated_confidence
 
 # Folder path to write the outputs to.
-# This will create two CSV files in the output folder:
-# - metadata.csv: Contains all metadata and feature columns from the input dataset.
-# - preds_and_fdr_metrics.csv: Contains predictions and FDR metrics.
 output_folder: results/predictions
+
+# Output format:
+#   "split"  (default) - Legacy two-file output:
+#     - metadata.csv: spectrum metadata and computed features
+#     - preds_and_fdr_metrics.csv: predictions and FDR metrics
+#   "merged" - Single file with all columns:
+#     - calibrated_psms.tsv: combined TSV with spectrum metadata + predictions + FDR metrics
+output_format: split
