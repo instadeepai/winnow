@@ -793,10 +793,10 @@ class MZTabDatasetLoader(DatasetLoader):
                     ScoredSequence(
                         sequence=row["prediction"],
                         mass_error=None,
-                        sequence_log_probability=row["confidence"],
-                        token_log_probabilities=row[
-                            "token_scores"
-                        ],  # None for traditional search engines
+                        sequence_log_probability=np.log(row["confidence"]),
+                        token_log_probabilities=np.log(row["token_scores"])
+                        if row["token_scores"] is not None
+                        else None,  # None for traditional search engines
                     )
                 )
             beam_predictions.append(scored_sequences if scored_sequences else None)

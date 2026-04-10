@@ -1367,7 +1367,7 @@ class TestMZTabDatasetLoader:
                 "confidence": [0.9, 0.7],
                 "prediction": [["P", "E", "P"], ["A", "C"]],
                 "token_scores": pl.Series(
-                    [[-0.1, -0.2, -0.3], None], dtype=pl.List(pl.Float64)
+                    [[0.9, 0.8, 0.7], None], dtype=pl.List(pl.Float64)
                 ),
             }
         )
@@ -1407,11 +1407,16 @@ class TestMZTabDatasetLoader:
                 "index": pl.Series([0, 0], dtype=pl.Int64),
                 "confidence": [0.5, 0.9],  # low confidence listed first in df
                 "prediction": [["A"], ["P"]],
-                "token_scores": pl.Series([None, None], dtype=pl.List(pl.Float64)),
+                "token_scores": pl.Series(
+                    [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], dtype=pl.List(pl.Float64)
+                ),
             }
         )
         result = loader._create_beam_predictions(df, [0])
-        assert result[0][0].sequence_log_probability == pytest.approx(0.9)
+        assert result[0][0].sequence_log_probability == pytest.approx(np.log(0.9))
+        assert result[0][0].token_log_probabilities == pytest.approx(
+            [np.log(0.4), np.log(0.5), np.log(0.6)]
+        )
 
     # ------------------------------------------------------------------
     # load() – error handling
