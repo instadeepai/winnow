@@ -12,7 +12,14 @@ import numpy as np
 import pandas as pd
 
 from winnow.datasets.calibration_dataset import CalibrationDataset
-from winnow.calibration.features.constants import CARBON_ISOTOPE_MASS_SHIFT
+from winnow.calibration.features.constants import (
+    CARBON_ISOTOPE_MASS_SHIFT,
+    XCORR_BIN_SIZE,
+    XCORR_BIN_OFFSET,
+    XCORR_NUM_WINDOWS,
+    XCORR_MAX_OFFSET,
+    XCORR_WINDOW_NORM_VALUE,
+)
 
 ########################################################
 # Helper functions
@@ -340,8 +347,8 @@ def compute_ion_identifications(
     source_intensity_column: str,
     mz_tolerance: float = 0.02,
     predictions: Optional[List[str]] = None,
-) -> Iterator[Tuple[float, float, int, int, int, float, float, float]]:
-    """Computes the ion match rate, match intensity, longest b-series, longest y-series, complementary ion count, max ion gap, b-y intensity ratio and spectral angle for each spectrum in the dataset.
+) -> Iterator[Tuple[float, float, int, int, int, float, float, float, float]]:
+    """Computes the ion match rate, match intensity, longest b-series, longest y-series, complementary ion count, max ion gap, b-y intensity ratio, spectral angle and xcorr for each spectrum in the dataset.
 
     Args:
         dataset: DataFrame containing the mass spectrum data.
@@ -352,10 +359,10 @@ def compute_ion_identifications(
         predictions: Optional list of tokenised predictions for each spectrum. If not provided, the peptide length will be inferred from the column "predictions" in the metadata.
 
     Returns:
-        Iterator of (ion_match_rate, ion_match_intensity, longest_b_series, longest_y_series, complementary_ion_count, max_ion_gap, b_y_intensity_ratio, spectral_angle) tuples.
+        Iterator of (ion_match_rate, ion_match_intensity, longest_b_series, longest_y_series, complementary_ion_count, max_ion_gap, b_y_intensity_ratio, spectral_angle, xcorr) tuples.
     """
     per_row_match_results: List[
-        Tuple[float, float, int, int, int, float, float, float]
+        Tuple[float, float, int, int, int, float, float, float, float]
     ] = []
 
     for _, row in dataset.iterrows():
@@ -392,6 +399,12 @@ def compute_ion_identifications(
         spectral_angle = compute_spectral_angle(
             row[source_intensity_column], aligned_m0_intensities
         )
+        # Compute the fast xcorr score
+        xcorr = compute_xcorr(
+            observed_mz=row["mz_array"],
+            observed_intensities=row["intensity_array"],
+            theoretical_mz=row[source_mz_column],
+        )
 
         per_row_match_results.append(
             (
@@ -403,6 +416,7 @@ def compute_ion_identifications(
                 max_ion_gap,
                 b_y_intensity_ratio,
                 spectral_angle,
+                xcorr,
             )
         )
 
@@ -617,3 +631,152 @@ def compute_spectral_angle(
     dot_product = np.clip(dot_product, -1.0, 1.0)
 
     return 1 - (2 * np.arccos(dot_product) / np.pi)
+
+
+########################################################
+# Cross-correlation Score (xcorr)
+########################################################
+
+
+def _bin_observed_spectrum(
+    observed_mz: List[float],
+    observed_intensities: List[float],
+    num_bins: int,
+    bin_size: float,
+    bin_offset: float,
+) -> np.ndarray:
+    """Bin an observed spectrum with sqrt intensity compression.
+
+    Places each peak into a near-unit-dalton bin, taking the square root of
+    its intensity. When multiple peaks land in the same bin, the maximum
+    sqrt-intensity is kept.
+
+    Args:
+        observed_mz: m/z values of the observed spectrum.
+        observed_intensities: Intensities corresponding to observed_mz.
+        num_bins: Total number of bins in the output array.
+        bin_size: Width of each m/z bin in Daltons.
+        bin_offset: Fractional offset for bin assignment.
+
+    Returns:
+        Array of length num_bins with sqrt-compressed, max-per-bin intensities.
+    """
+    binned = np.zeros(num_bins)
+    for mz, intensity in zip(observed_mz, observed_intensities):
+        bin_idx = int(mz / bin_size + bin_offset)
+        if 0 <= bin_idx < num_bins:
+            sqrt_intensity = np.sqrt(max(intensity, 0.0))
+            if sqrt_intensity > binned[bin_idx]:
+                binned[bin_idx] = sqrt_intensity
+    return binned
+
+
+def _normalize_windows(
+    spectrum: np.ndarray,
+    num_windows: int,
+) -> None:
+    """Normalize maximum intensity within equal m/z windows (in-place).
+
+    Divides the spectrum into num_windows equal regions and scales each so
+    that its maximum intensity equals XCORR_WINDOW_NORM_VALUE.
+
+    Args:
+        spectrum: Binned spectrum array, modified in-place.
+        num_windows: Number of equal-width windows.
+    """
+    num_bins = len(spectrum)
+    window_size = max(num_bins // num_windows, 1)
+    for w in range(num_windows):
+        start = w * window_size
+        end = min(start + window_size, num_bins) if w < num_windows - 1 else num_bins
+        window = spectrum[start:end]
+        max_val = window.max()
+        if max_val > 0:
+            spectrum[start:end] = window * (XCORR_WINDOW_NORM_VALUE / max_val)
+
+
+def _subtract_background(
+    spectrum: np.ndarray,
+    max_xcorr_offset: int,
+) -> np.ndarray:
+    """Subtract local background using the fast xcorr preprocessing.
+
+    For each bin i, computes:
+        y'[i] = y[i] - (sum of y[i-offset..i+offset] excluding y[i]) / (2 * offset)
+
+    Uses a cumulative sum for O(n) efficiency.
+
+    Args:
+        spectrum: Window-normalized binned spectrum.
+        max_xcorr_offset: Number of bins in each direction for background.
+
+    Returns:
+        Background-subtracted spectrum.
+    """
+    num_bins = len(spectrum)
+    cumsum = np.concatenate(([0.0], np.cumsum(spectrum)))
+    lo = np.maximum(0, np.arange(num_bins) - max_xcorr_offset)
+    hi = np.minimum(num_bins, np.arange(num_bins) + max_xcorr_offset + 1)
+    window_sums = cumsum[hi] - cumsum[lo]
+    divisor = 2 * max_xcorr_offset
+    return spectrum - (window_sums - spectrum) / divisor
+
+
+def compute_xcorr(
+    observed_mz: List[float],
+    observed_intensities: List[float],
+    theoretical_mz: Union[List[float], float],
+    bin_size: float = XCORR_BIN_SIZE,
+    bin_offset: float = XCORR_BIN_OFFSET,
+    num_windows: int = XCORR_NUM_WINDOWS,
+    max_xcorr_offset: int = XCORR_MAX_OFFSET,
+) -> float:
+    """Compute the SEQUEST fast xcorr score between observed and theoretical spectra.
+
+    Implements the fast cross-correlation score from Eng et al. (2008). The observed
+    spectrum is preprocessed by binning into near-unit-dalton bins with sqrt intensity
+    compression, normalizing peak intensities within equal m/z windows, and subtracting
+    the local background (mean of ±max_xcorr_offset shifted spectra). The xcorr score
+    is the dot product of the preprocessed observed spectrum with a binary theoretical
+    spectrum that has 1.0 at each predicted fragment ion bin.
+
+    Reference:
+        Eng JK, Fischer B, Grossmann J, Maccoss MJ. A fast SEQUEST cross correlation
+        algorithm. J Proteome Res. 2008 Oct;7(10):4598-602.
+
+    Args:
+        observed_mz: m/z values of the observed (acquired) spectrum.
+        observed_intensities: Intensities corresponding to observed_mz.
+        theoretical_mz: m/z values of theoretical fragment ions from intensity
+            prediction. May be NaN (float) for missing predictions.
+        bin_size: Width of each m/z bin in Daltons. Defaults to 1.0005079.
+        bin_offset: Fractional offset for bin assignment. Defaults to 0.4.
+        num_windows: Number of equal-width m/z windows for intensity normalization.
+            Defaults to 10.
+        max_xcorr_offset: Number of bins in each direction for background estimation.
+            The background is divided by 2 * max_xcorr_offset. Defaults to 75.
+
+    Returns:
+        The xcorr score. Returns 0.0 for missing/empty inputs.
+    """
+    if isinstance(theoretical_mz, float):
+        return 0.0
+    if len(observed_mz) == 0 or len(theoretical_mz) == 0:
+        return 0.0
+
+    max_mz = max(max(observed_mz), max(theoretical_mz))
+    num_bins = int(max_mz / bin_size + bin_offset) + 1
+
+    observed_binned = _bin_observed_spectrum(
+        observed_mz, observed_intensities, num_bins, bin_size, bin_offset
+    )
+    _normalize_windows(observed_binned, num_windows)
+    processed = _subtract_background(observed_binned, max_xcorr_offset)
+
+    theoretical_binned = np.zeros(num_bins)
+    for mz in theoretical_mz:
+        bin_idx = int(mz / bin_size + bin_offset)
+        if 0 <= bin_idx < num_bins:
+            theoretical_binned[bin_idx] = 1.0
+
+    return float(np.dot(theoretical_binned, processed))
