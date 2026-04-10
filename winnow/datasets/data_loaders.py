@@ -420,15 +420,27 @@ class InstaNovoDatasetLoader(DatasetLoader):
         # Convert to pandas for downstream compatibility
         df = df.to_pandas()
         if has_labels:
-            df["sequence"] = (
-                df["sequence"]
-                .apply(
-                    lambda peptide: peptide.replace("L", "I")
-                    if isinstance(peptide, str)
-                    else peptide
+            try:
+                df["sequence"] = (
+                    df["sequence"]
+                    .apply(
+                        lambda peptide: peptide.replace("L", "I")
+                        if isinstance(peptide, str)
+                        else peptide
+                    )
+                    .apply(self.metrics._split_peptide)
                 )
-                .apply(self.metrics._split_peptide)
-            )
+            except Exception as e:
+                import logging
+
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    f"Could not remap ground-truth sequences (likely contains "
+                    f"unsupported modification notation): {e}. "
+                    f"Dropping 'sequence' column — evaluation metrics will not be available."
+                )
+                df = df.drop(columns=["sequence"])
+                has_labels = False
         return df
 
     def _process_predictions(
