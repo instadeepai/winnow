@@ -6,7 +6,7 @@ The `winnow.calibration` module implements confidence calibration for peptide-sp
 
 ### ProbabilityCalibrator
 
-The main calibration model that transforms raw confidence scores into calibrated probabilities using a multi-layer perceptron classifier with various peptide and spectral features.
+The main calibration model that transforms raw confidence scores into calibrated probabilities using a PyTorch neural network (`CalibratorNetwork`) with various peptide and spectral features.
 
 ```python
 from winnow.calibration import ProbabilityCalibrator
@@ -14,23 +14,32 @@ from winnow.calibration.calibration_features import (
     MassErrorFeature, FragmentMatchFeatures, BeamFeatures
 )
 from winnow.datasets.calibration_dataset import CalibrationDataset
+from winnow.datasets.feature_dataset import FeatureDataset
 from winnow.constants import RESIDUE_MASSES
 
 # Create and configure calibrator
-calibrator = ProbabilityCalibrator(seed=42)
+calibrator = ProbabilityCalibrator(seed=42, hidden_dims=[128, 64])
 
 # Add features for calibration
 calibrator.add_feature(MassErrorFeature(residue_masses=RESIDUE_MASSES))
 calibrator.add_feature(FragmentMatchFeatures(mz_tolerance=0.02))
 calibrator.add_feature(BeamFeatures())
 
-# Train the calibrator
-calibrator.fit(training_dataset)
+# Two-phase workflow: compute features, then train from FeatureDataset
+# Phase 1: compute features on a CalibrationDataset (populates metadata columns)
+calibrator.compute_features(calibration_dataset, labelled=True)
 
-# Make predictions
+# Phase 2: load pre-computed features from Parquet into a FeatureDataset
+train_ds = FeatureDataset.from_parquet("features/train/")
+val_ds = FeatureDataset.from_parquet("features/val/")
+
+# Train the calibrator on FeatureDatasets
+calibrator.fit(train_ds, val_dataset=val_ds)
+
+# Make predictions on new data
 calibrator.predict(test_dataset)
 
-# Save/load trained models
+# Save/load trained models (safetensors + config.json)
 ProbabilityCalibrator.save(calibrator, Path("calibrator_checkpoint"))
 
 # Load models - supports multiple sources
@@ -46,18 +55,20 @@ loaded_calibrator = ProbabilityCalibrator.load("calibrator_checkpoint")
 
 **Key Features:**
 
-- **Neural Network Classifier**: Uses MLPClassifier with standardised feature scaling
+- **PyTorch Neural Network**: Uses a custom `CalibratorNetwork` (`nn.Module`) with feature normalisation
 - **Feature Management**: Add, remove and track multiple calibration features
 - **Dependency Handling**: Automatic computation of feature dependencies
-- **Model Persistence**: Save and load trained calibrators
+- **Model Persistence**: Save/load using `safetensors` (weights) and `config.json` (architecture, normalisation stats, feature definitions)
+- **Two-phase Training**: Supports training from pre-computed Parquet feature matrices via `FeatureDataset`
 - **Feature Extraction**: Computes features and handles both labelled and unlabelled data
+- **GPU Support**: Automatic GPU detection with CPU fallback
 
 **Main Methods:**
 
 - `add_feature(feature)`: Add a calibration feature
-- `fit(dataset)`: Train the calibrator on a labelled dataset
+- `fit(dataset, val_dataset)`: Train the calibrator on a `FeatureDataset`
 - `predict(dataset)`: Generate calibrated confidence scores
-- `save(calibrator, path)`: Save trained model to disk
+- `save(calibrator, path)`: Save trained model to disk (`model.safetensors` + `config.json`)
 - `load(pretrained_model_name_or_path, cache_dir)`: Load trained model from Hugging Face Hub or local directory
 
     - Default: Loads `"InstaDeepAI/winnow-general-model"` from Hugging Face
@@ -209,8 +220,8 @@ have different chromatographic conditions (column, gradient, temperature, etc.).
    regressor is fitted with a warning.
 
 3. **Always re-fitted** -- The regressor is fitted at both training and inference time (in
-   the `prepare()` step). It is not persisted inside the calibrator pickle. Given the same
-   data and random seed, the same regressor is produced.
+   the `prepare()` step). It is not persisted inside the calibrator model directory by
+   default. Given the same data and random seed, the same regressor is produced.
 
 #### `experiment_name` column
 
@@ -237,10 +248,10 @@ trained during the training step and load them at inference time:
 
 ```bash
 # Train: saves calibrator AND per-experiment iRT regressors
-winnow train ... irt_regressor_output_path=./irt_regressors.pkl
+winnow train ... irt_regressor_output_path=./irt_regressors.safetensors
 
 # Predict: loads regressors from training; skips re-fitting for known experiments
-winnow predict ... calibrator.irt_regressor_path=./irt_regressors.pkl
+winnow predict ... calibrator.irt_regressor_path=./irt_regressors.safetensors
 ```
 
 When pre-fitted regressors are loaded, `prepare()` skips re-fitting for those experiments.
@@ -256,10 +267,10 @@ Regressors can also be saved and loaded programmatically:
 ```python
 # After fitting (e.g., after calibrator.fit(dataset))
 rt_feature = calibrator.feature_dict["iRT Feature"]
-rt_feature.save_regressors("irt_regressors.pkl")
+rt_feature.save_regressors("irt_regressors.safetensors")
 
 # Before prediction on new data
-rt_feature.load_regressors("irt_regressors.pkl")
+rt_feature.load_regressors("irt_regressors.safetensors")
 ```
 
 ## Handling missing features

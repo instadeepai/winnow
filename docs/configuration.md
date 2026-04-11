@@ -40,7 +40,7 @@ configs/
 │   ├── nonparametric.yaml
 │   └── database_grounded.yaml
 ├── train.yaml                 # Main training config
-├── compute_features.yaml      # Feature-only export (no MLP fit)
+├── compute_features.yaml      # Feature-only export (no calibrator fit)
 ├── calibrator.yaml            # Model architecture and features
 └── predict.yaml               # Main prediction config
 ```
@@ -78,8 +78,8 @@ Access nested configuration values using dot notation:
 # Change calibrator seed
 winnow train calibrator.seed=123
 
-# Change MLP hidden layer sizes
-winnow train calibrator.hidden_layer_sizes=[100,50,25]
+# Change network architecture
+winnow train calibrator.hidden_dims=[128,64,32]
 
 # Change feature parameters
 winnow train calibrator.features.fragment_match_features.mz_tolerance=0.01
@@ -110,16 +110,22 @@ defaults:
   - calibrator
   - data_loader: instanovo  # Options: instanovo, mztab, pointnovo, winnow
 
+# Two-phase training: set features_path to skip raw data loading and train
+# directly from pre-computed feature Parquets (produced by compute-features).
+features_path: null
+val_features_path: null
+validation_fraction: 0.1
+
+# Single-phase dataset config (ignored when features_path is set):
 dataset:
-  # Path to the spectrum data file or to folder containing saved internal Winnow dataset
   spectrum_path_or_directory: data/spectra.ipc
-  # Path to the beam predictions file
-  # Leave as null if data source is winnow, or loading will fail
   predictions_path: data/predictions.csv
 
 # Output paths
 model_output_dir: models/new_model
 dataset_output_path: results/calibrated_dataset.csv
+irt_regressor_output_path: null
+training_history_path: null
 ```
 
 **Key parameters:**
@@ -127,14 +133,19 @@ dataset_output_path: results/calibrated_dataset.csv
 - `data_loader`: Format of input data loader to use (via defaults: `instanovo`, `mztab`, `pointnovo`, `winnow`)
 - `dataset.spectrum_path_or_directory`: Path to spectrum/metadata file (InstaNovo: `.parquet`, `.ipc`, or `.mgf`; or directory for Winnow format)
 - `dataset.predictions_path`: Path to predictions file (set to null for Winnow format)
-- `model_output_dir`: Where to save trained model
+- `features_path`: Path to pre-computed feature Parquet(s) for two-phase training (file or directory)
+- `val_features_path`: Explicit validation Parquet(s); overrides `validation_fraction`
+- `validation_fraction`: Automatic random validation split fraction (default: 0.1)
+- `model_output_dir`: Where to save trained model (`model.safetensors` + `config.json`)
 - `dataset_output_path`: Where to save calibrated training results
+- `irt_regressor_output_path`: Optional path to save per-experiment iRT regressors
+- `training_history_path`: Optional path to save epoch-level training history as JSON
 
 ## Compute-features configuration
 
 ### Main config (`configs/compute_features.yaml`)
 
-Loads data like `train.yaml` (same `defaults`: `residues`, `calibrator`, `data_loader`), runs `ProbabilityCalibrator.compute_features` only, and writes one CSV. No `model_output_dir` and no MLP training.
+Loads data like `train.yaml` (same `defaults`: `residues`, `calibrator`, `data_loader`), runs `ProbabilityCalibrator.compute_features` only, and writes outputs. No `model_output_dir` and no calibrator training.
 
 ```yaml
 defaults:
@@ -147,7 +158,8 @@ dataset:
   spectrum_path_or_directory: data/spectra.ipc
   predictions_path: data/predictions.csv
 
-dataset_output_path: results/metadata.csv
+metadata_output_path: results/metadata.csv
+# training_matrix_output_path: results/training_matrix.parquet
 filter_empty_predictions: true
 labelled: true
 ```
@@ -155,7 +167,8 @@ labelled: true
 **Key parameters:**
 
 - `dataset.*`, `data_loader`: Same meaning as in training config
-- `dataset_output_path`: CSV path for metadata after feature computation
+- `metadata_output_path`: Full metadata CSV for EDA
+- `training_matrix_output_path`: Optional lean numeric Parquet for model training (used with two-phase `features_path` workflow)
 - `filter_empty_predictions`: If true, apply the same empty-prediction filter as train/predict
 - `labelled`: If true, spectrum data must include `sequence` (ground truth).
 
@@ -169,13 +182,17 @@ Controls model architecture and calibration features:
 calibrator:
   _target_: winnow.calibration.calibrator.ProbabilityCalibrator
 
-  seed: 42
-  hidden_layer_sizes: [50, 50]  # The number of neurons in each hidden layer of the MLP classifier.
-  learning_rate_init: 0.001  # The initial learning rate for the MLP classifier.
-  alpha: 0.0001  # L2 regularisation parameter for the MLP classifier.
-  max_iter: 1000  # Maximum number of training iterations for the MLP classifier.
-  early_stopping: true  # Whether to use early stopping to terminate training.
-  validation_fraction: 0.1  # Proportion of training data to use for early stopping validation.
+  # Network architecture
+  hidden_dims: [128, 64]  # The number of neurons in each hidden layer of the network.
+  dropout: 0.1  # Dropout probability between hidden layers.
+
+  # Training hyperparameters
+  learning_rate: 0.001  # Learning rate for the Adam optimiser.
+  weight_decay: 0.0001  # L2 regularisation (weight decay) parameter.
+  max_epochs: 100  # Maximum number of training epochs.
+  batch_size: 1024  # Mini-batch size for DataLoader.
+  patience: 10  # Early stopping patience (epochs without validation improvement).
+  seed: 42  # Random seed for reproducibility.
 
   features:
     mass_error:
@@ -254,12 +271,13 @@ koina:
 **Key parameters:**
 
 - `seed`: Random seed for reproducibility
-- `hidden_layer_sizes`: Architecture of MLP classifier
-- `learning_rate_init`: Initial learning rate
-- `alpha`: L2 regularisation parameter
-- `max_iter`: Maximum training iterations
-- `early_stopping`: Whether to use early stopping
-- `validation_fraction`: Proportion of data for validation
+- `hidden_dims`: Architecture of the neural network (list of hidden layer sizes)
+- `dropout`: Dropout probability between hidden layers
+- `learning_rate`: Learning rate for the Adam optimiser
+- `weight_decay`: L2 regularisation (weight decay) parameter
+- `max_epochs`: Maximum number of training epochs
+- `batch_size`: Mini-batch size for DataLoader
+- `patience`: Early stopping patience (epochs without validation improvement)
 - `features.*`: Individual calibration feature configurations
 
 ### Koina model input validation
@@ -476,7 +494,7 @@ a setting which changes the column names of saved beams.
 The `beam_columns` parameter specifies the prefix for each required column type:
 
 | Key | Description | Example columns |
-|-----|-------------|-----------------|
+| ----- | ------------- | ----------------- |
 | `sequence` | Peptide sequence for each beam | `predictions_beam_0`, `predictions_beam_1`, ... |
 | `log_probability` | Log probability score for each beam | `predictions_log_probability_beam_0`, ... |
 | `token_log_probabilities` | Per-token log probabilities | `predictions_token_log_probabilities_beam_0`, ... |
@@ -651,7 +669,7 @@ For advanced users who have installed Winnow as a package and need to customise 
 
 Your custom config directory should mirror the structure of the package configs:
 
-```
+```text
 my_configs/
 ├── residues.yaml              # Override residue masses/modifications
 ├── calibrator.yaml            # Override calibrator features
@@ -709,7 +727,7 @@ calibrator:
   seed: 99999
 ```
 
-**Result**: Only `_target_` and `seed` are present. All other keys (`hidden_layer_sizes`, `learning_rate_init`, `features`, etc.) are **missing** from the final config. This will cause errors when running the pipeline in most cases.
+**Result**: Only `_target_` and `seed` are present. All other keys (`hidden_dims`, `learning_rate`, `features`, etc.) are **missing** from the final config. This will cause errors when running the pipeline in most cases.
 
 **Example - What you need (complete structure):**
 
@@ -718,12 +736,13 @@ calibrator:
 calibrator:
   _target_: winnow.calibration.calibrator.ProbabilityCalibrator
   seed: 99999  # Your custom value
-  hidden_layer_sizes: [50, 50]  # Must include all settings
-  learning_rate_init: 0.001
-  alpha: 0.0001
-  max_iter: 1000
-  early_stopping: true
-  validation_fraction: 0.1
+  hidden_dims: [128, 64]  # Must include all settings
+  dropout: 0.1
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  max_epochs: 100
+  batch_size: 1024
+  patience: 10
   features:
     mass_error:
       _target_: winnow.calibration.calibration_features.MassErrorFeature
