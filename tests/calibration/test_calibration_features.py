@@ -808,26 +808,8 @@ class TestRetentionTimeFeature:
         assert len(dataset.metadata) == 3
         assert set(dataset.metadata["spectrum_id"].values) == {10, 20, 40}
 
-    def test_pickle_excludes_regressor_state(self):
-        """Test that pickle round-trip excludes transient irt_predictors."""
-        import pickle
-        from sklearn.linear_model import LinearRegression
-
-        feature = RetentionTimeFeature(train_fraction=0.5, min_train_points=2)
-        reg = LinearRegression()
-        reg.fit([[1], [2]], [10, 20])
-        feature.irt_predictors["test_exp"] = reg
-
-        data = pickle.dumps(feature)
-        restored = pickle.loads(data)
-
-        assert isinstance(restored.irt_predictors, dict)
-        assert len(restored.irt_predictors) == 0
-        assert restored.train_fraction == 0.5
-        assert restored.min_train_points == 2
-
-    def test_save_and_load_regressors(self, tmp_path):
-        """Test save_regressors and load_regressors round-trip."""
+    def test_save_and_load_regressors_safetensors(self, tmp_path):
+        """Test save_regressors and load_regressors round-trip with safetensors."""
         from sklearn.linear_model import LinearRegression
 
         feature = RetentionTimeFeature(train_fraction=0.5, min_train_points=2)
@@ -837,7 +819,7 @@ class TestRetentionTimeFeature:
         reg_b.fit([[3], [4]], [30, 40])
         feature.irt_predictors = {"exp_a": reg_a, "exp_b": reg_b}
 
-        path = tmp_path / "regressors.pkl"
+        path = tmp_path / "regressors.safetensors"
         feature.save_regressors(path)
         assert path.exists()
 
