@@ -13,9 +13,11 @@ import logging
 from rich.logging import RichHandler
 from pathlib import Path
 
+import polars as pl
+import pandas as pd
+
 # Lazy imports for heavy dependencies - only imported when actually needed
 if TYPE_CHECKING:
-    import pandas as pd
     from winnow.datasets.calibration_dataset import CalibrationDataset
     from winnow.fdr.nonparametric import NonParametricFDRControl
     from winnow.fdr.database_grounded import DatabaseGroundedFDRControl
@@ -321,6 +323,30 @@ def _compute_features_single_file(
     return [dataset.metadata]
 
 
+def _write_training_matrix(metadata, calibrator, confidence_column, output_path):
+    """Write a lean numeric training matrix to Parquet.
+
+    Args:
+        metadata: Combined metadata DataFrame.
+        calibrator: The calibrator (used to get feature column names).
+        confidence_column: Name of the confidence column.
+        output_path: Destination Parquet path.
+    """
+    feature_columns = [confidence_column]
+    feature_columns.extend(calibrator.columns)
+    keep_cols = list(feature_columns)
+    if "correct" in metadata.columns:
+        keep_cols.append("correct")
+
+    training_df = pl.from_pandas(metadata[keep_cols])
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    training_df.write_parquet(output_path)
+    logger.info(
+        f"Saved training matrix ({len(training_df)} rows, "
+        f"{len(training_df.columns)} cols) to {output_path}"
+    )
+
+
 def compute_features_entry_point(
     overrides: Optional[List[str]] = None,
     execute: bool = True,
@@ -341,7 +367,6 @@ def compute_features_entry_point(
         execute: If False, only print the configuration and return.
         config_dir: Optional path to custom config directory.
     """
-    import pandas as pd
     from hydra import initialize_config_dir, compose
     from hydra.utils import instantiate
     from winnow.utils.config_path import get_primary_config_dir
@@ -396,8 +421,20 @@ def compute_features_entry_point(
 
     combined_dataset = CalibrationDataset(metadata=combined_metadata)
 
-    logger.info(f"Saving dataset with features to {cfg.dataset_output_path}")
-    combined_dataset.save_metadata(cfg.dataset_output_path)
+    metadata_output_path = cfg.get(
+        "metadata_output_path", cfg.get("dataset_output_path")
+    )
+    logger.info(f"Saving metadata CSV to {metadata_output_path}")
+    combined_dataset.save_metadata(metadata_output_path)
+
+    training_matrix_output_path = cfg.get("training_matrix_output_path")
+    if training_matrix_output_path:
+        _write_training_matrix(
+            combined_metadata,
+            calibrator,
+            combined_dataset.confidence_column,
+            training_matrix_output_path,
+        )
 
     logger.info("Compute-features pipeline completed successfully.")
 
