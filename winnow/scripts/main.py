@@ -153,22 +153,33 @@ def train_entry_point(
     execute: bool = True,
     config_dir: Optional[str] = None,
 ) -> None:
-    """The main training pipeline entry point.
+    """Train a calibrator from raw data or pre-computed feature Parquets.
+
+    Two modes are supported, controlled by the presence of ``features_path``
+    in the config:
+
+    1. **Single-phase** (``features_path`` not set): load raw spectra, compute
+       features, build a ``FeatureDataset``, and train.
+    2. **Two-phase** (``features_path`` set): load pre-computed features from
+       Parquet file(s) directly into a ``FeatureDataset``, skipping raw data
+       loading and feature computation.
+
+    Validation data can be supplied explicitly via ``val_features_path`` (a
+    Parquet file or directory), or split out automatically with
+    ``validation_fraction`` (default 0.1).  When using an automatic split, a
+    warning is logged about potential peptide/experiment leakage.
 
     Args:
         overrides: Optional list of config overrides.
-        execute: If False, only print the configuration and return without executing the pipeline.
-        config_dir: Optional path to custom config directory. If provided, configs in this
-            directory take precedence over package configs. Files not in custom dir will use package defaults (file-by-file resolution).
+        execute: If False, only print the configuration and return.
+        config_dir: Optional path to custom config directory.
     """
     from hydra import initialize_config_dir, compose
     from hydra.utils import instantiate
     from winnow.utils.config_path import get_primary_config_dir
 
-    # Get primary config directory (custom if provided, otherwise package/dev)
     primary_config_dir = get_primary_config_dir(config_dir)
 
-    # Initialise Hydra with primary config directory
     with initialize_config_dir(
         config_dir=str(primary_config_dir),
         version_base="1.3",
@@ -185,7 +196,74 @@ def train_entry_point(
     logger.info("Starting training pipeline.")
     logger.info(f"Training configuration: {cfg}")
 
-    # Load dataset - Hydra creates the DatasetLoader object
+    calibrator = instantiate(cfg.calibrator)
+    features_path = cfg.get("features_path")
+
+    if features_path is not None:
+        train_dataset, val_dataset = _load_feature_datasets(cfg, features_path)
+    else:
+        train_dataset, val_dataset = _compute_and_split_features(
+            cfg,
+            calibrator,
+            instantiate,
+        )
+
+    logger.info(
+        "Training on %d samples%s.",
+        len(train_dataset),
+        f" (val={len(val_dataset)})" if val_dataset is not None else "",
+    )
+    history = calibrator.fit(train_dataset, val_dataset)
+
+    logger.info(f"Saving model to {cfg.model_output_dir}")
+    ProbabilityCalibrator.save(calibrator, cfg.model_output_dir)
+
+    _save_training_artifacts(cfg, calibrator, history)
+
+    logger.info("Training pipeline completed successfully.")
+
+
+def _load_feature_datasets(cfg, features_path):
+    """Load pre-computed feature Parquets for two-phase training.
+
+    Args:
+        cfg: Resolved Hydra config.
+        features_path: Path (file or directory) to training features.
+
+    Returns:
+        Tuple of (train_dataset, val_dataset). val_dataset may be ``None``.
+    """
+    from winnow.datasets.feature_dataset import FeatureDataset
+    from winnow.utils.paths import resolve_data_path
+
+    resolved = resolve_data_path(str(features_path))
+    logger.info(f"Loading pre-computed features from {resolved}")
+    train_dataset = FeatureDataset.from_parquet(resolved)
+
+    val_features_path = cfg.get("val_features_path")
+    if val_features_path is not None:
+        val_resolved = resolve_data_path(str(val_features_path))
+        logger.info(f"Loading validation features from {val_resolved}")
+        val_dataset = FeatureDataset.from_parquet(val_resolved)
+        return train_dataset, val_dataset
+
+    return _maybe_split_validation(cfg, train_dataset)
+
+
+def _compute_and_split_features(cfg, calibrator, instantiate):
+    """Single-phase: load raw data, compute features, build FeatureDataset.
+
+    Args:
+        cfg: Resolved Hydra config.
+        calibrator: The calibrator instance (used for compute_features).
+        instantiate: Hydra's instantiate function.
+
+    Returns:
+        Tuple of (train_dataset, val_dataset). val_dataset may be ``None``.
+    """
+    import numpy as np
+    from winnow.datasets.feature_dataset import FeatureDataset
+
     logger.info("Loading dataset.")
     data_loader = instantiate(cfg.data_loader)
 
@@ -196,27 +274,86 @@ def train_entry_point(
     dataset_params["predictions_path"] = dataset_params.pop("predictions_path", None)
 
     annotated_dataset = data_loader.load(**dataset_params)
-
     logger.info(f"Loaded: {len(annotated_dataset.metadata)} spectra")
 
     logger.info("Filtering dataset for empty predictions.")
     annotated_dataset = filter_dataset(annotated_dataset)
-
     logger.info(f"After filtering: {len(annotated_dataset.metadata)} spectra")
 
-    # Instantiate the calibrator from the config
-    logger.info("Instantiating calibrator from config.")
-    calibrator = instantiate(cfg.calibrator)
+    features, labels = calibrator.compute_features(
+        annotated_dataset,
+        labelled=True,
+    )
 
-    # Fit the calibrator to the dataset
-    logger.info("Fitting calibrator to dataset.")
-    calibrator.fit(annotated_dataset)
+    train_dataset = FeatureDataset(
+        features=np.asarray(features),
+        labels=np.asarray(labels),
+    )
 
-    # Save the model
-    logger.info(f"Saving model to {cfg.model_output_dir}")
-    ProbabilityCalibrator.save(calibrator, cfg.model_output_dir)
+    dataset_output_path = cfg.get("dataset_output_path")
+    if dataset_output_path:
+        logger.info(f"Saving training metadata to {dataset_output_path}")
+        annotated_dataset.save_metadata(dataset_output_path)
 
-    # Save per-experiment iRT regressors if configured
+    return _maybe_split_validation(cfg, train_dataset)
+
+
+def _maybe_split_validation(cfg, train_dataset):
+    """Optionally split a random validation set from the training data.
+
+    Args:
+        cfg: Resolved Hydra config.
+        train_dataset: The full training FeatureDataset.
+
+    Returns:
+        Tuple of (train_dataset, val_dataset). val_dataset is ``None`` when
+        ``validation_fraction`` is 0 or absent.
+    """
+    import torch
+    from winnow.datasets.feature_dataset import FeatureDataset
+
+    validation_fraction = cfg.get("validation_fraction", 0.1)
+
+    if not validation_fraction or validation_fraction <= 0:
+        return train_dataset, None
+
+    logger.warning(
+        "Using automatic validation split (%.0f%%). This performs a random "
+        "split that may leak peptides or experiment artifacts between train "
+        "and validation sets. For rigorous evaluation, provide separate "
+        "train/val Parquet files via features_path and val_features_path.",
+        validation_fraction * 100,
+    )
+
+    n = len(train_dataset)
+    n_val = max(1, int(n * validation_fraction))
+    n_train = n - n_val
+
+    generator = torch.Generator().manual_seed(cfg.get("calibrator", {}).get("seed", 42))
+    indices = torch.randperm(n, generator=generator)
+    train_idx = indices[:n_train]
+    val_idx = indices[n_train:]
+
+    train_split = FeatureDataset(
+        features=train_dataset.features[train_idx].numpy(),
+        labels=train_dataset.labels[train_idx].numpy(),
+    )
+    val_split = FeatureDataset(
+        features=train_dataset.features[val_idx].numpy(),
+        labels=train_dataset.labels[val_idx].numpy(),
+    )
+
+    return train_split, val_split
+
+
+def _save_training_artifacts(cfg, calibrator, history):
+    """Save iRT regressors and training history if configured.
+
+    Args:
+        cfg: Resolved Hydra config.
+        calibrator: The fitted calibrator.
+        history: TrainingHistory returned by fit().
+    """
     irt_regressor_output_path = cfg.get("irt_regressor_output_path")
     if irt_regressor_output_path:
         from winnow.calibration.calibration_features import RetentionTimeFeature
@@ -226,12 +363,10 @@ def train_entry_point(
             logger.info(f"Saving iRT regressors to {irt_regressor_output_path}")
             rt_feature.save_regressors(irt_regressor_output_path)
 
-    # Save the training dataset results
-    logger.info(f"Final dataset: {len(annotated_dataset)} spectra")
-    logger.info(f"Saving training dataset results to {cfg.dataset_output_path}")
-    annotated_dataset.save_metadata(cfg.dataset_output_path)
-
-    logger.info("Training pipeline completed successfully.")
+    training_history_path = cfg.get("training_history_path")
+    if training_history_path:
+        logger.info(f"Saving training history to {training_history_path}")
+        history.save(training_history_path)
 
 
 def _discover_experiment_files(directory) -> list[Path]:
