@@ -1,14 +1,16 @@
 from abc import ABCMeta, abstractmethod
 import bisect
+import inspect
 from math import exp, isnan
 from pathlib import Path
-import pickle
 from typing import Any, Dict, List, Set, Tuple, Iterator, Optional, Union
 import warnings
 
 import pandas as pd
 import numpy as np
+import torch
 from numpy import median
+from safetensors.torch import load_file, save_file
 from scipy.stats import entropy
 from sklearn.linear_model import LinearRegression
 
@@ -190,6 +192,18 @@ class CalibrationFeatures(metaclass=ABCMeta):
             str: The feature identifier
         """
 
+    @staticmethod
+    def _to_plain(value: Any) -> Any:
+        """Convert OmegaConf containers to plain Python types."""
+        try:
+            from omegaconf import DictConfig, ListConfig, OmegaConf
+
+            if isinstance(value, (DictConfig, ListConfig)):
+                return OmegaConf.to_container(value, resolve=True)
+        except ImportError:
+            pass
+        return value
+
     @abstractmethod
     def prepare(self, dataset: CalibrationDataset) -> None:
         """Prepare the dataset for feature computation.
@@ -211,6 +225,30 @@ class CalibrationFeatures(metaclass=ABCMeta):
             dataset (CalibrationDataset): The dataset on which to compute the feature.
         """
         pass
+
+    def get_config(self) -> Dict[str, Any]:
+        """Return a serialisable dict of constructor parameters.
+
+        The returned dict includes a ``_target_`` key with the fully-qualified
+        class path, plus every ``__init__`` parameter and its current value.
+        This is sufficient to reconstruct the feature instance.
+
+        OmegaConf containers (``DictConfig``, ``ListConfig``) are resolved to
+        plain Python types so that the result is always JSON-serialisable.
+
+        Returns:
+            Dict whose values are JSON-serialisable.
+        """
+        sig = inspect.signature(self.__class__.__init__)
+        config: Dict[str, Any] = {
+            "_target_": (f"{self.__class__.__module__}.{self.__class__.__qualname__}"),
+        }
+        for param_name in sig.parameters:
+            if param_name == "self":
+                continue
+            if hasattr(self, param_name):
+                config[param_name] = self._to_plain(getattr(self, param_name))
+        return config
 
 
 def find_matching_ions(
@@ -1196,28 +1234,47 @@ class RetentionTimeFeature(CalibrationFeatures):
         return is_valid_irt_prediction
 
     def save_regressors(self, path: Union[Path, str]) -> None:
-        """Save fitted per-experiment regressors to a pickle file.
+        """Save fitted per-experiment regressors to a safetensors file.
+
+        Each ``LinearRegression`` is stored as two tensors keyed by
+        ``{experiment_name}/coef`` and ``{experiment_name}/intercept``.
 
         Args:
-            path: File path for the output pickle.
+            path: File path for the output ``.safetensors`` file.
         """
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "wb") as f:
-            pickle.dump(self.irt_predictors, f)
+        tensors: Dict[str, torch.Tensor] = {}
+        for exp_name, reg in self.irt_predictors.items():
+            tensors[f"{exp_name}/coef"] = torch.as_tensor(
+                reg.coef_, dtype=torch.float64
+            )
+            tensors[f"{exp_name}/intercept"] = torch.as_tensor(
+                np.atleast_1d(reg.intercept_), dtype=torch.float64
+            )
+        save_file(tensors, path)
 
     def load_regressors(self, path: Union[Path, str]) -> None:
-        """Load per-experiment regressors from a pickle file.
+        """Load per-experiment regressors from a safetensors file.
 
-        Loaded regressors are merged into ``self.irt_predictors``. Experiments already
-        present are overwritten by the loaded values.
+        Loaded regressors are merged into ``self.irt_predictors``. Experiments
+        already present are overwritten by the loaded values.
 
         Args:
-            path: File path to the pickle containing saved regressors.
+            path: File path to the ``.safetensors`` file containing saved
+                regressors.
         """
-        with open(Path(path), "rb") as f:
-            loaded: Dict[str, LinearRegression] = pickle.load(f)
-        self.irt_predictors.update(loaded)
+        tensors = load_file(Path(path))
+        experiments: Dict[str, Dict[str, torch.Tensor]] = {}
+        for key, tensor in tensors.items():
+            exp_name, param = key.rsplit("/", 1)
+            experiments.setdefault(exp_name, {})[param] = tensor
+
+        for exp_name, params in experiments.items():
+            reg = LinearRegression()
+            reg.coef_ = params["coef"].numpy()
+            reg.intercept_ = params["intercept"].numpy().item()
+            self.irt_predictors[exp_name] = reg
 
     def prepare(self, dataset: CalibrationDataset) -> None:
         """Fit per-experiment RT->iRT linear regressors.
@@ -1429,15 +1486,3 @@ class RetentionTimeFeature(CalibrationFeatures):
             )
 
         return train_data
-
-    def __getstate__(self) -> dict:
-        """Exclude transient regressor state from pickle serialisation."""
-        state = self.__dict__.copy()
-        state.pop("irt_predictors", None)
-        state.pop("irt_predictor", None)
-        return state
-
-    def __setstate__(self, state: dict) -> None:
-        """Restore state and initialise empty regressor dict after unpickling."""
-        self.__dict__.update(state)
-        self.irt_predictors = {}
