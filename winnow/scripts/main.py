@@ -11,6 +11,7 @@ from typing import Union, Tuple, Optional, List, TYPE_CHECKING, Annotated
 import typer
 import logging
 from rich.logging import RichHandler
+from pathlib import Path
 
 # Lazy imports for heavy dependencies - only imported when actually needed
 if TYPE_CHECKING:
@@ -231,6 +232,95 @@ def train_entry_point(
     logger.info("Training pipeline completed successfully.")
 
 
+def _discover_experiment_files(directory) -> list[Path]:
+    """Return sorted list of spectrum files in a directory.
+
+    Args:
+        directory: Path to a directory containing spectrum files.
+
+    Returns:
+        Sorted list of paths with supported extensions (.parquet, .ipc, .mgf).
+
+    Raises:
+        FileNotFoundError: If the directory contains no supported files.
+    """
+    directory = Path(directory)
+    supported = {".parquet", ".ipc", ".mgf"}
+    files = sorted(f for f in directory.iterdir() if f.suffix in supported)
+    if not files:
+        raise FileNotFoundError(
+            f"No spectrum files found in {directory}. "
+            f"Supported extensions: {', '.join(sorted(supported))}"
+        )
+    return files
+
+
+def _compute_features_directory(
+    spectrum_path,
+    predictions_path,
+    data_loader,
+    calibrator,
+    labelled: bool,
+    filter_empty: bool,
+) -> list:
+    """Process a directory of experiment files one at a time."""
+    experiment_files = _discover_experiment_files(spectrum_path)
+    logger.info(
+        f"Directory mode: found {len(experiment_files)} experiment file(s) "
+        f"in {spectrum_path}"
+    )
+    all_metadata: list[pd.DataFrame] = []
+    for file_path in experiment_files:
+        logger.info(f"Processing experiment file: {file_path.name}")
+        dataset = data_loader.load(
+            data_path=file_path,
+            predictions_path=predictions_path,
+        )
+        if filter_empty:
+            dataset = filter_dataset(dataset)
+        if labelled and "sequence" not in dataset.metadata.columns:
+            raise ValueError(
+                f"Labelled dataset must contain a 'sequence' column "
+                f"(missing in {file_path.name})."
+            )
+        calibrator.compute_features(dataset, labelled=labelled)
+        all_metadata.append(dataset.metadata)
+        logger.info(
+            f"  {file_path.name}: {len(dataset.metadata)} spectra after features"
+        )
+    return all_metadata
+
+
+def _compute_features_single_file(
+    spectrum_path,
+    predictions_path,
+    data_loader,
+    calibrator,
+    labelled: bool,
+    filter_empty: bool,
+) -> list:
+    """Process a single spectrum file."""
+    logger.info(f"Single-file mode: {spectrum_path}")
+    dataset = data_loader.load(
+        data_path=spectrum_path,
+        predictions_path=predictions_path,
+    )
+    logger.info(f"Loaded: {len(dataset.metadata)} spectra")
+
+    if labelled and "sequence" not in dataset.metadata.columns:
+        raise ValueError(
+            "Labelled dataset must contain a 'sequence' column with "
+            "ground-truth sequences."
+        )
+
+    if filter_empty:
+        dataset = filter_dataset(dataset)
+        logger.info(f"After filtering: {len(dataset.metadata)} spectra")
+
+    calibrator.compute_features(dataset, labelled=labelled)
+    return [dataset.metadata]
+
+
 def compute_features_entry_point(
     overrides: Optional[List[str]] = None,
     execute: bool = True,
@@ -238,13 +328,20 @@ def compute_features_entry_point(
 ) -> None:
     """Load a dataset, compute calibration features into metadata, and save CSV.
 
-    Does not fit the MLP or write a calibrator checkpoint; reuses ``calibrator.features`` from Hydra like training.
+    Supports two input modes via ``dataset.spectrum_path_or_directory``:
+
+    * **Directory**: each file in the directory is treated as a separate
+      experiment and processed one at a time to limit RAM usage.
+    * **Single file**: loaded in one shot. If the file contains an
+      ``experiment_name`` column the data is processed per-group; otherwise
+      the filename stem is used as the experiment name.
 
     Args:
         overrides: Optional list of config overrides.
         execute: If False, only print the configuration and return.
         config_dir: Optional path to custom config directory.
     """
+    import pandas as pd
     from hydra import initialize_config_dir, compose
     from hydra.utils import instantiate
     from winnow.utils.config_path import get_primary_config_dir
@@ -266,36 +363,41 @@ def compute_features_entry_point(
     logger.info(f"Compute-features configuration: {cfg}")
 
     labelled = bool(cfg.labelled)
-
-    logger.info("Loading dataset.")
     data_loader = instantiate(cfg.data_loader)
-
-    dataset_params = dict(cfg.dataset)
-    dataset_params["data_path"] = dataset_params.pop("spectrum_path_or_directory")
-    dataset_params["predictions_path"] = dataset_params.pop("predictions_path", None)
-
-    dataset = data_loader.load(**dataset_params)
-
-    logger.info(f"Loaded: {len(dataset.metadata)} spectra")
-
-    if labelled and "sequence" not in dataset.metadata.columns:
-        raise ValueError(
-            "Labelled dataset must contain a 'sequence' column with ground-truth sequences."
-        )
-
-    if cfg.filter_empty_predictions:
-        logger.info("Filtering dataset for empty predictions.")
-        dataset = filter_dataset(dataset)
-        logger.info(f"After filtering: {len(dataset.metadata)} spectra")
-
-    logger.info("Instantiating calibrator from config.")
     calibrator = instantiate(cfg.calibrator)
 
-    logger.info(f"Computing features with labelled={labelled}.")
-    calibrator.compute_features(dataset, labelled=labelled)
+    spectrum_path = Path(cfg.dataset.spectrum_path_or_directory)
+    predictions_path = cfg.dataset.get("predictions_path")
+    filter_empty = bool(cfg.filter_empty_predictions)
+
+    if spectrum_path.is_dir():
+        all_metadata = _compute_features_directory(
+            spectrum_path,
+            predictions_path,
+            data_loader,
+            calibrator,
+            labelled,
+            filter_empty,
+        )
+    else:
+        all_metadata = _compute_features_single_file(
+            spectrum_path,
+            predictions_path,
+            data_loader,
+            calibrator,
+            labelled,
+            filter_empty,
+        )
+
+    combined_metadata = pd.concat(all_metadata, ignore_index=True)
+    logger.info(f"Total spectra after feature computation: {len(combined_metadata)}")
+
+    from winnow.datasets.calibration_dataset import CalibrationDataset
+
+    combined_dataset = CalibrationDataset(metadata=combined_metadata)
 
     logger.info(f"Saving dataset with features to {cfg.dataset_output_path}")
-    dataset.save_metadata(cfg.dataset_output_path)
+    combined_dataset.save_metadata(cfg.dataset_output_path)
 
     logger.info("Compute-features pipeline completed successfully.")
 
