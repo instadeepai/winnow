@@ -5602,7 +5602,10 @@ dependencies = [
     { name = "instanovo" },
     { name = "koinapy" },
     { name = "matchms" },
+    { name = "polars" },
+    { name = "safetensors" },
     { name = "tomli" },
+    { name = "torch" },
     { name = "typer" },
 ]
 
@@ -5634,7 +5637,10 @@ requires-dist = [
     { name = "instanovo", specifier = ">=1.1.4" },
     { name = "koinapy", specifier = ">=0.0.10" },
     { name = "matchms", specifier = ">=0.31.0" },
+    { name = "polars", specifier = ">=1.39.3" },
+    { name = "safetensors", specifier = ">=0.7.0" },
     { name = "tomli", specifier = ">=2.2.1" },
+    { name = "torch", specifier = ">=2.10.0" },
     { name = "typer", specifier = ">=0.15.2" },
 ]
 
