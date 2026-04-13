@@ -14,7 +14,6 @@ from winnow.calibration.calibration_features import (
     MassErrorFeature, FragmentMatchFeatures, BeamFeatures
 )
 from winnow.datasets.calibration_dataset import CalibrationDataset
-from winnow.datasets.feature_dataset import FeatureDataset
 from winnow.constants import RESIDUE_MASSES
 
 # Create and configure calibrator
@@ -25,16 +24,8 @@ calibrator.add_feature(MassErrorFeature(residue_masses=RESIDUE_MASSES))
 calibrator.add_feature(FragmentMatchFeatures(mz_tolerance=0.02))
 calibrator.add_feature(BeamFeatures())
 
-# Two-phase workflow: compute features, then train from FeatureDataset
-# Phase 1: compute features on a CalibrationDataset (populates metadata columns)
-calibrator.compute_features(calibration_dataset, labelled=True)
-
-# Phase 2: load pre-computed features from Parquet into a FeatureDataset
-train_ds = FeatureDataset.from_parquet("features/train/")
-val_ds = FeatureDataset.from_parquet("features/val/")
-
-# Train the calibrator on FeatureDatasets
-calibrator.fit(train_ds, val_dataset=val_ds)
+# Train directly from a labelled CalibrationDataset
+calibrator.fit(train_dataset)
 
 # Make predictions on new data
 calibrator.predict(test_dataset)
@@ -59,14 +50,15 @@ loaded_calibrator = ProbabilityCalibrator.load("calibrator_checkpoint")
 - **Feature Management**: Add, remove and track multiple calibration features
 - **Dependency Handling**: Automatic computation of feature dependencies
 - **Model Persistence**: Save/load using `safetensors` (weights) and `config.json` (architecture, normalisation stats, feature definitions)
-- **Two-phase Training**: Supports training from pre-computed Parquet feature matrices via `FeatureDataset`
-- **Feature Extraction**: Computes features and handles both labelled and unlabelled data
+- **Two-phase Training**: Supports training from pre-computed Parquet feature matrices via `FeatureDataset.from_parquet()` and `fit_from_features()`
 - **GPU Support**: Automatic GPU detection with CPU fallback
 
 **Main Methods:**
 
 - `add_feature(feature)`: Add a calibration feature
-- `fit(dataset, val_dataset)`: Train the calibrator on a `FeatureDataset`
+- `compute_features(dataset)`: Run feature computation on a `CalibrationDataset`, mutating its metadata in place
+- `fit(dataset, val_dataset)`: Compute features and train the calibrator from a `CalibrationDataset`
+- `fit_from_features(dataset, val_dataset)`: Train from a pre-computed `FeatureDataset` (two-phase workflow)
 - `predict(dataset)`: Generate calibrated confidence scores
 - `save(calibrator, path)`: Save trained model to disk (`model.safetensors` + `config.json`)
 - `load(pretrained_model_name_or_path, cache_dir)`: Load trained model from Hugging Face Hub or local directory
@@ -322,8 +314,15 @@ rt_feat = RetentionTimeFeature(train_fraction=0.1, learn_from_missing=False)
 
 1. **Create Calibrator**: Initialise `ProbabilityCalibrator`
 2. **Add Features**: Use `add_feature()` to include desired calibration features
-3. **Fit Model**: Call `fit()` with labelled `CalibrationDataset`
+3. **Fit Model**: Call `fit()` with a labelled `CalibrationDataset` — feature computation and training happen in one step
 4. **Save Model**: Use `save()` to persist trained calibrator
+
+For the two-phase workflow (compute features once, save to Parquet, train later):
+
+1. Call `compute_features(dataset)` to populate metadata columns
+2. Export to Parquet via `dataset.to_parquet()`
+3. Reload with `FeatureDataset.from_parquet()`
+4. Train with `fit_from_features(train_ds, val_dataset=val_ds)`
 
 ### Prediction workflow
 
