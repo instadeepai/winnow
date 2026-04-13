@@ -1338,11 +1338,11 @@ class RetentionTimeFeature(CalibrationFeatures):
         for exp_name, train_data in per_exp_train.items():
             n = len(train_data)
             train_data = train_data.copy()
-            train_data["iRT"] = all_irt[offset : offset + n]
+            train_data["irt"] = all_irt[offset : offset + n]
             offset += n
 
             x = train_data["retention_time"].values.reshape(-1, 1)
-            y = train_data["iRT"].values
+            y = train_data["irt"].values
             regressor = LinearRegression()
             regressor.fit(x, y)
             self.irt_predictors[exp_name] = regressor
@@ -1408,7 +1408,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         # Match computed metadata to valid spectra and impute missing values for invalid spectra
         # Reindex to match dataset.metadata.index and fill missing values with NaN
         dataset.metadata.index = dataset.metadata["spectrum_id"]
-        dataset.metadata["iRT"] = predictions["irt"].reindex(
+        dataset.metadata["irt"] = predictions["irt"].reindex(
             dataset.metadata["spectrum_id"], fill_value=np.nan
         )
 
@@ -1420,9 +1420,9 @@ class RetentionTimeFeature(CalibrationFeatures):
                 predicted_irt.loc[group.index] = regressor.predict(
                     group["retention_time"].values.reshape(-1, 1)
                 )
-            dataset.metadata["predicted iRT"] = predicted_irt
+            dataset.metadata["predicted_irt"] = predicted_irt
         else:
-            dataset.metadata["predicted iRT"] = self.irt_predictors[
+            dataset.metadata["predicted_irt"] = self.irt_predictors[
                 "__global__"
             ].predict(dataset.metadata["retention_time"].values.reshape(-1, 1))
 
@@ -1430,9 +1430,9 @@ class RetentionTimeFeature(CalibrationFeatures):
         dataset.metadata.index = original_indices
 
         # Compute iRT error
-        # Set zeros for rows where "iRT" is missing
+        # Set zeros for rows where "irt" is missing
         dataset.metadata["irt_error"] = np.abs(
-            dataset.metadata["predicted iRT"] - dataset.metadata["iRT"]
+            dataset.metadata["predicted_irt"] - dataset.metadata["irt"]
         ).fillna(0.0)
 
     def _select_training_data(

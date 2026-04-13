@@ -694,15 +694,15 @@ class TestRetentionTimeFeature:
 
         retention_time_feature.compute(sample_dataset_with_rt)
 
-        assert "iRT" in sample_dataset_with_rt.metadata.columns
-        assert "predicted iRT" in sample_dataset_with_rt.metadata.columns
+        assert "irt" in sample_dataset_with_rt.metadata.columns
+        assert "predicted_irt" in sample_dataset_with_rt.metadata.columns
         assert "irt_error" in sample_dataset_with_rt.metadata.columns
         assert "is_missing_irt_error" in sample_dataset_with_rt.metadata.columns
 
         assert len(sample_dataset_with_rt.metadata["irt_error"]) == 5
         max_abs_diff = abs(
-            sample_dataset_with_rt.metadata["predicted iRT"]
-            - sample_dataset_with_rt.metadata["iRT"]
+            sample_dataset_with_rt.metadata["predicted_irt"]
+            - sample_dataset_with_rt.metadata["irt"]
         ).max()
         max_error = sample_dataset_with_rt.metadata["irt_error"].max()
         assert max_abs_diff == pytest.approx(max_error, rel=1e-10, abs=1e-10)
@@ -776,22 +776,22 @@ class TestRetentionTimeFeature:
         assert not valid_flags[spectrum_20_mask].iloc[0]
         assert valid_flags[spectrum_40_mask].iloc[0]
 
-        assert "iRT" in dataset.metadata.columns
-        assert "predicted iRT" in dataset.metadata.columns
+        assert "irt" in dataset.metadata.columns
+        assert "predicted_irt" in dataset.metadata.columns
         assert "irt_error" in dataset.metadata.columns
 
-        irt_10 = dataset.metadata[spectrum_10_mask]["iRT"].iloc[0]
-        irt_40 = dataset.metadata[spectrum_40_mask]["iRT"].iloc[0]
+        irt_10 = dataset.metadata[spectrum_10_mask]["irt"].iloc[0]
+        irt_40 = dataset.metadata[spectrum_40_mask]["irt"].iloc[0]
         assert not pd.isna(irt_10)
         assert not pd.isna(irt_40)
         assert irt_10 == 25.5
         assert irt_40 == 30.2
 
-        irt_20 = dataset.metadata[spectrum_20_mask]["iRT"].iloc[0]
+        irt_20 = dataset.metadata[spectrum_20_mask]["irt"].iloc[0]
         assert pd.isna(irt_20)
 
-        predicted_irt_10 = dataset.metadata[spectrum_10_mask]["predicted iRT"].iloc[0]
-        predicted_irt_40 = dataset.metadata[spectrum_40_mask]["predicted iRT"].iloc[0]
+        predicted_irt_10 = dataset.metadata[spectrum_10_mask]["predicted_irt"].iloc[0]
+        predicted_irt_40 = dataset.metadata[spectrum_40_mask]["predicted_irt"].iloc[0]
         assert not pd.isna(predicted_irt_10)
         assert not pd.isna(predicted_irt_40)
 
