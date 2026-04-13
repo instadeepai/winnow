@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
+from tqdm import tqdm
 import torch
 import torch.nn as nn
 from numpy.typing import NDArray
@@ -456,6 +457,7 @@ class ProbabilityCalibrator:
         self,
         train_dataset: FeatureDataset,
         val_dataset: Optional[FeatureDataset] = None,
+        progress_bar: bool = True,
     ) -> TrainingHistory:
         """Train the calibrator network on pre-computed features.
 
@@ -502,7 +504,12 @@ class ProbabilityCalibrator:
         best_state: Optional[Dict[str, torch.Tensor]] = None
         epochs_without_improvement = 0
 
-        for epoch in range(self.max_epochs):
+        for epoch in tqdm(
+            range(self.max_epochs),
+            disable=not progress_bar,
+            desc="Training calibrator",
+            unit="epoch",
+        ):
             avg_train_loss = self._train_one_epoch(
                 train_loader,
                 optimizer,
@@ -513,12 +520,6 @@ class ProbabilityCalibrator:
 
             if val_dataset is None:
                 history.best_epoch = epoch
-                logger.info(
-                    "Epoch %d/%d  train_loss=%.5f",
-                    epoch + 1,
-                    self.max_epochs,
-                    avg_train_loss,
-                )
                 continue
 
             should_stop, best_val_loss, best_state, epochs_without_improvement = (
