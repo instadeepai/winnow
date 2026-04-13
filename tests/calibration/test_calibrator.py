@@ -299,23 +299,36 @@ class TestProbabilityCalibrator:
         with pytest.raises(KeyError):
             calibrator.remove_feature("nonexistent")
 
-    def test_compute_features_unlabelled(self, calibrator, sample_dataset):
-        """Test computing features for unlabelled dataset."""
+    def test_compute_features_mutates_metadata(self, calibrator, sample_dataset):
+        """Test that compute_features adds feature columns to metadata."""
         feature = MockCalibrationFeature("test_feature", ["test_col"])
         calibrator.add_feature(feature)
 
-        features = calibrator.compute_features(sample_dataset, labelled=False)
+        calibrator.compute_features(sample_dataset)
+
+        assert "test_col" in sample_dataset.metadata.columns
+
+    def test_extract_feature_matrix_unlabelled(self, calibrator, sample_dataset):
+        """Test extracting unlabelled feature matrix after compute_features."""
+        feature = MockCalibrationFeature("test_feature", ["test_col"])
+        calibrator.add_feature(feature)
+
+        calibrator.compute_features(sample_dataset)
+        features = calibrator._extract_feature_matrix(sample_dataset, labelled=False)
 
         assert isinstance(features, np.ndarray)
         assert features.shape[0] == len(sample_dataset.metadata)
         assert features.shape[1] == 2  # confidence + one feature column
 
-    def test_compute_features_labelled(self, calibrator, labelled_dataset):
-        """Test computing features for labelled dataset."""
+    def test_extract_feature_matrix_labelled(self, calibrator, labelled_dataset):
+        """Test extracting labelled feature matrix after compute_features."""
         feature = MockCalibrationFeature("test_feature", ["test_col"])
         calibrator.add_feature(feature)
 
-        features, labels = calibrator.compute_features(labelled_dataset, labelled=True)
+        calibrator.compute_features(labelled_dataset)
+        features, labels = calibrator._extract_feature_matrix(
+            labelled_dataset, labelled=True
+        )
 
         assert features.shape[0] == len(labelled_dataset.metadata)
         assert labels.shape[0] == len(labelled_dataset.metadata)
@@ -326,26 +339,26 @@ class TestProbabilityCalibrator:
         feature = MockCalibrationFeature("test_feature", dependencies=[dependency])
         calibrator.add_feature(feature)
 
-        calibrator.compute_features(sample_dataset, labelled=False)
+        calibrator.compute_features(sample_dataset)
 
         assert f"{dependency.name}_data" in sample_dataset.metadata.columns
 
-    def test_fit_returns_history(self, feature_dataset):
-        """Test that fit returns a TrainingHistory."""
+    def test_fit_from_features_returns_history(self, feature_dataset):
+        """Test that fit_from_features returns a TrainingHistory."""
         calibrator = ProbabilityCalibrator(
             max_epochs=3,
             hidden_dims=(8,),
             seed=42,
         )
-        history = calibrator.fit(feature_dataset)
+        history = calibrator.fit_from_features(feature_dataset)
 
         assert isinstance(history, TrainingHistory)
         assert len(history.train_losses) == 3
         assert history.epochs_trained == 3
         assert calibrator.network is not None
 
-    def test_fit_with_validation(self, feature_dataset):
-        """Test fit with an explicit validation dataset."""
+    def test_fit_from_features_with_validation(self, feature_dataset):
+        """Test fit_from_features with an explicit validation dataset."""
         np.random.seed(123)
         val_features = np.random.randn(20, 3).astype(np.float32)
         val_labels = np.random.choice([0.0, 1.0], 20).astype(np.float32)
@@ -357,23 +370,23 @@ class TestProbabilityCalibrator:
             patience=3,
             seed=42,
         )
-        history = calibrator.fit(feature_dataset, val_dataset)
+        history = calibrator.fit_from_features(feature_dataset, val_dataset)
 
         assert history.val_losses is not None
         assert history.val_accuracies is not None
         assert len(history.val_losses) <= 5
 
-    def test_fit_sets_normalization(self, feature_dataset):
-        """Test that fit computes feature normalization stats."""
+    def test_fit_from_features_sets_normalization(self, feature_dataset):
+        """Test that fit_from_features computes feature normalization stats."""
         calibrator = ProbabilityCalibrator(max_epochs=1, hidden_dims=(4,))
-        calibrator.fit(feature_dataset)
+        calibrator.fit_from_features(feature_dataset)
 
         assert calibrator.feature_mean is not None
         assert calibrator.feature_std is not None
         assert calibrator.feature_mean.shape == (3,)
 
-    def test_end_to_end_compute_fit_predict(self):
-        """Test the full pipeline: compute_features -> FeatureDataset -> fit -> predict."""
+    def test_end_to_end_fit_predict(self):
+        """Test the full pipeline: fit(CalibrationDataset) -> predict."""
         n_train = 80
         np.random.seed(42)
         train_metadata = pd.DataFrame(
@@ -395,9 +408,7 @@ class TestProbabilityCalibrator:
         feature = MockCalibrationFeature("mock_feat", ["mock_col"])
         calibrator.add_feature(feature)
 
-        features, labels = calibrator.compute_features(train_raw, labelled=True)
-        train_ds = FeatureDataset(features=features, labels=labels)
-        calibrator.fit(train_ds)
+        calibrator.fit(train_raw)
 
         n_pred = 10
         pred_metadata = pd.DataFrame(
@@ -433,7 +444,7 @@ class TestProbabilityCalibrator:
         )
         feature = MockCalibrationFeature("test_feature", ["test_col"])
         calibrator.add_feature(feature)
-        calibrator.fit(feature_dataset)
+        calibrator.fit_from_features(feature_dataset)
 
         ProbabilityCalibrator.save(calibrator, tmp_path / "model")
 
@@ -456,7 +467,7 @@ class TestProbabilityCalibrator:
             hidden_dims=(8,),
             seed=42,
         )
-        calibrator.fit(feature_dataset)
+        calibrator.fit_from_features(feature_dataset)
 
         ProbabilityCalibrator.save(calibrator, tmp_path / "model")
         loaded = ProbabilityCalibrator.load(tmp_path / "model")
@@ -504,8 +515,7 @@ class TestProbabilityCalibrator:
         feature = MockCalibrationFeature("feat", ["feat_col"])
         calibrator.add_feature(feature)
 
-        features, labels = calibrator.compute_features(train_raw, labelled=True)
-        calibrator.fit(FeatureDataset(features=features, labels=labels))
+        calibrator.fit(train_raw)
 
         ProbabilityCalibrator.save(calibrator, tmp_path / "model")
         loaded = ProbabilityCalibrator.load(tmp_path / "model")
@@ -542,7 +552,7 @@ class TestProbabilityCalibrator:
             patience=3,
             seed=42,
         )
-        history = calibrator.fit(train_ds, val_ds)
+        history = calibrator.fit_from_features(train_ds, val_ds)
 
         assert history.epochs_trained < 50
 
@@ -574,7 +584,8 @@ class TestProbabilityCalibrator:
         feature = MockCalibrationFeature("test_feature")
         calibrator.add_feature(feature)
 
-        features = calibrator.compute_features(empty_dataset, labelled=False)
+        calibrator.compute_features(empty_dataset)
+        features = calibrator._extract_feature_matrix(empty_dataset, labelled=False)
         assert features.shape[0] == 0
 
     def test_get_config_on_mock_feature(self):
