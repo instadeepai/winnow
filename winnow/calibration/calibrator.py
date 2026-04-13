@@ -75,59 +75,31 @@ class TrainingHistory:
         """
         import matplotlib.pyplot as plt
 
-        fig, ax = plt.subplots(figsize=(10, 6))
+        fig, ax = plt.subplots()
         epochs = range(1, len(self.train_losses) + 1)
 
-        ax.plot(
-            epochs,
-            self.train_losses,
-            label="Train Loss",
-            color="#2563eb",
-            linewidth=2,
-        )
+        ax.plot(epochs, self.train_losses, label="Train Loss", linestyle="-")
 
         if self.val_losses is not None:
-            ax.plot(
-                epochs,
-                self.val_losses,
-                label="Val Loss",
-                color="#dc2626",
-                linewidth=2,
-                linestyle="--",
-            )
-            ax.axvline(
-                x=self.best_epoch + 1,
-                color="#059669",
-                linestyle=":",
-                label=f"Best epoch ({self.best_epoch + 1})",
-            )
+            ax.plot(epochs, self.val_losses, label="Val Loss", linestyle="--")
 
         if self.val_accuracies is not None:
             ax2 = ax.twinx()
-            ax2.plot(
-                epochs,
-                self.val_accuracies,
-                label="Val Accuracy",
-                color="#7c3aed",
-                linewidth=2,
-                linestyle=":",
-            )
-            ax2.set_ylabel("Validation Accuracy", color="#7c3aed", fontsize=12)
-            ax2.tick_params(axis="y", labelcolor="#7c3aed")
-            ax2.legend(loc="center right")
-
-        ax.set_xlabel("Epoch", fontsize=12)
-        ax.set_ylabel("Loss", fontsize=12)
-        ax.set_title("Calibrator Training Progress", fontsize=14, fontweight="bold")
-        ax.legend(loc="upper right")
-        ax.grid(True, alpha=0.3)
+            ax2.plot(epochs, self.val_accuracies, label="Val Accuracy", linestyle=":")
+            ax2.set_ylabel("Validation Accuracy")
+            ax2.legend(loc="lower left")
 
         plt.tight_layout()
+        plt.grid(False)
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Loss")
+        ax.set_title("Calibrator Training Progress")
+        ax.legend(loc="upper left")
 
         if output_path is not None:
             output_path = Path(output_path)
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            plt.savefig(output_path, dpi=150, bbox_inches="tight")
+            plt.savefig(output_path, bbox_inches="tight")
 
         if show:
             plt.show()
@@ -421,20 +393,14 @@ class ProbabilityCalibrator:
         for feature in features:
             self.add_feature(feature)
 
-    def compute_features(
-        self, dataset: CalibrationDataset, labelled: bool
-    ) -> Union[
-        NDArray[np.float64],
-        Tuple[NDArray[np.float64], NDArray[np.float64]],
-    ]:
-        """Compute calibration features from a CalibrationDataset.
+    def compute_features(self, dataset: CalibrationDataset) -> None:
+        """Run feature dependencies and feature computation on a dataset.
+
+        Mutates ``dataset.metadata`` in place: adds feature columns and may
+        drop rows when ``learn_from_missing=False`` on individual features.
 
         Args:
-            dataset: The dataset from which features are computed.
-            labelled: Whether to also return labels.
-
-        Returns:
-            Feature matrix, or ``(features, labels)`` when ``labelled=True``.
+            dataset: The dataset on which features are computed.
         """
         for dependency in self.dependencies.values():
             dependency.compute(dataset=dataset)
@@ -443,6 +409,135 @@ class ProbabilityCalibrator:
             feature.prepare(dataset=dataset)
             feature.compute(dataset=dataset)
 
+    def fit(
+        self,
+        train_dataset: CalibrationDataset,
+        val_dataset: Optional[CalibrationDataset] = None,
+        progress_bar: bool = True,
+    ) -> TrainingHistory:
+        """Compute features and train the calibrator.
+
+        This is the primary training entry point.  It runs
+        :meth:`compute_features` on the supplied datasets, extracts the
+        numeric feature matrix and labels, and trains the calibrator network.
+
+        Both ``train_dataset`` and ``val_dataset`` are mutated in place
+        (feature columns are added, and rows may be dropped when individual
+        features have ``learn_from_missing=False``).
+
+        Args:
+            train_dataset: Labelled training dataset.
+            val_dataset: Optional labelled validation dataset for early
+                stopping.
+            progress_bar: Whether to display a progress bar during training.
+
+        Returns:
+            Epoch-level training metrics.
+        """
+        self.compute_features(train_dataset)
+        features, labels = self._extract_feature_matrix(train_dataset, labelled=True)
+        train_fd = FeatureDataset(
+            features=np.asarray(features), labels=np.asarray(labels)
+        )
+
+        val_fd = None
+        if val_dataset is not None:
+            self.compute_features(val_dataset)
+            val_features, val_labels = self._extract_feature_matrix(
+                val_dataset, labelled=True
+            )
+            val_fd = FeatureDataset(
+                features=np.asarray(val_features),
+                labels=np.asarray(val_labels),
+            )
+
+        return self._fit_from_features(train_fd, val_fd, progress_bar=progress_bar)
+
+    def fit_from_features(
+        self,
+        train_dataset: FeatureDataset,
+        val_dataset: Optional[FeatureDataset] = None,
+        progress_bar: bool = True,
+    ) -> TrainingHistory:
+        """Train the calibrator from pre-computed feature arrays.
+
+        Use this for the two-phase workflow where features have already been
+        computed and saved to Parquet, then reloaded via
+        :meth:`FeatureDataset.from_parquet`.
+
+        Args:
+            train_dataset: Training features and labels.
+            val_dataset: Optional held-out validation set for early stopping.
+            progress_bar: Whether to display a progress bar during training.
+
+        Returns:
+            Epoch-level training metrics.
+        """
+        return self._fit_from_features(train_dataset, val_dataset, progress_bar)
+
+    @torch.no_grad()
+    def predict(self, dataset: CalibrationDataset) -> None:
+        """Predict calibrated probabilities and store them on the dataset.
+
+        The ``calibrated_confidence`` column is added to ``dataset.metadata``.
+
+        Args:
+            dataset: The dataset for which predictions are made.
+        """
+        if self.network is None:
+            raise RuntimeError(
+                "Calibrator has not been fitted or loaded. Call fit() or load() first."
+            )
+        assert self.feature_mean is not None
+        assert self.feature_std is not None
+
+        self.compute_features(dataset)
+        features = self._extract_feature_matrix(dataset, labelled=False)
+
+        device = next(self.network.parameters()).device
+        x = torch.as_tensor(features, dtype=torch.float32, device=device)
+        x = (x - self.feature_mean) / self.feature_std
+
+        self.network.eval()
+        logits = self.network(x)
+        probs = torch.sigmoid(logits).cpu().numpy()
+
+        dataset.metadata["calibrated_confidence"] = probs.tolist()
+
+    def remove_feature(self, name: str) -> None:
+        """Remove a feature and its orphaned dependencies."""
+        feature = self.feature_dict.pop(name)
+        for dependency in feature.dependencies:
+            self.dependency_reference_counter[dependency.name] -= 1
+            if self.dependency_reference_counter[dependency.name] == 0:
+                self.dependency_reference_counter.pop(dependency.name)
+                self.dependencies.pop(dependency.name)
+
+    # ------------------------------------------------------------------
+    # Private instance methods
+    # ------------------------------------------------------------------
+
+    def _extract_feature_matrix(
+        self, dataset: CalibrationDataset, labelled: bool
+    ) -> Union[
+        NDArray[np.float64],
+        Tuple[NDArray[np.float64], NDArray[np.float64]],
+    ]:
+        """Pull numeric feature columns (and optionally labels) from metadata.
+
+        Must be called *after* :meth:`compute_features` has populated the
+        feature columns on ``dataset.metadata``.
+
+        Args:
+            dataset: Dataset whose metadata already contains the feature
+                columns.
+            labelled: If ``True``, also return the ``correct`` column as
+                labels.
+
+        Returns:
+            Feature matrix, or ``(features, labels)`` when
+            ``labelled=True``.
+        """
         feature_columns = [dataset.confidence_column]
         feature_columns.extend(self.columns)
         features = dataset.metadata[feature_columns]
@@ -450,10 +545,9 @@ class ProbabilityCalibrator:
         if labelled:
             labels = dataset.metadata["correct"]
             return features.values, labels.values
-        else:
-            return features.values
+        return features.values
 
-    def fit(
+    def _fit_from_features(
         self,
         train_dataset: FeatureDataset,
         val_dataset: Optional[FeatureDataset] = None,
@@ -464,6 +558,7 @@ class ProbabilityCalibrator:
         Args:
             train_dataset: Training features and labels.
             val_dataset: Optional held-out validation set for early stopping.
+            progress_bar: Whether to display a progress bar during training.
 
         Returns:
             Epoch-level training metrics.
@@ -529,7 +624,6 @@ class ProbabilityCalibrator:
                     device,
                     history,
                     epoch,
-                    avg_train_loss,
                     best_val_loss,
                     best_state,
                     epochs_without_improvement,
@@ -545,47 +639,6 @@ class ProbabilityCalibrator:
             self.network.to(device)
 
         return history
-
-    @torch.no_grad()
-    def predict(self, dataset: CalibrationDataset) -> None:
-        """Predict calibrated probabilities and store them on the dataset.
-
-        The ``calibrated_confidence`` column is added to ``dataset.metadata``.
-
-        Args:
-            dataset: The dataset for which predictions are made.
-        """
-        if self.network is None:
-            raise RuntimeError(
-                "Calibrator has not been fitted or loaded. Call fit() or load() first."
-            )
-        assert self.feature_mean is not None
-        assert self.feature_std is not None
-
-        features = self.compute_features(dataset=dataset, labelled=False)
-
-        device = next(self.network.parameters()).device
-        x = torch.as_tensor(features, dtype=torch.float32, device=device)
-        x = (x - self.feature_mean) / self.feature_std
-
-        self.network.eval()
-        logits = self.network(x)
-        probs = torch.sigmoid(logits).cpu().numpy()
-
-        dataset.metadata["calibrated_confidence"] = probs.tolist()
-
-    def remove_feature(self, name: str) -> None:
-        """Remove a feature and its orphaned dependencies."""
-        feature = self.feature_dict.pop(name)
-        for dependency in feature.dependencies:
-            self.dependency_reference_counter[dependency.name] -= 1
-            if self.dependency_reference_counter[dependency.name] == 0:
-                self.dependency_reference_counter.pop(dependency.name)
-                self.dependencies.pop(dependency.name)
-
-    # ------------------------------------------------------------------
-    # Private instance methods
-    # ------------------------------------------------------------------
 
     @torch.no_grad()
     def _evaluate(
@@ -655,7 +708,6 @@ class ProbabilityCalibrator:
         device: torch.device,
         history: TrainingHistory,
         epoch: int,
-        avg_train_loss: float,
         best_val_loss: float,
         best_state: Optional[Dict[str, torch.Tensor]],
         epochs_without_improvement: int,
@@ -681,21 +733,7 @@ class ProbabilityCalibrator:
         else:
             epochs_without_improvement += 1
 
-        logger.info(
-            "Epoch %d/%d  train_loss=%.5f  val_loss=%.5f  val_acc=%.4f",
-            epoch + 1,
-            self.max_epochs,
-            avg_train_loss,
-            val_loss,
-            val_acc,
-        )
-
         if epochs_without_improvement >= self.patience:
-            logger.info(
-                "Early stopping at epoch %d (patience=%d).",
-                epoch + 1,
-                self.patience,
-            )
             return True, best_val_loss, best_state, epochs_without_improvement
 
         return False, best_val_loss, best_state, epochs_without_improvement

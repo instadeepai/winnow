@@ -158,16 +158,16 @@ def train_entry_point(
     Two modes are supported, controlled by the presence of ``features_path``
     in the config:
 
-    1. **Single-phase** (``features_path`` not set): load raw spectra, compute
-       features, build a ``FeatureDataset``, and train.
+    1. **Single-phase** (``features_path`` not set): load raw spectra and
+       call ``calibrator.fit(CalibrationDataset)`` which computes features
+       and trains in one step.
     2. **Two-phase** (``features_path`` set): load pre-computed features from
-       Parquet file(s) directly into a ``FeatureDataset``, skipping raw data
-       loading and feature computation.
+       Parquet file(s) into a ``FeatureDataset`` and call
+       ``calibrator.fit_from_features()``.
 
-    Validation data can be supplied explicitly via ``val_features_path`` (a
-    Parquet file or directory), or split out automatically with
-    ``validation_fraction`` (default 0.1).  When using an automatic split, a
-    warning is logged about potential peptide/experiment leakage.
+    In two-phase mode, validation data can be supplied explicitly via
+    ``val_features_path``, or split out automatically with
+    ``validation_fraction`` (default 0.1).
 
     Args:
         overrides: Optional list of config overrides.
@@ -201,19 +201,24 @@ def train_entry_point(
 
     if features_path is not None:
         train_dataset, val_dataset = _load_feature_datasets(cfg, features_path)
-    else:
-        train_dataset, val_dataset = _compute_and_split_features(
-            cfg,
-            calibrator,
-            instantiate,
+        logger.info(
+            "Training on %d samples%s.",
+            len(train_dataset),
+            f" (val={len(val_dataset)})" if val_dataset is not None else "",
         )
-
-    logger.info(
-        "Training on %d samples%s.",
-        len(train_dataset),
-        f" (val={len(val_dataset)})" if val_dataset is not None else "",
-    )
-    history = calibrator.fit(train_dataset, val_dataset)
+        history = calibrator.fit_from_features(train_dataset, val_dataset)
+    else:
+        annotated_dataset, dataset_output_path = _load_and_prepare_dataset(
+            cfg, instantiate
+        )
+        logger.info(
+            "Training on %d samples.",
+            len(annotated_dataset),
+        )
+        history = calibrator.fit(annotated_dataset)
+        if dataset_output_path:
+            logger.info(f"Saving training metadata to {dataset_output_path}")
+            annotated_dataset.save_metadata(dataset_output_path)
 
     logger.info(f"Saving model to {cfg.model_output_dir}")
     ProbabilityCalibrator.save(calibrator, cfg.model_output_dir)
@@ -250,26 +255,21 @@ def _load_feature_datasets(cfg, features_path):
     return _maybe_split_validation(cfg, train_dataset)
 
 
-def _compute_and_split_features(cfg, calibrator, instantiate):
-    """Single-phase: load raw data, compute features, build FeatureDataset.
+def _load_and_prepare_dataset(cfg, instantiate):
+    """Single-phase: load raw data and filter, ready for calibrator.fit().
 
     Args:
         cfg: Resolved Hydra config.
-        calibrator: The calibrator instance (used for compute_features).
         instantiate: Hydra's instantiate function.
 
     Returns:
-        Tuple of (train_dataset, val_dataset). val_dataset may be ``None``.
+        Tuple of (dataset, dataset_output_path).  ``dataset_output_path``
+        may be ``None``.
     """
-    import numpy as np
-    from winnow.datasets.feature_dataset import FeatureDataset
-
     logger.info("Loading dataset.")
     data_loader = instantiate(cfg.data_loader)
 
-    # Extract dataset loading parameters and convert to dict for flexible kwargs
     dataset_params = dict(cfg.dataset)
-    # Rename config keys to match the Protocol interface
     dataset_params["data_path"] = dataset_params.pop("spectrum_path_or_directory")
     dataset_params["predictions_path"] = dataset_params.pop("predictions_path", None)
 
@@ -280,22 +280,8 @@ def _compute_and_split_features(cfg, calibrator, instantiate):
     annotated_dataset = filter_dataset(annotated_dataset)
     logger.info(f"After filtering: {len(annotated_dataset.metadata)} spectra")
 
-    features, labels = calibrator.compute_features(
-        annotated_dataset,
-        labelled=True,
-    )
-
-    train_dataset = FeatureDataset(
-        features=np.asarray(features),
-        labels=np.asarray(labels),
-    )
-
     dataset_output_path = cfg.get("dataset_output_path")
-    if dataset_output_path:
-        logger.info(f"Saving training metadata to {dataset_output_path}")
-        annotated_dataset.save_metadata(dataset_output_path)
-
-    return _maybe_split_validation(cfg, train_dataset)
+    return annotated_dataset, dataset_output_path
 
 
 def _maybe_split_validation(cfg, train_dataset):
@@ -420,7 +406,7 @@ def _compute_features_directory(
                 f"Labelled dataset must contain a 'sequence' column "
                 f"(missing in {file_path.name})."
             )
-        calibrator.compute_features(dataset, labelled=labelled)
+        calibrator.compute_features(dataset)
         all_metadata.append(dataset.metadata)
         logger.info(
             f"  {file_path.name}: {len(dataset.metadata)} spectra after features"
@@ -454,7 +440,7 @@ def _compute_features_single_file(
         dataset = filter_dataset(dataset)
         logger.info(f"After filtering: {len(dataset.metadata)} spectra")
 
-    calibrator.compute_features(dataset, labelled=labelled)
+    calibrator.compute_features(dataset)
     return [dataset.metadata]
 
 
