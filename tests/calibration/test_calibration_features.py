@@ -732,7 +732,7 @@ class TestRetentionTimeFeature:
         )
         dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
-        def mock_prosit_predict(inputs_df):
+        def mock_koina_predict(inputs_df):
             if len(inputs_df) == 0:
                 return pd.DataFrame(columns=["irt"])
             predictions_list = []
@@ -761,7 +761,7 @@ class TestRetentionTimeFeature:
         ) as mock_koina:
             mock_model = mock_koina.return_value
             mock_model.model_inputs = ["peptide_sequences"]
-            mock_model.predict = mock_prosit_predict
+            mock_model.predict = mock_koina_predict
 
             retention_time_feature.compute(dataset)
 
@@ -839,7 +839,7 @@ class TestFragmentMatchFeatures:
     """Test the FragmentMatchFeatures class."""
 
     @pytest.fixture()
-    def prosit_features(self):
+    def fragment_match_features(self):
         """Create a FragmentMatchFeatures instance for testing."""
         return FragmentMatchFeatures(
             mz_tolerance=0.02,
@@ -871,16 +871,16 @@ class TestFragmentMatchFeatures:
         )
         return CalibrationDataset(metadata=metadata, predictions=None)
 
-    def test_properties(self, prosit_features):
+    def test_properties(self, fragment_match_features):
         """Test FragmentMatchFeatures properties."""
-        assert prosit_features.name == "Fragment Match Features"
-        assert prosit_features.columns == [
+        assert fragment_match_features.name == "Fragment Match Features"
+        assert fragment_match_features.columns == [
             "ion_matches",
             "ion_match_intensity",
             "is_missing_fragment_match_features",
         ]
-        assert prosit_features.dependencies == []
-        assert prosit_features.mz_tolerance == 0.02
+        assert fragment_match_features.dependencies == []
+        assert fragment_match_features.mz_tolerance == 0.02
 
     def test_initialization_with_tolerance(self):
         """Test initialization with custom tolerance."""
@@ -894,10 +894,12 @@ class TestFragmentMatchFeatures:
         assert feature.model_input_constants == {"collision_energies": 25}
         assert feature.model_input_columns is None
 
-    def test_prepare_does_nothing(self, prosit_features, sample_dataset_with_spectra):
+    def test_prepare_does_nothing(
+        self, fragment_match_features, sample_dataset_with_spectra
+    ):
         """Test that prepare method does nothing."""
         original_metadata = sample_dataset_with_spectra.metadata.copy()
-        prosit_features.prepare(sample_dataset_with_spectra)
+        fragment_match_features.prepare(sample_dataset_with_spectra)
         pd.testing.assert_frame_equal(
             sample_dataset_with_spectra.metadata, original_metadata
         )
@@ -908,7 +910,7 @@ class TestFragmentMatchFeatures:
         self,
         mock_compute_ions,
         mock_koina,
-        prosit_features,
+        fragment_match_features,
         sample_dataset_with_spectra,
     ):
         """Test compute method with mocked Koina intensity model and ion computation."""
@@ -994,7 +996,7 @@ class TestFragmentMatchFeatures:
         # Mock ion identification computation
         mock_compute_ions.return_value = ([0.5, 0.6, 0.7], [0.4, 0.5, 0.6])
 
-        prosit_features.compute(sample_dataset_with_spectra)
+        fragment_match_features.compute(sample_dataset_with_spectra)
 
         # Check that new columns were added
         assert "theoretical_mz" in sample_dataset_with_spectra.metadata.columns
@@ -1014,7 +1016,7 @@ class TestFragmentMatchFeatures:
 
     def test_compute_maps_values_to_correct_rows_and_imputes_missing(
         self,
-        prosit_features,
+        fragment_match_features,
     ):
         """Test that computed values are mapped to correct rows and missing values are imputed correctly."""
         # Create a dataset with mixed valid/invalid predictions
@@ -1043,7 +1045,7 @@ class TestFragmentMatchFeatures:
         )
         dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
-        # Run compute with mocked Prosit model
+        # Run compute with mocked Koina intensity prediction model
         with patch(
             "winnow.calibration.calibration_features.koinapy.Koina"
         ) as mock_koina:
@@ -1053,8 +1055,8 @@ class TestFragmentMatchFeatures:
                 "precursor_charges",
                 "collision_energies",
             ]
-            mock_model.predict = self._create_prosit_mock_predict()
-            prosit_features.compute(dataset)
+            mock_model.predict = self._create_koina_mock_predict()
+            fragment_match_features.compute(dataset)
 
         # Verify results
         assert "is_missing_fragment_match_features" in dataset.metadata.columns
@@ -1066,11 +1068,11 @@ class TestFragmentMatchFeatures:
         assert len(dataset.metadata) == 3
         assert set(dataset.metadata["spectrum_id"].values) == {10, 20, 40}
 
-    def _create_prosit_mock_predict(self):
+    def _create_koina_mock_predict(self):
         """Create a mock Koina intensity predict function for testing."""
 
-        def mock_prosit_predict(inputs_df):
-            """Mock Prosit predict that returns realistic predictions matching experimental m/z values."""
+        def mock_koina_predict(inputs_df):
+            """Mock Koina predict that returns realistic predictions matching experimental m/z values."""
             if len(inputs_df) == 0:
                 return pd.DataFrame(
                     columns=[
@@ -1113,7 +1115,7 @@ class TestFragmentMatchFeatures:
 
             return pd.DataFrame(predictions_list, index=index_list)
 
-        return mock_prosit_predict
+        return mock_koina_predict
 
     def _get_mock_predictions_for_spectrum(self, spectrum_id):
         """Get mock prediction values for a given spectrum ID."""
@@ -1342,7 +1344,7 @@ class TestChimericFeatures:
             # Set pandas index so first 3 rows get index 0, last 2 get index 1
             index=[0, 0, 0, 1, 1],
         )
-        mock_model = self._setup_prosit_mock(mock_koina, mock_predictions)
+        mock_model = self._setup_koina_mock(mock_koina, mock_predictions)
 
         # Mock ion computation
         mock_compute_ions.return_value = ([0.5, 0.6], [0.4, 0.5])
@@ -1358,8 +1360,10 @@ class TestChimericFeatures:
         assert list(call_args["collision_energies"]) == [25, 25]
 
         # Verify groupby aggregation AND sorting for multiple fragments per peptide
-        actual_mz = dataset.metadata["runner_up_prosit_mz"].tolist()
-        actual_intensities = dataset.metadata["runner_up_prosit_intensity"].tolist()
+        actual_mz = dataset.metadata["runner_up_theoretical_mz"].tolist()
+        actual_intensities = dataset.metadata[
+            "runner_up_theoretical_intensity"
+        ].tolist()
 
         # First peptide "GA": 3 fragments with m/z [300.0, 100.0, 250.0] -> sorted [100.0, 250.0, 300.0]
         # Second peptide "TV": 2 fragments with m/z [400.0, 200.0] -> sorted [200.0, 400.0]
@@ -1444,13 +1448,13 @@ class TestChimericFeatures:
                 "precursor_charges",
                 "collision_energies",
             ]
-            mock_model.predict = self._create_chimeric_prosit_mock_predict()
+            mock_model.predict = self._create_chimeric_koina_mock_predict()
             chimeric_features.compute(dataset)
 
         # Verify results
         assert "is_missing_chimeric_features" in dataset.metadata.columns
         spectrum_masks = self._assert_chimeric_valid_invalid_flags(dataset)
-        self._assert_chimeric_prosit_mz_intensity(dataset, spectrum_masks)
+        self._assert_chimeric_theoretical_mz_intensity(dataset, spectrum_masks)
         self._assert_chimeric_ion_matches(dataset, spectrum_masks)
 
         # Verify dataset structure
@@ -1472,11 +1476,11 @@ class TestChimericFeatures:
         ):
             chimeric_features.compute(dataset)
 
-    def _create_chimeric_prosit_mock_predict(self):
-        """Create a mock Prosit predict function for chimeric testing."""
+    def _create_chimeric_koina_mock_predict(self):
+        """Create a mock Koina predict function for chimeric testing."""
 
-        def mock_prosit_predict(inputs_df):
-            """Mock Prosit predict that returns realistic predictions matching experimental m/z values."""
+        def mock_koina_predict(inputs_df):
+            """Mock Koina predict that returns realistic predictions matching experimental m/z values."""
             if len(inputs_df) == 0:
                 return pd.DataFrame(
                     columns=[
@@ -1519,7 +1523,7 @@ class TestChimericFeatures:
 
             return pd.DataFrame(predictions_list, index=index_list)
 
-        return mock_prosit_predict
+        return mock_koina_predict
 
     def _get_chimeric_mock_predictions_for_spectrum(self, spectrum_id):
         """Get mock prediction values for a given spectrum ID in chimeric test."""
@@ -1550,39 +1554,43 @@ class TestChimericFeatures:
 
         return spectrum_masks
 
-    def _assert_chimeric_prosit_mz_intensity(self, dataset, spectrum_masks):
-        """Assert runner_up_prosit_mz and runner_up_prosit_intensity values."""
-        assert "runner_up_prosit_mz" in dataset.metadata.columns
-        assert "runner_up_prosit_intensity" in dataset.metadata.columns
+    def _assert_chimeric_theoretical_mz_intensity(self, dataset, spectrum_masks):
+        """Assert runner_up_theoretical_mz and runner_up_theoretical_intensity values."""
+        assert "runner_up_theoretical_mz" in dataset.metadata.columns
+        assert "runner_up_theoretical_intensity" in dataset.metadata.columns
 
         # Valid entry
-        prosit_mz_10 = dataset.metadata[spectrum_masks[10]]["runner_up_prosit_mz"].iloc[
-            0
-        ]
-        assert prosit_mz_10 is not None
-        assert hasattr(prosit_mz_10, "__iter__") or isinstance(prosit_mz_10, list)
+        theoretical_mz_10 = dataset.metadata[spectrum_masks[10]][
+            "runner_up_theoretical_mz"
+        ].iloc[0]
+        assert theoretical_mz_10 is not None
+        assert hasattr(theoretical_mz_10, "__iter__") or isinstance(
+            theoretical_mz_10, list
+        )
         mz_10_list = (
-            list(prosit_mz_10) if hasattr(prosit_mz_10, "__iter__") else [prosit_mz_10]
+            list(theoretical_mz_10)
+            if hasattr(theoretical_mz_10, "__iter__")
+            else [theoretical_mz_10]
         )
         assert mz_10_list == sorted(mz_10_list)
         assert len(mz_10_list) > 0
 
-        prosit_intensity_10 = dataset.metadata[spectrum_masks[10]][
-            "runner_up_prosit_intensity"
+        theoretical_intensity_10 = dataset.metadata[spectrum_masks[10]][
+            "runner_up_theoretical_intensity"
         ].iloc[0]
-        assert prosit_intensity_10 is not None
-        assert len(prosit_intensity_10) == len(mz_10_list)
+        assert theoretical_intensity_10 is not None
+        assert len(theoretical_intensity_10) == len(mz_10_list)
 
         # Invalid entries
         for sid in [30, 40]:
-            prosit_mz = dataset.metadata[spectrum_masks[sid]][
-                "runner_up_prosit_mz"
+            theoretical_mz = dataset.metadata[spectrum_masks[sid]][
+                "runner_up_theoretical_mz"
             ].iloc[0]
-            prosit_intensity = dataset.metadata[spectrum_masks[sid]][
-                "runner_up_prosit_intensity"
+            theoretical_intensity = dataset.metadata[spectrum_masks[sid]][
+                "runner_up_theoretical_intensity"
             ].iloc[0]
-            assert pd.isna(prosit_mz) or prosit_mz is None
-            assert pd.isna(prosit_intensity) or prosit_intensity is None
+            assert pd.isna(theoretical_mz) or theoretical_mz is None
+            assert pd.isna(theoretical_intensity) or theoretical_intensity is None
 
     def _assert_chimeric_ion_matches(self, dataset, spectrum_masks):
         """Assert chimeric_ion_matches and chimeric_ion_match_intensity values."""
@@ -1619,7 +1627,7 @@ class TestChimericFeatures:
             assert ion_matches == 0.0
             assert ion_match_intensity == 0.0
 
-    def _setup_prosit_mock(self, mock_koina, mock_predictions_df):
+    def _setup_koina_mock(self, mock_koina, mock_predictions_df):
         """Helper method to set up Koina model mock with given predictions."""
         mock_model_instance = Mock()
         mock_koina.return_value = mock_model_instance

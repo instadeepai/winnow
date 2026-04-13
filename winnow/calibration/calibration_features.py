@@ -610,7 +610,7 @@ class ChimericFeatures(CalibrationFeatures):
         self,
         mz_tolerance: float,
         learn_from_missing: bool = True,
-        prosit_intensity_model_name: str = "Prosit_2020_intensity_HCD",
+        intensity_model_name: str = "Prosit_2020_intensity_HCD",
         max_precursor_charge: int = 6,
         max_peptide_length: int = 30,
         unsupported_residues: Optional[List[str]] = None,
@@ -625,7 +625,7 @@ class ChimericFeatures(CalibrationFeatures):
                 in an ``is_missing_chimeric_features`` indicator column and imputed with
                 zeros, allowing the calibrator to learn from missingness. When False,
                 invalid entries are silently filtered out with a warning. Defaults to True.
-            prosit_intensity_model_name (str): The name of the Koina intensity model to use.
+            intensity_model_name (str): The name of the Koina intensity model to use.
                 Defaults to "Prosit_2020_intensity_HCD".
             max_precursor_charge (int): Maximum precursor charge accepted by the Koina
                 intensity model. Spectra exceeding this are treated as missing. Defaults to 6.
@@ -652,7 +652,7 @@ class ChimericFeatures(CalibrationFeatures):
         self.unsupported_residues = (
             unsupported_residues if unsupported_residues is not None else []
         )
-        self.prosit_intensity_model_name = prosit_intensity_model_name
+        self.intensity_model_name = intensity_model_name
         self.max_precursor_charge = max_precursor_charge
         self.max_peptide_length = max_peptide_length
         self.model_input_constants = model_input_constants
@@ -696,9 +696,7 @@ class ChimericFeatures(CalibrationFeatures):
             columns.append("is_missing_chimeric_features")
         return columns
 
-    def check_valid_chimeric_prosit_prediction(
-        self, dataset: CalibrationDataset
-    ) -> pd.Series:
+    def check_valid_chimeric_prediction(self, dataset: CalibrationDataset) -> pd.Series:
         """Check which predictions are valid for chimeric intensity prediction.
 
         A spectrum is considered invalid if any of the following conditions hold:
@@ -744,11 +742,11 @@ class ChimericFeatures(CalibrationFeatures):
         valid_spectrum_ids = filtered_dataset.metadata["spectrum_id"]
 
         # Create boolean series indicating whether the runner-up prediction is valid
-        is_valid_chimeric_prosit_prediction = pd.Series(
+        is_valid_chimeric_prediction = pd.Series(
             dataset.metadata["spectrum_id"].isin(valid_spectrum_ids),
         )
 
-        return is_valid_chimeric_prosit_prediction
+        return is_valid_chimeric_prediction
 
     def prepare(self, dataset: CalibrationDataset) -> None:
         """Prepares the dataset before feature computation.
@@ -763,7 +761,7 @@ class ChimericFeatures(CalibrationFeatures):
     def compute(self, dataset: CalibrationDataset) -> None:
         """Computes chimeric features for the given dataset.
 
-        Uses the Prosit model to predict intensities for runner-up peptide sequences. The method processes predictions by sorting and grouping them, aligns ion match intensities and mass-to-charge ratios (m/z), and stores the results in the dataset metadata.
+        Uses a Koina-hosted model to predict intensities for runner-up peptide sequences. The method processes predictions by sorting and grouping them, aligning ion match intensities and mass-to-charge ratios (m/z), and storing the results in the dataset metadata.
 
         Args:
             dataset (CalibrationDataset): The dataset containing metadata for predictions.
@@ -776,22 +774,18 @@ class ChimericFeatures(CalibrationFeatures):
         # Ensure dataset.predictions is not None (beams required for runner-up sequences)
         _require_beam_predictions(dataset, "ChimericFeatures")
 
-        # Check which predictions are valid for Prosit intensity prediction
-        is_valid_chimeric_prosit_prediction = (
-            self.check_valid_chimeric_prosit_prediction(dataset)
-        )
-        dataset.metadata[
-            "is_missing_chimeric_features"
-        ] = ~is_valid_chimeric_prosit_prediction
+        # Check which predictions are valid for intensity prediction
+        is_valid_chimeric_prediction = self.check_valid_chimeric_prediction(dataset)
+        dataset.metadata["is_missing_chimeric_features"] = ~is_valid_chimeric_prediction
 
         if not self.learn_from_missing:
             # Filter invalid entries from the dataset in place so that they are dropped entirely
             # (not imputed with zeros) and downstream features also do not see them.
-            n_invalid = (~is_valid_chimeric_prosit_prediction).sum()
+            n_invalid = (~is_valid_chimeric_prediction).sum()
             if n_invalid > 0:
                 warnings.warn(
                     f"Filtered {n_invalid} spectra that do not satisfy the validity constraints "
-                    f"for the Koina intensity model '{self.prosit_intensity_model_name}' "
+                    f"for the Koina intensity model '{self.intensity_model_name}' "
                     f"(learn_from_missing=False). Constraints applied:\n"
                     f"  - Runner-up sequence required (beam search width >= 2)\n"
                     f"  - max_peptide_length={self.max_peptide_length} residue tokens (runner-up sequence)\n"
@@ -810,34 +804,34 @@ class ChimericFeatures(CalibrationFeatures):
 
         original_indices = dataset.metadata.index
 
-        # Filter out invalid spectra for Prosit intensity prediction
-        valid_chimeric_prosit_input = dataset.filter_entries(
+        # Filter out invalid spectra for intensity prediction
+        valid_chimeric_input = dataset.filter_entries(
             metadata_predicate=lambda row: row["is_missing_chimeric_features"]
         )
 
         # Prepare input data
-        assert valid_chimeric_prosit_input.predictions is not None
+        assert valid_chimeric_input.predictions is not None
         inputs = pd.DataFrame()
         inputs["peptide_sequences"] = np.array(
             [
                 tokens_to_proforma(items[1].sequence)  # type: ignore
-                for items in valid_chimeric_prosit_input.predictions
+                for items in valid_chimeric_input.predictions
             ]
         )
         inputs["precursor_charges"] = np.array(
-            valid_chimeric_prosit_input.metadata["precursor_charge"]
+            valid_chimeric_input.metadata["precursor_charge"]
         )
-        inputs.index = valid_chimeric_prosit_input.metadata["spectrum_id"]
+        inputs.index = valid_chimeric_input.metadata["spectrum_id"]
 
-        model = koinapy.Koina(self.prosit_intensity_model_name)
+        model = koinapy.Koina(self.intensity_model_name)
         inputs = _resolve_model_inputs(
             inputs=inputs,
-            metadata=valid_chimeric_prosit_input.metadata,
+            metadata=valid_chimeric_input.metadata,
             required_model_inputs=model.model_inputs,
             auto_populated={"peptide_sequences", "precursor_charges"},
             constants=self.model_input_constants,
             columns=self.model_input_columns,
-            model_name=self.prosit_intensity_model_name,
+            model_name=self.intensity_model_name,
         )
         predictions: pd.DataFrame = model.predict(inputs)
 
@@ -871,10 +865,10 @@ class ChimericFeatures(CalibrationFeatures):
         # Match computed metadata to valid spectra and impute missing values for invalid spectra
         # Reindex to match dataset.metadata.index and fill missing values with NaN
         dataset.metadata.index = dataset.metadata["spectrum_id"]
-        dataset.metadata["runner_up_prosit_mz"] = grouped_predictions["mz"].reindex(
-            dataset.metadata["spectrum_id"], fill_value=np.nan
-        )
-        dataset.metadata["runner_up_prosit_intensity"] = grouped_predictions[
+        dataset.metadata["runner_up_theoretical_mz"] = grouped_predictions[
+            "mz"
+        ].reindex(dataset.metadata["spectrum_id"], fill_value=np.nan)
+        dataset.metadata["runner_up_theoretical_intensity"] = grouped_predictions[
             "intensities"
         ].reindex(dataset.metadata["spectrum_id"], fill_value=np.nan)
 
@@ -882,10 +876,10 @@ class ChimericFeatures(CalibrationFeatures):
         dataset.metadata.index = original_indices
 
         # Compute ion matches and match intensity
-        # Zeros are returned for rows with missing Prosit-predicted spectra
+        # Zeros are returned for rows with missing theoretical spectra
         ion_matches, match_intensity = compute_ion_identifications(
             dataset=dataset.metadata,
-            source_column="runner_up_prosit_mz",
+            source_column="runner_up_theoretical_mz",
             mz_tolerance=self.mz_tolerance,
         )
 
