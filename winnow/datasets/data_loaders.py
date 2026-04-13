@@ -41,7 +41,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
     def __init__(
         self,
         residue_masses: dict[str, float],
-        residue_remapping: dict[str, str],
+        residue_remapping: Optional[dict[str, str]] = None,
         isotope_error_range: Tuple[int, int] = (0, 1),
         beam_columns: Optional[dict[str, str]] = None,
         add_index_cols: bool = False,
