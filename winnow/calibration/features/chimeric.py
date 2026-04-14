@@ -19,9 +19,8 @@ from winnow.utils.peptide import tokens_to_proforma
 class ChimericFeatures(CalibrationFeatures):
     """Computes chimeric features for calibration.
 
-    Predicts ion intensities for runner-up (second-best) peptide sequences using a Koina intensity
-    model and computes chimeric ion matches based on mass-to-charge ratios (m/z). The computed
-    features are stored in the dataset metadata.
+    Computes spectrum match quality features for the runner-up (second-best) peptide prediction.
+    Predicts ion intensities for runner-up (second-best) peptide sequences using a Koina intensity model.
     """
 
     def __init__(
@@ -123,6 +122,7 @@ class ChimericFeatures(CalibrationFeatures):
             "chimeric_complementary_ion_count",
             "chimeric_max_ion_gap",
             "chimeric_b_y_intensity_ratio",
+            "chimeric_spectral_angle",
         ]
         if self.learn_from_missing:
             columns.append("is_missing_chimeric_features")
@@ -304,10 +304,12 @@ class ChimericFeatures(CalibrationFeatures):
             complementary_ion_count,
             max_ion_gap,
             b_y_intensity_ratio,
+            spectral_angle,
         ) = compute_ion_identifications(
             dataset=dataset.metadata,
-            source_column="runner_up_theoretical_mz",
+            source_mz_column="runner_up_theoretical_mz",
             source_annotation_column="runner_up_annotation",
+            source_intensity_column="runner_up_theoretical_intensity",
             mz_tolerance=self.mz_tolerance,
             predictions=runner_up_predictions,
         )
@@ -319,3 +321,4 @@ class ChimericFeatures(CalibrationFeatures):
         dataset.metadata["chimeric_complementary_ion_count"] = complementary_ion_count
         dataset.metadata["chimeric_max_ion_gap"] = max_ion_gap
         dataset.metadata["chimeric_b_y_intensity_ratio"] = b_y_intensity_ratio
+        dataset.metadata["chimeric_spectral_angle"] = spectral_angle
