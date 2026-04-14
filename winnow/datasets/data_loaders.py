@@ -108,14 +108,21 @@ def _add_index_cols(df: pl.DataFrame, fp: Path | str) -> pl.DataFrame:
 class InstaNovoDatasetLoader(DatasetLoader):
     """Loader for InstaNovo predictions in CSV format."""
 
+    _DEFAULT_COLUMN_MAPPING: dict[str, str] = {
+        "predictions": "predictions",
+        "predictions_tokenised": "predictions_tokenised",
+        "log_probability": "log_probs",
+    }
+
     _df_from_matchms = staticmethod(_df_from_matchms)
     _add_index_cols = staticmethod(_add_index_cols)
 
     def __init__(
         self,
         residue_masses: dict[str, float],
-        residue_remapping: dict[str, str],
+        residue_remapping: Optional[dict[str, str]] = None,
         isotope_error_range: Tuple[int, int] = (0, 1),
+        column_mapping: Optional[dict[str, str]] = None,
         beam_columns: Optional[dict[str, str]] = None,
         add_index_cols: bool = False,
     ) -> None:
@@ -125,6 +132,11 @@ class InstaNovoDatasetLoader(DatasetLoader):
             residue_masses: The mapping of residues to their masses (ProForma notation).
             residue_remapping: The mapping of input notations to ProForma notation.
             isotope_error_range: The range of isotope errors to consider when matching peptides.
+            column_mapping: Mapping from logical column names (``predictions``,
+                ``predictions_tokenised``, ``log_probability``) to the actual CSV column
+                names produced by the InstaNovo version you are loading.  Defaults are
+                ``{"predictions": "predictions", "predictions_tokenised":
+                "predictions_tokenised", "log_probability": "log_probs"}``.
             beam_columns: The names of the beam columns to substring match in the predictions file.
             add_index_cols: If True, add ``experiment_name`` and ``spectrum_id`` to parquet/ipc
                 inputs. MGF inputs always get these columns regardless of this flag.
@@ -135,6 +147,10 @@ class InstaNovoDatasetLoader(DatasetLoader):
             ),
             isotope_error_range=isotope_error_range,
         )
+        self.column_mapping = {
+            **self._DEFAULT_COLUMN_MAPPING,
+            **(column_mapping or {}),
+        }
         self.beam_columns = beam_columns
         self.add_index_cols = add_index_cols
 
@@ -451,16 +467,18 @@ class InstaNovoDatasetLoader(DatasetLoader):
         )
 
         rename_dict = {
-            "predictions": "prediction_untokenised",
-            "predictions_tokenised": "prediction",
-            "log_probs": "confidence",
+            self.column_mapping["predictions"]: "prediction_untokenised",
+            self.column_mapping["predictions_tokenised"]: "prediction",
+            self.column_mapping["log_probability"]: "confidence",
         }
         missing_cols = [
             col for col in rename_dict.keys() if col not in preds_dataset.columns
         ]
         if missing_cols:
             raise ValueError(
-                f"Required columns {missing_cols} not found in predictions dataset."
+                f"Required columns {missing_cols} not found in predictions dataset. "
+                f"If you are using an older InstaNovo version, set column_mapping in "
+                f"the data_loader config to match the CSV headers."
             )
         preds_dataset.rename(rename_dict, axis=1, inplace=True)
 
