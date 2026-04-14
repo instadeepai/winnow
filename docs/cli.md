@@ -87,8 +87,7 @@ You can customise the calibrator architecture and features using nested paramete
 # Change MLP architecture
 winnow train calibrator.hidden_layer_sizes=[100,50,25]
 
-# Configure individual features
-winnow train calibrator.features.fragment_match_features.mz_tolerance=0.01
+winnow train calibrator.features.fragment_match_features.mz_tolerance_da=0.01
 ```
 
 For comprehensive calibrator configuration options, see:
@@ -333,7 +332,7 @@ winnow train \
     calibrator.hidden_layer_sizes=[100,50,25] \
     calibrator.learning_rate_init=0.01 \
     calibrator.max_iter=500 \
-    calibrator.features.fragment_match_features.mz_tolerance=0.01
+    calibrator.features.fragment_match_features.mz_tolerance_ppm=10
 
 # Predict with database-grounded FDR
 winnow predict \

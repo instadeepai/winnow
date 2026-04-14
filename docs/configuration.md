@@ -28,7 +28,7 @@ winnow predict
 
 Winnow's configuration files are organised in the `configs/` directory:
 
-```
+```text
 configs/
 ├── residues.yaml              # Amino acid masses, modifications
 ├── data_loader/               # Dataset format loaders
@@ -81,8 +81,7 @@ winnow train calibrator.seed=123
 # Change MLP hidden layer sizes
 winnow train calibrator.hidden_layer_sizes=[100,50,25]
 
-# Change feature parameters
-winnow train calibrator.features.fragment_match_features.mz_tolerance=0.01
+winnow train calibrator.features.fragment_match_features.mz_tolerance_da=0.01
 ```
 
 ### Dataset configuration
@@ -184,7 +183,7 @@ calibrator:
 
     fragment_match_features:
       _target_: winnow.calibration.calibration_features.FragmentMatchFeatures
-      mz_tolerance: 0.02
+      mz_tolerance_ppm: 20  # Relative tolerance in ppm (set mz_tolerance_da instead for absolute Da tolerance)
       learn_from_missing: false  # If True, impute missing features and add an indicator column. If False, filter invalid entries with a warning.
       intensity_model_name: ${koina.intensity_model}  # The name of the Koina intensity model to use.
       max_precursor_charge: ${koina.constraints.max_precursor_charge}  # Maximum precursor charge accepted by the Koina intensity model.
@@ -210,7 +209,7 @@ calibrator:
 
     chimeric_features:
       _target_: winnow.calibration.calibration_features.ChimericFeatures
-      mz_tolerance: 0.02
+      mz_tolerance_ppm: 20  # Relative tolerance in ppm (set mz_tolerance_da instead for absolute Da tolerance)
       learn_from_missing: false  # If True, impute missing features and add an indicator column. If False, filter invalid entries with a warning.
       prosit_intensity_model_name: ${koina.intensity_model}  # The name of the Koina intensity model to use.
       max_precursor_charge: ${koina.constraints.max_precursor_charge}  # Maximum precursor charge accepted by the Koina intensity model. Applied to the runner-up sequence.
@@ -656,7 +655,7 @@ For advanced users who have installed Winnow as a package and need to customise 
 
 Your custom config directory should mirror the structure of the package configs:
 
-```
+```text
 my_configs/
 ├── residues.yaml              # Override residue masses/modifications
 ├── calibrator.yaml            # Override calibrator features
