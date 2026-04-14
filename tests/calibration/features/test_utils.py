@@ -12,6 +12,7 @@ from winnow.calibration.features.utils import (
     compute_longest_ion_series,
     compute_complementary_ion_count,
     compute_max_ion_gap,
+    _validate_mz_tolerance,
 )
 from winnow.calibration.features.fragment_match import FragmentMatchFeatures
 from winnow.calibration.features.chimeric import ChimericFeatures
@@ -26,14 +27,13 @@ class TestIonMatchFunctions:
         source_mz = [100.0, 200.0, 300.0]
         target_mz = [100.0, 200.0, 400.0]
         target_intensities = [1000.0, 2000.0, 4000.0]
-        tolerance = 0.01
 
         match_fraction, average_intensity, _, _ = find_matching_ions(
             source_mz,
             target_mz,
             target_intensities,
             source_annotations=["b1+1", "b2+1", "b3+1"],
-            mz_tolerance=tolerance,
+            mz_tolerance_da=0.01,
         )
 
         # Function returns fraction of matched ions (2/3) and normalised intensity
@@ -52,14 +52,13 @@ class TestIonMatchFunctions:
         source_mz = [100.0, 200.0]
         target_mz = [100.005, 200.01]  # Within tolerance
         target_intensities = [1000.0, 2000.0]
-        tolerance = 0.02
 
         match_fraction, average_intensity, _, _ = find_matching_ions(
             source_mz,
             target_mz,
             target_intensities,
             source_annotations=["b1+1", "b2+1"],
-            mz_tolerance=tolerance,
+            mz_tolerance_da=0.02,
         )
 
         # All source ions match, so fraction = 1.0
@@ -72,14 +71,13 @@ class TestIonMatchFunctions:
         source_mz = [100.0, 200.0]
         target_mz = [100.05, 200.1]  # Outside tolerance
         target_intensities = [1000.0, 2000.0]
-        tolerance = 0.01
 
         match_fraction, average_intensity, _, _ = find_matching_ions(
             source_mz,
             target_mz,
             target_intensities,
             source_annotations=["b1+1", "b2+1"],
-            mz_tolerance=tolerance,
+            mz_tolerance_da=0.01,
         )
 
         assert match_fraction == 0
@@ -96,10 +94,89 @@ class TestIonMatchFunctions:
             target_mz,
             target_intensities,
             source_annotations=["b1+1"],
-            mz_tolerance=0.01,
+            mz_tolerance_da=0.01,
         )
         assert match_fraction == 0.0  # 0 matches / 1 source ion
         assert average_intensity == 0.0  # 0 match intensity / 1000 total intensity
+
+    def test_find_matching_ions_ppm_tolerance(self):
+        """Test find_matching_ions with ppm-based tolerance."""
+        source_mz = [500.0, 1000.0]
+        # At 20 ppm: 500 * 20/1e6 = 0.01 Da, 1000 * 20/1e6 = 0.02 Da
+        target_mz = [500.009, 1000.019]  # Within 20 ppm
+        target_intensities = [1000.0, 2000.0]
+
+        match_fraction, _, _, _ = find_matching_ions(
+            source_mz,
+            target_mz,
+            target_intensities,
+            source_annotations=["b1+1", "b2+1"],
+            mz_tolerance_ppm=20,
+        )
+        assert match_fraction == 1.0
+
+    def test_find_matching_ions_ppm_scales_with_mz(self):
+        """Test that ppm tolerance scales: same Da offset matches at high m/z but not at low m/z."""
+        source_mz_low = [100.0]
+        source_mz_high = [1000.0]
+        offset = 0.015  # 150 ppm at m/z 100, 15 ppm at m/z 1000
+
+        match_low, _, _, _ = find_matching_ions(
+            source_mz_low,
+            [100.0 + offset],
+            [1000.0],
+            source_annotations=["b1+1"],
+            mz_tolerance_ppm=20,
+        )
+        match_high, _, _, _ = find_matching_ions(
+            source_mz_high,
+            [1000.0 + offset],
+            [1000.0],
+            source_annotations=["b1+1"],
+            mz_tolerance_ppm=20,
+        )
+        assert match_low == 0.0  # 150 ppm > 20 ppm, no match
+        assert match_high == 1.0  # 15 ppm < 20 ppm, match
+
+    def test_find_matching_ions_both_tolerances_raises(self):
+        """Setting both mz_tolerance_ppm and mz_tolerance_da raises ValueError."""
+        with pytest.raises(ValueError, match="not both"):
+            find_matching_ions(
+                [100.0],
+                [100.0],
+                [1000.0],
+                source_annotations=["b1+1"],
+                mz_tolerance_ppm=20,
+                mz_tolerance_da=0.02,
+            )
+
+    def test_find_matching_ions_neither_tolerance_raises(self):
+        """Setting neither mz_tolerance_ppm nor mz_tolerance_da raises ValueError."""
+        with pytest.raises(ValueError, match="Exactly one"):
+            find_matching_ions(
+                [100.0],
+                [100.0],
+                [1000.0],
+                source_annotations=["b1+1"],
+            )
+
+
+class TestValidateMzTolerance:
+    """Test the _validate_mz_tolerance helper."""
+
+    def test_ppm_only_passes(self):
+        _validate_mz_tolerance(mz_tolerance_ppm=20, mz_tolerance_da=None)
+
+    def test_da_only_passes(self):
+        _validate_mz_tolerance(mz_tolerance_ppm=None, mz_tolerance_da=0.02)
+
+    def test_both_set_raises(self):
+        with pytest.raises(ValueError, match="not both"):
+            _validate_mz_tolerance(mz_tolerance_ppm=20, mz_tolerance_da=0.02)
+
+    def test_neither_set_raises(self):
+        with pytest.raises(ValueError, match="Exactly one"):
+            _validate_mz_tolerance(mz_tolerance_ppm=None, mz_tolerance_da=None)
 
 
 class TestModelInputHelpers:
@@ -143,7 +220,7 @@ class TestModelInputHelpers:
         """FragmentMatchFeatures raises ValueError at construction when keys conflict."""
         with pytest.raises(ValueError, match="collision_energies"):
             FragmentMatchFeatures(
-                mz_tolerance=0.02,
+                mz_tolerance_ppm=20,
                 model_input_constants={"collision_energies": 25},
                 model_input_columns={"collision_energies": "ce_col"},
             )
@@ -152,7 +229,7 @@ class TestModelInputHelpers:
         """ChimericFeatures raises ValueError at construction when keys conflict."""
         with pytest.raises(ValueError, match="collision_energies"):
             ChimericFeatures(
-                mz_tolerance=0.02,
+                mz_tolerance_ppm=20,
                 model_input_constants={"collision_energies": 25},
                 model_input_columns={"collision_energies": "ce_col"},
             )
@@ -268,7 +345,7 @@ class TestModelInputHelpers:
     def test_fragment_match_feature_passes_constant_to_model(self):
         """FragmentMatchFeatures correctly passes model_input_constants to the Koina model call."""
         feature = FragmentMatchFeatures(
-            mz_tolerance=0.02,
+            mz_tolerance_ppm=20,
             unsupported_residues=["U", "O", "X"],
             model_input_constants={"collision_energies": 30},
         )
@@ -314,7 +391,7 @@ class TestModelInputHelpers:
     def test_fragment_match_feature_passes_column_to_model(self):
         """FragmentMatchFeatures uses per-row metadata column values when model_input_columns is set."""
         feature = FragmentMatchFeatures(
-            mz_tolerance=0.02,
+            mz_tolerance_ppm=20,
             unsupported_residues=["U", "O", "X"],
             model_input_columns={"collision_energies": "nce"},
         )
