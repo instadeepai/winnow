@@ -76,6 +76,7 @@ class TestChimericFeatures:
             "chimeric_longest_y_series",
             "chimeric_complementary_ion_count",
             "chimeric_max_ion_gap",
+            "chimeric_b_y_intensity_ratio",
             # Missing indicator (learn_from_missing=True by default)
             "is_missing_chimeric_features",
         ]
@@ -135,6 +136,7 @@ class TestChimericFeatures:
             "chimeric_longest_y_series",
             "chimeric_complementary_ion_count",
             "chimeric_max_ion_gap",
+            "chimeric_b_y_intensity_ratio",
         ]
 
     # ------------------------------------------------------------------
@@ -207,6 +209,7 @@ class TestChimericFeatures:
         mock_longest_y_series = 1
         mock_complementary_ion_count = 1
         mock_max_ion_gap = 1
+        mock_b_y_intensity_ratio = 0.5
         mock_compute_ions.return_value = (
             mock_match_rate,
             mock_match_intensity,
@@ -214,6 +217,7 @@ class TestChimericFeatures:
             mock_longest_y_series,
             mock_complementary_ion_count,
             mock_max_ion_gap,
+            mock_b_y_intensity_ratio,
         )
 
         # Run the compute method
