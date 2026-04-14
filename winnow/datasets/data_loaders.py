@@ -171,26 +171,29 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
     @staticmethod
     def _load_predictions_without_beams(predictions_path: Path | str) -> pl.DataFrame:
-        """Load predictions CSV without parsing beam columns.
+        """Load predictions without parsing beam columns.
 
         Used when beam_columns is None (beam predictions disabled).
 
         Args:
-            predictions_path: Path to the CSV file containing predictions.
+            predictions_path: Path to the predictions file (CSV or Parquet).
 
         Returns:
             pl.DataFrame: The predictions dataframe.
 
         Raises:
-            ValueError: If the file format is not CSV.
+            ValueError: If the file format is not supported.
         """
         predictions_path = Path(predictions_path)
-        if predictions_path.suffix != ".csv":
+        if predictions_path.suffix == ".parquet":
+            return pl.read_parquet(predictions_path)
+        elif predictions_path.suffix == ".csv":
+            return pl.read_csv(predictions_path)
+        else:
             raise ValueError(
                 f"Unsupported file format for InstaNovo predictions: {predictions_path.suffix}. "
-                "Supported format is .csv."
+                "Supported formats are .csv and .parquet."
             )
-        return pl.read_csv(predictions_path)
 
     def load(
         self, *, data_path: Path, predictions_path: Optional[Path] = None, **kwargs: Any
@@ -323,11 +326,15 @@ class InstaNovoDatasetLoader(DatasetLoader):
             ValueError: If the file format is not CSV or if beam column validation fails.
         """
         predictions_path = Path(predictions_path)
-        if predictions_path.suffix != ".csv":
+        if predictions_path.suffix == ".parquet":
+            df = pl.read_parquet(predictions_path)
+        elif predictions_path.suffix == ".csv":
+            df = pl.read_csv(predictions_path)
+        else:
             raise ValueError(
-                f"Unsupported file format for InstaNovo beam predictions: {predictions_path.suffix}. Supported format is .csv."
+                f"Unsupported file format for InstaNovo beam predictions: {predictions_path.suffix}. "
+                "Supported formats are .csv and .parquet."
             )
-        df = pl.read_csv(predictions_path)
 
         self._validate_beam_columns(df.columns)
         assert self.beam_columns is not None  # to pass type checking
