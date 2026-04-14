@@ -119,6 +119,7 @@ check-build: clean-build build-package
 
 ## Build mkdocs site
 docs:
+	uv sync --group docs
 	uv run mkdocs build --strict
 
 ## Serve mkdocs locally with live-reload
