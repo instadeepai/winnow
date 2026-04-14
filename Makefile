@@ -86,7 +86,7 @@ install-all:
 ## Development commands														 	#
 #################################################################################
 
-.PHONY: tests clean-coverage test-docker bash build-package clean-build clean-workspace test-build clean-all-build test-cli-isolated test-cli-config set-gcp-credentials
+.PHONY: tests clean-coverage test-docker bash build-package clean-build test-build check-build docs docs-serve clean-docs set-gcp-credentials
 
 ## Run all tests
 tests:
@@ -112,8 +112,22 @@ build-package:
 clean-build:
 	rm -rf dist/ build/ *.egg-info/ winnow_fdr.egg-info/
 
-## Build the package and then clean up (safe test build)
-test-build: build-package clean-build
+## Build the package cleanly from scratch (fails on errors, cleans up on success)
+check-build: clean-build build-package
+	@ls dist/*.whl dist/*.tar.gz >/dev/null 2>&1 && echo "Package build OK ✓" || (echo "Build produced no artifacts" && exit 1)
+	$(MAKE) clean-build
+
+## Build mkdocs site
+docs:
+	uv run mkdocs build --strict
+
+## Serve mkdocs locally with live-reload
+docs-serve:
+	uv run mkdocs serve
+
+## Remove mkdocs build output
+clean-docs:
+	rm -rf docs_public/
 
 ## Set the GCP credentials
 set-gcp-credentials:

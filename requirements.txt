@@ -2005,7 +2005,9 @@ pluggy==1.6.0 \
 polars==1.39.3 \
     --hash=sha256:2e016c7f3e8d14fa777ef86fe0477cec6c67023a20ba4c94d6e8431eefe4a63c \
     --hash=sha256:c2b955ccc0a08a2bc9259785decf3d5c007b489b523bf2390cf21cec2bb82a56
-    # via instanovo
+    # via
+    #   instanovo
+    #   winnow-fdr
 polars-runtime-32==1.39.3 \
     --hash=sha256:06b47f535eb1f97a9a1e5b0053ef50db3a4276e241178e37bbb1a38b1fa53b14 \
     --hash=sha256:363d49e3a3e638fc943e2b9887940300a7d06789930855a178a4727949259dc2 \
@@ -2707,7 +2709,9 @@ safetensors==0.7.0 \
     --hash=sha256:dac7252938f0696ddea46f5e855dd3138444e82236e3be475f54929f0c510d48 \
     --hash=sha256:e07d91d0c92a31200f25351f4acb2bc6aff7f48094e13ebb1d0fb995b54b6542 \
     --hash=sha256:f4729811a6640d019a4b7ba8638ee2fd21fa5ca8c7e7bdf0fed62068fcaac737
-    # via accelerate
+    # via
+    #   accelerate
+    #   winnow-fdr
 scikit-learn==1.7.2 ; python_full_version < '3.11' \
     --hash=sha256:0486c8f827c2e7b64837c731c8feff72c0bd2b998067a8a9cbc10643c31f0fe1 \
     --hash=sha256:0b7dacaa05e5d76759fb071558a8b5130f4845166d88654a0f9bdf3eb57851b7 \
@@ -3044,7 +3048,9 @@ torch==2.10.0 \
     --hash=sha256:e521c9f030a3774ed770a9c011751fb47c4d12029a3d6522116e48431f2ff89e \
     --hash=sha256:f5ab4ba32383061be0fb74bda772d470140a12c1c3b58a0cfbf3dae94d164c28 \
     --hash=sha256:ff43db38af76fda183156153983c9a096fc4c78d0cd1e07b14a2314c7f01c2c8
-    # via accelerate
+    # via
+    #   accelerate
+    #   winnow-fdr
 tqdm==4.67.3 \
     --hash=sha256:7d825f03f89244ef73f1d4ce193cb1774a8179fd96f31d7e1dcde62092b960bb \
     --hash=sha256:ee1e4c0e59148062281c49d80b25b67771a127c85fc9676d3be5f243206826bf

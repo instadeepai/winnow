@@ -11,10 +11,13 @@ from typing import Union, Tuple, Optional, List, TYPE_CHECKING, Annotated
 import typer
 import logging
 from rich.logging import RichHandler
+from pathlib import Path
+
+import polars as pl
+import pandas as pd
 
 # Lazy imports for heavy dependencies - only imported when actually needed
 if TYPE_CHECKING:
-    import pandas as pd
     from winnow.datasets.calibration_dataset import CalibrationDataset
     from winnow.fdr.nonparametric import NonParametricFDRControl
     from winnow.fdr.database_grounded import DatabaseGroundedFDRControl
@@ -150,22 +153,33 @@ def train_entry_point(
     execute: bool = True,
     config_dir: Optional[str] = None,
 ) -> None:
-    """The main training pipeline entry point.
+    """Train a calibrator from raw data or pre-computed feature Parquets.
+
+    Two modes are supported, controlled by the presence of ``features_path``
+    in the config:
+
+    1. **Single-phase** (``features_path`` not set): load raw spectra and
+       call ``calibrator.fit(CalibrationDataset)`` which computes features
+       and trains in one step.
+    2. **Two-phase** (``features_path`` set): load pre-computed features from
+       Parquet file(s) into a ``FeatureDataset`` and call
+       ``calibrator.fit_from_features()``.
+
+    In two-phase mode, validation data can be supplied explicitly via
+    ``val_features_path``, or split out automatically with
+    ``validation_fraction`` (default 0.1).
 
     Args:
         overrides: Optional list of config overrides.
-        execute: If False, only print the configuration and return without executing the pipeline.
-        config_dir: Optional path to custom config directory. If provided, configs in this
-            directory take precedence over package configs. Files not in custom dir will use package defaults (file-by-file resolution).
+        execute: If False, only print the configuration and return.
+        config_dir: Optional path to custom config directory.
     """
     from hydra import initialize_config_dir, compose
     from hydra.utils import instantiate
     from winnow.utils.config_path import get_primary_config_dir
 
-    # Get primary config directory (custom if provided, otherwise package/dev)
     primary_config_dir = get_primary_config_dir(config_dir)
 
-    # Initialise Hydra with primary config directory
     with initialize_config_dir(
         config_dir=str(primary_config_dir),
         version_base="1.3",
@@ -182,38 +196,150 @@ def train_entry_point(
     logger.info("Starting training pipeline.")
     logger.info(f"Training configuration: {cfg}")
 
-    # Load dataset - Hydra creates the DatasetLoader object
+    calibrator = instantiate(cfg.calibrator)
+    features_path = cfg.get("features_path")
+
+    if features_path is not None:
+        train_dataset, val_dataset = _load_feature_datasets(cfg, features_path)
+        logger.info(
+            "Training on %d samples%s.",
+            len(train_dataset),
+            f" (val={len(val_dataset)})" if val_dataset is not None else "",
+        )
+        history = calibrator.fit_from_features(train_dataset, val_dataset)
+    else:
+        annotated_dataset, dataset_output_path = _load_and_prepare_dataset(
+            cfg, instantiate
+        )
+        logger.info(
+            "Training on %d samples.",
+            len(annotated_dataset),
+        )
+        history = calibrator.fit(annotated_dataset)
+        if dataset_output_path:
+            logger.info(f"Saving training metadata to {dataset_output_path}")
+            annotated_dataset.save_metadata(dataset_output_path)
+
+    logger.info(f"Saving model to {cfg.model_output_dir}")
+    ProbabilityCalibrator.save(calibrator, cfg.model_output_dir)
+
+    _save_training_artifacts(cfg, calibrator, history)
+
+    logger.info("Training pipeline completed successfully.")
+
+
+def _load_feature_datasets(cfg, features_path):
+    """Load pre-computed feature Parquets for two-phase training.
+
+    Args:
+        cfg: Resolved Hydra config.
+        features_path: Path (file or directory) to training features.
+
+    Returns:
+        Tuple of (train_dataset, val_dataset). val_dataset may be ``None``.
+    """
+    from winnow.datasets.feature_dataset import FeatureDataset
+    from winnow.utils.paths import resolve_data_path
+
+    resolved = resolve_data_path(str(features_path))
+    logger.info(f"Loading pre-computed features from {resolved}")
+    train_dataset = FeatureDataset.from_parquet(resolved)
+
+    val_features_path = cfg.get("val_features_path")
+    if val_features_path is not None:
+        val_resolved = resolve_data_path(str(val_features_path))
+        logger.info(f"Loading validation features from {val_resolved}")
+        val_dataset = FeatureDataset.from_parquet(val_resolved)
+        return train_dataset, val_dataset
+
+    return _maybe_split_validation(cfg, train_dataset)
+
+
+def _load_and_prepare_dataset(cfg, instantiate):
+    """Single-phase: load raw data and filter, ready for calibrator.fit().
+
+    Args:
+        cfg: Resolved Hydra config.
+        instantiate: Hydra's instantiate function.
+
+    Returns:
+        Tuple of (dataset, dataset_output_path).  ``dataset_output_path``
+        may be ``None``.
+    """
     logger.info("Loading dataset.")
     data_loader = instantiate(cfg.data_loader)
 
-    # Extract dataset loading parameters and convert to dict for flexible kwargs
     dataset_params = dict(cfg.dataset)
-    # Rename config keys to match the Protocol interface
     dataset_params["data_path"] = dataset_params.pop("spectrum_path_or_directory")
     dataset_params["predictions_path"] = dataset_params.pop("predictions_path", None)
 
     annotated_dataset = data_loader.load(**dataset_params)
-
     logger.info(f"Loaded: {len(annotated_dataset.metadata)} spectra")
 
     logger.info("Filtering dataset for empty predictions.")
     annotated_dataset = filter_dataset(annotated_dataset)
-
     logger.info(f"After filtering: {len(annotated_dataset.metadata)} spectra")
 
-    # Instantiate the calibrator from the config
-    logger.info("Instantiating calibrator from config.")
-    calibrator = instantiate(cfg.calibrator)
+    dataset_output_path = cfg.get("dataset_output_path")
+    return annotated_dataset, dataset_output_path
 
-    # Fit the calibrator to the dataset
-    logger.info("Fitting calibrator to dataset.")
-    calibrator.fit(annotated_dataset)
 
-    # Save the model
-    logger.info(f"Saving model to {cfg.model_output_dir}")
-    ProbabilityCalibrator.save(calibrator, cfg.model_output_dir)
+def _maybe_split_validation(cfg, train_dataset):
+    """Optionally split a random validation set from the training data.
 
-    # Save per-experiment iRT regressors if configured
+    Args:
+        cfg: Resolved Hydra config.
+        train_dataset: The full training FeatureDataset.
+
+    Returns:
+        Tuple of (train_dataset, val_dataset). val_dataset is ``None`` when
+        ``validation_fraction`` is 0 or absent.
+    """
+    import torch
+    from winnow.datasets.feature_dataset import FeatureDataset
+
+    validation_fraction = cfg.get("validation_fraction", 0.1)
+
+    if not validation_fraction or validation_fraction <= 0:
+        return train_dataset, None
+
+    logger.warning(
+        "Using automatic validation split (%.0f%%). This performs a random "
+        "split that may leak peptides or experiment artifacts between train "
+        "and validation sets. For rigorous evaluation, provide separate "
+        "train/val Parquet files via features_path and val_features_path.",
+        validation_fraction * 100,
+    )
+
+    n = len(train_dataset)
+    n_val = max(1, int(n * validation_fraction))
+    n_train = n - n_val
+
+    generator = torch.Generator().manual_seed(cfg.get("calibrator", {}).get("seed", 42))
+    indices = torch.randperm(n, generator=generator)
+    train_idx = indices[:n_train]
+    val_idx = indices[n_train:]
+
+    train_split = FeatureDataset(
+        features=train_dataset.features[train_idx].numpy(),
+        labels=train_dataset.labels[train_idx].numpy(),
+    )
+    val_split = FeatureDataset(
+        features=train_dataset.features[val_idx].numpy(),
+        labels=train_dataset.labels[val_idx].numpy(),
+    )
+
+    return train_split, val_split
+
+
+def _save_training_artifacts(cfg, calibrator, history):
+    """Save iRT regressors and training history if configured.
+
+    Args:
+        cfg: Resolved Hydra config.
+        calibrator: The fitted calibrator.
+        history: TrainingHistory returned by fit().
+    """
     irt_regressor_output_path = cfg.get("irt_regressor_output_path")
     if irt_regressor_output_path:
         from winnow.calibration.calibration_features import RetentionTimeFeature
@@ -223,12 +349,123 @@ def train_entry_point(
             logger.info(f"Saving iRT regressors to {irt_regressor_output_path}")
             rt_feature.save_regressors(irt_regressor_output_path)
 
-    # Save the training dataset results
-    logger.info(f"Final dataset: {len(annotated_dataset)} spectra")
-    logger.info(f"Saving training dataset results to {cfg.dataset_output_path}")
-    annotated_dataset.save_metadata(cfg.dataset_output_path)
+    training_history_path = cfg.get("training_history_path")
+    if training_history_path:
+        logger.info(f"Saving training history to {training_history_path}")
+        history.save(training_history_path)
 
-    logger.info("Training pipeline completed successfully.")
+
+def _discover_experiment_files(directory) -> list[Path]:
+    """Return sorted list of spectrum files in a directory.
+
+    Args:
+        directory: Path to a directory containing spectrum files.
+
+    Returns:
+        Sorted list of paths with supported extensions (.parquet, .ipc, .mgf).
+
+    Raises:
+        FileNotFoundError: If the directory contains no supported files.
+    """
+    directory = Path(directory)
+    supported = {".parquet", ".ipc", ".mgf"}
+    files = sorted(f for f in directory.iterdir() if f.suffix in supported)
+    if not files:
+        raise FileNotFoundError(
+            f"No spectrum files found in {directory}. "
+            f"Supported extensions: {', '.join(sorted(supported))}"
+        )
+    return files
+
+
+def _compute_features_directory(
+    spectrum_path,
+    predictions_path,
+    data_loader,
+    calibrator,
+    labelled: bool,
+    filter_empty: bool,
+) -> list:
+    """Process a directory of experiment files one at a time."""
+    experiment_files = _discover_experiment_files(spectrum_path)
+    logger.info(
+        f"Directory mode: found {len(experiment_files)} experiment file(s) "
+        f"in {spectrum_path}"
+    )
+    all_metadata: list[pd.DataFrame] = []
+    for file_path in experiment_files:
+        logger.info(f"Processing experiment file: {file_path.name}")
+        dataset = data_loader.load(
+            data_path=file_path,
+            predictions_path=predictions_path,
+        )
+        if filter_empty:
+            dataset = filter_dataset(dataset)
+        if labelled and "sequence" not in dataset.metadata.columns:
+            raise ValueError(
+                f"Labelled dataset must contain a 'sequence' column "
+                f"(missing in {file_path.name})."
+            )
+        calibrator.compute_features(dataset)
+        all_metadata.append(dataset.metadata)
+        logger.info(
+            f"  {file_path.name}: {len(dataset.metadata)} spectra after features"
+        )
+    return all_metadata
+
+
+def _compute_features_single_file(
+    spectrum_path,
+    predictions_path,
+    data_loader,
+    calibrator,
+    labelled: bool,
+    filter_empty: bool,
+) -> list:
+    """Process a single spectrum file."""
+    logger.info(f"Single-file mode: {spectrum_path}")
+    dataset = data_loader.load(
+        data_path=spectrum_path,
+        predictions_path=predictions_path,
+    )
+    logger.info(f"Loaded: {len(dataset.metadata)} spectra")
+
+    if labelled and "sequence" not in dataset.metadata.columns:
+        raise ValueError(
+            "Labelled dataset must contain a 'sequence' column with "
+            "ground-truth sequences."
+        )
+
+    if filter_empty:
+        dataset = filter_dataset(dataset)
+        logger.info(f"After filtering: {len(dataset.metadata)} spectra")
+
+    calibrator.compute_features(dataset)
+    return [dataset.metadata]
+
+
+def _write_training_matrix(metadata, calibrator, confidence_column, output_path):
+    """Write a lean numeric training matrix to Parquet.
+
+    Args:
+        metadata: Combined metadata DataFrame.
+        calibrator: The calibrator (used to get feature column names).
+        confidence_column: Name of the confidence column.
+        output_path: Destination Parquet path.
+    """
+    feature_columns = [confidence_column]
+    feature_columns.extend(calibrator.columns)
+    keep_cols = list(feature_columns)
+    if "correct" in metadata.columns:
+        keep_cols.append("correct")
+
+    training_df = pl.from_pandas(metadata[keep_cols])
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    training_df.write_parquet(output_path)
+    logger.info(
+        f"Saved training matrix ({len(training_df)} rows, "
+        f"{len(training_df.columns)} cols) to {output_path}"
+    )
 
 
 def compute_features_entry_point(
@@ -238,7 +475,13 @@ def compute_features_entry_point(
 ) -> None:
     """Load a dataset, compute calibration features into metadata, and save CSV.
 
-    Does not fit the MLP or write a calibrator checkpoint; reuses ``calibrator.features`` from Hydra like training.
+    Supports two input modes via ``dataset.spectrum_path_or_directory``:
+
+    * **Directory**: each file in the directory is treated as a separate
+      experiment and processed one at a time to limit RAM usage.
+    * **Single file**: loaded in one shot. If the file contains an
+      ``experiment_name`` column the data is processed per-group; otherwise
+      the filename stem is used as the experiment name.
 
     Args:
         overrides: Optional list of config overrides.
@@ -266,36 +509,53 @@ def compute_features_entry_point(
     logger.info(f"Compute-features configuration: {cfg}")
 
     labelled = bool(cfg.labelled)
-
-    logger.info("Loading dataset.")
     data_loader = instantiate(cfg.data_loader)
-
-    dataset_params = dict(cfg.dataset)
-    dataset_params["data_path"] = dataset_params.pop("spectrum_path_or_directory")
-    dataset_params["predictions_path"] = dataset_params.pop("predictions_path", None)
-
-    dataset = data_loader.load(**dataset_params)
-
-    logger.info(f"Loaded: {len(dataset.metadata)} spectra")
-
-    if labelled and "sequence" not in dataset.metadata.columns:
-        raise ValueError(
-            "Labelled dataset must contain a 'sequence' column with ground-truth sequences."
-        )
-
-    if cfg.filter_empty_predictions:
-        logger.info("Filtering dataset for empty predictions.")
-        dataset = filter_dataset(dataset)
-        logger.info(f"After filtering: {len(dataset.metadata)} spectra")
-
-    logger.info("Instantiating calibrator from config.")
     calibrator = instantiate(cfg.calibrator)
 
-    logger.info(f"Computing features with labelled={labelled}.")
-    calibrator.compute_features(dataset, labelled=labelled)
+    spectrum_path = Path(cfg.dataset.spectrum_path_or_directory)
+    predictions_path = cfg.dataset.get("predictions_path")
+    filter_empty = bool(cfg.filter_empty_predictions)
 
-    logger.info(f"Saving dataset with features to {cfg.dataset_output_path}")
-    dataset.save_metadata(cfg.dataset_output_path)
+    if spectrum_path.is_dir():
+        all_metadata = _compute_features_directory(
+            spectrum_path,
+            predictions_path,
+            data_loader,
+            calibrator,
+            labelled,
+            filter_empty,
+        )
+    else:
+        all_metadata = _compute_features_single_file(
+            spectrum_path,
+            predictions_path,
+            data_loader,
+            calibrator,
+            labelled,
+            filter_empty,
+        )
+
+    combined_metadata = pd.concat(all_metadata, ignore_index=True)
+    logger.info(f"Total spectra after feature computation: {len(combined_metadata)}")
+
+    from winnow.datasets.calibration_dataset import CalibrationDataset
+
+    combined_dataset = CalibrationDataset(metadata=combined_metadata)
+
+    metadata_output_path = cfg.get(
+        "metadata_output_path", cfg.get("dataset_output_path")
+    )
+    logger.info(f"Saving metadata CSV to {metadata_output_path}")
+    combined_dataset.save_metadata(metadata_output_path)
+
+    training_matrix_output_path = cfg.get("training_matrix_output_path")
+    if training_matrix_output_path:
+        _write_training_matrix(
+            combined_metadata,
+            calibrator,
+            combined_dataset.confidence_column,
+            training_matrix_output_path,
+        )
 
     logger.info("Compute-features pipeline completed successfully.")
 

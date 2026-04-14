@@ -1,14 +1,16 @@
 from abc import ABCMeta, abstractmethod
 import bisect
+import inspect
 from math import exp, isnan
 from pathlib import Path
-import pickle
 from typing import Any, Dict, List, Set, Tuple, Iterator, Optional, Union
 import warnings
 
 import pandas as pd
 import numpy as np
+import torch
 from numpy import median
+from safetensors.torch import load_file, save_file
 from scipy.stats import entropy
 from sklearn.linear_model import LinearRegression
 
@@ -190,6 +192,18 @@ class CalibrationFeatures(metaclass=ABCMeta):
             str: The feature identifier
         """
 
+    @staticmethod
+    def _to_plain(value: Any) -> Any:
+        """Convert OmegaConf containers to plain Python types."""
+        try:
+            from omegaconf import DictConfig, ListConfig, OmegaConf
+
+            if isinstance(value, (DictConfig, ListConfig)):
+                return OmegaConf.to_container(value, resolve=True)
+        except ImportError:
+            pass
+        return value
+
     @abstractmethod
     def prepare(self, dataset: CalibrationDataset) -> None:
         """Prepare the dataset for feature computation.
@@ -211,6 +225,30 @@ class CalibrationFeatures(metaclass=ABCMeta):
             dataset (CalibrationDataset): The dataset on which to compute the feature.
         """
         pass
+
+    def get_config(self) -> Dict[str, Any]:
+        """Return a serialisable dict of constructor parameters.
+
+        The returned dict includes a ``_target_`` key with the fully-qualified
+        class path, plus every ``__init__`` parameter and its current value.
+        This is sufficient to reconstruct the feature instance.
+
+        OmegaConf containers (``DictConfig``, ``ListConfig``) are resolved to
+        plain Python types so that the result is always JSON-serialisable.
+
+        Returns:
+            Dict whose values are JSON-serialisable.
+        """
+        sig = inspect.signature(self.__class__.__init__)
+        config: Dict[str, Any] = {
+            "_target_": (f"{self.__class__.__module__}.{self.__class__.__qualname__}"),
+        }
+        for param_name in sig.parameters:
+            if param_name == "self":
+                continue
+            if hasattr(self, param_name):
+                config[param_name] = self._to_plain(getattr(self, param_name))
+        return config
 
 
 def find_matching_ions(
@@ -572,7 +610,7 @@ class ChimericFeatures(CalibrationFeatures):
         self,
         mz_tolerance: float,
         learn_from_missing: bool = True,
-        prosit_intensity_model_name: str = "Prosit_2020_intensity_HCD",
+        intensity_model_name: str = "Prosit_2020_intensity_HCD",
         max_precursor_charge: int = 6,
         max_peptide_length: int = 30,
         unsupported_residues: Optional[List[str]] = None,
@@ -587,7 +625,7 @@ class ChimericFeatures(CalibrationFeatures):
                 in an ``is_missing_chimeric_features`` indicator column and imputed with
                 zeros, allowing the calibrator to learn from missingness. When False,
                 invalid entries are silently filtered out with a warning. Defaults to True.
-            prosit_intensity_model_name (str): The name of the Koina intensity model to use.
+            intensity_model_name (str): The name of the Koina intensity model to use.
                 Defaults to "Prosit_2020_intensity_HCD".
             max_precursor_charge (int): Maximum precursor charge accepted by the Koina
                 intensity model. Spectra exceeding this are treated as missing. Defaults to 6.
@@ -614,7 +652,7 @@ class ChimericFeatures(CalibrationFeatures):
         self.unsupported_residues = (
             unsupported_residues if unsupported_residues is not None else []
         )
-        self.prosit_intensity_model_name = prosit_intensity_model_name
+        self.intensity_model_name = intensity_model_name
         self.max_precursor_charge = max_precursor_charge
         self.max_peptide_length = max_peptide_length
         self.model_input_constants = model_input_constants
@@ -658,9 +696,7 @@ class ChimericFeatures(CalibrationFeatures):
             columns.append("is_missing_chimeric_features")
         return columns
 
-    def check_valid_chimeric_prosit_prediction(
-        self, dataset: CalibrationDataset
-    ) -> pd.Series:
+    def check_valid_chimeric_prediction(self, dataset: CalibrationDataset) -> pd.Series:
         """Check which predictions are valid for chimeric intensity prediction.
 
         A spectrum is considered invalid if any of the following conditions hold:
@@ -706,11 +742,11 @@ class ChimericFeatures(CalibrationFeatures):
         valid_spectrum_ids = filtered_dataset.metadata["spectrum_id"]
 
         # Create boolean series indicating whether the runner-up prediction is valid
-        is_valid_chimeric_prosit_prediction = pd.Series(
+        is_valid_chimeric_prediction = pd.Series(
             dataset.metadata["spectrum_id"].isin(valid_spectrum_ids),
         )
 
-        return is_valid_chimeric_prosit_prediction
+        return is_valid_chimeric_prediction
 
     def prepare(self, dataset: CalibrationDataset) -> None:
         """Prepares the dataset before feature computation.
@@ -725,7 +761,7 @@ class ChimericFeatures(CalibrationFeatures):
     def compute(self, dataset: CalibrationDataset) -> None:
         """Computes chimeric features for the given dataset.
 
-        Uses the Prosit model to predict intensities for runner-up peptide sequences. The method processes predictions by sorting and grouping them, aligns ion match intensities and mass-to-charge ratios (m/z), and stores the results in the dataset metadata.
+        Uses a Koina-hosted model to predict intensities for runner-up peptide sequences. The method processes predictions by sorting and grouping them, aligning ion match intensities and mass-to-charge ratios (m/z), and storing the results in the dataset metadata.
 
         Args:
             dataset (CalibrationDataset): The dataset containing metadata for predictions.
@@ -738,22 +774,18 @@ class ChimericFeatures(CalibrationFeatures):
         # Ensure dataset.predictions is not None (beams required for runner-up sequences)
         _require_beam_predictions(dataset, "ChimericFeatures")
 
-        # Check which predictions are valid for Prosit intensity prediction
-        is_valid_chimeric_prosit_prediction = (
-            self.check_valid_chimeric_prosit_prediction(dataset)
-        )
-        dataset.metadata[
-            "is_missing_chimeric_features"
-        ] = ~is_valid_chimeric_prosit_prediction
+        # Check which predictions are valid for intensity prediction
+        is_valid_chimeric_prediction = self.check_valid_chimeric_prediction(dataset)
+        dataset.metadata["is_missing_chimeric_features"] = ~is_valid_chimeric_prediction
 
         if not self.learn_from_missing:
             # Filter invalid entries from the dataset in place so that they are dropped entirely
             # (not imputed with zeros) and downstream features also do not see them.
-            n_invalid = (~is_valid_chimeric_prosit_prediction).sum()
+            n_invalid = (~is_valid_chimeric_prediction).sum()
             if n_invalid > 0:
                 warnings.warn(
                     f"Filtered {n_invalid} spectra that do not satisfy the validity constraints "
-                    f"for the Koina intensity model '{self.prosit_intensity_model_name}' "
+                    f"for the Koina intensity model '{self.intensity_model_name}' "
                     f"(learn_from_missing=False). Constraints applied:\n"
                     f"  - Runner-up sequence required (beam search width >= 2)\n"
                     f"  - max_peptide_length={self.max_peptide_length} residue tokens (runner-up sequence)\n"
@@ -772,34 +804,34 @@ class ChimericFeatures(CalibrationFeatures):
 
         original_indices = dataset.metadata.index
 
-        # Filter out invalid spectra for Prosit intensity prediction
-        valid_chimeric_prosit_input = dataset.filter_entries(
+        # Filter out invalid spectra for intensity prediction
+        valid_chimeric_input = dataset.filter_entries(
             metadata_predicate=lambda row: row["is_missing_chimeric_features"]
         )
 
         # Prepare input data
-        assert valid_chimeric_prosit_input.predictions is not None
+        assert valid_chimeric_input.predictions is not None
         inputs = pd.DataFrame()
         inputs["peptide_sequences"] = np.array(
             [
                 tokens_to_proforma(items[1].sequence)  # type: ignore
-                for items in valid_chimeric_prosit_input.predictions
+                for items in valid_chimeric_input.predictions
             ]
         )
         inputs["precursor_charges"] = np.array(
-            valid_chimeric_prosit_input.metadata["precursor_charge"]
+            valid_chimeric_input.metadata["precursor_charge"]
         )
-        inputs.index = valid_chimeric_prosit_input.metadata["spectrum_id"]
+        inputs.index = valid_chimeric_input.metadata["spectrum_id"]
 
-        model = koinapy.Koina(self.prosit_intensity_model_name)
+        model = koinapy.Koina(self.intensity_model_name)
         inputs = _resolve_model_inputs(
             inputs=inputs,
-            metadata=valid_chimeric_prosit_input.metadata,
+            metadata=valid_chimeric_input.metadata,
             required_model_inputs=model.model_inputs,
             auto_populated={"peptide_sequences", "precursor_charges"},
             constants=self.model_input_constants,
             columns=self.model_input_columns,
-            model_name=self.prosit_intensity_model_name,
+            model_name=self.intensity_model_name,
         )
         predictions: pd.DataFrame = model.predict(inputs)
 
@@ -833,10 +865,10 @@ class ChimericFeatures(CalibrationFeatures):
         # Match computed metadata to valid spectra and impute missing values for invalid spectra
         # Reindex to match dataset.metadata.index and fill missing values with NaN
         dataset.metadata.index = dataset.metadata["spectrum_id"]
-        dataset.metadata["runner_up_prosit_mz"] = grouped_predictions["mz"].reindex(
-            dataset.metadata["spectrum_id"], fill_value=np.nan
-        )
-        dataset.metadata["runner_up_prosit_intensity"] = grouped_predictions[
+        dataset.metadata["runner_up_theoretical_mz"] = grouped_predictions[
+            "mz"
+        ].reindex(dataset.metadata["spectrum_id"], fill_value=np.nan)
+        dataset.metadata["runner_up_theoretical_intensity"] = grouped_predictions[
             "intensities"
         ].reindex(dataset.metadata["spectrum_id"], fill_value=np.nan)
 
@@ -844,10 +876,10 @@ class ChimericFeatures(CalibrationFeatures):
         dataset.metadata.index = original_indices
 
         # Compute ion matches and match intensity
-        # Zeros are returned for rows with missing Prosit-predicted spectra
+        # Zeros are returned for rows with missing theoretical spectra
         ion_matches, match_intensity = compute_ion_identifications(
             dataset=dataset.metadata,
-            source_column="runner_up_prosit_mz",
+            source_column="runner_up_theoretical_mz",
             mz_tolerance=self.mz_tolerance,
         )
 
@@ -1196,28 +1228,47 @@ class RetentionTimeFeature(CalibrationFeatures):
         return is_valid_irt_prediction
 
     def save_regressors(self, path: Union[Path, str]) -> None:
-        """Save fitted per-experiment regressors to a pickle file.
+        """Save fitted per-experiment regressors to a safetensors file.
+
+        Each ``LinearRegression`` is stored as two tensors keyed by
+        ``{experiment_name}/coef`` and ``{experiment_name}/intercept``.
 
         Args:
-            path: File path for the output pickle.
+            path: File path for the output ``.safetensors`` file.
         """
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "wb") as f:
-            pickle.dump(self.irt_predictors, f)
+        tensors: Dict[str, torch.Tensor] = {}
+        for exp_name, reg in self.irt_predictors.items():
+            tensors[f"{exp_name}/coef"] = torch.as_tensor(
+                reg.coef_, dtype=torch.float64
+            )
+            tensors[f"{exp_name}/intercept"] = torch.as_tensor(
+                np.atleast_1d(reg.intercept_), dtype=torch.float64
+            )
+        save_file(tensors, path)
 
     def load_regressors(self, path: Union[Path, str]) -> None:
-        """Load per-experiment regressors from a pickle file.
+        """Load per-experiment regressors from a safetensors file.
 
-        Loaded regressors are merged into ``self.irt_predictors``. Experiments already
-        present are overwritten by the loaded values.
+        Loaded regressors are merged into ``self.irt_predictors``. Experiments
+        already present are overwritten by the loaded values.
 
         Args:
-            path: File path to the pickle containing saved regressors.
+            path: File path to the ``.safetensors`` file containing saved
+                regressors.
         """
-        with open(Path(path), "rb") as f:
-            loaded: Dict[str, LinearRegression] = pickle.load(f)
-        self.irt_predictors.update(loaded)
+        tensors = load_file(Path(path))
+        experiments: Dict[str, Dict[str, torch.Tensor]] = {}
+        for key, tensor in tensors.items():
+            exp_name, param = key.rsplit("/", 1)
+            experiments.setdefault(exp_name, {})[param] = tensor
+
+        for exp_name, params in experiments.items():
+            reg = LinearRegression()
+            reg.coef_ = params["coef"].numpy()
+            reg.intercept_ = params["intercept"].numpy().item()
+            self.irt_predictors[exp_name] = reg
 
     def prepare(self, dataset: CalibrationDataset) -> None:
         """Fit per-experiment RT->iRT linear regressors.
@@ -1287,11 +1338,11 @@ class RetentionTimeFeature(CalibrationFeatures):
         for exp_name, train_data in per_exp_train.items():
             n = len(train_data)
             train_data = train_data.copy()
-            train_data["iRT"] = all_irt[offset : offset + n]
+            train_data["irt"] = all_irt[offset : offset + n]
             offset += n
 
             x = train_data["retention_time"].values.reshape(-1, 1)
-            y = train_data["iRT"].values
+            y = train_data["irt"].values
             regressor = LinearRegression()
             regressor.fit(x, y)
             self.irt_predictors[exp_name] = regressor
@@ -1357,7 +1408,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         # Match computed metadata to valid spectra and impute missing values for invalid spectra
         # Reindex to match dataset.metadata.index and fill missing values with NaN
         dataset.metadata.index = dataset.metadata["spectrum_id"]
-        dataset.metadata["iRT"] = predictions["irt"].reindex(
+        dataset.metadata["irt"] = predictions["irt"].reindex(
             dataset.metadata["spectrum_id"], fill_value=np.nan
         )
 
@@ -1369,9 +1420,9 @@ class RetentionTimeFeature(CalibrationFeatures):
                 predicted_irt.loc[group.index] = regressor.predict(
                     group["retention_time"].values.reshape(-1, 1)
                 )
-            dataset.metadata["predicted iRT"] = predicted_irt
+            dataset.metadata["predicted_irt"] = predicted_irt
         else:
-            dataset.metadata["predicted iRT"] = self.irt_predictors[
+            dataset.metadata["predicted_irt"] = self.irt_predictors[
                 "__global__"
             ].predict(dataset.metadata["retention_time"].values.reshape(-1, 1))
 
@@ -1379,9 +1430,9 @@ class RetentionTimeFeature(CalibrationFeatures):
         dataset.metadata.index = original_indices
 
         # Compute iRT error
-        # Set zeros for rows where "iRT" is missing
+        # Set zeros for rows where "irt" is missing
         dataset.metadata["irt_error"] = np.abs(
-            dataset.metadata["predicted iRT"] - dataset.metadata["iRT"]
+            dataset.metadata["predicted_irt"] - dataset.metadata["irt"]
         ).fillna(0.0)
 
     def _select_training_data(
@@ -1429,15 +1480,3 @@ class RetentionTimeFeature(CalibrationFeatures):
             )
 
         return train_data
-
-    def __getstate__(self) -> dict:
-        """Exclude transient regressor state from pickle serialisation."""
-        state = self.__dict__.copy()
-        state.pop("irt_predictors", None)
-        state.pop("irt_predictor", None)
-        return state
-
-    def __setstate__(self, state: dict) -> None:
-        """Restore state and initialise empty regressor dict after unpickling."""
-        self.__dict__.update(state)
-        self.irt_predictors = {}

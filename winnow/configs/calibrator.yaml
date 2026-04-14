@@ -3,13 +3,17 @@
 calibrator:
   _target_: winnow.calibration.calibrator.ProbabilityCalibrator
 
+  # Network architecture
+  hidden_dims: [128, 64]
+  dropout: 0.1
+
+  # Training hyperparameters
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  max_epochs: 100
+  batch_size: 1024
+  patience: 10
   seed: 42
-  hidden_layer_sizes: [50, 50]  # The number of neurons in each hidden layer of the MLP classifier.
-  learning_rate_init: 0.001  # The initial learning rate for the MLP classifier.
-  alpha: 0.0001  # L2 regularisation parameter for the MLP classifier.
-  max_iter: 1000  # Maximum number of training iterations for the MLP classifier.
-  early_stopping: true  # Whether to use early stopping to terminate training.
-  validation_fraction: 0.1  # Proportion of training data to use for early stopping validation.
 
   features:
     mass_error:
@@ -41,7 +45,7 @@ calibrator:
       _target_: winnow.calibration.calibration_features.ChimericFeatures
       mz_tolerance: 0.02
       learn_from_missing: false  # If True, impute missing features and add an indicator column. If False, filter invalid entries with a warning.
-      prosit_intensity_model_name: ${koina.intensity_model}  # The name of the Koina intensity model to use.
+      intensity_model_name: ${koina.intensity_model}  # The name of the Koina intensity model to use.
       max_precursor_charge: ${koina.constraints.max_precursor_charge}  # Maximum precursor charge accepted by the Koina intensity model. Applied to the runner-up sequence.
       max_peptide_length: ${koina.constraints.max_peptide_length}      # Maximum peptide length accepted by the Koina intensity model. Applied to the runner-up (second-best) sequence.
       unsupported_residues: ${koina.constraints.unsupported_residues}  # Residues unsupported by the configured Koina intensity model.
