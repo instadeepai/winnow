@@ -94,8 +94,7 @@ winnow train calibrator.hidden_dims=[128,64,32]
 # Adjust training hyperparameters
 winnow train calibrator.learning_rate=0.01 calibrator.max_epochs=200 calibrator.patience=15
 
-# Configure individual features
-winnow train calibrator.features.fragment_match_features.mz_tolerance=0.01
+winnow train calibrator.features.fragment_match_features.mz_tolerance_da=0.01
 ```
 
 For comprehensive calibrator configuration options, see:
@@ -370,7 +369,7 @@ winnow train \
     calibrator.hidden_dims=[128,64,32] \
     calibrator.learning_rate=0.01 \
     calibrator.max_epochs=200 \
-    calibrator.features.fragment_match_features.mz_tolerance=0.01
+    calibrator.features.fragment_match_features.mz_tolerance_da=0.01
 
 # Predict with database-grounded FDR
 winnow predict \

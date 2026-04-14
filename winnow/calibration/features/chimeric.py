@@ -12,6 +12,7 @@ from winnow.calibration.features.utils import (
     resolve_model_inputs,
     format_intensity_prediction_outputs,
     compute_ion_identifications,
+    _validate_mz_tolerance,
 )
 from winnow.utils.peptide import tokens_to_proforma
 
@@ -25,7 +26,9 @@ class ChimericFeatures(CalibrationFeatures):
 
     def __init__(
         self,
-        mz_tolerance: float,
+        *,
+        mz_tolerance_ppm: Optional[float] = None,
+        mz_tolerance_da: Optional[float] = None,
         learn_from_missing: bool = True,
         intensity_model_name: str = "Prosit_2020_intensity_HCD",
         max_precursor_charge: int = 6,
@@ -36,8 +39,13 @@ class ChimericFeatures(CalibrationFeatures):
     ) -> None:
         """Initialize ChimericFeatures.
 
+        Exactly one of ``mz_tolerance_ppm`` or ``mz_tolerance_da`` must be provided.
+
         Args:
-            mz_tolerance (float): The mass-to-charge tolerance for ion matching.
+            mz_tolerance_ppm: Relative m/z tolerance in parts per million. The absolute
+                tolerance for each query ion is ``query_mz * mz_tolerance_ppm / 1e6``.
+            mz_tolerance_da: Absolute m/z tolerance in Daltons, applied uniformly to
+                all ions.
             learn_from_missing (bool): When True, invalid runner-up predictions are recorded
                 in an ``is_missing_chimeric_features`` indicator column and imputed with
                 zeros, allowing the calibrator to learn from missingness. When False,
@@ -61,10 +69,13 @@ class ChimericFeatures(CalibrationFeatures):
                 (e.g. {"collision_energies": "nce_col"}). Defaults to None.
 
         Raises:
-            ValueError: If the same key appears in both model_input_constants and model_input_columns.
+            ValueError: If both or neither tolerance is provided, or if the same key
+                appears in both model_input_constants and model_input_columns.
         """
+        _validate_mz_tolerance(mz_tolerance_ppm, mz_tolerance_da)
         validate_model_input_params(model_input_constants, model_input_columns)
-        self.mz_tolerance = mz_tolerance
+        self.mz_tolerance_ppm = mz_tolerance_ppm
+        self.mz_tolerance_da = mz_tolerance_da
         self.learn_from_missing = learn_from_missing
         self.unsupported_residues = (
             unsupported_residues if unsupported_residues is not None else []
@@ -312,7 +323,8 @@ class ChimericFeatures(CalibrationFeatures):
             source_mz_column="runner_up_theoretical_mz",
             source_annotation_column="runner_up_annotation",
             source_intensity_column="runner_up_theoretical_intensity",
-            mz_tolerance=self.mz_tolerance,
+            mz_tolerance_ppm=self.mz_tolerance_ppm,
+            mz_tolerance_da=self.mz_tolerance_da,
             predictions=runner_up_predictions,
         )
 

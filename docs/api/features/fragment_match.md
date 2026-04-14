@@ -32,7 +32,7 @@ The model returns:
 
 ### Step 2: Peak Matching
 
-For each theoretical peak, we search for the nearest observed peak using binary search. A match is recorded if the m/z difference is within the configured tolerance (default: 0.02 Da). This produces a set of matched peaks containing:
+For each theoretical peak, we search for the nearest observed peak using binary search. A match is recorded if the m/z difference is within the configured tolerance (default: 20 ppm). This produces a set of matched peaks containing:
 
 - Theoretical m/z and intensity
 - Observed intensity
@@ -79,7 +79,7 @@ The score is then computed as the dot product of the preprocessed observed spect
 from winnow.calibration.features import FragmentMatchFeatures
 
 feature = FragmentMatchFeatures(
-    mz_tolerance=0.02,
+    mz_tolerance_ppm=20,
     unsupported_residues=["N[UNIMOD:7]", "Q[UNIMOD:7]"],
     intensity_model_name="Prosit_2020_intensity_HCD",
     max_precursor_charge=6,
@@ -92,9 +92,12 @@ calibrator.add_feature(feature)
 
 ### Parameters
 
+Exactly one of `mz_tolerance_ppm` or `mz_tolerance_da` must be provided.
+
 | Parameter | Type | Default | Description |
 | ----------- | ------ | --------- | ------------- |
-| `mz_tolerance` | `float` | Required | Mass tolerance for peak matching in Daltons |
+| `mz_tolerance_ppm` | `Optional[float]` | `None` | Relative tolerance in parts per million. The absolute tolerance per ion is `query_mz * ppm / 1e6`. |
+| `mz_tolerance_da` | `Optional[float]` | `None` | Absolute tolerance in Daltons, applied uniformly to all ions. |
 | `unsupported_residues` | `List[str]` | `[]` | Residue tokens not supported by the Koina model |
 | `intensity_model_name` | `str` | `"Prosit_2020_intensity_HCD"` | Name of the Koina intensity model |
 | `max_precursor_charge` | `int` | `6` | Maximum charge state supported by the model |

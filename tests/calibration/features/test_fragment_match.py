@@ -17,7 +17,7 @@ class TestFragmentMatchFeatures:
     def fragment_match_features(self):
         """Create a FragmentMatchFeatures instance for testing."""
         return FragmentMatchFeatures(
-            mz_tolerance=0.02,
+            mz_tolerance_da=0.02,
             unsupported_residues=["U", "O", "X"],
             model_input_constants={"collision_energies": 25},
         )
@@ -69,19 +69,31 @@ class TestFragmentMatchFeatures:
             "is_missing_fragment_match_features",
         ]
         assert fragment_match_features.dependencies == []
-        assert fragment_match_features.mz_tolerance == 0.02
+        assert fragment_match_features.mz_tolerance_da == 0.02
+        assert fragment_match_features.mz_tolerance_ppm is None
 
-    def test_initialization_with_tolerance(self):
-        """Test initialization with custom tolerance."""
+    def test_initialization_with_da_tolerance(self):
+        """Test initialization with Da tolerance."""
         feature = FragmentMatchFeatures(
-            mz_tolerance=0.01,
+            mz_tolerance_da=0.01,
             unsupported_residues=["U", "O", "X"],
             model_input_constants={"collision_energies": 25},
         )
-        assert feature.mz_tolerance == 0.01
+        assert feature.mz_tolerance_da == 0.01
+        assert feature.mz_tolerance_ppm is None
         assert feature.intensity_model_name == "Prosit_2020_intensity_HCD"
         assert feature.model_input_constants == {"collision_energies": 25}
         assert feature.model_input_columns is None
+
+    def test_initialization_with_ppm_tolerance(self):
+        """Test initialization with ppm tolerance."""
+        feature = FragmentMatchFeatures(
+            mz_tolerance_ppm=20,
+            unsupported_residues=["U", "O", "X"],
+            model_input_constants={"collision_energies": 25},
+        )
+        assert feature.mz_tolerance_ppm == 20
+        assert feature.mz_tolerance_da is None
 
     def test_prepare_does_nothing(
         self, fragment_match_features, sample_dataset_with_spectra
@@ -99,7 +111,7 @@ class TestFragmentMatchFeatures:
 
     def test_columns_include_ion_coverage_features(self):
         """Verify columns include all ion coverage features."""
-        feature = FragmentMatchFeatures(mz_tolerance=0.02, learn_from_missing=True)
+        feature = FragmentMatchFeatures(mz_tolerance_da=0.02, learn_from_missing=True)
         columns = feature.columns
 
         ion_coverage_features = [
@@ -114,7 +126,7 @@ class TestFragmentMatchFeatures:
     def test_learn_from_missing_false_columns_excludes_indicator(self):
         """learn_from_missing=False: is_missing_fragment_match_features not in columns."""
         feature = FragmentMatchFeatures(
-            mz_tolerance=0.02,
+            mz_tolerance_da=0.02,
             learn_from_missing=False,
         )
         assert "is_missing_fragment_match_features" not in feature.columns
@@ -133,7 +145,7 @@ class TestFragmentMatchFeatures:
     def test_learn_from_missing_true_columns_includes_indicator(self):
         """learn_from_missing=True: is_missing_fragment_match_features in columns."""
         feature = FragmentMatchFeatures(
-            mz_tolerance=0.02,
+            mz_tolerance_da=0.02,
             learn_from_missing=True,
         )
         assert "is_missing_fragment_match_features" in feature.columns
@@ -333,7 +345,7 @@ class TestFragmentMatchFeatures:
     def test_learn_from_missing_false_drops_invalid_rows_and_warns(self, mock_koina):
         """learn_from_missing=False: invalid rows are removed and a warning is emitted."""
         feature = FragmentMatchFeatures(
-            mz_tolerance=0.02,
+            mz_tolerance_da=0.02,
             learn_from_missing=False,
             max_peptide_length=5,  # short limit so row 1 (len 6) is invalid
             model_input_constants={"collision_energies": 25},
@@ -374,7 +386,7 @@ class TestFragmentMatchFeatures:
     def test_learn_from_missing_false_no_warning_when_all_valid(self, mock_koina):
         """learn_from_missing=False: no warning when all entries are valid."""
         feature = FragmentMatchFeatures(
-            mz_tolerance=0.02,
+            mz_tolerance_da=0.02,
             learn_from_missing=False,
             model_input_constants={"collision_energies": 25},
         )
@@ -415,7 +427,7 @@ class TestFragmentMatchFeatures:
     ):
         """learn_from_missing=True: invalid rows kept with zero values and indicator set."""
         feature = FragmentMatchFeatures(
-            mz_tolerance=0.02,
+            mz_tolerance_da=0.02,
             learn_from_missing=True,
             max_peptide_length=5,
             model_input_constants={"collision_energies": 25},

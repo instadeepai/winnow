@@ -108,7 +108,7 @@ Invalid PSMs are removed from the dataset before feature computation.
 from winnow.calibration.features import FragmentMatchFeatures
 
 feature = FragmentMatchFeatures(
-    mz_tolerance=0.02,
+    mz_tolerance_ppm=20,
     learn_from_missing=False,  # Default
     max_peptide_length=30,
     max_precursor_charge=6,
@@ -130,7 +130,7 @@ Invalid PSMs are retained with imputed feature values and an indicator column.
 
 ```python
 feature = FragmentMatchFeatures(
-    mz_tolerance=0.02,
+    mz_tolerance_ppm=20,
     learn_from_missing=True,
     max_peptide_length=30,
     max_precursor_charge=6,
@@ -153,7 +153,7 @@ The defaults match Prosit model constraints. Adjust for other Koina models:
 ```python
 # Example for a model with different constraints
 feature = FragmentMatchFeatures(
-    mz_tolerance=0.02,
+    mz_tolerance_ppm=20,
     max_peptide_length=50,           # Model supports longer peptides
     max_precursor_charge=8,          # Model supports higher charges
     unsupported_residues=["U", "O"], # Selenocysteine and pyrrolysine

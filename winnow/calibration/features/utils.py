@@ -198,6 +198,50 @@ def _iter_candidates_by_distance(
             right += 1
 
 
+def _validate_mz_tolerance(
+    mz_tolerance_ppm: Optional[float],
+    mz_tolerance_da: Optional[float],
+) -> None:
+    """Raise ValueError unless exactly one of mz_tolerance_ppm or mz_tolerance_da is set.
+
+    Args:
+        mz_tolerance_ppm: Relative tolerance in parts per million.
+        mz_tolerance_da: Absolute tolerance in Daltons.
+
+    Raises:
+        ValueError: If both or neither tolerance is provided.
+    """
+    if mz_tolerance_ppm is not None and mz_tolerance_da is not None:
+        raise ValueError("Set mz_tolerance_ppm or mz_tolerance_da, not both.")
+    if mz_tolerance_ppm is None and mz_tolerance_da is None:
+        raise ValueError(
+            "Exactly one of mz_tolerance_ppm or mz_tolerance_da must be provided."
+        )
+
+
+def _resolve_tolerance(
+    query_mz: float,
+    mz_tolerance_ppm: Optional[float],
+    mz_tolerance_da: Optional[float],
+) -> float:
+    """Return the absolute Da tolerance for a given query m/z.
+
+    Must be called after ``_validate_mz_tolerance`` so exactly one argument is not None.
+
+    Args:
+        query_mz: The m/z value of the query ion.
+        mz_tolerance_ppm: Relative tolerance in parts per million.
+        mz_tolerance_da: Absolute tolerance in Daltons.
+
+    Returns:
+        Absolute tolerance in Daltons.
+    """
+    if mz_tolerance_da is not None:
+        return mz_tolerance_da
+    assert mz_tolerance_ppm is not None  # guaranteed by prior validation
+    return query_mz * mz_tolerance_ppm / 1e6
+
+
 def _find_peak_index(
     target_mz: List[float],
     query_mz: float,
@@ -238,7 +282,8 @@ def find_matching_ions(
     target_mz: List[float],
     target_intensities: List[float],
     source_annotations: Union[List[bytes], List[str]],
-    mz_tolerance: float = 0.02,
+    mz_tolerance_ppm: Optional[float] = None,
+    mz_tolerance_da: Optional[float] = None,
 ) -> Tuple[float, float, List[str], List[float], List[float], List[float]]:
     """Finds the matching ions between source and target spectra based on m/z.
 
@@ -257,19 +302,28 @@ def find_matching_ions(
     theoretical ion (either as M0 or as part of its isotopic envelope), it is excluded
     from matching subsequent theoretical ions.
 
+    Exactly one of ``mz_tolerance_ppm`` or ``mz_tolerance_da`` must be provided.
+
     Args:
         source_mz: List of m/z values from the source (theoretical) spectrum.
         target_mz: List of m/z values from the target (observed) spectrum.
         target_intensities: List of intensities corresponding to target m/z values.
         source_annotations: List of ion annotations from Koina (e.g., "b1+3", "y2+2").
-        mz_tolerance: Tolerance for matching m/z values (Daltons). Defaults to 0.02 Daltons.
+        mz_tolerance_ppm: Relative tolerance in parts per million. The absolute
+            tolerance for each query ion is ``query_mz * mz_tolerance_ppm / 1e6``.
+        mz_tolerance_da: Absolute tolerance in Daltons, applied uniformly to all ions.
 
     Returns:
         Tuple of (fraction of matched ions, fraction of observed intensity matched,
         list of matched ion annotations, list of matched ion m/z values,
         list of matched observed ion intensities (summing the isotopic envelope),
         list of aligned M0 intensities for spectral angle computation).
+
+    Raises:
+        ValueError: If both or neither tolerance is provided.
     """
+    _validate_mz_tolerance(mz_tolerance_ppm, mz_tolerance_da)
+
     if isinstance(source_mz, float) and isnan(source_mz):
         return 0.0, 0.0, [], [], [], []
 
@@ -293,7 +347,9 @@ def find_matching_ions(
         # Find monoisotopic peak (M0), excluding already-matched peaks
         source_ion_charge = extract_fragment_ion_charge(ion_annotation)
         isotope_spacing = CARBON_ISOTOPE_MASS_SHIFT / source_ion_charge
-        m0_idx = _find_peak_index(target_mz, ion_mz, mz_tolerance, matched_indices)
+
+        tol = _resolve_tolerance(ion_mz, mz_tolerance_ppm, mz_tolerance_da)
+        m0_idx = _find_peak_index(target_mz, ion_mz, tol, matched_indices)
 
         if m0_idx is not None:
             # Count match only for M0 (avoids noise inflation)
@@ -316,8 +372,11 @@ def find_matching_ions(
             # Sum isotopic envelope intensities (M+1, M+2, M+3, M+4)
             for i in range(1, 5):
                 isotope_mz = ion_mz + i * isotope_spacing
+                isotope_tol = _resolve_tolerance(
+                    isotope_mz, mz_tolerance_ppm, mz_tolerance_da
+                )
                 iso_idx = _find_peak_index(
-                    target_mz, isotope_mz, mz_tolerance, matched_indices
+                    target_mz, isotope_mz, isotope_tol, matched_indices
                 )
                 if iso_idx is not None:
                     matched_indices.add(iso_idx)
@@ -345,22 +404,32 @@ def compute_ion_identifications(
     source_mz_column: str,
     source_annotation_column: str,
     source_intensity_column: str,
-    mz_tolerance: float = 0.02,
+    *,
+    mz_tolerance_ppm: Optional[float] = None,
+    mz_tolerance_da: Optional[float] = None,
     predictions: Optional[List[str]] = None,
 ) -> Iterator[Tuple[float, float, int, int, int, float, float, float, float]]:
     """Computes the ion match rate, match intensity, longest b-series, longest y-series, complementary ion count, max ion gap, b-y intensity ratio, spectral angle and xcorr for each spectrum in the dataset.
+
+    Exactly one of ``mz_tolerance_ppm`` or ``mz_tolerance_da`` must be provided.
 
     Args:
         dataset: DataFrame containing the mass spectrum data.
         source_mz_column: Column name containing the theoretical m/z values.
         source_annotation_column: Column name containing the ion annotations.
         source_intensity_column: Column name containing the theoretical intensities.
-        mz_tolerance: Mass tolerance used to match ions (Daltons). Defaults to 0.02 Daltons.
+        mz_tolerance_ppm: Relative tolerance in parts per million.
+        mz_tolerance_da: Absolute tolerance in Daltons.
         predictions: Optional list of tokenised predictions for each spectrum. If not provided, the peptide length will be inferred from the column "predictions" in the metadata.
 
     Returns:
         Iterator of (ion_match_rate, ion_match_intensity, longest_b_series, longest_y_series, complementary_ion_count, max_ion_gap, b_y_intensity_ratio, spectral_angle, xcorr) tuples.
+
+    Raises:
+        ValueError: If both or neither tolerance is provided.
     """
+    _validate_mz_tolerance(mz_tolerance_ppm, mz_tolerance_da)
+
     per_row_match_results: List[
         Tuple[float, float, int, int, int, float, float, float, float]
     ] = []
@@ -378,7 +447,8 @@ def compute_ion_identifications(
             target_mz=row["mz_array"],
             target_intensities=row["intensity_array"],
             source_annotations=row[source_annotation_column],
-            mz_tolerance=mz_tolerance,
+            mz_tolerance_ppm=mz_tolerance_ppm,
+            mz_tolerance_da=mz_tolerance_da,
         )
 
         # Compute the longest consecutive run of matched fragment ions
