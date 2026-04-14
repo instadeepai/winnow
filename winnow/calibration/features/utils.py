@@ -171,32 +171,59 @@ def format_intensity_prediction_outputs(predictions: pd.DataFrame) -> pd.DataFra
 ########################################################
 
 
+def _iter_candidates_by_distance(
+    target_mz: List[float], query_mz: float, insertion_point: int
+) -> Iterator[Tuple[int, float]]:
+    """Yield (index, distance) pairs outward from insertion point, closest first."""
+    left = insertion_point - 1
+    right = insertion_point
+    n = len(target_mz)
+
+    while left >= 0 or right < n:
+        left_dist = abs(target_mz[left] - query_mz) if left >= 0 else float("inf")
+        right_dist = abs(target_mz[right] - query_mz) if right < n else float("inf")
+
+        if left_dist <= right_dist:
+            yield left, left_dist  # left neighbour is closer
+            left -= 1
+        else:
+            yield right, right_dist  # right neighbour is closer
+            right += 1
+
+
 def _find_peak_index(
-    target_mz: List[float], query_mz: float, mz_tolerance: float
+    target_mz: List[float],
+    query_mz: float,
+    mz_tolerance: float,
+    excluded_indices: set[int] | None = None,
 ) -> int | None:
-    """Find index of peak in sorted target_mz within tolerance of query_mz.
+    """Find index of nearest unmatched peak in sorted target_mz within tolerance.
+
+    Searches outward from the binary search insertion point to find the closest
+    peak within tolerance that is not in the excluded set.
 
     Args:
         target_mz: Sorted list of m/z values.
         query_mz: The m/z value to search for.
         mz_tolerance: Tolerance for matching (Daltons).
+        excluded_indices: Set of indices to skip (already matched peaks).
 
     Returns:
         Index of matching peak, or None if no match found.
     """
-    nearest = bisect.bisect_left(target_mz, query_mz)
+    if excluded_indices is None:
+        excluded_indices = set()
 
-    # Check right neighbour
-    if nearest < len(target_mz):
-        if target_mz[nearest] - query_mz < mz_tolerance:
-            return nearest
+    insertion_point = bisect.bisect_left(target_mz, query_mz)
 
-    # Check left neighbour
-    if nearest > 0:
-        if query_mz - target_mz[nearest - 1] < mz_tolerance:
-            return nearest - 1
+    # Search outward from insertion point, checking candidates by distance
+    for idx, dist in _iter_candidates_by_distance(target_mz, query_mz, insertion_point):
+        if dist >= mz_tolerance:
+            return None  # out of tolerance and next candidates are further
+        if idx not in excluded_indices:
+            return idx  # valid match (within tolerance and not already matched)
 
-    return None
+    return None  # no valid match found
 
 
 def find_matching_ions(
@@ -217,6 +244,10 @@ def find_matching_ions(
       3. The list of matched theoretical ion annotations.
       4. The list of matched theoretical ion m/z values.
 
+    Each observed peak can only be matched once. Once an observed peak is assigned to a
+    theoretical ion (either as M0 or as part of its isotopic envelope), it is excluded
+    from matching subsequent theoretical ions.
+
     Args:
         source_mz: List of m/z values from the source (theoretical) spectrum.
         target_mz: List of m/z values from the target (observed) spectrum.
@@ -235,6 +266,9 @@ def find_matching_ions(
     matched_ion_mz = []
     total_target_intensity = sum(target_intensities)
 
+    # Track matched observed peak indices
+    matched_indices: set[int] = set()
+
     # Decode the ion annotations to strings if they are bytes
     source_annotations = [
         ion_annotation.decode() if isinstance(ion_annotation, bytes) else ion_annotation
@@ -242,14 +276,15 @@ def find_matching_ions(
     ]
 
     for ion_mz, ion_annotation in zip(source_mz, source_annotations):
-        # Find monoisotopic peak (M0)
+        # Find monoisotopic peak (M0), excluding already-matched peaks
         source_ion_charge = extract_fragment_ion_charge(ion_annotation)
         isotope_spacing = CARBON_ISOTOPE_MASS_SHIFT / source_ion_charge
-        m0_idx = _find_peak_index(target_mz, ion_mz, mz_tolerance)
+        m0_idx = _find_peak_index(target_mz, ion_mz, mz_tolerance, matched_indices)
 
         if m0_idx is not None:
             # Count match only for M0 (avoids noise inflation)
             num_matches += 1
+            matched_indices.add(m0_idx)
 
             # Add the ion annotation to the list of matched ion annotations
             matched_ion_annotations.append(ion_annotation)
@@ -262,8 +297,11 @@ def find_matching_ions(
             # Sum isotopic envelope intensities (M+1, M+2, M+3, M+4)
             for i in range(1, 5):
                 isotope_mz = ion_mz + i * isotope_spacing
-                iso_idx = _find_peak_index(target_mz, isotope_mz, mz_tolerance)
+                iso_idx = _find_peak_index(
+                    target_mz, isotope_mz, mz_tolerance, matched_indices
+                )
                 if iso_idx is not None:
+                    matched_indices.add(iso_idx)
                     match_intensity += target_intensities[iso_idx]
 
     return (
