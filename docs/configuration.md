@@ -28,7 +28,7 @@ winnow predict
 
 Winnow's configuration files are organised in the `configs/` directory:
 
-```
+```text
 configs/
 ├── residues.yaml              # Amino acid masses, modifications
 ├── data_loader/               # Dataset format loaders
@@ -157,7 +157,7 @@ labelled: true
 - `dataset.*`, `data_loader`: Same meaning as in training config
 - `dataset_output_path`: CSV path for metadata after feature computation
 - `filter_empty_predictions`: If true, apply the same empty-prediction filter as train/predict
-- `labelled`: If true, spectrum data must include `sequence` (ground truth); runs feature `prepare()` (needed for e.g. `RetentionTimeFeature`). If false, you must not include `retention_time_feature` in `calibrator.features` (validation error otherwise)
+- `labelled`: If true, spectrum data must include `sequence` (ground truth).
 
 The feature set is the `calibrator.features` block from `calibrator.yaml` (shared with training). Override or drop features with Hydra the same way as for `winnow train`.
 
@@ -195,15 +195,10 @@ calibrator:
 
     retention_time_feature:
       _target_: winnow.calibration.calibration_features.RetentionTimeFeature
-      hidden_dim: 10  # The hidden dimension size for the MLP regressor used to predict iRT from observed retention times.
-      train_fraction: 0.1  # The fraction of the data to use for training the iRT predictor.
+      train_fraction: 0.1  # Top fraction of spectra (by confidence, descending) used to train the per-experiment RT->iRT regressor.
+      min_train_points: 10  # Minimum high-confidence spectra needed per experiment. Raises an error if fewer are available.
       learn_from_missing: false  # If True, impute missing features and add an indicator column. If False, filter invalid entries with a warning.
-      seed: 42  # Random seed for the MLP regressor.
-      learning_rate_init: 0.001  # The initial learning rate for the MLP regressor.
-      alpha: 0.0001  # L2 regularisation parameter for the MLP regressor.
-      max_iter: 200  # Maximum number of training iterations for the MLP regressor.
-      early_stopping: true  # Whether to use early stopping for the MLP regressor.
-      validation_fraction: 0.1  # Proportion of training data to use for early stopping validation.
+      seed: 42  # Random seed for reproducibility.
       irt_model_name: ${koina.irt_model}  # The name of the Koina iRT model to use.
       max_peptide_length: ${koina.constraints.max_peptide_length}      # Maximum peptide length accepted by the Koina iRT model.
       unsupported_residues: ${koina.constraints.unsupported_residues}  # Residues unsupported by the configured Koina iRT model.
@@ -277,7 +272,7 @@ filters. Predictions that fail any check are treated as **missing** rather than 
 #### Validity filters
 
 | Parameter | Applies to | Description |
-|---|---|---|
+| --- | --- | --- |
 | `max_precursor_charge` | `FragmentMatchFeatures`, `ChimericFeatures` | Predictions with a precursor charge strictly greater than this value are excluded. |
 | `max_peptide_length` | all three features | Predictions with more residue tokens than this limit are excluded. In `ChimericFeatures`, this limit is applied to the **runner-up (second-best) sequence**, not the top-1 prediction. |
 | `unsupported_residues` | all three features | Predictions containing any of the listed ProForma tokens are excluded. |
@@ -456,6 +451,7 @@ Winnow represents PTMs using the UNIMOD format internally, so all residue masses
 Each data format has a dedicated loader configuration in `configs/data_loader/`:
 
 **InstaNovo** (`configs/data_loader/instanovo.yaml`):
+
 ```yaml
 _target_: winnow.datasets.data_loaders.InstaNovoDatasetLoader
 add_index_cols: false  # If true, add experiment_name + spectrum_id for parquet/ipc (InstaNovo-style). MGF always gets these columns.
@@ -502,6 +498,7 @@ winnow train data_loader.beam_columns=null
 ```
 
 **MZTab** (`configs/data_loader/mztab.yaml`):
+
 ```yaml
 _target_: winnow.datasets.data_loaders.MZTabDatasetLoader
 residue_masses: ${residue_masses}
@@ -517,12 +514,14 @@ The `load_beams` parameter controls whether beam predictions are created from mu
 predictions per spectrum. Set to `false` if you only need metadata features.
 
 **PointNovo** (`configs/data_loader/pointnovo.yaml`):
+
 ```yaml
 _target_: winnow.datasets.data_loaders.PointNovoDatasetLoader
 residue_masses: ${residue_masses}
 ```
 
 **Winnow** (`configs/data_loader/winnow.yaml`):
+
 ```yaml
 _target_: winnow.datasets.data_loaders.WinnowDatasetLoader
 residue_masses: ${residue_masses}
@@ -569,6 +568,7 @@ Common interpolation patterns in Winnow configs:
 3. Use with: `winnow train data_loader=custom`
 
 Example `configs/data_loader/custom.yaml`:
+
 ```yaml
 _target_: my_module.CustomDatasetLoader
 residue_masses: ${residue_masses}
@@ -579,6 +579,7 @@ custom_param: value
 
 1. Create feature class inheriting from `CalibrationFeatures`
 2. Add to `configs/calibrator.yaml`:
+
    ```yaml
    features:
      custom_feature:
@@ -594,6 +595,7 @@ custom_param: value
 3. Use with: `winnow predict fdr_method=custom_method`
 
 Example `configs/fdr_method/custom_method.yaml`:
+
 ```yaml
 _target_: my_module.CustomFDRControl
 confidence_feature: ${fdr_control.confidence_column}
@@ -699,6 +701,7 @@ When you use `--config-dir`, Winnow will:
 - ❌ **Partial configs at key level don't work**: If you provide `calibrator.yaml` with only `seed: 999`, the other settings (`hidden_layer_sizes`, `features`, etc.) will be **missing**, not using package defaults. This will cause errors.
 
 **Example - What happens with minimal config:**
+
 ```yaml
 # custom/calibrator.yaml - TOO MINIMAL
 calibrator:
@@ -709,6 +712,7 @@ calibrator:
 **Result**: Only `_target_` and `seed` are present. All other keys (`hidden_layer_sizes`, `learning_rate_init`, `features`, etc.) are **missing** from the final config. This will cause errors when running the pipeline in most cases.
 
 **Example - What you need (complete structure):**
+
 ```yaml
 # custom/calibrator.yaml - COMPLETE STRUCTURE REQUIRED
 calibrator:
