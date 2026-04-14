@@ -78,14 +78,21 @@ winnow train dataset.spectrum_path_or_directory=data/spectra.parquet dataset.pre
 - `dataset.predictions_path`: Path to predictions file (set to `null` for Winnow format)
 - `model_output_dir`: Directory to save trained calibrator
 - `dataset_output_path`: Path to save training results CSV
+- `features_path`: Optional path to pre-computed feature Parquet file or directory (enables two-phase training)
+- `val_features_path`: Optional path to validation feature Parquet file or directory
+- `validation_fraction`: Automatic validation split fraction (default: 0.1, used when `val_features_path` is null)
+- `training_history_path`: Optional path to save epoch-level training history as JSON
 
 **Advanced calibrator configuration:**
 
 You can customise the calibrator architecture and features using nested parameters:
 
 ```bash
-# Change MLP architecture
-winnow train calibrator.hidden_layer_sizes=[100,50,25]
+# Change network architecture
+winnow train calibrator.hidden_dims=[128,64,32]
+
+# Adjust training hyperparameters
+winnow train calibrator.learning_rate=0.01 calibrator.max_epochs=200 calibrator.patience=15
 
 # Configure individual features
 winnow train calibrator.features.fragment_match_features.mz_tolerance=0.01
@@ -98,14 +105,18 @@ For comprehensive calibrator configuration options, see:
 
 ### `winnow compute-features`
 
-Compute calibration features and write one enriched metadata CSV. Uses the same `data_loader`, `dataset` paths and `calibrator.features` stack as training, but does **not** fit the MLP or save a model.
+Compute calibration features and write an enriched metadata CSV and optionally a lean numeric Parquet for model training. Uses the same `data_loader`, `dataset` paths and `calibrator.features` stack as training, but does **not** fit the calibrator or save a model.
 
 ```bash
 # Defaults (configs/compute_features.yaml)
 winnow compute-features
 
-# Paths and output file
-winnow compute-features dataset.spectrum_path_or_directory=data/spectra.ipc dataset.predictions_path=data/preds.csv dataset_output_path=results/features.csv
+# Paths and output files
+winnow compute-features \
+    dataset.spectrum_path_or_directory=data/spectra.ipc \
+    dataset.predictions_path=data/preds.csv \
+    metadata_output_path=results/metadata.csv \
+    training_matrix_output_path=results/features.parquet
 
 # De novo spectra (no ground truth): labelled=false; remove retention_time_feature if present
 winnow compute-features labelled=false '~calibrator.features.retention_time_feature'
@@ -114,7 +125,8 @@ winnow compute-features labelled=false '~calibrator.features.retention_time_feat
 **Common parameters:**
 
 - `data_loader`, `dataset.*`: Same as `winnow train`
-- `dataset_output_path`: Output CSV path
+- `metadata_output_path`: Full metadata CSV for EDA (all columns)
+- `training_matrix_output_path`: Optional lean numeric Parquet containing only features and labels for model training (used with two-phase `features_path` workflow)
 - `filter_empty_predictions`: Drop empty or invalid predictions (default: true)
 - `labelled`: If true (default), spectrum data must include a `sequence` column; runs each feature's `prepare()` (e.g. iRT calibrator).
 
@@ -237,11 +249,15 @@ winnow predict fdr_method=database_grounded fdr_control.fdr_threshold=0.05
 
 Training produces:
 
-1. **Model checkpoints** (`model_output_dir`):
-    - `calibrator.pkl`: Complete trained calibrator with all features and parameters
+1. **Model directory** (`model_output_dir`):
+    - `model.safetensors`: Trained network weights in safetensors format
+    - `config.json`: Model architecture, feature definitions, normalisation statistics and training history
 
 2. **Training results** (`dataset_output_path`):
     - CSV file with calibrated scores and evaluation metrics
+
+3. **Optional** (`training_history_path`):
+    - JSON file with epoch-level training and validation metrics
 
 ### Prediction output
 
@@ -270,7 +286,8 @@ This separation allows users to work with metadata and features separately from 
 
 ### Compute-features output
 
-A single CSV at `dataset_output_path`: full metadata after feature computation. No calibrated scores, FDR columns or FDR row filtering (unlike `winnow predict`).
+- **Metadata CSV** at `metadata_output_path`: Full metadata after feature computation, suitable for EDA. No calibrated scores, FDR columns or FDR row filtering (unlike `winnow predict`).
+- **Training matrix Parquet** at `training_matrix_output_path` (optional): Lean numeric matrix containing only feature columns and labels, suitable for two-phase training via `features_path`.
 
 ## Example workflows
 
@@ -324,6 +341,26 @@ winnow predict \
     fdr_control.fdr_threshold=0.05
 ```
 
+### Two-phase training (large-scale)
+
+For large datasets (e.g. millions of spectra across many projects), pre-compute features per project then train from the Parquet files:
+
+```bash
+# Phase 1: Compute features per project
+winnow compute-features \
+    dataset.spectrum_path_or_directory=data/project_01/spectra.parquet \
+    dataset.predictions_path=data/project_01/predictions.csv \
+    training_matrix_output_path=features/project_01.parquet
+
+winnow compute-features \
+    dataset.spectrum_path_or_directory=data/project_02/spectra.parquet \
+    dataset.predictions_path=data/project_02/predictions.csv \
+    training_matrix_output_path=features/project_02.parquet
+
+# Phase 2: Train from pre-computed features (directory of Parquets)
+winnow train features_path=features/train/ val_features_path=features/val/
+```
+
 ### Advanced configuration
 
 ```bash
@@ -331,9 +368,9 @@ winnow predict \
 winnow train \
     dataset.spectrum_path_or_directory=data/spectra.parquet \
     dataset.predictions_path=data/predictions.csv \
-    calibrator.hidden_layer_sizes=[100,50,25] \
-    calibrator.learning_rate_init=0.01 \
-    calibrator.max_iter=500 \
+    calibrator.hidden_dims=[128,64,32] \
+    calibrator.learning_rate=0.01 \
+    calibrator.max_epochs=200 \
     calibrator.features.fragment_match_features.mz_tolerance=0.01
 
 # Predict with database-grounded FDR
@@ -349,7 +386,7 @@ winnow predict \
 
 Winnow comes with sensible default settings for all parameters:
 
-- **Calibrator**: 2-layer MLP with 50 hidden units per layer
+- **Calibrator**: PyTorch feed-forward neural network
 - **Features**: Mass error, fragment match features, retention time deviation, chimeric features, beam features
 - **FDR**: Non-parametric method with 5% threshold
 - **Model**: Pretrained general model from Hugging Face

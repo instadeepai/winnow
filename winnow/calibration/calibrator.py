@@ -1,83 +1,203 @@
-"""Contains classes and functions for probability recalibration."""
+"""Contains classes and functions for PSM rescoring and probability calibration."""
 
-from typing import Dict, List, Tuple, Union, Optional
+from __future__ import annotations
+
+import importlib
+import json
+import logging
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-import pickle
+from typing import Dict, List, Optional, Tuple, Union
+
 import numpy as np
-from sklearn.neural_network import MLPClassifier
-from sklearn.preprocessing import StandardScaler
+from tqdm import tqdm
+import torch
+import torch.nn as nn
 from numpy.typing import NDArray
-from huggingface_hub import snapshot_download
 from omegaconf import DictConfig
+from safetensors.torch import load_file, save_file
+from torch.utils.data import DataLoader
 
 from winnow.calibration.calibration_features import (
     CalibrationFeatures,
     FeatureDependency,
 )
 from winnow.datasets.calibration_dataset import CalibrationDataset
+from winnow.datasets.feature_dataset import FeatureDataset
+from winnow.utils.paths import resolve_data_path
+
+logger = logging.getLogger(__name__)
 
 
-class ProbabilityCalibrator:
-    """A class for recalibrating probabilities for a de novo peptide sequencing method.
+@dataclass
+class TrainingHistory:
+    """Epoch-level training metrics from calibrator fitting.
 
-    This class provides functionality to recalibrate predicted probabilities by fitting an MLP classifier using various features computed from a calibration dataset.
+    Attributes:
+        train_losses: Training loss at the end of each epoch.
+        val_losses: Validation loss per epoch (present only when validation data is used).
+        val_accuracies: Validation accuracy per epoch.
+        best_epoch: Epoch with the best validation loss (0-indexed), or the last
+            epoch if no validation data was provided.
+        epochs_trained: Total number of epochs completed.
+    """
+
+    train_losses: List[float] = field(default_factory=list)
+    val_losses: Optional[List[float]] = None
+    val_accuracies: Optional[List[float]] = None
+    best_epoch: int = 0
+    epochs_trained: int = 0
+
+    def save(self, path: Union[Path, str]) -> None:
+        """Save training history to a JSON file."""
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(asdict(self), f, indent=2)
+
+    @classmethod
+    def load(cls, path: Union[Path, str]) -> TrainingHistory:
+        """Load training history from a JSON file."""
+        with open(path) as f:
+            data = json.load(f)
+        return cls(**data)
+
+    def plot(
+        self,
+        output_path: Optional[Union[Path, str]] = None,
+        show: bool = False,
+    ) -> None:
+        """Plot training and validation curves.
+
+        Args:
+            output_path: Path to save the plot image.  Not saved if ``None``.
+            show: Whether to call ``plt.show()`` interactively.
+        """
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots()
+        epochs = range(1, len(self.train_losses) + 1)
+
+        ax.plot(epochs, self.train_losses, label="Train Loss", linestyle="-")
+
+        if self.val_losses is not None:
+            ax.plot(epochs, self.val_losses, label="Val Loss", linestyle="--")
+
+        if self.val_accuracies is not None:
+            ax2 = ax.twinx()
+            ax2.plot(epochs, self.val_accuracies, label="Val Accuracy", linestyle=":")
+            ax2.set_ylabel("Validation Accuracy")
+            ax2.legend(loc="lower left")
+
+        plt.tight_layout()
+        plt.grid(False)
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Loss")
+        ax.set_title("Calibrator Training Progress")
+        ax.legend(loc="upper left")
+
+        if output_path is not None:
+            output_path = Path(output_path)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            plt.savefig(output_path, bbox_inches="tight")
+
+        if show:
+            plt.show()
+
+        plt.close(fig)
+
+
+class CalibratorNetwork(nn.Module):
+    """Feed-forward neural network for probability calibration.
+
+    Args:
+        input_dim: Number of input features.
+        hidden_dims: Sizes of hidden layers.
+        dropout: Dropout rate applied after each hidden layer.
     """
 
     def __init__(
         self,
-        seed: int = 42,
-        features: Optional[
-            Union[List[CalibrationFeatures], Dict[str, CalibrationFeatures], DictConfig]
-        ] = None,
-        hidden_layer_sizes: Tuple[int, ...] = (50, 50),
-        learning_rate_init: float = 0.001,
-        alpha: float = 0.0001,
-        max_iter: int = 1000,
-        early_stopping: bool = True,
-        validation_fraction: float = 0.1,
+        input_dim: int,
+        hidden_dims: Tuple[int, ...] = (128, 64),
+        dropout: float = 0.1,
     ) -> None:
-        """Initialise the probability calibrator.
+        super().__init__()
+        layers: List[nn.Module] = []
+        prev_dim = input_dim
+        for dim in hidden_dims:
+            layers.extend(
+                [
+                    nn.Linear(prev_dim, dim),
+                    nn.ReLU(),
+                    nn.Dropout(dropout),
+                ]
+            )
+            prev_dim = dim
+        layers.append(nn.Linear(prev_dim, 1))
+        self.network = nn.Sequential(*layers)
 
-        Args:
-            seed (int): Random seed for the classifier. Defaults to 42.
-            features (Optional[Union[List[CalibrationFeatures], Dict[str, CalibrationFeatures], DictConfig]]):
-                Features to add to the calibrator. Can be a list or dict of CalibrationFeatures objects.
-                If None, no features are added. Defaults to None.
-            hidden_layer_sizes (Tuple[int, ...]): The number of neurons in each hidden layer. Defaults to (50, 50).
-            learning_rate_init (float): The initial learning rate. Defaults to 0.001.
-            alpha (float): L2 regularisation parameter. Defaults to 0.0001.
-            max_iter (int): Maximum number of training iterations. Defaults to 1000.
-            early_stopping (bool): Whether to use early stopping to terminate training. Defaults to True.
-            validation_fraction (float): Proportion of training data to use for early stopping validation. Defaults to 0.1.
-        """
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Return raw logits (scalar per sample)."""
+        return self.network(x).squeeze(-1)
+
+
+class ProbabilityCalibrator:
+    """Recalibrates probabilities for de novo peptide sequencing predictions.
+
+    Uses a PyTorch feed-forward network trained on pre-computed calibration
+    features.  Models are persisted as ``safetensors`` weights plus a
+    ``config.json`` metadata file.
+    """
+
+    def __init__(
+        self,
+        features: Optional[
+            Union[
+                List[CalibrationFeatures],
+                Dict[str, CalibrationFeatures],
+                DictConfig,
+            ]
+        ] = None,
+        hidden_dims: Tuple[int, ...] = (128, 64),
+        dropout: float = 0.1,
+        learning_rate: float = 1e-3,
+        weight_decay: float = 1e-4,
+        max_epochs: int = 100,
+        batch_size: int = 1024,
+        patience: int = 10,
+        seed: int = 42,
+    ) -> None:
+        self.hidden_dims = tuple(hidden_dims)
+        self.dropout = dropout
+        self.learning_rate = learning_rate
+        self.weight_decay = weight_decay
+        self.max_epochs = max_epochs
+        self.batch_size = batch_size
+        self.patience = patience
+        self.seed = seed
+
         self.feature_dict: Dict[str, CalibrationFeatures] = {}
         self.dependencies: Dict[str, FeatureDependency] = {}
         self.dependency_reference_counter: Dict[str, int] = {}
-        self.classifier = MLPClassifier(
-            random_state=seed,
-            hidden_layer_sizes=hidden_layer_sizes,
-            learning_rate_init=learning_rate_init,
-            alpha=alpha,
-            max_iter=max_iter,
-            early_stopping=early_stopping,
-            validation_fraction=validation_fraction,
-        )
-        self.scaler = StandardScaler()
 
-        # Add features if provided
+        self.network: Optional[CalibratorNetwork] = None
+        self.feature_mean: Optional[torch.Tensor] = None
+        self.feature_std: Optional[torch.Tensor] = None
+
         if features is not None:
             if isinstance(features, (dict, DictConfig)):
                 self.add_features(list(features.values()))
             else:
                 self.add_features(list(features))
 
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
+
     @property
     def columns(self) -> List[str]:
-        """Returns the list of column names corresponding to the features added to the calibrator.
-
-        Returns:
-            List[str]: A list of column names representing the features used for calibration.
-        """
+        """Column names corresponding to the features added to the calibrator."""
         return [
             column
             for feature in self.feature_dict.values()
@@ -85,28 +205,84 @@ class ProbabilityCalibrator:
         ]
 
     @property
-    def features(self) -> List[str]:
-        """Get the list of features added to the calibrator.
-
-        Returns:
-            List[str]: The list of feature names
-        """
+    def feature_names(self) -> List[str]:
+        """Names of features registered with the calibrator."""
         return list(self.feature_dict.keys())
+
+    # ------------------------------------------------------------------
+    # Static methods
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _resolve_device() -> torch.device:
+        """Auto-detect GPU, warn if falling back to CPU."""
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+            logger.info("Using GPU: %s", torch.cuda.get_device_name(0))
+        else:
+            logger.warning(
+                "No GPU detected, falling back to CPU. "
+                "Training may be slow for large datasets."
+            )
+            device = torch.device("cpu")
+        return device
+
+    # ------------------------------------------------------------------
+    # Class methods (persistence)
+    # ------------------------------------------------------------------
 
     @classmethod
     def save(
-        cls, calibrator: "ProbabilityCalibrator", dir_path: Union[Path, str]
+        cls,
+        calibrator: ProbabilityCalibrator,
+        dir_path: Union[Path, str],
     ) -> None:
-        """Save the calibrator to a file.
+        """Save calibrator weights and config to a directory.
+
+        Writes ``model.safetensors`` (network weights, feature mean/std) and
+        ``config.json`` (architecture, hyperparameters, resolved feature configs).
 
         Args:
-            calibrator (ProbabilityCalibrator): The calibrator to save.
-            dir_path (Path): The path to the directory where the calibrator checkpoint will be saved.
+            calibrator: The calibrator to save.
+            dir_path: Destination directory.
         """
-        if isinstance(dir_path, str):
-            dir_path = Path(dir_path)
+        if calibrator.network is None:
+            raise RuntimeError("Cannot save an unfitted calibrator.")
+        assert calibrator.feature_mean is not None
+        assert calibrator.feature_std is not None
+
+        dir_path = Path(dir_path)
         dir_path.mkdir(parents=True, exist_ok=True)
-        pickle.dump(calibrator, open(dir_path / "calibrator.pkl", "wb"))
+
+        tensors: Dict[str, torch.Tensor] = {}
+        for name, param in calibrator.network.state_dict().items():
+            tensors[f"network.{name}"] = param.cpu()
+        tensors["feature_mean"] = calibrator.feature_mean.cpu()
+        tensors["feature_std"] = calibrator.feature_std.cpu()
+
+        save_file(tensors, dir_path / "model.safetensors")
+
+        config = {
+            "input_dim": int(calibrator.feature_mean.shape[0]),
+            "hidden_dims": list(calibrator.hidden_dims),
+            "dropout": calibrator.dropout,
+            "learning_rate": calibrator.learning_rate,
+            "weight_decay": calibrator.weight_decay,
+            "max_epochs": calibrator.max_epochs,
+            "batch_size": calibrator.batch_size,
+            "patience": calibrator.patience,
+            "seed": calibrator.seed,
+            "feature_columns": calibrator.columns,
+            "feature_names": calibrator.feature_names,
+            "features": {
+                name: feature.get_config()
+                for name, feature in calibrator.feature_dict.items()
+            },
+        }
+        with open(dir_path / "config.json", "w") as f:
+            json.dump(config, f, indent=2)
+
+        logger.info("Saved calibrator to %s", dir_path)
 
     @classmethod
     def load(
@@ -115,64 +291,91 @@ class ProbabilityCalibrator:
             Path, str
         ] = "InstaDeepAI/winnow-general-model",
         cache_dir: Optional[Path] = None,
-    ) -> "ProbabilityCalibrator":
-        """Load a pretrained calibrator from a local path or Hugging Face repository. If the path is a local directory path, it will be used directly. If it is a Hugging Face repository identifier, it will be downloaded from Hugging Face.
+    ) -> ProbabilityCalibrator:
+        """Load a calibrator from a local directory or HuggingFace Hub repo.
+
+        Expects the directory to contain ``model.safetensors`` and
+        ``config.json``.
 
         Args:
-            pretrained_model_name_or_path (Union[Path, str]): The local directory path (e.g., "./my-model-directory") or the Hugging Face repository identifier (e.g., "InstaDeepAI/winnow-general-model").
-            cache_dir (Optional[Path]): Directory to cache the Hugging Face model.
+            pretrained_model_name_or_path: Local directory path or HuggingFace
+                repository identifier.
+            cache_dir: Optional cache directory for HuggingFace downloads.
+
+        Returns:
+            A fitted ``ProbabilityCalibrator`` ready for prediction.
+
+        Raises:
+            FileNotFoundError: If the path cannot be resolved.
         """
-        dir_path = Path(pretrained_model_name_or_path)
+        dir_path = resolve_data_path(
+            str(pretrained_model_name_or_path),
+            repo_type="model",
+            cache_dir=cache_dir,
+        )
 
-        # If the path exists locally, use it directly.
-        if dir_path.exists():
-            # Resolve relative paths to absolute, canonical paths
-            dir_path = dir_path.resolve()
-        # Otherwise download it from Hugging Face.
-        else:
-            # If no cache directory is provided, use the default cache directory.
-            if cache_dir is None:
-                cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
-            # Download from Hugging Face
-            dir_path = Path(
-                snapshot_download(
-                    repo_id=pretrained_model_name_or_path,
-                    repo_type="model",
-                    cache_dir=cache_dir,
-                )
-            )
+        with open(dir_path / "config.json") as f:
+            config = json.load(f)
 
-        # Load the calibrator object
-        loaded_obj = pickle.load(open(dir_path / "calibrator.pkl", "rb"))
+        calibrator = cls(
+            hidden_dims=tuple(config["hidden_dims"]),
+            dropout=config["dropout"],
+            learning_rate=config.get("learning_rate", 1e-3),
+            weight_decay=config.get("weight_decay", 1e-4),
+            max_epochs=config.get("max_epochs", 100),
+            batch_size=config.get("batch_size", 1024),
+            patience=config.get("patience", 10),
+            seed=config.get("seed", 42),
+        )
 
-        # Check if this is a legacy checkpoint (MLPClassifier instead of ProbabilityCalibrator)
-        if isinstance(loaded_obj, MLPClassifier):
-            error_msg = (
-                "Legacy checkpoint format detected. The checkpoint directory contains "
-                "an old format where calibrator.pkl contains only the MLPClassifier "
-                "instead of the full ProbabilityCalibrator object.\n"
-                "Legacy checkpoints cannot be automatically migrated because they lack "
-                "the feature and dependency information required by the current version. "
-                "We cannot correctly infer the trained feature set with old versions.\n"
-                "To resolve this, retrain the calibrator using the current version with your training dataset. "
-                "The new format will save the complete ProbabilityCalibrator object including all features and dependencies."
-            )
-            raise ValueError(error_msg)
+        for _feat_name, feat_cfg in config.get("features", {}).items():
+            feat_cfg = dict(feat_cfg)
+            target = feat_cfg.pop("_target_")
+            module_path, class_name = target.rsplit(".", 1)
+            module = importlib.import_module(module_path)
+            feat_cls = getattr(module, class_name)
+            calibrator.add_feature(feat_cls(**feat_cfg))
 
-        elif not isinstance(loaded_obj, ProbabilityCalibrator):
-            raise ValueError(
-                f"Loaded object is of type {type(loaded_obj).__name__}, expected ProbabilityCalibrator."
-            )
-        else:
-            return loaded_obj
+        tensors = load_file(dir_path / "model.safetensors")
+
+        calibrator.feature_mean = tensors["feature_mean"]
+        calibrator.feature_std = tensors["feature_std"]
+
+        input_dim = config["input_dim"]
+        calibrator.network = CalibratorNetwork(
+            input_dim=input_dim,
+            hidden_dims=calibrator.hidden_dims,
+            dropout=calibrator.dropout,
+        )
+        network_state = {
+            k.removeprefix("network."): v
+            for k, v in tensors.items()
+            if k.startswith("network.")
+        }
+        calibrator.network.load_state_dict(network_state)
+        calibrator.network.eval()
+
+        logger.info(
+            "Loaded calibrator from %s (input_dim=%d, hidden_dims=%s, features=%s)",
+            dir_path,
+            input_dim,
+            calibrator.hidden_dims,
+            list(calibrator.feature_dict.keys()),
+        )
+        return calibrator
+
+    # ------------------------------------------------------------------
+    # Public instance methods
+    # ------------------------------------------------------------------
 
     def add_feature(self, feature: CalibrationFeatures) -> None:
-        """Add a feature for the classifier used for calibration.
-
-        This method ensures that the feature is unique and its dependencies are tracked.
+        """Register a feature for calibration.
 
         Args:
-            feature (CalibrationFeatures): The feature to be added to the calibrator.
+            feature: The feature to register.
+
+        Raises:
+            KeyError: If a feature with the same name is already present.
         """
         if feature.name not in self.feature_dict:
             self.feature_dict[feature.name] = feature
@@ -186,22 +389,123 @@ class ProbabilityCalibrator:
             raise KeyError(f"Feature {feature.name} in feature set.")
 
     def add_features(self, features: List[CalibrationFeatures]) -> None:
-        """Add features for the classifier used for calibration.
-
-        Args:
-            features (List[CalibrationFeatures]): A list of features to be added to the calibrator.
-        """
+        """Register multiple features."""
         for feature in features:
             self.add_feature(feature)
 
-    def remove_feature(self, name: str) -> None:
-        """Remove a feature for the classifier used for calibration.
+    def compute_features(self, dataset: CalibrationDataset) -> None:
+        """Run feature dependencies and feature computation on a dataset.
 
-        This method also removes any dependencies that are no longer required.
+        Mutates ``dataset.metadata`` in place: adds feature columns and may
+        drop rows when ``learn_from_missing=False`` on individual features.
 
         Args:
-            name (str): The name of the feature to be removed.
+            dataset: The dataset on which features are computed.
         """
+        for dependency in self.dependencies.values():
+            dependency.compute(dataset=dataset)
+
+        for feature in self.feature_dict.values():
+            feature.prepare(dataset=dataset)
+            feature.compute(dataset=dataset)
+
+    def fit(
+        self,
+        train_dataset: CalibrationDataset,
+        val_dataset: Optional[CalibrationDataset] = None,
+        progress_bar: bool = True,
+    ) -> TrainingHistory:
+        """Compute features and train the calibrator.
+
+        This is the primary training entry point.  It runs
+        :meth:`compute_features` on the supplied datasets, extracts the
+        numeric feature matrix and labels, and trains the calibrator network.
+
+        Both ``train_dataset`` and ``val_dataset`` are mutated in place
+        (feature columns are added, and rows may be dropped when individual
+        features have ``learn_from_missing=False``).
+
+        Args:
+            train_dataset: Labelled training dataset.
+            val_dataset: Optional labelled validation dataset for early
+                stopping.
+            progress_bar: Whether to display a progress bar during training.
+
+        Returns:
+            Epoch-level training metrics.
+        """
+        self.compute_features(train_dataset)
+        features, labels = self._extract_feature_matrix(train_dataset, labelled=True)
+        train_fd = FeatureDataset(
+            features=np.asarray(features), labels=np.asarray(labels)
+        )
+
+        val_fd = None
+        if val_dataset is not None:
+            self.compute_features(val_dataset)
+            val_features, val_labels = self._extract_feature_matrix(
+                val_dataset, labelled=True
+            )
+            val_fd = FeatureDataset(
+                features=np.asarray(val_features),
+                labels=np.asarray(val_labels),
+            )
+
+        return self._fit_from_features(train_fd, val_fd, progress_bar=progress_bar)
+
+    def fit_from_features(
+        self,
+        train_dataset: FeatureDataset,
+        val_dataset: Optional[FeatureDataset] = None,
+        progress_bar: bool = True,
+    ) -> TrainingHistory:
+        """Train the calibrator from pre-computed feature arrays.
+
+        Use this for the two-phase workflow where features have already been
+        computed and saved to Parquet, then reloaded via
+        :meth:`FeatureDataset.from_parquet`.
+
+        Args:
+            train_dataset: Training features and labels.
+            val_dataset: Optional held-out validation set for early stopping.
+            progress_bar: Whether to display a progress bar during training.
+
+        Returns:
+            Epoch-level training metrics.
+        """
+        return self._fit_from_features(train_dataset, val_dataset, progress_bar)
+
+    @torch.no_grad()
+    def predict(self, dataset: CalibrationDataset) -> None:
+        """Predict calibrated probabilities and store them on the dataset.
+
+        The ``calibrated_confidence`` column is added to ``dataset.metadata``.
+
+        Args:
+            dataset: The dataset for which predictions are made.
+        """
+        if self.network is None:
+            raise RuntimeError(
+                "Calibrator has not been fitted or loaded. Call fit() or load() first."
+            )
+        assert self.feature_mean is not None
+        assert self.feature_std is not None
+
+        self.compute_features(dataset)
+        features = self._extract_feature_matrix(dataset, labelled=False)
+
+        device = next(self.network.parameters()).device
+        x = torch.as_tensor(features, dtype=torch.float32, device=device)
+        x = (x - self.feature_mean) / self.feature_std
+
+        self.network.eval()
+        logits = self.network(x)
+        probs = torch.sigmoid(logits).cpu().numpy()
+
+        dataset.metadata["calibrated_confidence"] = probs.tolist()
+
+    def remove_feature(self, name: str) -> None:
+        """Remove a feature and its orphaned dependencies."""
         feature = self.feature_dict.pop(name)
         for dependency in feature.dependencies:
             self.dependency_reference_counter[dependency.name] -= 1
@@ -209,49 +513,31 @@ class ProbabilityCalibrator:
                 self.dependency_reference_counter.pop(dependency.name)
                 self.dependencies.pop(dependency.name)
 
-    def fit(self, dataset: CalibrationDataset) -> None:
-        """Fit the MLP classifier using the given calibration dataset.
+    # ------------------------------------------------------------------
+    # Private instance methods
+    # ------------------------------------------------------------------
 
-        This method computes the features from the dataset, prepares the labels, and trains an MLP classifier for recalibrating probabilities.
-
-        Args:
-            dataset (CalibrationDataset): The dataset used for training the classifier.
-        """
-        features, labels = self.compute_features(dataset=dataset, labelled=True)
-        # Fit and transform features with scaler
-        features_scaled = self.scaler.fit_transform(features)
-        self.classifier.fit(features_scaled, labels)
-
-    def compute_features(
+    def _extract_feature_matrix(
         self, dataset: CalibrationDataset, labelled: bool
     ) -> Union[
         NDArray[np.float64],
         Tuple[NDArray[np.float64], NDArray[np.float64]],
     ]:
-        """Compute the features for the dataset, including any dependencies and feature calculations.
+        """Pull numeric feature columns (and optionally labels) from metadata.
 
-        This method handles both labelled and unlabelled datasets. It computes the necessary features and returns them for model training or prediction.
+        Must be called *after* :meth:`compute_features` has populated the
+        feature columns on ``dataset.metadata``.
 
         Args:
-            dataset (CalibrationDataset): The dataset from which features are computed.
-            labelled (bool): Whether the dataset contains labels for supervised learning.
+            dataset: Dataset whose metadata already contains the feature
+                columns.
+            labelled: If ``True``, also return the ``correct`` column as
+                labels.
 
         Returns:
-            Union[
-                NDArray[np.float64],
-                Tuple[NDArray[np.float64], NDArray[np.float64]]
-            ]:
-                - If `labelled` is True: A tuple containing the computed feature matrix and the corresponding labels.
-                - If `labelled` is False: Only the computed feature matrix.
+            Feature matrix, or ``(features, labels)`` when
+            ``labelled=True``.
         """
-        for dependency in self.dependencies.values():
-            dependency.compute(dataset=dataset)
-
-        for feature in self.feature_dict.values():
-            if labelled:
-                feature.prepare(dataset=dataset)
-            feature.compute(dataset=dataset)
-
         feature_columns = [dataset.confidence_column]
         feature_columns.extend(self.columns)
         features = dataset.metadata[feature_columns]
@@ -259,19 +545,195 @@ class ProbabilityCalibrator:
         if labelled:
             labels = dataset.metadata["correct"]
             return features.values, labels.values
-        else:
-            return features.values
+        return features.values
 
-    def predict(self, dataset: CalibrationDataset) -> None:
-        """Predict the calibrated probabilities for a given dataset.
-
-        This method computes the features and uses the trained classifier to predict the calibrated probabilities for the dataset. The calibrated probabilities are stored in the dataset under the "calibrated_confidence" column.
+    def _fit_from_features(
+        self,
+        train_dataset: FeatureDataset,
+        val_dataset: Optional[FeatureDataset] = None,
+        progress_bar: bool = True,
+    ) -> TrainingHistory:
+        """Train the calibrator network on pre-computed features.
 
         Args:
-            dataset (CalibrationDataset): The dataset for which predictions are made.
+            train_dataset: Training features and labels.
+            val_dataset: Optional held-out validation set for early stopping.
+            progress_bar: Whether to display a progress bar during training.
+
+        Returns:
+            Epoch-level training metrics.
         """
-        features = self.compute_features(dataset=dataset, labelled=False)
-        # Transform features with scaler
-        features_scaled = self.scaler.transform(features)
-        correct_probs = self.classifier.predict_proba(features_scaled)
-        dataset.metadata["calibrated_confidence"] = correct_probs[:, 1].tolist()
+        torch.manual_seed(self.seed)
+        device = self._resolve_device()
+
+        input_dim = train_dataset.features.shape[1]
+        self.network = CalibratorNetwork(
+            input_dim=input_dim,
+            hidden_dims=self.hidden_dims,
+            dropout=self.dropout,
+        ).to(device)
+
+        self.feature_mean = train_dataset.features.mean(dim=0).to(device)
+        self.feature_std = train_dataset.features.std(dim=0).clamp(min=1e-8).to(device)
+
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            drop_last=False,
+        )
+
+        optimizer = torch.optim.Adam(
+            self.network.parameters(),
+            lr=self.learning_rate,
+            weight_decay=self.weight_decay,
+        )
+        criterion = nn.BCEWithLogitsLoss()
+
+        has_val = val_dataset is not None
+        history = TrainingHistory(
+            val_losses=[] if has_val else None,
+            val_accuracies=[] if has_val else None,
+        )
+        best_val_loss = float("inf")
+        best_state: Optional[Dict[str, torch.Tensor]] = None
+        epochs_without_improvement = 0
+
+        for epoch in tqdm(
+            range(self.max_epochs),
+            disable=not progress_bar,
+            desc="Training calibrator",
+            unit="epoch",
+        ):
+            avg_train_loss = self._train_one_epoch(
+                train_loader,
+                optimizer,
+                criterion,
+                device,
+            )
+            history.train_losses.append(avg_train_loss)
+
+            if val_dataset is None:
+                history.best_epoch = epoch
+                continue
+
+            should_stop, best_val_loss, best_state, epochs_without_improvement = (
+                self._validation_step(
+                    val_dataset,
+                    criterion,
+                    device,
+                    history,
+                    epoch,
+                    best_val_loss,
+                    best_state,
+                    epochs_without_improvement,
+                )
+            )
+            if should_stop:
+                break
+
+        history.epochs_trained = epoch + 1  # noqa: F821 — loop always runs
+
+        if best_state is not None:
+            self.network.load_state_dict(best_state)
+            self.network.to(device)
+
+        return history
+
+    @torch.no_grad()
+    def _evaluate(
+        self,
+        dataset: FeatureDataset,
+        criterion: nn.Module,
+        device: torch.device,
+    ) -> Tuple[float, float]:
+        """Compute loss and accuracy on a dataset."""
+        assert self.network is not None
+        assert self.feature_mean is not None
+        assert self.feature_std is not None
+
+        self.network.eval()
+        loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=False)
+        total_loss = 0.0
+        correct = 0
+        total = 0
+        for features, labels in loader:
+            features = (features.to(device) - self.feature_mean) / self.feature_std
+            labels = labels.to(device)
+            logits = self.network(features)
+            total_loss += criterion(logits, labels).item() * len(labels)
+            preds = (logits > 0.0).float()
+            correct += (preds == labels).sum().item()
+            total += len(labels)
+
+        return total_loss / max(total, 1), correct / max(total, 1)
+
+    def _snapshot_state(self) -> Dict[str, torch.Tensor]:
+        """Return a CPU copy of the current network state dict."""
+        assert self.network is not None
+        return {k: v.cpu().clone() for k, v in self.network.state_dict().items()}
+
+    def _train_one_epoch(
+        self,
+        train_loader: DataLoader,
+        optimizer: torch.optim.Optimizer,
+        criterion: nn.Module,
+        device: torch.device,
+    ) -> float:
+        """Run one training epoch, return the average loss."""
+        assert self.network is not None
+        assert self.feature_mean is not None
+        assert self.feature_std is not None
+
+        self.network.train()
+        epoch_loss = 0.0
+        n_batches = 0
+        for features, labels in train_loader:
+            features = (features.to(device) - self.feature_mean) / self.feature_std
+            labels = labels.to(device)
+            optimizer.zero_grad()
+            logits = self.network(features)
+            loss = criterion(logits, labels)
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
+            n_batches += 1
+
+        return epoch_loss / max(n_batches, 1)
+
+    def _validation_step(
+        self,
+        val_dataset: FeatureDataset,
+        criterion: nn.Module,
+        device: torch.device,
+        history: TrainingHistory,
+        epoch: int,
+        best_val_loss: float,
+        best_state: Optional[Dict[str, torch.Tensor]],
+        epochs_without_improvement: int,
+    ) -> Tuple[bool, float, Optional[Dict[str, torch.Tensor]], int]:
+        """Evaluate on validation set and check early stopping.
+
+        Returns:
+            Tuple of (should_stop, best_val_loss, best_state,
+            epochs_without_improvement).
+        """
+        val_loss, val_acc = self._evaluate(val_dataset, criterion, device)
+
+        assert history.val_losses is not None
+        assert history.val_accuracies is not None
+        history.val_losses.append(val_loss)
+        history.val_accuracies.append(val_acc)
+
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_state = self._snapshot_state()
+            history.best_epoch = epoch
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
+
+        if epochs_without_improvement >= self.patience:
+            return True, best_val_loss, best_state, epochs_without_improvement
+
+        return False, best_val_loss, best_state, epochs_without_improvement

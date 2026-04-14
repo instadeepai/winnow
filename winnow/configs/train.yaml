@@ -7,8 +7,24 @@ defaults:
 
 # --- Pipeline Execution Configuration ---
 
+# Two-phase training: set features_path to skip raw data loading and train
+# directly from pre-computed feature Parquets (produced by compute-features).
+# Accepts a single .parquet file or a directory of .parquet files.
+# Leave as null for single-phase training (load raw data + compute features).
+features_path: null
+
+# Explicit validation set: a Parquet file or directory of Parquets.
+# When set, this overrides validation_fraction.
+val_features_path: null
+
+# Automatic validation split fraction (used when val_features_path is null).
+# WARNING: random splits may leak peptides or experiment artifacts between
+# train and validation. For rigorous evaluation, hold out entire projects
+# via val_features_path instead.
+validation_fraction: 0.1
+
+# Single-phase dataset config (ignored when features_path is set):
 dataset:
-  # Dataset paths:
   # Path to the spectrum data file or to folder containing saved internal Winnow dataset.
   spectrum_path_or_directory: examples/example_data/spectra.ipc
   # Path to the beam predictions file.
@@ -19,3 +35,10 @@ dataset:
 # Output paths:
 model_output_dir: models/new_model
 dataset_output_path: results/calibrated_dataset.csv
+# Optional: save per-experiment iRT regressors for reuse at inference time.
+# Useful when training on well-characterised data and predicting on unlabelled data
+# from the same experiment(s), where the inference confidence distribution may be
+# unreliable for training a new RT->iRT regressor.
+irt_regressor_output_path: null
+# Optional: save epoch-level training history as JSON for analysis and plotting.
+training_history_path: null

@@ -32,13 +32,20 @@ from winnow.datasets.calibration_dataset import (
 class InstaNovoDatasetLoader(DatasetLoader):
     """Loader for InstaNovo predictions in CSV format."""
 
+    _DEFAULT_COLUMN_MAPPING: dict[str, str] = {
+        "predictions": "predictions",
+        "predictions_tokenised": "predictions_tokenised",
+        "log_probability": "log_probs",
+    }
+
     def __init__(
         self,
         residue_masses: dict[str, float],
-        residue_remapping: dict[str, str],
+        residue_remapping: Optional[dict[str, str]] = None,
         isotope_error_range: Tuple[int, int] = (0, 1),
         beam_columns: Optional[dict[str, str]] = None,
         add_index_cols: bool = False,
+        column_mapping: Optional[dict[str, str]] = None,
     ) -> None:
         """Initialise the InstaNovoDatasetLoader.
 
@@ -49,6 +56,11 @@ class InstaNovoDatasetLoader(DatasetLoader):
             beam_columns: The names of the beam columns to substring match in the predictions file.
             add_index_cols: If True, add ``experiment_name`` and ``spectrum_id`` to parquet/ipc
                 inputs. MGF inputs always get these columns regardless of this flag.
+            column_mapping: Mapping from logical column names (``predictions``,
+                ``predictions_tokenised``, ``log_probability``) to the actual CSV column
+                names produced by the InstaNovo version you are loading.  Defaults are
+                ``{"predictions": "predictions", "predictions_tokenised":
+                "predictions_tokenised", "log_probability": "log_probs"}``.
         """
         self.metrics = Metrics(
             residue_set=ResidueSet(
@@ -58,6 +70,10 @@ class InstaNovoDatasetLoader(DatasetLoader):
         )
         self.beam_columns = beam_columns
         self.add_index_cols = add_index_cols
+        self.column_mapping = {
+            **self._DEFAULT_COLUMN_MAPPING,
+            **(column_mapping or {}),
+        }
 
     @staticmethod
     def _df_from_matchms(spectra: list[Spectrum]) -> pl.DataFrame:
@@ -260,6 +276,10 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
         if spectrum_path.suffix == ".mgf" or self.add_index_cols:
             df = self._add_index_cols(df, spectrum_path)
+        elif "experiment_name" not in df.columns:
+            df = df.with_columns(
+                pl.lit(Path(spectrum_path).stem).alias("experiment_name").cast(pl.Utf8)
+            )
 
         if "sequence" in df.columns:
             has_labels = True
@@ -446,16 +466,18 @@ class InstaNovoDatasetLoader(DatasetLoader):
         )
 
         rename_dict = {
-            "predictions": "prediction_untokenised",
-            "predictions_tokenised": "prediction",
-            "log_probs": "confidence",
+            self.column_mapping["predictions"]: "prediction_untokenised",
+            self.column_mapping["predictions_tokenised"]: "prediction",
+            self.column_mapping["log_probability"]: "confidence",
         }
         missing_cols = [
             col for col in rename_dict.keys() if col not in preds_dataset.columns
         ]
         if missing_cols:
             raise ValueError(
-                f"Required columns {missing_cols} not found in predictions dataset."
+                f"Required columns {missing_cols} not found in predictions dataset. "
+                f"If you are using an older InstaNovo version, set column_mapping in "
+                f"the data_loader config to match the CSV headers."
             )
         preds_dataset.rename(rename_dict, axis=1, inplace=True)
 
@@ -592,6 +614,11 @@ class MZTabDatasetLoader(DatasetLoader):
         else:
             raise ValueError(
                 f"Unsupported file format for spectrum data: {spectrum_path.suffix}. Supported formats are .parquet and .ipc."
+            )
+
+        if "experiment_name" not in df.columns:
+            df = df.with_columns(
+                pl.lit(Path(spectrum_path).stem).alias("experiment_name").cast(pl.Utf8)
             )
 
         if "sequence" in df.columns:

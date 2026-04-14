@@ -15,12 +15,11 @@ docs_public
 *.mztab
 *.fasta
 *.mgf
-*.pkl
+*.safetensors
 *.json
 *.yaml
 *.pdf
 *.png
-
 *.ipynb
 
 examples/winnow-general-model
