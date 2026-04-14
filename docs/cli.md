@@ -105,7 +105,7 @@ Compute calibration features and write one enriched metadata CSV. Uses the same 
 winnow compute-features
 
 # Paths and output file
-winnow compute-features dataset.spectrum_path_or_directory=data/spectra.ipc dataset.predictions_path=data/preds.csv dataset_output_path=results/features.csv
+winnow compute-features dataset.spectrum_path_or_directory=data/spectra.parquet dataset.predictions_path=data/preds.csv dataset_output_path=results/features.csv
 
 # De novo spectra (no ground truth): labelled=false; remove retention_time_feature if present
 winnow compute-features labelled=false '~calibrator.features.retention_time_feature'
