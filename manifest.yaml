@@ -24,3 +24,10 @@ spec:
       resources:
         cpus: 4
         ramRatio: 2 # >= 2
+
+  storage:
+    attachExistingPVCs: # optional, array
+        - name: "dtu-denovo-s-2e6da747d6d34f62-mass-spec-fo-3010d211a1d447cf"
+          mountPoint: "app/fm_mount"
+        - name: "dtu-denovo-s-2e6da747d6d34f62-instanovo-ce-f313d8ccd60f4263"
+          mountPoint: "app/clean_acfm_mount"
