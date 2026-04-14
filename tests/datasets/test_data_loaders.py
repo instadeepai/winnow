@@ -1219,7 +1219,7 @@ class TestMZTabDatasetLoader:
         )
         mgf_path = tmp_path / "spectra.mgf"
         mgf_path.write_text(
-            "BEGIN IONS\n" "PEPMASS=500.0\n" "CHARGE=2+\n" "100.0 1.0\n" "END IONS\n",
+            "BEGIN IONS\nPEPMASS=500.0\nCHARGE=2+\n100.0 1.0\nEND IONS\n",
             encoding="utf-8",
         )
         result_df, _ = loader._load_spectrum_data(mgf_path)
@@ -1230,12 +1230,7 @@ class TestMZTabDatasetLoader:
     def test_load_spectrum_data_mgf_has_labels(self, loader, tmp_path):
         mgf_path = tmp_path / "labeled.mgf"
         mgf_path.write_text(
-            "BEGIN IONS\n"
-            "PEPMASS=500.0\n"
-            "CHARGE=2+\n"
-            "SEQ=PEPTIDE\n"
-            "100.0 1.0\n"
-            "END IONS\n",
+            "BEGIN IONS\nPEPMASS=500.0\nCHARGE=2+\nSEQ=PEPTIDE\n100.0 1.0\nEND IONS\n",
             encoding="utf-8",
         )
         _, has_labels = loader._load_spectrum_data(mgf_path)
@@ -1244,7 +1239,7 @@ class TestMZTabDatasetLoader:
     def test_load_spectrum_data_mgf_no_labels(self, loader, tmp_path):
         mgf_path = tmp_path / "unlabeled.mgf"
         mgf_path.write_text(
-            "BEGIN IONS\n" "PEPMASS=500.0\n" "CHARGE=2+\n" "100.0 1.0\n" "END IONS\n",
+            "BEGIN IONS\nPEPMASS=500.0\nCHARGE=2+\n100.0 1.0\nEND IONS\n",
             encoding="utf-8",
         )
         _, has_labels = loader._load_spectrum_data(mgf_path)
