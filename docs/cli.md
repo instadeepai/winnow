@@ -198,7 +198,7 @@ For prediction (`winnow predict`), you need:
 
 Winnow supports multiple input formats:
 
-- **InstaNovo**: Parquet, IPC, or MGF spectra + CSV predictions (beam search format)
+- **InstaNovo**: Parquet, IPC, or MGF spectra + CSV or Parquet predictions (beam search format)
 - **MZTab**: Parquet or IPC spectra + MZTab predictions
 - **PointNovo**: Similar to InstaNovo format
 - **Winnow**: Internal format (directory with metadata.csv and predictions.pkl)

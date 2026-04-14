@@ -48,7 +48,7 @@ The datasets module provides several data loaders that implement the `DatasetLoa
 
 #### InstaNovoDatasetLoader
 
-Loads InstaNovo predictions from CSV format along with spectrum data from Parquet/IPC files.
+Loads InstaNovo predictions from CSV or Parquet format along with spectrum data from Parquet/IPC files.
 
 ```python
 from winnow.datasets.data_loaders import InstaNovoDatasetLoader
@@ -56,7 +56,7 @@ from winnow.datasets.data_loaders import InstaNovoDatasetLoader
 loader = InstaNovoDatasetLoader()
 dataset = loader.load(
     data_path=Path("spectrum_data.parquet"),  # Spectrum metadata
-    predictions_path=Path("instanovo_predictions.csv")  # InstaNovo beam predictions
+    predictions_path=Path("instanovo_predictions.csv")  # CSV or Parquet
 )
 ```
 

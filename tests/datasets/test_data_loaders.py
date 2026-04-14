@@ -356,7 +356,7 @@ class TestInstaNovoDatasetLoader:
         assert dataset.predictions is None
         assert len(dataset.metadata) == 1
 
-    def test_beam_columns_none_load_predictions_without_beams(
+    def test_beam_columns_none_load_predictions_without_beams_csv(
         self, residue_masses, residue_remapping, tmp_path
     ):
         """_load_predictions_without_beams should load CSV without parsing beams."""
@@ -375,12 +375,32 @@ class TestInstaNovoDatasetLoader:
         assert "predictions" in result.columns
         assert len(result) == 1
 
+    def test_beam_columns_none_load_predictions_without_beams_parquet(
+        self, residue_masses, residue_remapping, tmp_path
+    ):
+        """_load_predictions_without_beams should load Parquet without parsing beams."""
+        df = pd.DataFrame(
+            {
+                "spectrum_id": [0],
+                "predictions": ["PEPTIDE"],
+                "log_probs": [-0.5],
+            }
+        )
+        parquet_path = tmp_path / "preds.parquet"
+        df.to_parquet(parquet_path, index=False)
+
+        result = InstaNovoDatasetLoader._load_predictions_without_beams(parquet_path)
+        assert "spectrum_id" in result.columns
+        assert "predictions" in result.columns
+        assert len(result) == 1
+
     # ------------------------------------------------------------------
     # _load_beam_preds
     # ------------------------------------------------------------------
 
-    def test_load_beam_preds_raises_for_non_csv(self, loader, tmp_path):
-        path = tmp_path / "preds.parquet"
+    def test_load_beam_preds_raises_for_unsupported_format(self, loader, tmp_path):
+        """_load_beam_preds should reject unsupported file formats."""
+        path = tmp_path / "preds.txt"
         path.touch()
         with pytest.raises(ValueError, match="Unsupported file format"):
             loader._load_beam_preds(path)

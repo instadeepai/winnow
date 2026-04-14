@@ -25,10 +25,10 @@ residue_remapping:  # Used to map InstaNovo legacy notations to UNIMOD tokens.
   "(+42.01)": "[UNIMOD:1]"  # Acetylation
   "(+43.01)": "[UNIMOD:5]"  # Carbamylation
   "(-17.03)": "[UNIMOD:385]"  # Ammonia loss
-# Beam column prefixes for matching columns in the predictions CSV file.
+# Beam column prefixes for matching columns in the predictions file (CSV or Parquet).
 #
 # Each prefix is appended with a beam index (0, 1, 2, ...) to form the full column name.
-# The predictions CSV must contain columns matching EXACTLY: <prefix><beam_index>
+# The predictions file must contain columns matching EXACTLY: <prefix><beam_index>
 #
 # Required columns per beam (where N is 0, 1, 2, ...):
 #   - {sequence}N         → peptide sequence for beam N (e.g., "predictions_beam_0")

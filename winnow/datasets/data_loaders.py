@@ -30,7 +30,7 @@ from winnow.datasets.calibration_dataset import (
 
 
 class InstaNovoDatasetLoader(DatasetLoader):
-    """Loader for InstaNovo predictions in CSV format."""
+    """Loader for InstaNovo predictions in CSV or Parquet format."""
 
     def __init__(
         self,
@@ -198,11 +198,11 @@ class InstaNovoDatasetLoader(DatasetLoader):
     def load(
         self, *, data_path: Path, predictions_path: Optional[Path] = None, **kwargs: Any
     ) -> CalibrationDataset:
-        """Load a CalibrationDataset from InstaNovo CSV predictions.
+        """Load a CalibrationDataset from InstaNovo predictions.
 
         Args:
             data_path: Path to the spectrum data file
-            predictions_path: Path to the predictions CSV file
+            predictions_path: Path to the predictions file (CSV or Parquet)
             **kwargs: Not used
 
         Returns:
@@ -313,17 +313,17 @@ class InstaNovoDatasetLoader(DatasetLoader):
         self,
         predictions_path: Path | str,
     ) -> Tuple[pl.DataFrame, pl.DataFrame]:
-        """Load beam predictions from a CSV file and split into predictions and beams dataframes.
+        """Load beam predictions and split into predictions and beams dataframes.
 
         Args:
-            predictions_path: Path to the CSV file containing the predictions.
+            predictions_path: Path to the predictions file (CSV or Parquet).
 
         Returns:
             A tuple of (predictions_df, beams_df) where beams_df contains only the
             beam-indexed columns and predictions_df contains the remaining columns.
 
         Raises:
-            ValueError: If the file format is not CSV or if beam column validation fails.
+            ValueError: If the file format is not supported or if beam column validation fails.
         """
         predictions_path = Path(predictions_path)
         if predictions_path.suffix == ".parquet":
