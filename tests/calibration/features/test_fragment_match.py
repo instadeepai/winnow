@@ -64,6 +64,7 @@ class TestFragmentMatchFeatures:
             "max_ion_gap",
             "b_y_intensity_ratio",
             "spectral_angle",
+            "xcorr",
             # Missing indicator (learn_from_missing=True by default)
             "is_missing_fragment_match_features",
         ]
@@ -126,6 +127,7 @@ class TestFragmentMatchFeatures:
             "max_ion_gap",
             "b_y_intensity_ratio",
             "spectral_angle",
+            "xcorr",
         ]
 
     def test_learn_from_missing_true_columns_includes_indicator(self):
@@ -238,6 +240,7 @@ class TestFragmentMatchFeatures:
         mock_max_ion_gap = 1
         mock_b_y_intensity_ratio = 0.5
         mock_spectral_angle = 0.8
+        mock_xcorr = [1.0, 2.0, 3.0]
         mock_compute_ions.return_value = (
             mock_match_rate,
             mock_match_intensity,
@@ -247,6 +250,7 @@ class TestFragmentMatchFeatures:
             mock_max_ion_gap,
             mock_b_y_intensity_ratio,
             mock_spectral_angle,
+            mock_xcorr,
         )
 
         fragment_match_features.compute(sample_dataset_with_spectra)

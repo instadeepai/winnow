@@ -57,6 +57,21 @@ For each theoretical peak, we search for the nearest observed peak using binary 
 | `max_ion_gap` | Daltons (Da) | Largest m/z difference between two consecutive matched theoretical peaks when sorted by m/z. Large gaps may indicate missing fragmentation coverage. |
 | `b_y_intensity_ratio` | Ratio | Ratio of total matched b-ion intensity to total matched y-ion intensity (including isotopic envelopes). |
 | `spectral_angle` | Score (0-1) | Normalized spectral angle similarity between theoretical and matched observed intensity vectors. A value of 1 indicates perfect correlation, 0 indicates orthogonal vectors. |
+| `xcorr` | Score | SEQUEST fast cross-correlation score. Measures overall agreement between the observed and theoretical spectra with local background correction. Higher values indicate better matches. |
+
+### Cross-correlation Score
+
+The `xcorr` column implements the fast cross-correlation score function from SEQUEST (Eng et al., 2008). Unlike the other features which operate on individually matched peaks, xcorr evaluates the overall pattern of the observed spectrum against the theoretical spectrum using a background-corrected dot product.
+
+The observed spectrum is preprocessed by:
+
+1. **Binning** into near-unit-dalton bins (~1.0005 Da) with square-root intensity compression
+2. **Window normalization** — the maximum intensity within each of 10 equal m/z windows is normalized to a fixed value, making the score robust to different intensity scales
+3. **Background subtraction** — the mean intensity from ±75 neighbouring bins is subtracted from each bin, so that only signal specifically at the correct m/z positions contributes positively
+
+The score is then computed as the dot product of the preprocessed observed spectrum with a binary theoretical spectrum (1.0 at each predicted fragment ion bin position). This background correction naturally penalizes unmatched theoretical ions and discounts noise.
+
+**Reference:** Eng JK, Fischer B, Grossmann J, Maccoss MJ. A fast SEQUEST cross correlation algorithm. *J Proteome Res.* 2008 Oct;7(10):4598-602. doi: 10.1021/pr800420s.
 
 ## Usage
 

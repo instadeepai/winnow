@@ -48,6 +48,7 @@ All columns from `FragmentMatchFeatures` with `chimeric_` prefix:
 | `chimeric_max_ion_gap` | Daltons (Da) | Largest gap between matched runner-up ions |
 | `chimeric_b_y_intensity_ratio` | Ratio | Ratio of b-ion to y-ion intensity for runner-up (including isotopic envelopes) |
 | `chimeric_spectral_angle` | Score (0-1) | Spectral angle similarity between runner-up theoretical and observed intensities |
+| `chimeric_xcorr` | Score | SEQUEST fast cross-correlation score for the runner-up peptide. Measures overall agreement between the observed spectrum and the runner-up theoretical spectrum with local background correction. See [FragmentMatchFeatures — Cross-correlation Score](fragment_match.md#cross-correlation-score) for details on the algorithm. |
 
 ```python
 from winnow.calibration.features import ChimericFeatures
