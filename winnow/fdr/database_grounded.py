@@ -34,6 +34,7 @@ class DatabaseGroundedFDRControl(FDRControl):
     def fit(  # type: ignore
         self,
         dataset: pd.DataFrame,
+        correct_column: str = "correct",
     ) -> None:
         """Computes the precision-recall curve by comparing model predictions to database-grounded peptide sequences.
 
@@ -57,18 +58,18 @@ class DatabaseGroundedFDRControl(FDRControl):
             lambda row: self.metrics._novor_match(row["sequence"], row["prediction"]),
             axis=1,
         )
-        dataset["correct"] = dataset.apply(
+        dataset[correct_column] = dataset.apply(
             lambda row: (
                 row["num_matches"] == len(row["sequence"]) == len(row["prediction"])
             ),
             axis=1,
         )
-        self.preds = dataset[["correct", self.confidence_feature]]
+        self.preds = dataset[[correct_column, self.confidence_feature]]
 
         dataset = dataset.sort_values(
             by=self.confidence_feature, axis=0, ascending=False
         )
-        precision = np.cumsum(dataset["correct"]) / np.arange(1, len(dataset) + 1)
+        precision = np.cumsum(dataset[correct_column]) / np.arange(1, len(dataset) + 1)
         confidence = np.array(dataset[self.confidence_feature])
 
         self._fdr_values = np.array(1 - precision[self.drop :])
