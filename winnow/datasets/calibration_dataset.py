@@ -146,7 +146,7 @@ class CalibrationDataset:
         return CalibrationDataset(predictions=predictions, metadata=metadata)
 
     def save_metadata(self, path: Union[Path, str]) -> None:
-        """Save the dataset metadata to a CSV file.
+        """Save the dataset metadata to a CSV or parquet file.
 
         Args:
             path (Union[Path, str]): Path to the output CSV file.
@@ -171,7 +171,13 @@ class CalibrationDataset:
             output_metadata = output_metadata.drop(columns=["valid_sequence"])
         if "valid_prediction" in output_metadata.columns:
             output_metadata = output_metadata.drop(columns=["valid_prediction"])
-        output_metadata.to_csv(path, index=False)
+
+        if path.suffix == ".csv":
+            output_metadata.to_csv(path, index=False)
+        elif path.suffix == ".parquet":
+            output_metadata.to_parquet(path)
+        else:
+            raise ValueError(f"Unsupported file extension: {path.suffix}")
 
     def save_predictions(self, path: Union[Path, str]) -> None:
         """Save the dataset predictions to a pickle file.
