@@ -200,7 +200,9 @@ def train_entry_point(
     features_path = cfg.get("features_path")
 
     if features_path is not None:
-        train_dataset, val_dataset = _load_feature_datasets(cfg, features_path)
+        train_dataset, val_dataset = _load_feature_datasets(
+            cfg, features_path, calibrator
+        )
         logger.info(
             "Training on %d samples%s.",
             len(train_dataset),
@@ -228,12 +230,14 @@ def train_entry_point(
     logger.info("Training pipeline completed successfully.")
 
 
-def _load_feature_datasets(cfg, features_path):
+def _load_feature_datasets(cfg, features_path, calibrator):
     """Load pre-computed feature Parquets for two-phase training.
 
     Args:
         cfg: Resolved Hydra config.
         features_path: Path (file or directory) to training features.
+        calibrator: Instantiated calibrator whose ``columns`` define the
+            feature columns to select from the Parquet files.
 
     Returns:
         Tuple of (train_dataset, val_dataset). val_dataset may be ``None``.
@@ -241,15 +245,17 @@ def _load_feature_datasets(cfg, features_path):
     from winnow.datasets.feature_dataset import FeatureDataset
     from winnow.utils.paths import resolve_data_path
 
+    feature_columns = ["confidence"] + calibrator.columns
+
     resolved = resolve_data_path(str(features_path))
     logger.info(f"Loading pre-computed features from {resolved}")
-    train_dataset = FeatureDataset.from_parquet(resolved)
+    train_dataset = FeatureDataset.from_parquet(resolved, feature_columns)
 
     val_features_path = cfg.get("val_features_path")
     if val_features_path is not None:
         val_resolved = resolve_data_path(str(val_features_path))
         logger.info(f"Loading validation features from {val_resolved}")
-        val_dataset = FeatureDataset.from_parquet(val_resolved)
+        val_dataset = FeatureDataset.from_parquet(val_resolved, feature_columns)
         return train_dataset, val_dataset
 
     return _maybe_split_validation(cfg, train_dataset)
@@ -473,7 +479,7 @@ def compute_features_entry_point(
     execute: bool = True,
     config_dir: Optional[str] = None,
 ) -> None:
-    """Load a dataset, compute calibration features into metadata, and save CSV.
+    """Load a dataset, compute calibration features into metadata, and save CSV or parquet.
 
     Supports two input modes via ``dataset.spectrum_path_or_directory``:
 
@@ -545,7 +551,7 @@ def compute_features_entry_point(
     metadata_output_path = cfg.get(
         "metadata_output_path", cfg.get("dataset_output_path")
     )
-    logger.info(f"Saving metadata CSV to {metadata_output_path}")
+    logger.info(f"Saving metadata to {metadata_output_path}")
     combined_dataset.save_metadata(metadata_output_path)
 
     training_matrix_output_path = cfg.get("training_matrix_output_path")
