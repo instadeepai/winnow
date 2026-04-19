@@ -235,6 +235,16 @@ class InstaNovoDatasetLoader(DatasetLoader):
         # Load beam predictions only if beam_columns is configured
         if self.beam_columns:
             predictions_df, beams_df = self._load_beam_preds(predictions_path)
+            beams_df = beams_df.join(
+                pl.from_pandas(inputs).select("spectrum_id"),
+                on="spectrum_id",
+                how="inner",
+            )
+            predictions_df = predictions_df.join(
+                pl.from_pandas(inputs).select("spectrum_id"),
+                on="spectrum_id",
+                how="inner",
+            )
             beams = self._process_beams(beams_df)
         else:
             predictions_df = self._load_predictions_without_beams(predictions_path)
@@ -345,8 +355,12 @@ class InstaNovoDatasetLoader(DatasetLoader):
         assert self.beam_columns is not None  # to pass type checking
 
         # Use polars column selectors to split dataframe
-        beam_df = df.select(cs.contains(*self.beam_columns.values()))
-        preds_df = df.select(~cs.contains([*self.beam_columns.values()]))
+        beam_df = df.select(
+            pl.col("spectrum_id"), cs.contains(*self.beam_columns.values())
+        )
+        preds_df = df.select(
+            ~cs.contains([*self.beam_columns.values()]) | pl.col("spectrum_id")
+        )
         return preds_df, beam_df
 
     def _process_beams(
