@@ -196,6 +196,6 @@ compute_train_features: copy_down_train_dataset
 		uv run winnow compute-features \
 		dataset.spectrum_path_or_directory=data/train/$$project/ \
 		dataset.predictions_path=data/train_predictions/$$project.csv \
-		training_matrix_output_path=train_feature_matrices/$$project.parquet \
+		training_matrix_output_path=train_feature_matrices/$$project.parquet; \
 		aws s3 cp train_features_matrices/$$project.parquet s3://winnow-g88rh/revisions/new_datasets/train_features_matrices/$$project.parquet; \
 	done
