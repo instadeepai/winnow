@@ -10,9 +10,9 @@ dataset:
   spectrum_path_or_directory: examples/example_data/spectra.ipc
   predictions_path: examples/example_data/predictions.csv
 
-metadata_output_path: results/metadata.csv
+# metadata_output_path: results/metadata.csv
 # Optional: write a lean numeric Parquet for model training.
-# training_matrix_output_path: results/training_matrix.parquet
+training_matrix_output_path: results/training_matrix.parquet
 # Drop rows with empty or non-list predictions (same helper as train/predict).
 filter_empty_predictions: true
 # If true, the dataset must include ground-truth sequence labels.

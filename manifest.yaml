@@ -11,12 +11,12 @@ builder:
 spec:
   debug:
       vscode:
-        enabled: true # required
+        enabled: false # required
         path: "/aichor/code" # Optional, defaults to "code". Refer the absolute path of the binary if not findable in $PATH
         provider: "github" # Optional, vscode tunnel provider. Options are "github" or "microsoft", defaults to "github"
   operator: jobset
   image: winnow
-  command: make tests
+  command: make compute_train_features && make copy_up_train_feature_matrices
 
   types:
     worker:
@@ -24,4 +24,3 @@ spec:
       resources:
         cpus: 6
         ramRatio: 8 # >= 2
-

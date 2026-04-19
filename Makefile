@@ -168,3 +168,36 @@ clean:
 
 ## Clean outputs and regenerate sample data
 clean-all: clean sample-data
+
+#################################################################################
+## General model commands														#
+#################################################################################
+
+.PHONY: copy_down_train_dataset compute_train_features copy_up_train_feature_matrices
+
+PROJECTS := PXD000561 PXD000900 PXD001258 PXD002052 PXD003868 PXD004325 \
+            PXD004424 PXD004452 PXD004467 PXD004536 PXD004732 PXD004947 \
+            PXD004948 PXD005025 PXD005573 PXD006201 PXD009449 PXD009935 \
+            PXD010154 PXD010595 PXD013868 PXD014017 PXD019483 PXD021013 \
+            PXD025859 PXD026629 PXD026649 PXD029360 PXD031025 PXD031032 \
+            PXD035158 PXD037009 PXD043989 PXD044301 PXD044303 PXD044325 \
+            PXD044641 PXD044830 PXD045299 PXD045457 PXD045471 PXD045662 \
+            PXD046182 PXD046460 PXD046802 PXD046911 PXD047134 PXD047641 \
+            PXD047761 PXD048219 PXD056559
+
+copy_down_train_dataset:
+	aws s3 cp --recursive s3://winnow-g88rh/revisions/new_datasets/train/ data/train/
+	aws s3 cp --recursive s3://winnow-g88rh/revisions/new_datasets/train_predictions/ data/train_predictions/
+
+compute_train_features: copy_down_train_dataset
+	@mkdir -p train_feature_matrices
+	@for project in $(PROJECTS); do \
+		echo "Computing features for $$project..."; \
+		uv run winnow compute-features \
+		dataset.spectrum_path_or_directory=data/train/$$project/ \
+		dataset.predictions_path=data/train_predictions/$$project.csv \
+		training_matrix_output_path=train_feature_matrices/$$project.parquet; \
+	done
+
+copy_up_train_feature_matrices:
+	aws s3 cp --recursive train_features_matrices/ s3://winnow-g88rh/revisions/new_datasets/train_features_matrices/
