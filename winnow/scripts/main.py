@@ -551,8 +551,9 @@ def compute_features_entry_point(
     metadata_output_path = cfg.get(
         "metadata_output_path", cfg.get("dataset_output_path")
     )
-    logger.info(f"Saving metadata to {metadata_output_path}")
-    combined_dataset.save_metadata(metadata_output_path)
+    if metadata_output_path:
+        logger.info(f"Saving metadata to {metadata_output_path}")
+        combined_dataset.save_metadata(metadata_output_path)
 
     training_matrix_output_path = cfg.get("training_matrix_output_path")
     if training_matrix_output_path:
