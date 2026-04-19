@@ -21,6 +21,7 @@ For each spectrum with beam search results `[p₁, p₂, ..., pₙ]` where `p₁
 2. **Median Margin**: `p₁ - median(p₂, ..., pₙ)` (difference from median runner-up)
 3. **Entropy**: Shannon entropy of normalised runner-up distribution
 4. **Z-score**: `(p₁ - mean(all)) / std(all)` (how unusual is the top score)
+5. **Edit distance**: Normalised Levenshtein distance between top-1 and top-2 sequences, treating I/L as the same residue.
 
 ## Columns
 
@@ -30,6 +31,7 @@ For each spectrum with beam search results `[p₁, p₂, ..., pₙ]` where `p₁
 | `median_margin` | Probability difference (0-1) | Difference between top-1 probability and median probability of runner-ups. |
 | `entropy` | Nats | Shannon entropy of the **normalised** runner-up probability distribution. Higher entropy = more uncertainty among alternatives. |
 | `z-score` | Standard deviations | Z-score of the top-1 probability relative to the full beam distribution (mean and std computed over all beam probabilities). |
+| `edit_distance` | Fraction (0-1) | Normalised Levenshtein edit distance between the top-1 and top-2 token sequences, divided by the length of the longer sequence. |
 
 ## Usage
 
@@ -51,7 +53,7 @@ The dataset must have beam predictions available (`dataset.predictions` must not
 ## Notes
 
 - A warning is emitted if any beam search results have fewer than two sequences
-- When beam size is 1, margin and entropy default to 0
+- When beam size is 1, margin and entropy default to 0; normalised edit distance is set to 1.0.
 - Entropy is computed on the **normalised** runner-up probabilities (excluding top-1)
 - Z-score uses the full beam including top-1 for mean/std calculation
 - All probability values are derived from `exp(sequence_log_probability)`

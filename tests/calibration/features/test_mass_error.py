@@ -162,7 +162,7 @@ class TestMassErrorFeature:
         assert result < 0
 
     def test_compute_with_invalid_peptide(self, residue_masses):
-        """When prediction is not a list, mass_error_ppm should be a large sentinel value."""
+        """When prediction is not a list, compute raises with a clear error."""
         feature = MassErrorFeature(residue_masses=residue_masses)
         metadata = pd.DataFrame(
             {
@@ -173,10 +173,8 @@ class TestMassErrorFeature:
         )
         dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
-        with pytest.warns(UserWarning, match="not valid peptide sequences"):
+        with pytest.raises(ValueError, match="not valid peptide sequences"):
             feature.compute(dataset)
-
-        assert dataset.metadata.iloc[0]["mass_error_ppm"] == float("inf")
 
     def test_custom_residue_masses(self):
         """Test that custom residue masses are used correctly."""

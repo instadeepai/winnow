@@ -1,5 +1,4 @@
 from typing import Dict, List, Tuple
-import warnings
 
 import numpy as np
 
@@ -11,7 +10,6 @@ from winnow.datasets.calibration_dataset import CalibrationDataset
 class MassErrorFeature(CalibrationFeatures):
     """Calculates the signed precursor mass error in ppm, correcting for possible isotope peak selection."""
 
-    INVALID_PPM: float = float("inf")
     h2o_mass: float = 18.0106
     proton_mass: float = 1.007276
 
@@ -99,11 +97,9 @@ class MassErrorFeature(CalibrationFeatures):
         )
         if invalid_mask.any():
             n_invalid = invalid_mask.sum()
-            warnings.warn(
+            raise ValueError(
                 f"{n_invalid} prediction(s) are not valid peptide sequences "
-                f"(expected list of residue tokens). These will receive a large "
-                f"mass error value ({self.INVALID_PPM} ppm).",
-                stacklevel=2,
+                f"(expected list of residue tokens)."
             )
 
         neutral_mass = dataset.metadata["prediction"].apply(
@@ -132,5 +128,4 @@ class MassErrorFeature(CalibrationFeatures):
         )
         best_idx = np.argmin(np.abs(ppm_per_isotope), axis=1)
         result = ppm_per_isotope[np.arange(len(best_idx)), best_idx]
-        result[invalid_mask.values] = self.INVALID_PPM
         dataset.metadata["mass_error_ppm"] = result

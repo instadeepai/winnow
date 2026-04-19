@@ -1,4 +1,4 @@
-from typing import List
+from typing import Dict, List
 import warnings
 import numpy as np
 from math import exp
@@ -8,6 +8,57 @@ from numpy import median
 from winnow.calibration.features.base import CalibrationFeatures, FeatureDependency
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.calibration.features.utils import require_beam_predictions
+
+
+def _normalise_li(tokens: List[str]) -> List[str]:
+    """Replace every 'I' token with 'L' so leucine/isoleucine are treated identically."""
+    return ["L" if t == "I" else t for t in tokens]
+
+
+def _normalised_levenshtein(sequence_a: List[str], sequence_b: List[str]) -> float:
+    """Normalised token-level Levenshtein distance between two sequences.
+
+    Tokens are mapped to consecutive integers per pair comparison so the dynamic
+    program compares small ints instead of strings.
+
+    Returns the edit distance divided by the length of the longer sequence,
+    giving a value in [0, 1]. Returns 0.0 when both sequences are empty.
+    """
+    residue_to_id: Dict[str, int] = {}
+
+    def _to_ints(sequence: List[str]) -> List[int]:
+        return [
+            residue_to_id.setdefault(residue, len(residue_to_id))
+            for residue in sequence
+        ]
+
+    a_ints = _to_ints(sequence_a)
+    b_ints = _to_ints(sequence_b)
+    return _normalised_levenshtein_ints(a_ints, b_ints)
+
+
+def _normalised_levenshtein_ints(a: List[int], b: List[int]) -> float:
+    """Levenshtein on integer token ids; result normalised by max(len(a), len(b))."""
+    n, m = len(a), len(b)
+    max_len = max(n, m)
+    if max_len == 0:
+        return 0.0
+
+    prev = list(range(m + 1))
+    curr = [0] * (m + 1)
+    for i in range(1, n + 1):
+        curr[0] = i
+        ai = a[i - 1]
+        for j in range(1, m + 1):
+            cost = 0 if ai == b[j - 1] else 1
+            res = prev[j] + 1
+            if curr[j - 1] + 1 < res:
+                res = curr[j - 1] + 1
+            if prev[j - 1] + cost < res:
+                res = prev[j - 1] + cost
+            curr[j] = res
+        prev, curr = curr, prev
+    return prev[m] / max_len
 
 
 class BeamFeatures(CalibrationFeatures):
@@ -40,9 +91,9 @@ class BeamFeatures(CalibrationFeatures):
         """Defines the column names for the computed features.
 
         Returns:
-            List[str]: A list of column names: ["margin", "median_margin", "entropy", "z-score"].
+            List[str]: A list of column names: ["margin", "median_margin", "entropy", "z-score", "edit_distance"].
         """
-        return ["margin", "median_margin", "entropy", "z-score"]
+        return ["margin", "median_margin", "entropy", "z-score", "edit_distance"]
 
     def prepare(self, dataset: CalibrationDataset) -> None:
         """Prepares the dataset before feature computation.
@@ -61,6 +112,7 @@ class BeamFeatures(CalibrationFeatures):
         - Median Margin: Difference between the highest probability sequence and the median probability of the runner-ups.
         - Entropy: Shannon entropy of the normalised probabilities of the runner-up sequences.
         - Z-score: Distance between the top beam score and the population mean over all beam results for that spectra in units of the standard deviation.
+        - Edit distance: Normalised Levenshtein distance between the top-1 and top-2 sequences, treating I/L as the same residue.
 
         These metrics help assess the confidence of the top prediction relative to lower-ranked candidates.
 
@@ -123,8 +175,20 @@ class BeamFeatures(CalibrationFeatures):
 
         z_score = [row_beam_z_score(prediction) for prediction in dataset.predictions]
 
-        # dataset.metadata['confidence'] = top_probs
+        edit_distances: List[float] = []
+        for prediction in dataset.predictions:
+            if len(prediction) < 2:  # type: ignore
+                edit_distances.append(1.0)
+            else:
+                edit_distances.append(
+                    _normalised_levenshtein(
+                        _normalise_li(prediction[0].sequence),  # type: ignore
+                        _normalise_li(prediction[1].sequence),  # type: ignore
+                    )
+                )
+
         dataset.metadata["margin"] = second_margin
         dataset.metadata["median_margin"] = median_margin
         dataset.metadata["entropy"] = runner_up_entropy
         dataset.metadata["z-score"] = z_score
+        dataset.metadata["edit_distance"] = edit_distances

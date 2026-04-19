@@ -58,11 +58,11 @@ class TestFragmentMatchFeatures:
             "ion_matches",
             "ion_match_intensity",
             # Ion coverage features
-            "longest_b_series",
-            "longest_y_series",
+            # "longest_b_series",
+            # "longest_y_series",
             "complementary_ion_count",
             "max_ion_gap",
-            "b_y_intensity_ratio",
+            # "b_y_intensity_ratio",
             "spectral_angle",
             "xcorr",
             # Missing indicator (learn_from_missing=True by default)
@@ -115,8 +115,8 @@ class TestFragmentMatchFeatures:
         columns = feature.columns
 
         ion_coverage_features = [
-            "longest_b_series",
-            "longest_y_series",
+            # "longest_b_series",
+            # "longest_y_series",
             "complementary_ion_count",
             "max_ion_gap",
         ]
@@ -133,11 +133,11 @@ class TestFragmentMatchFeatures:
         assert feature.columns == [
             "ion_matches",
             "ion_match_intensity",
-            "longest_b_series",
-            "longest_y_series",
+            # "longest_b_series",
+            # "longest_y_series",
             "complementary_ion_count",
             "max_ion_gap",
-            "b_y_intensity_ratio",
+            # "b_y_intensity_ratio",
             "spectral_angle",
             "xcorr",
         ]

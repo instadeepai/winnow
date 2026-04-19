@@ -115,8 +115,11 @@ class FragmentMatchFeatures(CalibrationFeatures):
 
         The columns include:
             - Basic match metrics: ion_matches, ion_match_intensity
-            - Ion coverage: longest_b_series, longest_y_series,
-              complementary_ion_count, max_ion_gap, b_y_intensity_ratio
+            - Ion series coverage: longest_b_series, longest_y_series,
+              complementary_ion_count, max_ion_gap
+            - Intensity balance: b_y_intensity_ratio (fraction of matched
+              intensity from b-ions, bounded [0, 1])
+            - Similarity scores: spectral_angle, xcorr
 
         Returns:
             List[str]: A list of column names for all computed features, and optionally
@@ -127,11 +130,11 @@ class FragmentMatchFeatures(CalibrationFeatures):
             "ion_matches",
             "ion_match_intensity",
             # Ion coverage features
-            "longest_b_series",
-            "longest_y_series",
+            # "longest_b_series",
+            # "longest_y_series",
             "complementary_ion_count",
             "max_ion_gap",
-            "b_y_intensity_ratio",
+            # "b_y_intensity_ratio",
             "spectral_angle",
             "xcorr",
         ]
@@ -315,10 +318,10 @@ class FragmentMatchFeatures(CalibrationFeatures):
 
         dataset.metadata["ion_matches"] = ion_matches
         dataset.metadata["ion_match_intensity"] = match_intensity
-        dataset.metadata["longest_b_series"] = longest_b_series
-        dataset.metadata["longest_y_series"] = longest_y_series
+        # dataset.metadata["longest_b_series"] = longest_b_series
+        # dataset.metadata["longest_y_series"] = longest_y_series
         dataset.metadata["complementary_ion_count"] = complementary_ion_count
         dataset.metadata["max_ion_gap"] = max_ion_gap
-        dataset.metadata["b_y_intensity_ratio"] = b_y_intensity_ratio
+        # dataset.metadata["b_y_intensity_ratio"] = b_y_intensity_ratio
         dataset.metadata["spectral_angle"] = spectral_angle
         dataset.metadata["xcorr"] = xcorr

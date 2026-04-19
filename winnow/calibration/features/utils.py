@@ -284,7 +284,7 @@ def find_matching_ions(
     source_annotations: Union[List[bytes], List[str]],
     mz_tolerance_ppm: Optional[float] = None,
     mz_tolerance_da: Optional[float] = None,
-) -> Tuple[float, float, List[str], List[float], List[float], List[float]]:
+) -> Tuple[float, float, List[str], List[float], List[float]]:
     """Finds the matching ions between source and target spectra based on m/z.
 
     Computes:
@@ -294,9 +294,8 @@ def find_matching_ions(
          (M0 through M+4), over the sum of all observed intensities.
          Isotopic peaks are searched at spacing of 1.00335/charge Da.
       3. The list of matched theoretical ion annotations.
-      4. The list of matched theoretical ion m/z values.
-      5. The list of matched ion intensities (M0 + isotopic envelope per ion).
-      6. The list of aligned M0 intensities (same length as source_mz, 0.0 for unmatched).
+      4. The list of matched ion intensities (M0 + isotopic envelope per ion).
+      5. The list of aligned M0 intensities (same length as source_mz, 0.0 for unmatched).
 
     Each observed peak can only be matched once. Once an observed peak is assigned to a
     theoretical ion (either as M0 or as part of its isotopic envelope), it is excluded
@@ -314,8 +313,9 @@ def find_matching_ions(
         mz_tolerance_da: Absolute tolerance in Daltons, applied uniformly to all ions.
 
     Returns:
-        Tuple of (fraction of matched ions, fraction of observed intensity matched,
-        list of matched ion annotations, list of matched ion m/z values,
+        Tuple of (fraction of matched ions,
+        fraction of observed intensity matched,
+        list of matched ion annotations,
         list of matched observed ion intensities (summing the isotopic envelope),
         list of aligned M0 intensities for spectral angle computation).
 
@@ -325,11 +325,10 @@ def find_matching_ions(
     _validate_mz_tolerance(mz_tolerance_ppm, mz_tolerance_da)
 
     if isinstance(source_mz, float) and isnan(source_mz):
-        return 0.0, 0.0, [], [], [], []
+        return 0.0, 0.0, [], [], []
 
     num_matches, matched_target_intensity = 0, 0.0
     matched_ion_annotations = []
-    matched_ion_mz = []
     matched_ion_intensities_incl_isotopic_env = []
     aligned_m0_intensities: List[float] = []
     total_target_intensity = sum(target_intensities)
@@ -358,8 +357,6 @@ def find_matching_ions(
 
             # Add the ion annotation to the list of matched ion annotations
             matched_ion_annotations.append(ion_annotation)
-            # Add the ion m/z to the list of matched ion m/z values
-            matched_ion_mz.append(ion_mz)
 
             # Record M0 intensity for aligned list (used for spectral angle)
             m0_intensity = target_intensities[m0_idx]
@@ -393,7 +390,6 @@ def find_matching_ions(
         num_matches / len(source_mz),
         matched_target_intensity / total_target_intensity,
         matched_ion_annotations,
-        matched_ion_mz,
         matched_ion_intensities_incl_isotopic_env,
         aligned_m0_intensities,
     )
@@ -408,8 +404,13 @@ def compute_ion_identifications(
     mz_tolerance_ppm: Optional[float] = None,
     mz_tolerance_da: Optional[float] = None,
     predictions: Optional[List[str]] = None,
-) -> Iterator[Tuple[float, float, int, int, int, float, float, float, float]]:
-    """Computes the ion match rate, match intensity, longest b-series, longest y-series, complementary ion count, max ion gap, b-y intensity ratio, spectral angle and xcorr for each spectrum in the dataset.
+) -> Iterator[Tuple[float, float, int, int, float, float, float, float, float]]:
+    """Computes per-spectrum fragment ion match quality features.
+
+    For each spectrum, computes: ion match rate, match intensity, longest b-series,
+    longest y-series, complementary ion count, max ion gap, b/y intensity ratio
+    (fraction of matched intensity from b-ions, bounded [0, 1]), spectral angle,
+    and xcorr.
 
     Exactly one of ``mz_tolerance_ppm`` or ``mz_tolerance_da`` must be provided.
 
@@ -420,10 +421,15 @@ def compute_ion_identifications(
         source_intensity_column: Column name containing the theoretical intensities.
         mz_tolerance_ppm: Relative tolerance in parts per million.
         mz_tolerance_da: Absolute tolerance in Daltons.
-        predictions: Optional list of tokenised predictions for each spectrum. If not provided, the peptide length will be inferred from the column "predictions" in the metadata.
+        predictions: Optional list of tokenised predictions for each spectrum,
+            used to determine peptide length for complementary ion counting.
+            If not provided, peptide length is inferred from the ``prediction``
+            column in the metadata.
 
     Returns:
-        Iterator of (ion_match_rate, ion_match_intensity, longest_b_series, longest_y_series, complementary_ion_count, max_ion_gap, b_y_intensity_ratio, spectral_angle, xcorr) tuples.
+        Iterator of (ion_match_rate, ion_match_intensity, longest_b_series,
+        longest_y_series, complementary_ion_count, max_ion_gap,
+        b_y_intensity_ratio, spectral_angle, xcorr) tuples.
 
     Raises:
         ValueError: If both or neither tolerance is provided.
@@ -431,15 +437,14 @@ def compute_ion_identifications(
     _validate_mz_tolerance(mz_tolerance_ppm, mz_tolerance_da)
 
     per_row_match_results: List[
-        Tuple[float, float, int, int, int, float, float, float, float]
+        Tuple[float, float, int, int, float, float, float, float, float]
     ] = []
 
-    for _, row in dataset.iterrows():
+    for i, (_, row) in enumerate(dataset.iterrows()):
         (
             ion_match,
             ion_match_intensity,
             matched_ion_annotations,
-            matched_ion_mz,
             matched_ion_intensities_incl_isotopic_env,
             aligned_m0_intensities,
         ) = find_matching_ions(
@@ -455,13 +460,15 @@ def compute_ion_identifications(
         longest_b_series = compute_longest_ion_series(matched_ion_annotations, "b")
         longest_y_series = compute_longest_ion_series(matched_ion_annotations, "y")
         # Compute the number of bond positions where both b and y ions are matched
+        peptide_length = (
+            len(predictions[i]) if predictions is not None else len(row["prediction"])
+        )
         complementary_ion_count = compute_complementary_ion_count(
             matched_ion_annotations,
-            len(predictions) if predictions is not None else len(row["prediction"]),
+            peptide_length,
         )
-        # Compute the largest gap between consecutive matched fragment ions
-        max_ion_gap = compute_max_ion_gap(matched_ion_mz)
-        # Compute the ratio of b-ion to y-ion intensities
+        max_ion_gap = compute_max_ion_gap(matched_ion_annotations, peptide_length)
+        # Compute the fraction of matched intensity from b-ions vs y-ions
         b_y_intensity_ratio = compute_b_y_intensity_ratio(
             matched_ion_annotations, matched_ion_intensities_incl_isotopic_env
         )
@@ -555,19 +562,26 @@ def compute_longest_ion_series(
 
 def compute_complementary_ion_count(
     matched_ion_annotations: List[str], peptide_length: int
-) -> int:
-    """Count bond positions where both b and y ions are matched.
+) -> float:
+    """Count bond positions where both b and y ions are matched, normalised by peptide length.
 
-    For a peptide of length n, bond position i produces b_i and y_(n-1-i).
+    For a peptide of length n, bond position i produces b_i and y_(n-i).
     Finding both ions for the same bond provides stronger evidence.
+    There are (n - 1) possible bond positions, so the result is normalised
+    to [0, 1] by dividing by (n - 1).
 
     Args:
         matched_ion_annotations: Ion annotations for matched peaks only (E.g. "b1+1", "y2+2").
         peptide_length: Number of amino acid residues in the peptide.
 
     Returns:
-        Number of bond positions where both complementary b and y ions matched.
+        Fraction of bond positions where both complementary b and y ions matched.
+        Returns 0.0 if peptide_length < 2 (no bond positions exist).
     """
+    num_bonds = peptide_length - 1
+    if num_bonds <= 0:
+        return 0.0
+
     b_indices = set()
     y_indices = set()
 
@@ -581,25 +595,54 @@ def compute_complementary_ion_count(
 
     # For peptide of length n: bond i produces b_i and y_(n-i)
     # e.g., ACDK (length 4): b1 pairs with y3, b2 pairs with y2, b3 pairs with y1
-    return sum(1 for i in b_indices if (peptide_length - i) in y_indices)
+    count = sum(1 for i in b_indices if (peptide_length - i) in y_indices)
+    return count / num_bonds
 
 
-def compute_max_ion_gap(matched_mz: List[float]) -> float:
-    """Compute the largest gap between consecutive matched fragment ions.
+def compute_max_ion_gap(
+    matched_ion_annotations: List[str], peptide_length: int
+) -> float:
+    """Compute the longest run of consecutive missing fragment ion positions, normalised by peptide length.
 
-    Uses the m/z values of the matched theoretical fragment ions, without accounting for the isotopic envelope.
+    Collects all matched b-ion and y-ion position indices, maps them onto the
+    shared bond-position axis (1 .. peptide_length-1), then finds the longest
+    consecutive stretch of bond positions with no matched ion of either type.
+    The result is normalised by (peptide_length - 1).
 
     Args:
-        matched_mz: List of m/z values for matched fragment ions.
+        matched_ion_annotations: Ion annotations for matched peaks only (E.g. "b1+1", "y2+2").
+        peptide_length: Number of amino acid residues in the peptide.
 
     Returns:
-        Maximum gap in Daltons. Returns 0.0 if fewer than 2 ions matched.
+        Longest consecutive missing-ion run divided by (peptide_length - 1).
+        Returns 0.0 if there are no bond positions (peptide length 0 or 1).
+        Returns 1.0 when there are bond positions but no matched ions (all missing).
     """
-    if len(matched_mz) < 2:
+    num_bonds = peptide_length - 1
+    if num_bonds <= 0:
         return 0.0
 
-    sorted_mz = sorted(matched_mz)
-    return max(sorted_mz[i + 1] - sorted_mz[i] for i in range(len(sorted_mz) - 1))
+    covered_positions: Set[int] = set()
+
+    for annotation in matched_ion_annotations:
+        base = annotation.split("+")[0]
+        if base.startswith("b") and base[1:].isdigit():
+            covered_positions.add(int(base[1:]))
+        elif base.startswith("y") and base[1:].isdigit():
+            y_idx = int(base[1:])
+            covered_positions.add(peptide_length - y_idx)
+
+    max_run = 0
+    current_run = 0
+    for pos in range(1, peptide_length):
+        if pos not in covered_positions:
+            current_run += 1
+            if current_run > max_run:
+                max_run = current_run
+        else:
+            current_run = 0
+
+    return max_run / num_bonds
 
 
 ########################################################
@@ -610,23 +653,33 @@ def compute_max_ion_gap(matched_mz: List[float]) -> float:
 def compute_b_y_intensity_ratio(
     matched_ion_annotations: List[str],
     matched_ion_intensities_incl_isotopic_env: List[float],
-    epsilon: float = 1e-8,
 ) -> float:
-    """Compute the ratio of b-ion to y-ion intensities.
+    """Compute the fraction of matched ion intensity attributable to b-ions.
 
     Sums intensities for all b-ions and y-ions separately (including their isotopic
-    envelopes), then returns b_total / (y_total + epsilon). The epsilon ensures
-    numerical stability when no y-ions are matched, while still producing a high
-    ratio that indicates the absence of y-ions.
+    envelopes), then returns ``b_total / (b_total + y_total)``. The result is bounded
+    to [0, 1]: 0 means all matched intensity comes from y-ions, 1 means all from
+    b-ions, and 0.5 indicates an even split.
+
+    This feature captures the balance between N-terminal (b) and C-terminal (y)
+    fragment ion evidence supporting the predicted sequence. In HCD fragmentation,
+    y-ions are typically dominant, so a correct identification is expected to produce
+    a ratio well below 0.5. Deviations from the expected balance may indicate:
+
+    - A misidentification (random matches tend to produce an atypical b/y balance).
+    - Unusual fragmentation behaviour (e.g. proline-directed cleavage enriching
+      specific y-ions, or N-terminal modifications favouring b-ion formation).
+    - Chimeric or co-fragmented spectra, where fragment ions from a second co-eluting
+      precursor shift the observed intensity distribution.
 
     Args:
         matched_ion_annotations: Ion annotations for matched peaks (e.g. "b1+1", "y2+2").
-        matched_ion_intensities_incl_isotopic_env: Intensity for each matched ion (including isotopic envelope).
-        epsilon: Small value added to y-ion intensity for numerical stability.
-            Defaults to 1e-8.
+        matched_ion_intensities_incl_isotopic_env: Intensity for each matched ion
+            (including isotopic envelope).
 
     Returns:
-        Ratio of b-ion to y-ion intensities. Returns 0.0 if no ions are matched.
+        Fraction of matched intensity from b-ions, in [0, 1]. Returns 0.0 if no ions
+        are matched or total matched intensity is zero.
     """
     if not matched_ion_annotations:
         return 0.0
@@ -642,7 +695,11 @@ def compute_b_y_intensity_ratio(
         elif annotation.startswith("y"):
             y_intensity += intensity
 
-    return b_intensity / (y_intensity + epsilon)
+    total = b_intensity + y_intensity
+    if total == 0.0:
+        return 0.0
+
+    return b_intensity / total
 
 
 def compute_spectral_angle(

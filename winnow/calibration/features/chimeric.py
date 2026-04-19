@@ -115,9 +115,11 @@ class ChimericFeatures(CalibrationFeatures):
         The columns mirror those of FragmentMatchFeatures but with "chimeric_" prefix,
         computed for the runner-up (second-best) peptide prediction:
             - Basic match metrics: chimeric_ion_matches, chimeric_ion_match_intensity
-            - Ion coverage: chimeric_longest_b_series, chimeric_longest_y_series,
-              chimeric_complementary_ion_count, chimeric_max_ion_gap,
-              chimeric_b_y_intensity_ratio
+            - Ion series coverage: chimeric_longest_b_series, chimeric_longest_y_series,
+              chimeric_complementary_ion_count, chimeric_max_ion_gap
+            - Intensity balance: chimeric_b_y_intensity_ratio (fraction of matched
+              intensity from b-ions, bounded [0, 1])
+            - Similarity scores: chimeric_spectral_angle, chimeric_xcorr
 
         Returns:
             List[str]: A list of column names for all computed chimeric features,

@@ -44,9 +44,9 @@ All columns from `FragmentMatchFeatures` with `chimeric_` prefix:
 | -------- | ------ | ------------- |
 | `chimeric_longest_b_series` | Count (integer) | Longest consecutive b-ion run for runner-up |
 | `chimeric_longest_y_series` | Count (integer) | Longest consecutive y-ion run for runner-up |
-| `chimeric_complementary_ion_count` | Count (integer) | Bond positions with both b and y ions for runner-up |
-| `chimeric_max_ion_gap` | Daltons (Da) | Largest gap between matched runner-up ions |
-| `chimeric_b_y_intensity_ratio` | Ratio | Ratio of b-ion to y-ion intensity for runner-up (including isotopic envelopes) |
+| `chimeric_complementary_ion_count` | Fraction (0-1) | Fraction of bond positions with both b and y ions for runner-up, normalised by (peptide_length - 1) |
+| `chimeric_max_ion_gap` | Fraction (0-1) | Longest consecutive run of missing ion bond positions for runner-up, normalised by (peptide_length - 1) |
+| `chimeric_b_y_intensity_ratio` | Fraction (0-1) | Fraction of runner-up matched ion intensity attributable to b-ions: `b / (b + y)`, including isotopic envelopes. |
 | `chimeric_spectral_angle` | Score (0-1) | Spectral angle similarity between runner-up theoretical and observed intensities |
 | `chimeric_xcorr` | Score | SEQUEST fast cross-correlation score for the runner-up peptide. Measures overall agreement between the observed spectrum and the runner-up theoretical spectrum with local background correction. See [FragmentMatchFeatures — Cross-correlation Score](fragment_match.md#cross-correlation-score) for details on the algorithm. |
 
@@ -101,4 +101,4 @@ For some Koina-hosted intensity prediction models, the dataset may also require:
 - When `learn_from_missing=True`, invalid rows get zero feature values and an `is_missing_chimeric_features` indicator column
 - The runner-up validation constraints (length, charge, residues) are applied to the second-best sequence, not the top-1
 - Consider using both `FragmentMatchFeatures` and `ChimericFeatures` together to give the calibrator information about both top-1 and runner-up matches
-- `chimeric_b_y_intensity_ratio` is computed as `b_total / (y_total + epsilon)` where epsilon is a small constant providing numerical stability when no y-ions are matched.
+- `chimeric_b_y_intensity_ratio` is computed as `b_total / (b_total + y_total)`, producing a bounded [0, 1] value. Returns 0.0 when no ions are matched.

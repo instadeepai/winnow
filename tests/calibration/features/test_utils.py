@@ -2,7 +2,7 @@
 
 import pytest
 import pandas as pd
-from typing import Optional
+from typing import List, Optional
 from unittest.mock import patch
 
 from winnow.calibration.features.utils import (
@@ -109,7 +109,7 @@ class TestIonMatchFunctions:
         target_mz = [500.009, 1000.019]  # Within 20 ppm
         target_intensities = [1000.0, 2000.0]
 
-        match_fraction, _, _, _, _, _ = find_matching_ions(
+        match_fraction, _, _, _, _ = find_matching_ions(
             source_mz,
             target_mz,
             target_intensities,
@@ -124,14 +124,14 @@ class TestIonMatchFunctions:
         source_mz_high = [1000.0]
         offset = 0.015  # 150 ppm at m/z 100, 15 ppm at m/z 1000
 
-        match_low, _, _, _, _, _ = find_matching_ions(
+        match_low, _, _, _, _ = find_matching_ions(
             source_mz_low,
             [100.0 + offset],
             [1000.0],
             source_annotations=["b1+1"],
             mz_tolerance_ppm=20,
         )
-        match_high, _, _, _, _, _ = find_matching_ions(
+        match_high, _, _, _, _ = find_matching_ions(
             source_mz_high,
             [1000.0 + offset],
             [1000.0],
@@ -259,7 +259,6 @@ class TestValidateMzTolerance:
             _match_fraction,
             _average_intensity,
             _matched_annotations,
-            _matched_mz,
             _matched_intensities_isotopic,
             aligned_m0_intensities,
         ) = find_matching_ions(
@@ -289,7 +288,6 @@ class TestValidateMzTolerance:
             _match_fraction,
             _average_intensity,
             _matched_annotations,
-            _matched_mz,
             matched_intensities_isotopic,
             aligned_m0_intensities,
         ) = find_matching_ions(
@@ -608,32 +606,55 @@ class TestSpectrumMatchQualityFunctions:
     def test_compute_complementary_ion_count_basic(self):
         """Test complementary ion count with matching pairs."""
         annotations = ["b1+1", "y3+1", "b2+1"]
-        assert compute_complementary_ion_count(annotations, peptide_length=4) == 1
+        # 1 complementary pair out of 3 bonds
+        assert compute_complementary_ion_count(annotations, peptide_length=4) == 1 / 3
 
     def test_compute_complementary_ion_count_multiple(self):
         """Test complementary ion count with multiple pairs."""
         annotations = ["b1+1", "y4+1", "b2+1", "y3+1"]
-        assert compute_complementary_ion_count(annotations, peptide_length=5) == 2
+        # 2 complementary pairs out of 4 bonds
+        assert compute_complementary_ion_count(annotations, peptide_length=5) == 2 / 4
 
     def test_compute_complementary_ion_count_no_pairs(self):
         """Test complementary ion count with no complementary pairs."""
         annotations = ["b1+1", "b2+1", "y1+1", "y2+1"]
-        assert compute_complementary_ion_count(annotations, peptide_length=5) == 0
+        assert compute_complementary_ion_count(annotations, peptide_length=5) == 0.0
+
+    def test_compute_complementary_ion_count_short_peptide(self):
+        """Test complementary ion count with peptide too short for bonds."""
+        assert compute_complementary_ion_count([], peptide_length=1) == 0.0
+        assert compute_complementary_ion_count([], peptide_length=0) == 0.0
 
     def test_compute_max_ion_gap_basic(self):
-        """Test max ion gap calculation."""
-        matched_mz = [100.0, 150.0, 300.0]
-        assert compute_max_ion_gap(matched_mz) == 150.0
+        """Test max ion gap with a gap of 1 missing position."""
+        # Peptide length 5 => bond positions 1,2,3,4
+        # b1 covers pos 1, b3 covers pos 3 => gap at pos 2 (run of 1)
+        annotations = ["b1+1", "b3+1"]
+        assert compute_max_ion_gap(annotations, peptide_length=5) == 1 / 4
 
-    def test_compute_max_ion_gap_unsorted(self):
-        """Test that max ion gap handles unsorted input."""
-        matched_mz = [300.0, 100.0, 150.0]
-        assert compute_max_ion_gap(matched_mz) == 150.0
+    def test_compute_max_ion_gap_full_coverage(self):
+        """Test max ion gap with all positions covered."""
+        # b1,b2,b3 cover positions 1,2,3 for a 4-residue peptide (3 bonds)
+        annotations = ["b1+1", "b2+1", "b3+1"]
+        assert compute_max_ion_gap(annotations, peptide_length=4) == 0.0
 
-    def test_compute_max_ion_gap_insufficient_ions(self):
-        """Test max ion gap with fewer than 2 ions."""
-        assert compute_max_ion_gap([100.0]) == 0.0
-        assert compute_max_ion_gap([]) == 0.0
+    def test_compute_max_ion_gap_no_coverage(self):
+        """Test max ion gap with no matched ions."""
+        annotations: List[str] = []
+        # All 3 bond positions missing => run of 3 / 3
+        assert compute_max_ion_gap(annotations, peptide_length=4) == 1.0
+
+    def test_compute_max_ion_gap_y_ions_cover_positions(self):
+        """Test that y-ions are mapped to bond positions correctly."""
+        # Peptide length 5, y3 => bond position 5-3=2, y1 => bond position 5-1=4
+        # Positions 1 and 3 are uncovered (two separate runs of 1)
+        annotations = ["y3+1", "y1+1"]
+        assert compute_max_ion_gap(annotations, peptide_length=5) == 1 / 4
+
+    def test_compute_max_ion_gap_short_peptide(self):
+        """Test max ion gap with peptide too short for bonds."""
+        assert compute_max_ion_gap([], peptide_length=1) == 0.0
+        assert compute_max_ion_gap([], peptide_length=0) == 0.0
 
     # --- B/Y Intensity Ratio ---
 
@@ -642,22 +663,20 @@ class TestSpectrumMatchQualityFunctions:
         annotations = ["b1+1", "b2+1", "y1+1", "y2+1"]
         intensities = [1000.0, 2000.0, 500.0, 500.0]  # b=3000, y=1000
         ratio = compute_b_y_intensity_ratio(annotations, intensities)
-        assert ratio == pytest.approx(3.0, rel=1e-6)
+        assert ratio == pytest.approx(3000.0 / 4000.0, rel=1e-6)
 
     def test_compute_b_y_intensity_ratio_only_b_ions(self):
-        """Test b/y ratio when only b ions are matched (y=0, uses epsilon)."""
+        """Test b/y ratio when only b ions are matched."""
         annotations = ["b1+1", "b2+1", "b3+1"]
         intensities = [1000.0, 2000.0, 3000.0]  # b=6000, y=0
-        ratio = compute_b_y_intensity_ratio(annotations, intensities, epsilon=1e-8)
-        # Should be very large: 6000 / 1e-8 = 6e11
-        assert ratio == pytest.approx(6000.0 / 1e-8, rel=1e-6)
+        ratio = compute_b_y_intensity_ratio(annotations, intensities)
+        assert ratio == pytest.approx(1.0, rel=1e-6)
 
     def test_compute_b_y_intensity_ratio_only_y_ions(self):
         """Test b/y ratio when only y ions are matched."""
         annotations = ["y1+1", "y2+1"]
         intensities = [1000.0, 2000.0]  # b=0, y=3000
         ratio = compute_b_y_intensity_ratio(annotations, intensities)
-        # Should be ~0: 0 / (3000 + epsilon)
         assert ratio == pytest.approx(0.0, abs=1e-10)
 
     def test_compute_b_y_intensity_ratio_no_ions(self):
