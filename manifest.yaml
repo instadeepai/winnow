@@ -16,7 +16,7 @@ spec:
         provider: "github" # Optional, vscode tunnel provider. Options are "github" or "microsoft", defaults to "github"
   operator: jobset
   image: winnow
-  command: make compute_train_features && make copy_up_train_feature_matrices
+  command: make compute_train_features
 
   types:
     worker:

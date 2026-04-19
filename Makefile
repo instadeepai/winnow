@@ -173,7 +173,7 @@ clean-all: clean sample-data
 ## General model commands														#
 #################################################################################
 
-.PHONY: copy_down_train_dataset compute_train_features copy_up_train_feature_matrices
+.PHONY: copy_down_train_dataset compute_train_features
 
 PROJECTS := PXD000561 PXD000900 PXD001258 PXD002052 PXD003868 PXD004325 \
             PXD004424 PXD004452 PXD004467 PXD004536 PXD004732 PXD004947 \
@@ -196,8 +196,6 @@ compute_train_features: copy_down_train_dataset
 		uv run winnow compute-features \
 		dataset.spectrum_path_or_directory=data/train/$$project/ \
 		dataset.predictions_path=data/train_predictions/$$project.csv \
-		training_matrix_output_path=train_feature_matrices/$$project.parquet; \
+		training_matrix_output_path=train_feature_matrices/$$project.parquet \
+		aws s3 cp train_features_matrices/$$project.parquet s3://winnow-g88rh/revisions/new_datasets/train_features_matrices/$$project.parquet; \
 	done
-
-copy_up_train_feature_matrices:
-	aws s3 cp --recursive train_features_matrices/ s3://winnow-g88rh/revisions/new_datasets/train_features_matrices/
