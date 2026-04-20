@@ -109,5 +109,3 @@ koina:
       - "(+25.98)"      # Carbamylation & NH3 loss (legacy notation)
       # Unsupported residues
       # - "C"  # Unmodified cysteine (must be explicitly carbamidomethylated for some Koina models)
-      - "U"
-      - "O"
