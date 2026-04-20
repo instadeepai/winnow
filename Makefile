@@ -175,7 +175,8 @@ clean-all: clean sample-data
 
 .PHONY: copy_down_train_dataset compute_train_features
 
-PROJECTS := PXD000561 PXD000900 PXD001258 PXD002052 PXD003868 PXD004325 \
+# Took out PXD000561 because it's already computed
+PROJECTS := PXD000900 PXD001258 PXD002052 PXD003868 PXD004325 \
             PXD004424 PXD004452 PXD004467 PXD004536 PXD004732 PXD004947 \
             PXD004948 PXD005025 PXD005573 PXD006201 PXD009449 PXD009935 \
             PXD010154 PXD010595 PXD013868 PXD014017 PXD019483 PXD021013 \
@@ -197,5 +198,5 @@ compute_train_features: copy_down_train_dataset
 		dataset.spectrum_path_or_directory=data/train/$$project/ \
 		dataset.predictions_path=data/train_predictions/$$project.csv \
 		training_matrix_output_path=train_feature_matrices/$$project.parquet; \
-		aws s3 cp train_features_matrices/$$project.parquet s3://winnow-g88rh/revisions/new_datasets/train_features_matrices/$$project.parquet; \
+		aws s3 cp train_feature_matrices/$$project.parquet s3://winnow-g88rh/revisions/new_datasets/train_features_matrices/$$project.parquet; \
 	done

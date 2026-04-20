@@ -24,6 +24,8 @@ residue_masses:
   "R": 156.101111
   "Y": 163.063329
   "W": 186.079313
+  "U": 150.953633
+  "O": 237.147727
   # Modifications
   "M[UNIMOD:35]": 147.035400 # Oxidation
   "C[UNIMOD:4]": 160.030649 # Carboxyamidomethylation
