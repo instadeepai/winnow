@@ -391,7 +391,7 @@ def _compute_features_directory(
     calibrator,
     labelled: bool,
     filter_empty: bool,
-) -> list:
+) -> list[pd.DataFrame]:
     """Process a directory of experiment files one at a time."""
     experiment_files = _discover_experiment_files(spectrum_path)
     logger.info(
@@ -427,7 +427,7 @@ def _compute_features_single_file(
     calibrator,
     labelled: bool,
     filter_empty: bool,
-) -> list:
+) -> list[pd.DataFrame]:
     """Process a single spectrum file."""
     logger.info(f"Single-file mode: {spectrum_path}")
     dataset = data_loader.load(
@@ -448,6 +448,34 @@ def _compute_features_single_file(
 
     calibrator.compute_features(dataset)
     return [dataset.metadata]
+
+
+def _compute_features_batched_metadata(
+    spectrum_path: Path,
+    predictions_path,
+    data_loader,
+    calibrator,
+    labelled: bool,
+    filter_empty: bool,
+) -> list[pd.DataFrame]:
+    """Run feature computation over a directory (one file at a time) or a single spectrum file."""
+    if spectrum_path.is_dir():
+        return _compute_features_directory(
+            spectrum_path,
+            predictions_path,
+            data_loader,
+            calibrator,
+            labelled,
+            filter_empty,
+        )
+    return _compute_features_single_file(
+        spectrum_path,
+        predictions_path,
+        data_loader,
+        calibrator,
+        labelled,
+        filter_empty,
+    )
 
 
 def _write_training_matrix(metadata, calibrator, confidence_column, output_path):
@@ -522,24 +550,14 @@ def compute_features_entry_point(
     predictions_path = cfg.dataset.get("predictions_path")
     filter_empty = bool(cfg.filter_empty_predictions)
 
-    if spectrum_path.is_dir():
-        all_metadata = _compute_features_directory(
-            spectrum_path,
-            predictions_path,
-            data_loader,
-            calibrator,
-            labelled,
-            filter_empty,
-        )
-    else:
-        all_metadata = _compute_features_single_file(
-            spectrum_path,
-            predictions_path,
-            data_loader,
-            calibrator,
-            labelled,
-            filter_empty,
-        )
+    all_metadata = _compute_features_batched_metadata(
+        spectrum_path,
+        predictions_path,
+        data_loader,
+        calibrator,
+        labelled,
+        filter_empty,
+    )
 
     combined_metadata = pd.concat(all_metadata, ignore_index=True)
     logger.info(f"Total spectra after feature computation: {len(combined_metadata)}")
@@ -600,6 +618,8 @@ def predict_entry_point(
         print_config(cfg)
         return
 
+    from omegaconf import OmegaConf
+
     from winnow.calibration.calibrator import ProbabilityCalibrator
     from winnow.datasets.calibration_dataset import CalibrationDataset
     from winnow.fdr.database_grounded import DatabaseGroundedFDRControl
@@ -607,31 +627,32 @@ def predict_entry_point(
     logger.info("Starting prediction pipeline.")
     logger.info(f"Prediction configuration: {cfg}")
 
-    # Load dataset - Hydra creates the DatasetLoader object
-    logger.info("Loading dataset.")
-    data_loader = instantiate(cfg.data_loader)
-
-    # Extract dataset loading parameters and convert to dict for flexible kwargs
-    dataset_params = dict(cfg.dataset)
-    # Rename config keys to match the Protocol interface
-    dataset_params["data_path"] = dataset_params.pop("spectrum_path_or_directory")
-    dataset_params["predictions_path"] = dataset_params.pop("predictions_path", None)
-
-    dataset = data_loader.load(**dataset_params)
-
-    logger.info(f"Loaded: {len(dataset.metadata)} spectra")
-
-    logger.info("Filtering dataset for empty predictions.")
-    dataset = filter_dataset(dataset)
-
-    logger.info(f"After filtering: {len(dataset.metadata)} spectra")
-
     # Load trained calibrator
     logger.info("Loading trained calibrator.")
     calibrator = ProbabilityCalibrator.load(
         pretrained_model_name_or_path=cfg.calibrator.pretrained_model_name_or_path,
         cache_dir=cfg.calibrator.cache_dir,
     )
+
+    koina_cfg = cfg.get("koina")
+    if koina_cfg is not None:
+        koina_const = koina_cfg.get("input_constants")
+        koina_col = koina_cfg.get("input_columns")
+    else:
+        koina_const, koina_col = None, None
+    if koina_const is not None or koina_col is not None:
+        calibrator.apply_koina_model_input_overrides(
+            model_input_constants=(
+                OmegaConf.to_container(koina_const, resolve=True)
+                if koina_const is not None
+                else None
+            ),
+            model_input_columns=(
+                OmegaConf.to_container(koina_col, resolve=True)
+                if koina_col is not None
+                else None
+            ),
+        )
 
     # Load pre-fitted iRT regressors if configured
     irt_regressor_path = cfg.calibrator.get("irt_regressor_path")
@@ -642,6 +663,28 @@ def predict_entry_point(
         if isinstance(rt_feature, RetentionTimeFeature):
             logger.info(f"Loading iRT regressors from {irt_regressor_path}")
             rt_feature.load_regressors(irt_regressor_path)
+
+    # Load dataset - Hydra creates the DatasetLoader object
+    logger.info("Loading dataset.")
+    data_loader = instantiate(cfg.data_loader)
+
+    spectrum_path = Path(cfg.dataset.spectrum_path_or_directory)
+    predictions_path = cfg.dataset.get("predictions_path")
+    filter_empty = bool(cfg.filter_empty_predictions)
+
+    all_metadata = _compute_features_batched_metadata(
+        spectrum_path,
+        predictions_path,
+        data_loader,
+        calibrator,
+        labelled=False,
+        filter_empty=filter_empty,
+    )
+
+    combined_metadata = pd.concat(all_metadata, ignore_index=True)
+    logger.info(f"Total spectra after feature computation: {len(combined_metadata)}")
+
+    dataset = CalibrationDataset(metadata=combined_metadata)
 
     # Calibrate scores
     logger.info("Calibrating scores.")
