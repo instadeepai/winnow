@@ -140,6 +140,8 @@ training_history_path: null
 - `irt_regressor_output_path`: Optional path to save per-experiment iRT regressors
 - `training_history_path`: Optional path to save epoch-level training history as JSON
 
+When the validation set is larger than `calibrator.val_early_stopping_max_psms` (default `10000`), Winnow draws a **fixed-seed random subset** of PSMs for **per-epoch early stopping only** (`calibrator.val_subsample_seed`, defaulting to `calibrator.seed`). After training, **loss and accuracy on the full validation set** are computed and stored as `final_val_loss` and `final_val_accuracy` in the training history JSON (when subsampling was used). Per-epoch curves in that file still reflect the subsampled validation loss. Set `calibrator.val_early_stopping_max_psms` to `null` to disable subsampling and use every validation PSM each epoch.
+
 ## Compute-features configuration
 
 ### Main config (`configs/compute_features.yaml`)
@@ -192,6 +194,9 @@ calibrator:
   batch_size: 1024  # Mini-batch size for DataLoader.
   patience: 10  # Early stopping patience (epochs without validation improvement).
   seed: 42  # Random seed for reproducibility.
+  # If validation has more than this many PSMs, subsample for early stopping only (see training section).
+  val_early_stopping_max_psms: 10000
+  val_subsample_seed: null  # Defaults to seed when null.
 
   features:
     mass_error:
@@ -277,6 +282,8 @@ koina:
 - `max_epochs`: Maximum number of training epochs
 - `batch_size`: Mini-batch size for DataLoader
 - `patience`: Early stopping patience (epochs without validation improvement)
+- `val_early_stopping_max_psms`: Maximum validation PSMs used each epoch for early stopping; larger sets are randomly subsampled (see [Training configuration](#training-configuration)). Use `null` to disable subsampling.
+- `val_subsample_seed`: RNG seed for that subsample (defaults to `seed` when `null`)
 - `features.*`: Individual calibration feature configurations
 
 ### Koina model input validation
@@ -335,20 +342,36 @@ anticipate every model's requirements. **It is the user's responsibility to:**
 Predictions that violate undocumented model constraints may cause Koina errors at prediction
 time or silently produce predictions.
 
-#### Shared Koina inputs (`koina_model_input_constants` / `koina_model_input_columns`)
+#### Shared Koina inputs (`koina.input_constants` / `koina.input_columns`)
 
 Some Koina intensity models require additional inputs beyond peptide sequence and
 precursor charge, typically experimental settings such as `collision_energies` or
-`fragmentation_types`. These can be supplied in two ways — both defined once at the top
-level and interpolated into every intensity feature to ensure they remain consistent:
+`fragmentation_types`. These can be supplied in two ways — both defined once in the
+top-level `koina` block and interpolated into every intensity feature to ensure they
+remain consistent:
 
-- **`koina_model_input_constants`**: A single constant value tiled across all rows.
+- **`koina.input_constants`**: A single constant value tiled across all rows.
   Use this when the same collision energy applies to your whole dataset.
-- **`koina_model_input_columns`**: A metadata column name providing per-row values.
+- **`koina.input_columns`**: A metadata column name providing per-row values.
   Use this when collision energy or fragmentation type varies per spectrum and is already
   present in your spectrum metadata.
 
-Specifying the same key in both dicts raises a `ValueError` at construction time.
+Specifying the same key in both dicts raises a `ValueError` at feature construction time.
+
+In training, set these under the `koina` block in `calibrator.yaml` and interpolate
+into each feature, e.g. `model_input_constants: ${koina.input_constants}`.
+
+#### Inference-time Koina overrides (`winnow predict`)
+
+The saved checkpoint stores the `model_input_constants` / `model_input_columns` used when the model was trained. For prediction you can override collision energy, fragmentation type, or other Koina intensity inputs using the **same keys** as in training: **`koina.input_constants`** and/or **`koina.input_columns`** in `predict.yaml` (or via Hydra CLI). Overrides are merged **per key** into `FragmentMatchFeatures` and `ChimericFeatures`: supplying a constant for a key removes any previous column mapping for that key, and vice versa.
+
+Example CLI:
+
+```bash
+winnow predict \
+  koina.input_constants.collision_energies=28 \
+  koina.input_constants.fragmentation_types=HCD
+```
 
 #### Shared model constraints (`koina_model_constraints`)
 
@@ -385,6 +408,17 @@ calibrator:
   pretrained_model_name_or_path: InstaDeepAI/winnow-general-model
   # Directory to cache the Hugging Face model
   cache_dir: null  # can be set to null if using local model or for the default cache directory
+  # Optional: pre-fitted iRT regressors from training (see RetentionTimeFeature docs)
+  irt_regressor_path: null
+
+# Optional: Koina intensity input overrides at inference (same `input_constants` /
+# `input_columns` keys as the `koina` block in calibrator.yaml; merged per key into
+# features loaded from the checkpoint).
+# koina:
+#   input_constants:
+#     collision_energies: 28
+#     fragmentation_types: HCD
+#   input_columns: {}
 
 fdr_control:
   # Target FDR threshold (e.g. 0.01 for 1%, 0.05 for 5% etc.)
@@ -403,6 +437,8 @@ output_folder: results/predictions
 - `dataset.predictions_path`: Path to predictions file
 - `calibrator.pretrained_model_name_or_path`: Hugging Face model identifier or local model directory path
 - `calibrator.cache_dir`: Directory to cache Hugging Face models (null for default)
+- `calibrator.irt_regressor_path`: Optional path to iRT regressors saved during training; when set, skips re-fitting for known experiments
+- `koina.input_constants` / `koina.input_columns`: Optional overrides for Koina collision energy / fragmentation (and other intensity-model inputs) at inference; same structure as the `koina` block in `calibrator.yaml`; see [Inference-time Koina overrides](#inference-time-koina-overrides-winnow-predict)
 - `fdr_method`: FDR estimation method (via defaults: `nonparametric` or `database_grounded`)
 - `fdr_control.fdr_threshold`: Target FDR threshold (e.g. 0.01 for 1%, 0.05 for 5%)
 - `fdr_control.confidence_column`: Column name with confidence scores
@@ -571,9 +607,9 @@ Common interpolation patterns in Winnow configs:
 
 - `${residue_masses}` - References amino acid masses from residues.yaml
 - `${unsupported_residues}` - References Koina-unsupported residue tokens from residues.yaml
-- `${koina_model_input_constants}` - References shared Koina model inputs (e.g. collision energy) from calibrator.yaml
-- `${koina_model_constraints.max_precursor_charge}` - References shared charge limit from calibrator.yaml
-- `${koina_model_constraints.max_peptide_length}` - References shared length limit from calibrator.yaml
+- `${koina.input_constants}` - References shared Koina model inputs (e.g. collision energy) from the `koina` block in calibrator.yaml
+- `${koina.constraints.max_precursor_charge}` - References shared charge limit from the `koina` block in calibrator.yaml
+- `${koina.constraints.max_peptide_length}` - References shared length limit from the `koina` block in calibrator.yaml
 - `${fdr_control.confidence_column}` - References FDR confidence column setting
 
 ## Creating custom configurations

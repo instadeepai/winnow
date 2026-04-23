@@ -82,6 +82,7 @@ winnow train dataset.spectrum_path_or_directory=data/spectra.parquet dataset.pre
 - `val_features_path`: Optional path to validation feature Parquet file or directory
 - `validation_fraction`: Automatic validation split fraction (default: 0.1, used when `val_features_path` is null)
 - `training_history_path`: Optional path to save epoch-level training history as JSON
+- `calibrator.val_early_stopping_max_psms` / `calibrator.val_subsample_seed`: When the validation set is very large, control subsampling for early stopping only; full-set metrics are still recorded when subsampling is active (see [Configuration guide](configuration.md#training-configuration))
 
 **Advanced calibrator configuration:**
 
@@ -150,6 +151,11 @@ winnow predict calibrator.pretrained_model_name_or_path=my-org/my-custom-model
 
 # Use a local model
 winnow predict calibrator.pretrained_model_name_or_path=models/my_model
+
+# Override Koina collision energy / fragmentation at inference (no retraining)
+winnow predict \
+  koina.input_constants.collision_energies=28 \
+  koina.input_constants.fragmentation_types=HCD
 ```
 
 **Common Parameters:**
@@ -157,6 +163,8 @@ winnow predict calibrator.pretrained_model_name_or_path=models/my_model
 - `data_loader`: Type of dataset loader (`instanovo`, `mztab`, `pointnovo`, `winnow`)
 - `dataset.spectrum_path_or_directory`: Path to spectrum/metadata file (or directory for Winnow format)
 - `dataset.predictions_path`: Path to predictions file
+- `koina.input_constants` / `koina.input_columns`: Optional Koina intensity-model inputs at inference (same keys as the `koina` block in `calibrator.yaml`); see [Configuration guide](configuration.md#inference-time-koina-overrides-winnow-predict)
+- `calibrator.irt_regressor_path`: Optional pre-saved iRT regressors from training
 - `fdr_method`: FDR estimation method (`nonparametric` or `database_grounded`)
 - `fdr_control.fdr_threshold`: Target FDR threshold (e.g. 0.01 for 1%)
 - `output_folder`: Folder path to write output files

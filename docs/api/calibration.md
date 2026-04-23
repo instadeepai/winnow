@@ -53,6 +53,12 @@ loaded_calibrator = ProbabilityCalibrator.load("calibrator_checkpoint")
 - **Two-phase Training**: Supports training from pre-computed Parquet feature matrices via `FeatureDataset.from_parquet()` and `fit_from_features()`
 - **GPU Support**: Automatic GPU detection with CPU fallback
 
+**Constructor (selected parameters):**
+
+- `seed`: RNG seed for training (weight init, train shuffle, validation subsample default)
+- `val_early_stopping_max_psms`: If validation has more than this many samples, only a random subset is used **each epoch** for early stopping (default `10000`). Set to `None` to use the full validation set every epoch.
+- `val_subsample_seed`: Seed for that subsample; defaults to `seed` when `None`. After training, when subsampling was used, `fit` / `fit_from_features` evaluates the **full** validation set once and stores `final_val_loss` and `final_val_accuracy` on the returned `TrainingHistory`.
+
 **Main Methods:**
 
 - `add_feature(feature)`: Add a calibration feature
