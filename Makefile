@@ -148,9 +148,12 @@ sample-data:
 ## Run winnow train with sample data
 train-sample:
 	uv run winnow train \
+	features_path=null \
 	dataset.spectrum_path_or_directory=examples/example_data/spectra.ipc \
 	dataset.predictions_path=examples/example_data/predictions.csv \
 	model_output_dir=models/new_model \
+	irt_regressor_output_path=null \
+	training_history_path=null \
 	dataset_output_path=results/calibrated_dataset.csv \
 	calibrator.features.retention_time_feature.train_fraction=0.3
 
@@ -200,4 +203,66 @@ compute_train_features: copy_down_train_dataset
 		dataset.predictions_path=data/train_predictions/$$project.csv \
 		training_matrix_output_path=train_feature_matrices/$$project.parquet; \
 		aws s3 cp train_feature_matrices/$$project.parquet s3://winnow-g88rh/revisions/new_datasets/train_feature_matrices/$$project.parquet; \
+	done
+
+
+#################################################################################
+## Train general model commands													#
+#################################################################################
+
+.PHONY: train_general_model
+
+train_general_model:
+	uv run winnow train \
+	features_path=train_shuffled/ \
+	val_features_path=val_feature_matrices/PXD004424.parquet \
+	calibrator.hidden_dims='[128,64]' \
+	model_output_dir=general_model \
+	dataset_output_path=general_model/calibrated_dataset.csv \
+	training_history_path=general_model/training_history.json \
+	calibrator.koina.input_columns.collision_energies=collision_energy \
+	calibrator.koina.input_columns.fragmentation_types=frag_type \
+	calibrator.learning_rate=0.0001 \
+	calibrator.weight_decay=0.0001 \
+	calibrator.max_epochs=200 \
+	calibrator.batch_size=4096 \
+	calibrator.n_iter_no_change=10 \
+	calibrator.tol=1.0e-4 \
+	calibrator.seed=42
+
+
+#########################################################
+## Evaluate general model commands
+#########################################################
+
+.PHONY: evaluate_general_model_biological_validation evaluate_general_model_external_datasets
+
+BIOLOGICAL_VALIDATION_PROJECTS := gluc helaqc herceptin immuno sbrodae snakevenoms tplantibodies woundfluids
+
+evaluate_general_model_biological_validation:
+	for project in $(BIOLOGICAL_VALIDATION_PROJECTS); do \
+		uv run winnow predict \
+		dataset.spectrum_path_or_directory=held_out_projects/biological_validation/annotated/dataset-$$project-annotated-0000-0001.parquet \
+		dataset.predictions_path=held_out_projects/biological_validation/annotated_predictions/dataset-$$project-annotated-0000-0001.csv \
+		calibrator.pretrained_model_name_or_path=general_model \
+		output_folder=predictions/general_model/$$project/ \
+		koina.input_constants.collision_energies=27 \
+		koina.input_constants.fragmentation_types=HCD \
+		fdr_control.fdr_threshold=1.0 \
+		fdr_control.confidence_column=calibrated_confidence; \
+	done
+
+EXTERNAL_DATASETS := PXD009935 PXD014877 PXD023064
+
+evaluate_general_model_external_datasets:
+	for project in $(EXTERNAL_DATASETS); do \
+		uv run winnow predict \
+		dataset.spectrum_path_or_directory=held_out_projects/lcfm/$$project/ \
+		dataset.predictions_path=held_out_projects/lcfm/$${project}_predictions/$$project.csv \
+		calibrator.pretrained_model_name_or_path=general_model \
+		output_folder=predictions/general_model/$$project/ \
+		koina.input_columns.collision_energies=collision_energy \
+		koina.input_columns.fragmentation_types=frag_type \
+		fdr_control.fdr_threshold=1.0 \
+		fdr_control.confidence_column=calibrated_confidence; \
 	done

@@ -40,3 +40,7 @@ htmlcov/
 .coverage
 coverage.xml
 pytest.xml
+
+analysis/
+results/
+models/
