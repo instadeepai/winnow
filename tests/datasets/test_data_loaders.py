@@ -526,6 +526,20 @@ class TestInstaNovoDatasetLoader:
         out = InstaNovoDatasetLoader._add_index_cols(df, fp)
         assert out["spectrum_id"].to_list() == ["run:0", "run:1"]
 
+    def test_add_index_cols_preserves_existing_spectrum_id(self, tmp_path):
+        """IPC/Parquet exports that already key predictions by spectrum_id must not be rewritten."""
+        df = pl.DataFrame(
+            {
+                "spectrum_id": ["sp_A", "sp_B"],
+                "precursor_mz": [400.0, 500.0],
+            }
+        )
+        fp = tmp_path / "spectra.parquet"
+        fp.touch()
+        out = InstaNovoDatasetLoader._add_index_cols(df, fp)
+        assert out["spectrum_id"].to_list() == ["sp_A", "sp_B"]
+        assert out["experiment_name"].to_list() == ["spectra", "spectra"]
+
     def test_load_spectrum_data_parquet_add_index_cols_when_enabled(
         self, residue_masses, residue_remapping, tmp_path
     ):

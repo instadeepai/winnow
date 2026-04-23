@@ -83,6 +83,11 @@ def _df_from_matchms(spectra: list[Spectrum]) -> pl.DataFrame:
 def _add_index_cols(df: pl.DataFrame, fp: Path | str) -> pl.DataFrame:
     """Add ``experiment_name`` and ``spectrum_id`` columns.
 
+    If the frame already has ``spectrum_id`` (e.g. IPC/Parquet matched to a
+    predictions CSV), it is **not** overwritten; only a missing
+    ``experiment_name`` is filled from the file stem so downstream code can
+    still group by experiment.
+
     If ``scan_number`` is present, ``spectrum_id`` is ``experiment_name:scan_number``.
     Otherwise uses a row index, matching InstaNovo's data_handler fallback.
 
@@ -90,6 +95,14 @@ def _add_index_cols(df: pl.DataFrame, fp: Path | str) -> pl.DataFrame:
     it is preserved so ``spectrum_id`` matches prediction CSVs keyed by the same
     experiment label rather than the parquet filename stem.
     """
+    if "spectrum_id" in df.columns:
+        if "experiment_name" not in df.columns:
+            exp_name = Path(fp).stem
+            df = df.with_columns(
+                pl.lit(exp_name).alias("experiment_name").cast(pl.Utf8)
+            )
+        return df
+
     if "experiment_name" not in df.columns:
         exp_name = Path(fp).stem
         df = df.with_columns(pl.lit(exp_name).alias("experiment_name").cast(pl.Utf8))
