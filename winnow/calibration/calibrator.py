@@ -5,9 +5,9 @@ from __future__ import annotations
 import importlib
 import json
 import logging
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from tqdm import tqdm
@@ -29,6 +29,71 @@ from winnow.utils.paths import resolve_data_path
 logger = logging.getLogger(__name__)
 
 
+def _deserialize_calibration_feature(feat_cfg: Dict[str, Any]) -> CalibrationFeatures:
+    """Rebuild a feature instance from a saved ``config.json`` entry."""
+    cfg = dict(feat_cfg)
+    target = cfg.pop("_target_")
+    module_path, class_name = target.rsplit(".", 1)
+    module = importlib.import_module(module_path)
+    feat_cls = getattr(module, class_name)
+    return feat_cls(**cfg)
+
+
+def _apply_koina_constant_overrides(
+    mc: Dict[str, Any],
+    mcol: Dict[str, str],
+    overrides: Optional[Dict[str, Any]],
+) -> None:
+    """Merge constant overrides into ``mc`` and drop those keys from ``mcol``."""
+    if not overrides:
+        return
+    for key, value in overrides.items():
+        if value is None:
+            continue
+        mc[key] = value
+        mcol.pop(key, None)
+
+
+def _apply_koina_column_overrides(
+    mc: Dict[str, Any],
+    mcol: Dict[str, str],
+    overrides: Optional[Dict[str, str]],
+) -> None:
+    """Merge column overrides into ``mcol`` and drop those keys from ``mc``."""
+    if not overrides:
+        return
+    for key, value in overrides.items():
+        if value is None:
+            continue
+        mcol[key] = value
+        mc.pop(key, None)
+
+
+def _merge_koina_overrides_into_single_feature(
+    feature: Any,
+    model_input_constants: Optional[Dict[str, Any]],
+    model_input_columns: Optional[Dict[str, str]],
+) -> None:
+    """Apply Koina constant/column overrides to one feature object."""
+    from winnow.calibration.features.utils import validate_model_input_params
+
+    mc = dict(feature.model_input_constants or {})
+    mcol = dict(feature.model_input_columns or {})
+    _apply_koina_constant_overrides(mc, mcol, model_input_constants)
+    _apply_koina_column_overrides(mc, mcol, model_input_columns)
+    validate_model_input_params(mc or None, mcol or None)
+    feature.model_input_constants = mc if mc else None
+    feature.model_input_columns = mcol if mcol else None
+
+
+def _load_saved_features_section(
+    calibrator: Any, features_section: Dict[str, Any]
+) -> None:
+    """Populate ``calibrator`` with features from a ``config.json`` ``features`` block."""
+    for _name, feat_cfg in features_section.items():
+        calibrator.add_feature(_deserialize_calibration_feature(feat_cfg))
+
+
 @dataclass
 class TrainingHistory:
     """Epoch-level training metrics from calibrator fitting.
@@ -40,6 +105,9 @@ class TrainingHistory:
         best_epoch: Epoch with the best validation loss (0-indexed), or the last
             epoch if no validation data was provided.
         epochs_trained: Total number of epochs completed.
+        final_val_loss: Loss on the full validation set after restoring the best
+            weights (only when validation was subsampled for early stopping).
+        final_val_accuracy: Accuracy on the full validation set in that case.
     """
 
     train_losses: List[float] = field(default_factory=list)
@@ -47,6 +115,8 @@ class TrainingHistory:
     val_accuracies: Optional[List[float]] = None
     best_epoch: int = 0
     epochs_trained: int = 0
+    final_val_loss: Optional[float] = None
+    final_val_accuracy: Optional[float] = None
 
     def save(self, path: Union[Path, str]) -> None:
         """Save training history to a JSON file."""
@@ -60,6 +130,8 @@ class TrainingHistory:
         """Load training history from a JSON file."""
         with open(path) as f:
             data = json.load(f)
+        known = {f.name for f in fields(cls)}
+        data = {k: v for k, v in data.items() if k in known}
         return cls(**data)
 
     def plot(
@@ -165,8 +237,11 @@ class ProbabilityCalibrator:
         weight_decay: float = 1e-4,
         max_epochs: int = 100,
         batch_size: int = 1024,
-        patience: int = 10,
+        n_iter_no_change: int = 10,
+        tol: float = 1e-4,
         seed: int = 42,
+        val_early_stopping_max_psms: Optional[int] = 10000,
+        val_subsample_seed: Optional[int] = None,
     ) -> None:
         self.hidden_dims = tuple(hidden_dims)
         self.dropout = dropout
@@ -174,8 +249,11 @@ class ProbabilityCalibrator:
         self.weight_decay = weight_decay
         self.max_epochs = max_epochs
         self.batch_size = batch_size
-        self.patience = patience
+        self.n_iter_no_change = n_iter_no_change
+        self.tol = tol
         self.seed = seed
+        self.val_early_stopping_max_psms = val_early_stopping_max_psms
+        self.val_subsample_seed = val_subsample_seed
 
         self.feature_dict: Dict[str, CalibrationFeatures] = {}
         self.dependencies: Dict[str, FeatureDependency] = {}
@@ -270,8 +348,11 @@ class ProbabilityCalibrator:
             "weight_decay": calibrator.weight_decay,
             "max_epochs": calibrator.max_epochs,
             "batch_size": calibrator.batch_size,
-            "patience": calibrator.patience,
+            "n_iter_no_change": calibrator.n_iter_no_change,
+            "tol": calibrator.tol,
             "seed": calibrator.seed,
+            "val_early_stopping_max_psms": calibrator.val_early_stopping_max_psms,
+            "val_subsample_seed": calibrator.val_subsample_seed,
             "feature_columns": calibrator.columns,
             "feature_names": calibrator.feature_names,
             "features": {
@@ -324,17 +405,16 @@ class ProbabilityCalibrator:
             weight_decay=config.get("weight_decay", 1e-4),
             max_epochs=config.get("max_epochs", 100),
             batch_size=config.get("batch_size", 1024),
-            patience=config.get("patience", 10),
+            n_iter_no_change=config.get("n_iter_no_change", config.get("patience", 10)),
+            tol=config.get("tol", 1e-4),
             seed=config.get("seed", 42),
+            val_early_stopping_max_psms=config.get(
+                "val_early_stopping_max_psms", 10000
+            ),
+            val_subsample_seed=config.get("val_subsample_seed"),
         )
 
-        for _feat_name, feat_cfg in config.get("features", {}).items():
-            feat_cfg = dict(feat_cfg)
-            target = feat_cfg.pop("_target_")
-            module_path, class_name = target.rsplit(".", 1)
-            module = importlib.import_module(module_path)
-            feat_cls = getattr(module, class_name)
-            calibrator.add_feature(feat_cls(**feat_cfg))
+        _load_saved_features_section(calibrator, config.get("features", {}))
 
         tensors = load_file(dir_path / "model.safetensors")
 
@@ -363,6 +443,41 @@ class ProbabilityCalibrator:
             list(calibrator.feature_dict.keys()),
         )
         return calibrator
+
+    def apply_koina_model_input_overrides(
+        self,
+        model_input_constants: Optional[Dict[str, Any]] = None,
+        model_input_columns: Optional[Dict[str, str]] = None,
+    ) -> None:
+        """Merge inference-time Koina inputs into intensity-based features.
+
+        Used by ``winnow predict`` from the top-level config keys
+        ``koina.input_constants`` and ``koina.input_columns`` (same names as
+        in ``calibrator.yaml``).
+
+        Updates :attr:`model_input_constants` / :attr:`model_input_columns` on
+        features that define them (e.g. fragment match, chimeric). Per-key
+        overrides replace any previous constant or column mapping for that key.
+
+        Args:
+            model_input_constants: Koina input names mapped to constant values
+                tiled across all rows.
+            model_input_columns: Koina input names mapped to metadata column
+                names for per-row values.
+        """
+        if not model_input_constants and not model_input_columns:
+            return
+
+        for feature in self.feature_dict.values():
+            if not hasattr(feature, "model_input_constants") or not hasattr(
+                feature, "model_input_columns"
+            ):
+                continue
+            _merge_koina_overrides_into_single_feature(
+                feature,
+                model_input_constants,
+                model_input_columns,
+            )
 
     # ------------------------------------------------------------------
     # Public instance methods
@@ -428,7 +543,8 @@ class ProbabilityCalibrator:
         Args:
             train_dataset: Labelled training dataset.
             val_dataset: Optional labelled validation dataset for early
-                stopping.
+                stopping. Subsampling for large sets matches
+                :meth:`fit_from_features` (see ``val_early_stopping_max_psms``).
             progress_bar: Whether to display a progress bar during training.
 
         Returns:
@@ -468,6 +584,10 @@ class ProbabilityCalibrator:
         Args:
             train_dataset: Training features and labels.
             val_dataset: Optional held-out validation set for early stopping.
+                When it has more than ``val_early_stopping_max_psms`` rows, a
+                random subset (``val_subsample_seed``, defaulting to ``seed``)
+                is evaluated each epoch; after training, metrics on the full
+                validation set are stored in ``TrainingHistory.final_val_*``.
             progress_bar: Whether to display a progress bar during training.
 
         Returns:
@@ -482,7 +602,7 @@ class ProbabilityCalibrator:
         The ``calibrated_confidence`` column is added to ``dataset.metadata``.
 
         Args:
-            dataset: The dataset for which predictions are made.
+            dataset: The CalibrationDataset containing the features for which predictions are made.
         """
         if self.network is None:
             raise RuntimeError(
@@ -491,7 +611,6 @@ class ProbabilityCalibrator:
         assert self.feature_mean is not None
         assert self.feature_std is not None
 
-        self.compute_features(dataset)
         features = self._extract_feature_matrix(dataset, labelled=False)
 
         device = next(self.network.parameters()).device
@@ -547,6 +666,60 @@ class ProbabilityCalibrator:
             return features.values, labels.values
         return features.values
 
+    def _early_stopping_validation_split(
+        self,
+        val_dataset: FeatureDataset,
+    ) -> Tuple[FeatureDataset, bool]:
+        """Return validation data for early stopping, optionally subsampled."""
+        max_psms = self.val_early_stopping_max_psms
+        n_val = len(val_dataset)
+        if max_psms is None or max_psms <= 0 or n_val <= max_psms:
+            return val_dataset, False
+
+        subsample_seed = (
+            self.val_subsample_seed
+            if self.val_subsample_seed is not None
+            else self.seed
+        )
+        rng = np.random.default_rng(subsample_seed)
+        idx = rng.permutation(n_val)[:max_psms]
+        val_early = FeatureDataset(
+            features=val_dataset.features[idx].cpu().numpy(),
+            labels=val_dataset.labels[idx].cpu().numpy(),
+        )
+        logger.info(
+            "Using %d of %d validation PSMs for early stopping "
+            "(val_early_stopping_max_psms=%s, val_subsample_seed=%s).",
+            len(val_early),
+            n_val,
+            max_psms,
+            subsample_seed,
+        )
+        return val_early, True
+
+    def _record_full_validation_if_subsampled(
+        self,
+        val_was_subsampled: bool,
+        val_dataset: Optional[FeatureDataset],
+        history: TrainingHistory,
+        criterion: nn.Module,
+        device: torch.device,
+    ) -> None:
+        """After training, evaluate on full validation when early stopping used a subset."""
+        if not val_was_subsampled or val_dataset is None:
+            return
+        assert self.network is not None
+        final_loss, final_acc = self._evaluate(val_dataset, criterion, device)
+        history.final_val_loss = final_loss
+        history.final_val_accuracy = final_acc
+        logger.info(
+            "Full validation set metrics after training (n=%d): "
+            "loss=%.6f, accuracy=%.4f",
+            len(val_dataset),
+            final_loss,
+            final_acc,
+        )
+
     def _fit_from_features(
         self,
         train_dataset: FeatureDataset,
@@ -590,7 +763,14 @@ class ProbabilityCalibrator:
         )
         criterion = nn.BCEWithLogitsLoss()
 
-        has_val = val_dataset is not None
+        val_early: Optional[FeatureDataset] = None
+        val_was_subsampled = False
+        if val_dataset is not None:
+            val_early, val_was_subsampled = self._early_stopping_validation_split(
+                val_dataset
+            )
+
+        has_val = val_early is not None
         history = TrainingHistory(
             val_losses=[] if has_val else None,
             val_accuracies=[] if has_val else None,
@@ -613,13 +793,13 @@ class ProbabilityCalibrator:
             )
             history.train_losses.append(avg_train_loss)
 
-            if val_dataset is None:
+            if val_early is None:
                 history.best_epoch = epoch
                 continue
 
             should_stop, best_val_loss, best_state, epochs_without_improvement = (
                 self._validation_step(
-                    val_dataset,
+                    val_early,
                     criterion,
                     device,
                     history,
@@ -637,6 +817,14 @@ class ProbabilityCalibrator:
         if best_state is not None:
             self.network.load_state_dict(best_state)
             self.network.to(device)
+
+        self._record_full_validation_if_subsampled(
+            val_was_subsampled,
+            val_dataset,
+            history,
+            criterion,
+            device,
+        )
 
         return history
 
@@ -714,6 +902,9 @@ class ProbabilityCalibrator:
     ) -> Tuple[bool, float, Optional[Dict[str, torch.Tensor]], int]:
         """Evaluate on validation set and check early stopping.
 
+        Stops after ``n_iter_no_change`` consecutive epochs where validation loss
+        did not improve by at least ``tol`` over the running best (sklearn-style).
+
         Returns:
             Tuple of (should_stop, best_val_loss, best_state,
             epochs_without_improvement).
@@ -725,7 +916,9 @@ class ProbabilityCalibrator:
         history.val_losses.append(val_loss)
         history.val_accuracies.append(val_acc)
 
-        if val_loss < best_val_loss:
+        # Match sklearn SGD early stopping: count epochs where loss did not beat
+        # ``best_val_loss - tol`` (see ``loss > best_loss - tol`` in sklearn).
+        if val_loss <= best_val_loss - self.tol:
             best_val_loss = val_loss
             best_state = self._snapshot_state()
             history.best_epoch = epoch
@@ -733,7 +926,7 @@ class ProbabilityCalibrator:
         else:
             epochs_without_improvement += 1
 
-        if epochs_without_improvement >= self.patience:
+        if epochs_without_improvement >= self.n_iter_no_change:
             return True, best_val_loss, best_state, epochs_without_improvement
 
         return False, best_val_loss, best_state, epochs_without_improvement
