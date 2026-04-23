@@ -8,17 +8,25 @@ enforces schema compatibility when appending to existing parquet files.
 
 from __future__ import annotations
 
-import argparse
 import logging
 import random
 import re
-import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Annotated, Dict, List, Optional, Tuple
 
 import polars as pl
+import typer
 
 logger = logging.getLogger(__name__)
+
+app = typer.Typer(
+    add_completion=False,
+    rich_markup_mode="rich",
+    no_args_is_help=True,
+    help=(
+        "Split peptide datasets into train/test (and optionally val) with no peptide leakage."
+    ),
+)
 
 
 def sanitise_sequence(sequence: str) -> str:
@@ -264,61 +272,161 @@ def load_data(data_paths: List[str]) -> pl.DataFrame:
     return pl.concat(all_dfs, how="vertical_relaxed")
 
 
-def cmd_create(args: argparse.Namespace) -> None:
-    """Execute the 'create' command to build new splits from scratch.
+@app.command("create")
+def cmd_create(
+    data: Annotated[
+        list[str],
+        typer.Option(
+            ...,
+            "--data",
+            help="Path(s) to input parquet file(s). Supports glob patterns.",
+        ),
+    ],
+    out_train: Annotated[
+        Path,
+        typer.Option(..., "--out-train", help="Output path for training parquet."),
+    ],
+    out_test: Annotated[
+        Path,
+        typer.Option(..., "--out-test", help="Output path for test parquet."),
+    ],
+    peptides_csv: Annotated[
+        Path,
+        typer.Option(
+            ..., "--peptides-csv", help="Output path for peptide manifest CSV."
+        ),
+    ],
+    out_val: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--out-val",
+            help="Output path for validation parquet (omit for train/test only).",
+        ),
+    ] = None,
+    sequence_col: Annotated[
+        str,
+        typer.Option(
+            "--sequence-col", help="Column name containing peptide sequences."
+        ),
+    ] = "sequence",
+    train_frac: Annotated[
+        float,
+        typer.Option("--train-frac", help="Fraction of data for training."),
+    ] = 0.8,
+    test_frac: Annotated[
+        float,
+        typer.Option(
+            "--test-frac",
+            help="Fraction for testing (ignored when --out-val is omitted; uses 1 - train_frac).",
+        ),
+    ] = 0.1,
+    peptide_weight: Annotated[
+        float,
+        typer.Option(
+            "--peptide-weight", help="Weight for peptide count vs row count balancing."
+        ),
+    ] = 0.5,
+    seed: Annotated[int, typer.Option("--seed", help="Random seed.")] = 42,
+) -> None:
+    """Create new train/test (and optionally val) splits from scratch."""
+    include_val = out_val is not None
+    effective_test_frac = 1.0 - train_frac if not include_val else test_frac
 
-    Args:
-        args: Parsed command-line arguments.
-    """
-    include_val = args.out_val is not None
+    logger.info("Loading data from: %s", data)
+    df = load_data(data)
+    logger.info("Loaded %d rows", len(df))
 
-    if not include_val:
-        args.test_frac = 1.0 - args.train_frac
-
-    logger.info(f"Loading data from: {args.data}")
-    df = load_data(args.data)
-    logger.info(f"Loaded {len(df)} rows")
-
-    df = add_sanitised_column(df, args.sequence_col)
+    df = add_sanitised_column(df, sequence_col)
 
     num_unique = df.select("__sanitised_peptide").n_unique()
-    logger.info(f"Found {num_unique} unique peptides")
+    logger.info("Found %s unique peptides", num_unique)
 
     train_df, test_df, val_df, assignments = split_by_peptides_balanced(
         df,
         peptide_col="__sanitised_peptide",
-        train_frac=args.train_frac,
-        test_frac=args.test_frac,
+        train_frac=train_frac,
+        test_frac=effective_test_frac,
         include_val=include_val,
-        peptide_weight=args.peptide_weight,
-        seed=args.seed,
+        peptide_weight=peptide_weight,
+        seed=seed,
     )
 
     train_df = train_df.drop("__sanitised_peptide")
     test_df = test_df.drop("__sanitised_peptide")
 
-    out_train = Path(args.out_train)
-    out_test = Path(args.out_test)
-    manifest_path = Path(args.peptides_csv)
-
     out_train.parent.mkdir(parents=True, exist_ok=True)
     out_test.parent.mkdir(parents=True, exist_ok=True)
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    peptides_csv.parent.mkdir(parents=True, exist_ok=True)
 
     train_df.write_parquet(out_train)
     test_df.write_parquet(out_test)
 
-    logger.info(f"Wrote train split: {out_train} ({len(train_df)} rows)")
-    logger.info(f"Wrote test split: {out_test} ({len(test_df)} rows)")
+    logger.info("Wrote train split: %s (%d rows)", out_train, len(train_df))
+    logger.info("Wrote test split: %s (%d rows)", out_test, len(test_df))
 
     if val_df is not None:
         val_df = val_df.drop("__sanitised_peptide")
-        out_val = Path(args.out_val)
+        assert out_val is not None
         out_val.parent.mkdir(parents=True, exist_ok=True)
         val_df.write_parquet(out_val)
-        logger.info(f"Wrote val split: {out_val} ({len(val_df)} rows)")
+        logger.info("Wrote val split: %s (%d rows)", out_val, len(val_df))
 
-    save_manifest(assignments, manifest_path, append=False)
+    save_manifest(assignments, peptides_csv, append=False)
+
+
+@app.command("kfold")
+def cmd_kfold(
+    data: Annotated[
+        list[str],
+        typer.Option(
+            ...,
+            "--data",
+            help="Path(s) to input parquet file(s). Supports glob patterns.",
+        ),
+    ],
+    assignments_out: Annotated[
+        Path,
+        typer.Option(
+            ...,
+            "--assignments-out",
+            help="Output CSV path (columns: standardised_sequence, fold).",
+        ),
+    ],
+    k: Annotated[int, typer.Option("--k", help="Number of folds.")] = 5,
+    sequence_col: Annotated[
+        str,
+        typer.Option(
+            "--sequence-col", help="Column name containing peptide sequences."
+        ),
+    ] = "sequence",
+    seed: Annotated[int, typer.Option("--seed", help="Random seed.")] = 42,
+) -> None:
+    """Assign each unique sanitised peptide to one of K folds (cross-validation).
+
+    Writes a CSV with columns ``standardised_sequence`` and ``fold`` (0 .. K-1).
+    Rows in the same fold are disjoint in peptide space from other folds; each
+    peptide appears in exactly one fold.
+    """
+    logger.info("Loading data from: %s", data)
+    df = load_data(data)
+    df = add_sanitised_column(df, sequence_col)
+
+    unique_peptides = df["__sanitised_peptide"].unique().to_list()
+    rng = random.Random(seed)
+    rng.shuffle(unique_peptides)
+
+    rows = []
+    for i, pep in enumerate(unique_peptides):
+        rows.append({"standardised_sequence": pep, "fold": i % k})
+
+    assignments_out.parent.mkdir(parents=True, exist_ok=True)
+    pl.DataFrame(rows).write_csv(assignments_out)
+    logger.info(
+        "Wrote K-fold assignments for %d peptides (%d folds) to %s",
+        len(unique_peptides),
+        k,
+        assignments_out,
+    )
 
 
 def _combine_and_drop_peptide_col(dfs: List[pl.DataFrame]) -> pl.DataFrame:
@@ -443,47 +551,100 @@ def _split_novel_rows(
     return novel_assignments
 
 
-def cmd_add(args: argparse.Namespace) -> None:
-    """Execute the 'add' command to append new data to existing splits.
-
-    Args:
-        args: Parsed command-line arguments.
-    """
-    include_val = args.existing_val is not None
-
-    if not include_val:
-        args.test_frac = 1.0 - args.train_frac
+@app.command("add")
+def cmd_add(
+    data: Annotated[
+        list[str],
+        typer.Option(
+            ...,
+            "--data",
+            help="Path(s) to new input parquet file(s). Supports glob patterns.",
+        ),
+    ],
+    existing_train: Annotated[
+        Path,
+        typer.Option(
+            ...,
+            "--existing-train",
+            help="Path to existing training parquet (updated in place).",
+        ),
+    ],
+    existing_test: Annotated[
+        Path,
+        typer.Option(
+            ...,
+            "--existing-test",
+            help="Path to existing test parquet (updated in place).",
+        ),
+    ],
+    peptides_csv: Annotated[
+        Path,
+        typer.Option(
+            ...,
+            "--peptides-csv",
+            help="Path to existing peptide manifest CSV (appended to).",
+        ),
+    ],
+    existing_val: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--existing-val",
+            help="Path to existing validation parquet (omit for train/test only).",
+        ),
+    ] = None,
+    sequence_col: Annotated[
+        str,
+        typer.Option(
+            "--sequence-col", help="Column name containing peptide sequences."
+        ),
+    ] = "sequence",
+    train_frac: Annotated[
+        float,
+        typer.Option("--train-frac", help="Fraction of new peptides for training."),
+    ] = 0.8,
+    test_frac: Annotated[
+        float,
+        typer.Option(
+            "--test-frac",
+            help="Fraction for testing (ignored when --existing-val omitted).",
+        ),
+    ] = 0.1,
+    peptide_weight: Annotated[
+        float,
+        typer.Option("--peptide-weight", help="Peptide vs row balance weight."),
+    ] = 0.5,
+    seed: Annotated[int, typer.Option("--seed", help="Random seed.")] = 42,
+) -> None:
+    """Append new data to existing train/test (and optionally val) splits."""
+    include_val = existing_val is not None
+    effective_test_frac = 1.0 - train_frac if not include_val else test_frac
 
     split_names = ["train", "test"] + (["val"] if include_val else [])
 
-    existing_train_path = Path(args.existing_train)
-    existing_test_path = Path(args.existing_test)
-    manifest_path = Path(args.peptides_csv)
-
     existing_paths = [
-        (existing_train_path, "train"),
-        (existing_test_path, "test"),
+        (existing_train, "train"),
+        (existing_test, "test"),
     ]
     if include_val:
-        existing_val_path = Path(args.existing_val)
-        existing_paths.append((existing_val_path, "val"))
+        assert existing_val is not None
+        existing_paths.append((existing_val, "val"))
 
     for p, name in existing_paths:
         if not p.exists():
             raise FileNotFoundError(f"Existing {name} parquet not found: {p}")
 
     logger.info("Loading existing manifest...")
-    peptide_to_split = load_manifest(manifest_path)
-    logger.info(f"Loaded {len(peptide_to_split)} existing peptide assignments")
+    peptide_to_split = load_manifest(peptides_csv)
+    logger.info("Loaded %d existing peptide assignments", len(peptide_to_split))
 
-    logger.info(f"Loading new data from: {args.data}")
-    new_df = load_data(args.data)
-    logger.info(f"Loaded {len(new_df)} new rows")
+    logger.info("Loading new data from: %s", data)
+    new_df = load_data(data)
+    logger.info("Loaded %d new rows", len(new_df))
 
-    new_df = add_sanitised_column(new_df, args.sequence_col)
+    new_df = add_sanitised_column(new_df, sequence_col)
 
     logger.info("Loading existing train parquet for schema validation...")
-    existing_train_df = pl.read_parquet(existing_train_path)
+    existing_train_df = pl.read_parquet(existing_train)
 
     new_df_for_schema = new_df.drop("__sanitised_peptide")
     check_schema_compatibility(new_df_for_schema, existing_train_df)
@@ -494,9 +655,9 @@ def cmd_add(args: argparse.Namespace) -> None:
     known_peptides = all_peptides_in_new & existing_peptides
     novel_peptides = all_peptides_in_new - existing_peptides
 
-    logger.info(f"Peptides in new data: {len(all_peptides_in_new)}")
-    logger.info(f"  - Already assigned: {len(known_peptides)}")
-    logger.info(f"  - New (need splitting): {len(novel_peptides)}")
+    logger.info("Peptides in new data: %d", len(all_peptides_in_new))
+    logger.info("  - Already assigned: %d", len(known_peptides))
+    logger.info("  - New (need splitting): %d", len(novel_peptides))
 
     known_rows = new_df.filter(
         pl.col("__sanitised_peptide").is_in(list(known_peptides))
@@ -513,17 +674,17 @@ def cmd_add(args: argparse.Namespace) -> None:
         for name in split_names:
             split_rows[name].append(assigned[name])
         parts = ", ".join(f"{n}={len(assigned[n])}" for n in split_names)
-        logger.info(f"Assigned {len(known_rows)} rows with known peptides: {parts}")
+        logger.info("Assigned %d rows with known peptides: %s", len(known_rows), parts)
 
     if len(novel_rows) > 0:
         new_assignments = _split_novel_rows(
             novel_rows,
             split_rows,
             include_val,
-            args.train_frac,
-            args.test_frac,
-            args.peptide_weight,
-            args.seed,
+            train_frac,
+            effective_test_frac,
+            peptide_weight,
+            seed,
         )
 
     final_new = {
@@ -531,157 +692,31 @@ def cmd_add(args: argparse.Namespace) -> None:
     }
 
     logger.info("Appending to existing parquet files...")
-    existing_test_df = pl.read_parquet(existing_test_path)
+    existing_test_df = pl.read_parquet(existing_test)
 
-    _append_to_parquet(
-        existing_train_path, existing_train_df, final_new["train"], "train"
-    )
-    _append_to_parquet(existing_test_path, existing_test_df, final_new["test"], "test")
+    _append_to_parquet(existing_train, existing_train_df, final_new["train"], "train")
+    _append_to_parquet(existing_test, existing_test_df, final_new["test"], "test")
 
     if include_val:
-        existing_val_df = pl.read_parquet(existing_val_path)
-        _append_to_parquet(existing_val_path, existing_val_df, final_new["val"], "val")
+        assert existing_val is not None
+        existing_val_df = pl.read_parquet(existing_val)
+        _append_to_parquet(existing_val, existing_val_df, final_new["val"], "val")
 
     if any(len(peps) > 0 for peps in new_assignments.values()):
-        save_manifest(new_assignments, manifest_path, append=True)
+        save_manifest(new_assignments, peptides_csv, append=True)
 
     _log_peptide_summary(new_assignments)
     logger.info("Done!")
 
 
 def main() -> None:
-    """Main entry point for the CLI."""
+    """Configure logging and run the Typer CLI."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-
-    parser = argparse.ArgumentParser(
-        description="Split peptide datasets into train/test (and optionally val) with no peptide leakage.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__,
-    )
-
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    create_parser = subparsers.add_parser(
-        "create", help="Create new train/test (and optionally val) splits from scratch"
-    )
-    create_parser.add_argument(
-        "--data",
-        nargs="+",
-        required=True,
-        help="Path(s) to input parquet file(s). Supports glob patterns.",
-    )
-    create_parser.add_argument(
-        "--out-train", required=True, help="Output path for training parquet"
-    )
-    create_parser.add_argument(
-        "--out-test", required=True, help="Output path for test parquet"
-    )
-    create_parser.add_argument(
-        "--out-val",
-        default=None,
-        help="Output path for validation parquet (omit for train/test only)",
-    )
-    create_parser.add_argument(
-        "--peptides-csv", required=True, help="Output path for peptide manifest CSV"
-    )
-    create_parser.add_argument(
-        "--sequence-col",
-        default="sequence",
-        help="Column name containing peptide sequences (default: sequence)",
-    )
-    create_parser.add_argument(
-        "--train-frac",
-        type=float,
-        default=0.8,
-        help="Fraction of data for training (default: 0.8)",
-    )
-    create_parser.add_argument(
-        "--test-frac",
-        type=float,
-        default=0.1,
-        help="Fraction of data for testing (default: 0.1). "
-        "Ignored when --out-val is omitted (uses 1 - train_frac).",
-    )
-    create_parser.add_argument(
-        "--peptide-weight",
-        type=float,
-        default=0.5,
-        help="Weight for peptide count vs row count balancing (default: 0.5)",
-    )
-    create_parser.add_argument(
-        "--seed", type=int, default=42, help="Random seed (default: 42)"
-    )
-    create_parser.set_defaults(func=cmd_create)
-
-    add_parser = subparsers.add_parser(
-        "add", help="Add new data to existing train/test (and optionally val) splits"
-    )
-    add_parser.add_argument(
-        "--data",
-        nargs="+",
-        required=True,
-        help="Path(s) to new input parquet file(s). Supports glob patterns.",
-    )
-    add_parser.add_argument(
-        "--existing-train",
-        required=True,
-        help="Path to existing training parquet (will be updated in place)",
-    )
-    add_parser.add_argument(
-        "--existing-test",
-        required=True,
-        help="Path to existing test parquet (will be updated in place)",
-    )
-    add_parser.add_argument(
-        "--existing-val",
-        default=None,
-        help="Path to existing validation parquet (omit for train/test only)",
-    )
-    add_parser.add_argument(
-        "--peptides-csv",
-        required=True,
-        help="Path to existing peptide manifest CSV (will be appended to)",
-    )
-    add_parser.add_argument(
-        "--sequence-col",
-        default="sequence",
-        help="Column name containing peptide sequences (default: sequence)",
-    )
-    add_parser.add_argument(
-        "--train-frac",
-        type=float,
-        default=0.8,
-        help="Fraction of new peptides for training (default: 0.8)",
-    )
-    add_parser.add_argument(
-        "--test-frac",
-        type=float,
-        default=0.1,
-        help="Fraction of new peptides for testing (default: 0.1). "
-        "Ignored when --existing-val is omitted (uses 1 - train_frac).",
-    )
-    add_parser.add_argument(
-        "--peptide-weight",
-        type=float,
-        default=0.5,
-        help="Weight for peptide count vs row count balancing (default: 0.5)",
-    )
-    add_parser.add_argument(
-        "--seed", type=int, default=42, help="Random seed (default: 42)"
-    )
-    add_parser.set_defaults(func=cmd_add)
-
-    args = parser.parse_args()
-
-    try:
-        args.func(args)
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        sys.exit(1)
+    app()
 
 
 if __name__ == "__main__":
