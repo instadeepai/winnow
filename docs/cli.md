@@ -16,20 +16,17 @@ uv pip install winnow-fdr
 
 ## Quick Start
 
-Get started immediately with the included sample data:
+Use the example HeLa single-shot subset in `examples/example_data/` (`spectra.ipc`, `predictions.csv`) which represents real instrument data and InstaNovo predictions.
 
 ```bash
-# Generate sample data (if not already present)
-make sample-data
-
-# Train a calibrator on the sample data
+# Train a calibrator on the example subset
 make train-sample
 
 # Run prediction with the trained model
 make predict-sample
 ```
 
-**Note:** The sample data is minimal (100 spectra) and intended for testing only. When using the sample data, it's **recommended to use the `make` commands** (e.g., `make predict-sample`) as they include necessary configuration adjustments. Specifically, `make predict-sample` sets `fdr_control.fdr_threshold=1.0` because the sample data contains artificial PSMs with relatively high error rates, and using the default threshold (0.05) would filter out all predictions, resulting in empty output. In addition, we increase the validation fraction for the retention time feature in the calibrator's configuration, because with such a small training dataset, a higher validation fraction ensures that the validation set will contain enough samples for stable training and early stopping. For use with real datasets, use the standard FDR threshold (default 0.05) and default validation fractions, or adjust as appropriate for your application.
+**Note:** For this small dataset, the `make` helpers apply settings suited to a quick local demo (smaller network, no early stopping, capped iterations, higher retention-time validation fraction, and `fdr_control.fdr_threshold=1.0` on predict so the walkthrough does not end with an empty filtered table). On a full experiment, use `winnow train` / `winnow predict` with the usual defaults (e.g. FDR `0.05`) and tune validation fractions and model size for your dataset.
 
 ## Commands
 
@@ -150,7 +147,7 @@ winnow predict calibrator.pretrained_model_name_or_path=models/my_model
 - `fdr_control.fdr_threshold`: Target FDR threshold (e.g. 0.01 for 1%)
 - `output_folder`: Folder path to write output files
 
-By default, `winnow predict` uses the pretrained model `InstaDeepAI/winnow-general-model` from Hugging Face Hub. To use a different model, override the calibrator settings (see [Configuration guide](configuration.md#using-a-custom-model) for details).
+By default, `winnow predict` uses the pretrained model `InstaDeepAI/winnow-general-model` from Hugging Face Hub. To use a different model, override the calibrator settings (see [Configuration guide](configuration.md#prediction-configuration) for details).
 
 ## Configuration system
 
