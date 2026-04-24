@@ -124,11 +124,7 @@ set-gcp-credentials:
 ## Sample data and CLI commands													#
 #################################################################################
 
-.PHONY: sample-data train-sample predict-sample clean clean-all
-
-## Generate sample data files for testing
-sample-data:
-	uv run python scripts/generate_sample_data.py
+.PHONY: train-sample predict-sample clean clean-all
 
 ## Run winnow train with sample data
 train-sample:
@@ -136,8 +132,11 @@ train-sample:
 	dataset.spectrum_path_or_directory=examples/example_data/spectra.ipc \
 	dataset.predictions_path=examples/example_data/predictions.csv \
 	model_output_dir=models/new_model \
-	dataset_output_path=results/calibrated_dataset.csv \
-	calibrator.features.retention_time_feature.train_fraction=0.3
+	dataset_output_path=results/metadata.csv \
+	calibrator.features.retention_time_feature.train_fraction=0.3 \
+	calibrator.hidden_layer_sizes="[32, 16]" \
+	calibrator.early_stopping=false \
+	calibrator.max_iter=100 \
 
 ## Run winnow predict with sample data (uses locally trained model from models/new_model)
 predict-sample:
