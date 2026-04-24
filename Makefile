@@ -149,6 +149,3 @@ predict-sample:
 ## Clean output directories (does not delete sample data)
 clean:
 	rm -rf models/ results/
-
-## Clean outputs and regenerate sample data
-clean-all: clean sample-data
