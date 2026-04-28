@@ -49,7 +49,7 @@ PYTEST = uv run pytest tests --verbose --cov=winnow --cov-report xml:coverage.xm
 # the box. When running inside the winnow-koina image (Triton is bundled and
 # started by entrypoint.koina.sh), override to the in-pod gRPC endpoint, e.g.
 #   make compute_train_features KOINA_SERVER_URL=localhost:8500 KOINA_SSL=false
-# (manifest.koina.yaml sets these overrides for AIChor experiments.)
+# (manifest.yaml sets these overrides via spec.command for AIChor experiments.)
 KOINA_SERVER_URL ?= koina.wilhelmlab.org:443
 KOINA_SSL ?= true
 
