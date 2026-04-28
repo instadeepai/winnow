@@ -38,13 +38,13 @@ calibrator:
 # loaded from the checkpoint; per-key values replace the saved checkpoint for that key
 # (constant vs column mapping, not both for the same key).
 koina:
-  input_constants:
-    collision_energies: 27
-    fragmentation_types: HCD
-  # input_columns: {
-  #   collision_energies: "collision_energy",
-  #   fragmentation_types: "frag_type",
-  # }
+  # input_constants:
+  #   collision_energies: 27
+  #   fragmentation_types: HCD
+  input_columns: {
+    collision_energies: "collision_energy",
+    fragmentation_types: "frag_type",
+  }
 
 fdr_control:
   # FDR settings:

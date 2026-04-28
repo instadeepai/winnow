@@ -235,34 +235,86 @@ train_general_model:
 ## Evaluate general model commands
 #########################################################
 
-.PHONY: evaluate_general_model_biological_validation evaluate_general_model_external_datasets
+.PHONY: evaluate_general_model_annotated_biological_validation evaluate_general_model_raw_biological_validation evaluate_general_model_labelled_external_datasets evaluate_general_model_unlabelled_external_datasets annotate_preds_proteome_hits
 
 BIOLOGICAL_VALIDATION_PROJECTS := gluc helaqc herceptin immuno sbrodae snakevenoms tplantibodies woundfluids
 
-evaluate_general_model_biological_validation:
+# Proteome FASTA paths for ``scripts/annotate_preds_proteome_hits.py`` (leave empty to skip).
+# Outputs live under ``predictions/general_model/<project>_raw/`` or ``..._unlabelled/``.
+PROTEOME_FASTA_raw_gluc := fasta/human.fasta
+PROTEOME_FASTA_raw_helaqc := fasta/human.fasta
+PROTEOME_FASTA_raw_herceptin := fasta/herceptin.fasta
+PROTEOME_FASTA_raw_immuno := fasta/human.fasta
+PROTEOME_FASTA_raw_sbrodae := fasta/Sb_proteome.fasta
+PROTEOME_FASTA_raw_snakevenoms := fasta/uniprot-serpentes-2022.05.09.fasta
+PROTEOME_FASTA_raw_tplantibodies := fasta/nanobody_library.fasta
+PROTEOME_FASTA_raw_woundfluids := fasta/human.fasta
+
+evaluate_general_model_annotated_biological_validation:
 	for project in $(BIOLOGICAL_VALIDATION_PROJECTS); do \
 		uv run winnow predict \
 		dataset.spectrum_path_or_directory=held_out_projects/biological_validation/annotated/dataset-$$project-annotated-0000-0001.parquet \
 		dataset.predictions_path=held_out_projects/biological_validation/annotated_predictions/dataset-$$project-annotated-0000-0001.csv \
 		calibrator.pretrained_model_name_or_path=general_model \
-		output_folder=predictions/general_model/$$project/ \
+		output_folder=predictions/general_model/$${project}_annotated/ \
 		koina.input_constants.collision_energies=27 \
 		koina.input_constants.fragmentation_types=HCD \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence; \
 	done
 
+evaluate_general_model_raw_biological_validation:
+	for project in $(BIOLOGICAL_VALIDATION_PROJECTS); do \
+		uv run winnow predict \
+		dataset.spectrum_path_or_directory=held_out_projects/biological_validation/raw/dataset-$$project-raw-0000-0001.parquet \
+		dataset.predictions_path=held_out_projects/biological_validation/raw_predictions/dataset-$$project-raw-0000-0001.csv \
+		calibrator.pretrained_model_name_or_path=general_model \
+		output_folder=predictions/general_model/$${project}_raw/ \
+		koina.input_constants.collision_energies=27 \
+		koina.input_constants.fragmentation_types=HCD \
+		fdr_control.fdr_threshold=1.0 \
+		fdr_control.confidence_column=calibrated_confidence; \
+	done
+	uv run python scripts/annotate_preds_proteome_hits.py biological_validation_raw \
+		$(foreach p,$(BIOLOGICAL_VALIDATION_PROJECTS),$(if $(strip $(PROTEOME_FASTA_raw_$(p))),--map $(p)=$(PROTEOME_FASTA_raw_$(p)),))
+
 EXTERNAL_DATASETS := PXD009935 PXD014877 PXD023064
 
-evaluate_general_model_external_datasets:
+PROTEOME_FASTA_unlabelled_PXD009935 := fasta/human.fasta
+PROTEOME_FASTA_unlabelled_PXD014877 := fasta/Celegans.fasta
+PROTEOME_FASTA_unlabelled_PXD023064 := fasta/human.fasta
+
+## Run proteome-hit annotation + short-peptide filtering only (uses PROTEOME_FASTA_* above).
+annotate_preds_proteome_hits:
+	uv run python scripts/annotate_preds_proteome_hits.py biological_validation_raw \
+		$(foreach p,$(BIOLOGICAL_VALIDATION_PROJECTS),$(if $(strip $(PROTEOME_FASTA_raw_$(p))),--map $(p)=$(PROTEOME_FASTA_raw_$(p)),))
+	uv run python scripts/annotate_preds_proteome_hits.py unlabelled_external \
+		$(foreach p,$(EXTERNAL_DATASETS),$(if $(strip $(PROTEOME_FASTA_unlabelled_$(p))),--map $(p)=$(PROTEOME_FASTA_unlabelled_$(p)),))
+
+evaluate_general_model_labelled_external_datasets:
 	for project in $(EXTERNAL_DATASETS); do \
 		uv run winnow predict \
 		dataset.spectrum_path_or_directory=held_out_projects/lcfm/$$project/ \
 		dataset.predictions_path=held_out_projects/lcfm/$${project}_predictions/$$project.csv \
 		calibrator.pretrained_model_name_or_path=general_model \
-		output_folder=predictions/general_model/$$project/ \
+		output_folder=predictions/general_model/$${project}_labelled/ \
 		koina.input_columns.collision_energies=collision_energy \
 		koina.input_columns.fragmentation_types=frag_type \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence; \
 	done
+
+evaluate_general_model_unlabelled_external_datasets:
+	for project in $(EXTERNAL_DATASETS); do \
+		uv run winnow predict \
+		dataset.spectrum_path_or_directory=held_out_projects/acfm/$$project/ \
+		dataset.predictions_path=held_out_projects/acfm/$${project}_predictions/$$project.csv \
+		calibrator.pretrained_model_name_or_path=general_model \
+		output_folder=predictions/general_model/$${project}_unlabelled/ \
+		koina.input_columns.collision_energies=collision_energy \
+		koina.input_columns.fragmentation_types=frag_type \
+		fdr_control.fdr_threshold=1.0 \
+		fdr_control.confidence_column=calibrated_confidence; \
+	done
+	uv run python scripts/annotate_preds_proteome_hits.py unlabelled_external \
+		$(foreach p,$(EXTERNAL_DATASETS),$(if $(strip $(PROTEOME_FASTA_unlabelled_$(p))),--map $(p)=$(PROTEOME_FASTA_unlabelled_$(p)),))

@@ -23,6 +23,9 @@ dependencies = [
     "torch>=2.10.0",
     "safetensors>=0.7.0",
     "polars>=1.39.3",
+    "pyahocorasick>=2.1.0",
+    "biopython>=1.87",
+    "matplotlib-venn>=1.1.2",
 ]
 
 [project.urls]
