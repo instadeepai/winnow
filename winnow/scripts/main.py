@@ -638,8 +638,11 @@ def predict_entry_point(
     if koina_cfg is not None:
         koina_const = koina_cfg.get("input_constants")
         koina_col = koina_cfg.get("input_columns")
+        koina_server_url = koina_cfg.get("server_url")
+        koina_ssl = koina_cfg.get("ssl")
     else:
         koina_const, koina_col = None, None
+        koina_server_url, koina_ssl = None, None
     if koina_const is not None or koina_col is not None:
         calibrator.apply_koina_model_input_overrides(
             model_input_constants=(
@@ -652,6 +655,11 @@ def predict_entry_point(
                 if koina_col is not None
                 else None
             ),
+        )
+    if koina_server_url is not None or koina_ssl is not None:
+        calibrator.apply_koina_server_overrides(
+            server_url=koina_server_url,
+            ssl=koina_ssl,
         )
 
     # Load pre-fitted iRT regressors if configured

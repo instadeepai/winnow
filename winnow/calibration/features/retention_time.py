@@ -31,6 +31,8 @@ class RetentionTimeFeature(CalibrationFeatures):
         irt_model_name: str = "Prosit_2019_irt",
         max_peptide_length: int = 30,
         unsupported_residues: Optional[List[str]] = None,
+        koina_server_url: Optional[str] = None,
+        koina_ssl: bool = True,
     ) -> None:
         """Initialize RetentionTimeFeature.
 
@@ -53,6 +55,13 @@ class RetentionTimeFeature(CalibrationFeatures):
             unsupported_residues (List[str]): Residues unsupported by the configured Koina iRT
                 model, in ProForma format. Predictions containing any of these residues are
                 excluded from model input and treated as missing. Defaults to an empty list.
+            koina_server_url (Optional[str]): URL of the Koina inference server
+                (e.g. "localhost:8500" for a self-hosted instance). When ``None``,
+                ``koinapy`` defaults to the public endpoint at
+                ``koina.wilhelmlab.org:443``. Defaults to None.
+            koina_ssl (bool): Whether to use SSL when talking to the Koina server.
+                Set to False for local self-hosted servers (which Triton serves
+                without TLS). Defaults to True.
         """
         self.train_fraction = train_fraction
         self.min_train_points = min_train_points
@@ -63,6 +72,8 @@ class RetentionTimeFeature(CalibrationFeatures):
         )
         self.irt_model_name = irt_model_name
         self.max_peptide_length = max_peptide_length
+        self.koina_server_url = koina_server_url
+        self.koina_ssl = koina_ssl
         self.irt_predictors: Dict[str, LinearRegression] = {}
 
     @property
@@ -237,7 +248,11 @@ class RetentionTimeFeature(CalibrationFeatures):
             [tokens_to_proforma(peptide) for peptide in all_train["prediction"]]
         )
 
-        koina_model = koinapy.Koina(self.irt_model_name)
+        koina_model = koinapy.Koina(
+            self.irt_model_name,
+            server_url=self.koina_server_url or "koina.wilhelmlab.org:443",
+            ssl=self.koina_ssl,
+        )
         irt_predictions = koina_model.predict(inputs)
         all_irt = irt_predictions["irt"].values
 
@@ -309,7 +324,11 @@ class RetentionTimeFeature(CalibrationFeatures):
         )
         inputs.index = valid_irt_input.metadata["spectrum_id"]
 
-        koina_model = koinapy.Koina(self.irt_model_name)
+        koina_model = koinapy.Koina(
+            self.irt_model_name,
+            server_url=self.koina_server_url or "koina.wilhelmlab.org:443",
+            ssl=self.koina_ssl,
+        )
         predictions = koina_model.predict(inputs)
         predictions["spectrum_id"] = predictions.index
 

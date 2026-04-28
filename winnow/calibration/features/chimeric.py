@@ -36,6 +36,8 @@ class ChimericFeatures(CalibrationFeatures):
         unsupported_residues: Optional[List[str]] = None,
         model_input_constants: Optional[Dict[str, Any]] = None,
         model_input_columns: Optional[Dict[str, str]] = None,
+        koina_server_url: Optional[str] = None,
+        koina_ssl: bool = True,
     ) -> None:
         """Initialize ChimericFeatures.
 
@@ -67,6 +69,13 @@ class ChimericFeatures(CalibrationFeatures):
             model_input_columns (Optional[Dict[str, str]]): Mapping of Koina input name to a
                 metadata column name that provides per-row values
                 (e.g. {"collision_energies": "nce_col"}). Defaults to None.
+            koina_server_url (Optional[str]): URL of the Koina inference server
+                (e.g. "localhost:8500" for a self-hosted instance). When ``None``,
+                ``koinapy`` defaults to the public endpoint at
+                ``koina.wilhelmlab.org:443``. Defaults to None.
+            koina_ssl (bool): Whether to use SSL when talking to the Koina server.
+                Set to False for local self-hosted servers (which Triton serves
+                without TLS). Defaults to True.
 
         Raises:
             ValueError: If both or neither tolerance is provided, or if the same key
@@ -85,6 +94,8 @@ class ChimericFeatures(CalibrationFeatures):
         self.max_peptide_length = max_peptide_length
         self.model_input_constants = model_input_constants
         self.model_input_columns = model_input_columns
+        self.koina_server_url = koina_server_url
+        self.koina_ssl = koina_ssl
 
     @property
     def dependencies(self) -> List[FeatureDependency]:
@@ -269,7 +280,11 @@ class ChimericFeatures(CalibrationFeatures):
         )
         inputs.index = valid_chimeric_input.metadata["spectrum_id"]
 
-        model = koinapy.Koina(self.intensity_model_name)
+        model = koinapy.Koina(
+            self.intensity_model_name,
+            server_url=self.koina_server_url or "koina.wilhelmlab.org:443",
+            ssl=self.koina_ssl,
+        )
         inputs = resolve_model_inputs(
             inputs=inputs,
             metadata=valid_chimeric_input.metadata,

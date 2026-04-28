@@ -25,27 +25,46 @@ DOCKER_HOME_DIRECTORY = "/app"
 DOCKER_RUNS_DIRECTORY = "/runs"
 
 DOCKERFILE := Dockerfile
+DOCKERFILE_KOINA := Dockerfile.koina
 
 DOCKER_IMAGE_NAME = winnow
 DOCKER_IMAGE_TAG = $(VERSION)
 DOCKER_IMAGE = $(DOCKER_IMAGE_NAME):$(DOCKER_IMAGE_TAG)
+
+DOCKER_KOINA_IMAGE_NAME = winnow-koina
+DOCKER_KOINA_IMAGE = $(DOCKER_KOINA_IMAGE_NAME):$(DOCKER_IMAGE_TAG)
 
 DOCKER_RUN_FLAGS = --rm --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=67108864 --shm-size='1gb'
 DOCKER_RUN_FLAGS_VOLUME_MOUNT_HOME = $(DOCKER_RUN_FLAGS) --volume $(PWD):$(DOCKER_HOME_DIRECTORY)
 DOCKER_RUN_FLAGS_VOLUME_MOUNT_RUNS = $(DOCKER_RUN_FLAGS) --volume $(PWD)/runs:$(DOCKER_RUNS_DIRECTORY)
 DOCKER_RUN = docker run $(DOCKER_RUN_FLAGS) $(DOCKER_IMAGE_NAME)
 
+# Koina/Triton image needs a larger /dev/shm and exposes Triton ports for local poking.
+DOCKER_RUN_FLAGS_KOINA = --rm --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=67108864 --shm-size='8gb' -p 8500-8502:8500-8502
+
 PYTEST = uv run pytest tests --verbose --cov=winnow --cov-report xml:coverage.xml --cov-report term-missing --junitxml=pytest.xml --cov-fail-under=0
+
+# --- Koina inference server overrides ---
+# Defaults target the public Koina server so that local invocations work out of
+# the box. When running inside the winnow-koina image (Triton is bundled and
+# started by entrypoint.koina.sh), override to the in-pod gRPC endpoint, e.g.
+#   make compute_train_features KOINA_SERVER_URL=localhost:8500 KOINA_SSL=false
+# (manifest.koina.yaml sets these overrides for AIChor experiments.)
+KOINA_SERVER_URL ?= koina.wilhelmlab.org:443
+KOINA_SSL ?= true
+
+KOINA_OVERRIDES = koina.server_url=$(KOINA_SERVER_URL) \
+                  koina.ssl=$(KOINA_SSL)
 
 #################################################################################
 ## Docker build commands																#
 #################################################################################
 
-.PHONY: build build-arm
+.PHONY: build build-arm build-koina bash-koina
 
 define docker_buildx_template
 	docker buildx build --platform=$(1) --progress=plain . \
-		-f $(DOCKERFILE) -t $(2) --build-arg GID=$(shell id -g) \
+		-f $(2) -t $(3) --build-arg GID=$(shell id -g) \
 		--build-arg UID=$(shell id -u)  --build-arg LAST_COMMIT=$(LAST_COMMIT) \
 		--build-arg VERSION=$(VERSION) --build-arg HOME_DIRECTORY=$(DOCKER_HOME_DIRECTORY) \
 		--build-arg RUNS_DIRECTORY=$(DOCKER_RUNS_DIRECTORY)
@@ -53,11 +72,19 @@ endef
 
 ## Build Docker image for winnow on AMD64
 build:
-	$(call docker_buildx_template,linux/amd64,$(DOCKER_IMAGE))
+	$(call docker_buildx_template,linux/amd64,$(DOCKERFILE),$(DOCKER_IMAGE))
 
 ## Build Docker image for winnow on ARM64
 build-arm:
-	$(call docker_buildx_template,linux/arm64,$(DOCKER_IMAGE))
+	$(call docker_buildx_template,linux/arm64,$(DOCKERFILE),$(DOCKER_IMAGE))
+
+## Build the Koina-bundled Docker image (Triton + winnow) on AMD64
+build-koina:
+	$(call docker_buildx_template,linux/amd64,$(DOCKERFILE_KOINA),$(DOCKER_KOINA_IMAGE))
+
+## Open a bash shell in the Koina-bundled Docker image (Triton starts in the background)
+bash-koina:
+	docker run -it $(DOCKER_RUN_FLAGS_KOINA) $(DOCKER_KOINA_IMAGE) /bin/bash
 
 #################################################################################
 ## Install packages commands													#
@@ -155,7 +182,8 @@ train-sample:
 	irt_regressor_output_path=null \
 	training_history_path=null \
 	dataset_output_path=results/calibrated_dataset.csv \
-	calibrator.features.retention_time_feature.train_fraction=0.3
+	calibrator.features.retention_time_feature.train_fraction=0.3 \
+	$(KOINA_OVERRIDES)
 
 ## Run winnow predict with sample data (uses locally trained model from models/new_model)
 predict-sample:
@@ -163,7 +191,8 @@ predict-sample:
 	calibrator.pretrained_model_name_or_path=models/new_model \
 	fdr_control.fdr_threshold=1.0 \
 	dataset.spectrum_path_or_directory=examples/example_data/spectra.ipc \
-	dataset.predictions_path=examples/example_data/predictions.csv
+	dataset.predictions_path=examples/example_data/predictions.csv \
+	$(KOINA_OVERRIDES)
 
 ## Clean output directories (does not delete sample data)
 clean:
@@ -201,7 +230,8 @@ compute_train_features: copy_down_train_dataset
 		uv run winnow compute-features \
 		dataset.spectrum_path_or_directory=data/train/$$project/ \
 		dataset.predictions_path=data/train_predictions/$$project.csv \
-		training_matrix_output_path=train_feature_matrices/$$project.parquet; \
+		training_matrix_output_path=train_feature_matrices/$$project.parquet \
+		$(KOINA_OVERRIDES); \
 		aws s3 cp train_feature_matrices/$$project.parquet s3://winnow-g88rh/revisions/new_datasets/train_feature_matrices/$$project.parquet; \
 	done
 
@@ -228,7 +258,8 @@ train_general_model:
 	calibrator.batch_size=4096 \
 	calibrator.n_iter_no_change=10 \
 	calibrator.tol=1.0e-4 \
-	calibrator.seed=42
+	calibrator.seed=42 \
+	$(KOINA_OVERRIDES)
 
 
 #########################################################
@@ -260,7 +291,8 @@ evaluate_general_model_annotated_biological_validation:
 		koina.input_constants.collision_energies=27 \
 		koina.input_constants.fragmentation_types=HCD \
 		fdr_control.fdr_threshold=1.0 \
-		fdr_control.confidence_column=calibrated_confidence; \
+		fdr_control.confidence_column=calibrated_confidence \
+		$(KOINA_OVERRIDES); \
 	done
 
 evaluate_general_model_raw_biological_validation:
@@ -273,7 +305,8 @@ evaluate_general_model_raw_biological_validation:
 		koina.input_constants.collision_energies=27 \
 		koina.input_constants.fragmentation_types=HCD \
 		fdr_control.fdr_threshold=1.0 \
-		fdr_control.confidence_column=calibrated_confidence; \
+		fdr_control.confidence_column=calibrated_confidence \
+		$(KOINA_OVERRIDES); \
 	done
 	uv run python scripts/annotate_preds_proteome_hits.py biological_validation_raw \
 		$(foreach p,$(BIOLOGICAL_VALIDATION_PROJECTS),$(if $(strip $(PROTEOME_FASTA_raw_$(p))),--map $(p)=$(PROTEOME_FASTA_raw_$(p)),))
@@ -301,7 +334,8 @@ evaluate_general_model_labelled_external_datasets:
 		koina.input_columns.collision_energies=collision_energy \
 		koina.input_columns.fragmentation_types=frag_type \
 		fdr_control.fdr_threshold=1.0 \
-		fdr_control.confidence_column=calibrated_confidence; \
+		fdr_control.confidence_column=calibrated_confidence \
+		$(KOINA_OVERRIDES); \
 	done
 
 evaluate_general_model_unlabelled_external_datasets:
@@ -314,7 +348,8 @@ evaluate_general_model_unlabelled_external_datasets:
 		koina.input_columns.collision_energies=collision_energy \
 		koina.input_columns.fragmentation_types=frag_type \
 		fdr_control.fdr_threshold=1.0 \
-		fdr_control.confidence_column=calibrated_confidence; \
+		fdr_control.confidence_column=calibrated_confidence \
+		$(KOINA_OVERRIDES); \
 	done
 	uv run python scripts/annotate_preds_proteome_hits.py unlabelled_external \
 		$(foreach p,$(EXTERNAL_DATASETS),$(if $(strip $(PROTEOME_FASTA_unlabelled_$(p))),--map $(p)=$(PROTEOME_FASTA_unlabelled_$(p)),))

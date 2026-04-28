@@ -38,6 +38,11 @@ calibrator:
 # loaded from the checkpoint; per-key values replace the saved checkpoint for that key
 # (constant vs column mapping, not both for the same key).
 koina:
+  # Inference server. Override to e.g. `localhost:8500` (with `ssl: false`) when
+  # running against a self-hosted Koina/Triton instance (see Dockerfile.koina /
+  # manifest.koina.yaml).
+  server_url: koina.wilhelmlab.org:443
+  ssl: true
   # input_constants:
   #   collision_energies: 27
   #   fragmentation_types: HCD

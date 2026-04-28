@@ -40,6 +40,8 @@ calibrator:
       unsupported_residues: ${koina.constraints.unsupported_residues}  # Residues unsupported by the configured Koina intensity model.
       model_input_constants: ${koina.input_constants}  # Shared Koina model inputs (e.g. collision_energies, fragmentation_types).
       # model_input_columns: ${koina.input_columns}  # Uncomment to use per-row metadata columns instead.
+      koina_server_url: ${koina.server_url}  # Koina inference server URL.
+      koina_ssl: ${koina.ssl}                # Whether to use SSL when talking to the Koina server.
 
     retention_time_feature:
       _target_: winnow.calibration.calibration_features.RetentionTimeFeature
@@ -50,6 +52,8 @@ calibrator:
       irt_model_name: ${koina.irt_model}  # The name of the Koina iRT model to use.
       max_peptide_length: ${koina.constraints.max_peptide_length}      # Maximum peptide length accepted by the Koina iRT model.
       unsupported_residues: ${koina.constraints.unsupported_residues}  # Residues unsupported by the configured Koina iRT model.
+      koina_server_url: ${koina.server_url}  # Koina inference server URL.
+      koina_ssl: ${koina.ssl}                # Whether to use SSL when talking to the Koina server.
 
     # chimeric_features:
     #   _target_: winnow.calibration.calibration_features.ChimericFeatures
@@ -62,6 +66,8 @@ calibrator:
     #   unsupported_residues: ${koina.constraints.unsupported_residues}  # Residues unsupported by the configured Koina intensity model.
     #   model_input_constants: ${koina.input_constants}  # Shared Koina model inputs (e.g. collision_energies, fragmentation_types).
     #   # model_input_columns: ${koina.input_columns}  # Uncomment to use per-row metadata columns instead.
+    #   koina_server_url: ${koina.server_url}  # Koina inference server URL.
+    #   koina_ssl: ${koina.ssl}                # Whether to use SSL when talking to the Koina server.
 
     beam_features:
       _target_: winnow.calibration.calibration_features.BeamFeatures
@@ -75,6 +81,12 @@ calibrator:
 
 # Koina model configuration — shared settings for all intensity- and iRT-based features.
 koina:
+  # Inference server. Default is the public Koina endpoint; override to e.g.
+  # `localhost:8500` (with `ssl: false`) when running against a self-hosted
+  # Koina/Triton instance (see Dockerfile.koina / manifest.koina.yaml).
+  server_url: koina.wilhelmlab.org:443
+  ssl: true
+
   # Model names
   intensity_model: Prosit_2025_intensity_22PTM
   irt_model: Prosit_2025_irt_22PTM

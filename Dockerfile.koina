@@ -1,0 +1,90 @@
+FROM alpine/curl AS vscode-installer
+
+RUN mkdir /aichor
+RUN curl -Lk 'https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-x64' --output /aichor/vscode_cli.tar.gz
+RUN tar -xf /aichor/vscode_cli.tar.gz -C /aichor
+
+# Koina + winnow runtime. The upstream image bakes Triton (nvcr.io/nvidia/tritonserver:23.05-py3)
+# together with all Koina model definitions; weights are downloaded from Zenodo on first start.
+FROM ghcr.io/wilhelm-lab/koina:latest
+
+ARG USER=app
+ARG UID=1001
+ARG GID=1000
+ARG HOME_DIRECTORY=/app
+ARG RUNS_DIRECTORY=/runs
+ARG VENV_DIRECTORY=/app/.venv
+
+ARG VERSION=latest
+ARG LAST_COMMIT=latest
+ENV VERSION=$VERSION
+ENV LAST_COMMIT=$LAST_COMMIT
+
+ENV LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+ENV TERM=xterm-256color
+
+WORKDIR $HOME_DIRECTORY
+
+# Install dependencies for Google Cloud CLI, AWS CLI, Make, and uv.
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        apt-transport-https \
+        ca-certificates \
+        gnupg \
+        curl \
+        make
+
+# Install Google Cloud CLI
+RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && \
+    curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && \
+    apt-get update -y && \
+    apt-get install google-cloud-cli -y
+RUN apt-get clean && \
+    rm -rf /var/lib/{apt,dpkg,cache,log}
+
+# Install uv (the upstream Triton image does not ship it).
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    mv /root/.local/bin/uv /usr/local/bin/uv && \
+    mv /root/.local/bin/uvx /usr/local/bin/uvx
+
+# AWS CLI v1 from PyPI installed under a shared path so non-root users can run it.
+RUN mkdir -p /opt/uv-tools && chmod 755 /opt/uv-tools
+ENV UV_TOOL_DIR=/opt/uv-tools
+ENV UV_TOOL_BIN_DIR=/usr/local/bin
+RUN uv tool install awscli && aws --version
+
+# Create group and user
+RUN groupadd --force --gid $GID $USER && \
+        useradd -M --home $HOME_DIRECTORY --base-dir $HOME_DIRECTORY \
+        --uid $UID --gid $GID --shell "/bin/bash" $USER
+
+# Create runs directory
+RUN mkdir -p $RUNS_DIRECTORY
+RUN mkdir -p $VENV_DIRECTORY
+
+# Copy files into HOME_DIRECTORY
+COPY . $HOME_DIRECTORY
+COPY entrypoint.koina.sh /usr/local/bin/entrypoint.koina.sh
+RUN chmod +x /usr/local/bin/entrypoint.koina.sh
+
+# Makes HOME_DIRECTORY and RUNS_DIRECTORY files owned by USER.
+# /models is owned by root in the upstream image; Triton reads it at startup so we leave it alone.
+RUN chown -R $USER:$GID $HOME_DIRECTORY
+RUN chown -R $USER:$GID $RUNS_DIRECTORY
+RUN chown -R $USER:$GID $VENV_DIRECTORY
+
+# Default user
+USER $USER
+
+# Install a private Python 3.12 (matches the standard Dockerfile) and the winnow venv.
+ENV UV_PROJECT_ENVIRONMENT=$VENV_DIRECTORY
+ENV UV_PYTHON=3.12
+RUN uv python install 3.12 && uv sync --frozen --no-cache --dev
+
+# Set path to virtual environment
+ENV PATH="$VENV_DIRECTORY/bin:$PATH"
+
+COPY --from=vscode-installer /aichor /aichor
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.koina.sh"]
