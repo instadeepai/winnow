@@ -856,6 +856,149 @@ class TestInstaNovoDatasetLoader:
         with pytest.raises(ValueError, match="predictions_path is required"):
             loader.load(data_path=tmp_path)
 
+    # ------------------------------------------------------------------
+    # Glob support for data_path
+    # ------------------------------------------------------------------
+
+    @pytest.fixture()
+    def glob_loader(self, residue_masses, residue_remapping):
+        """InstaNovoDatasetLoader with add_index_cols=True for glob tests."""
+        return InstaNovoDatasetLoader(
+            residue_masses=residue_masses,
+            residue_remapping=residue_remapping,
+            add_index_cols=True,
+        )
+
+    @pytest.fixture()
+    def two_parquet_files(self, tmp_path):
+        """Two parquet files with overlapping scan numbers."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        df1 = pl.DataFrame(
+            {
+                "scan_number": [10, 12],
+                "mz_array": [[100.0], [200.0]],
+                "intensity_array": [[1.0], [2.0]],
+            }
+        )
+        df2 = pl.DataFrame(
+            {
+                "scan_number": [2, 3],
+                "mz_array": [[300.0], [400.0]],
+                "intensity_array": [[3.0], [4.0]],
+            }
+        )
+        df1.write_parquet(data_dir / "run_a.parquet")
+        df2.write_parquet(data_dir / "run_b.parquet")
+        return data_dir
+
+    @pytest.fixture()
+    def two_ipc_files(self, tmp_path):
+        """Two IPC files with overlapping scan numbers."""
+        data_dir = tmp_path / "ipc_data"
+        data_dir.mkdir()
+        df1 = pl.DataFrame(
+            {
+                "scan_number": [10, 12],
+                "mz_array": [[100.0], [200.0]],
+                "intensity_array": [[1.0], [2.0]],
+            }
+        )
+        df2 = pl.DataFrame(
+            {
+                "scan_number": [2, 3],
+                "mz_array": [[300.0], [400.0]],
+                "intensity_array": [[3.0], [4.0]],
+            }
+        )
+        df1.write_ipc(data_dir / "run_a.ipc")
+        df2.write_ipc(data_dir / "run_b.ipc")
+        return data_dir
+
+    def test_load_spectrum_data_glob_parquet_concatenates_files(
+        self, glob_loader, two_parquet_files
+    ):
+        """Glob pattern matching multiple parquet files concatenates them."""
+        glob_pattern = str(two_parquet_files / "*.parquet")
+        result, has_labels = glob_loader._load_spectrum_data(glob_pattern)
+        assert len(result) == 4
+        assert "spectrum_id" in result.columns
+        assert "experiment_name" in result.columns
+        assert has_labels is False
+
+    def test_load_spectrum_data_glob_spectrum_id_unique_across_files(
+        self, glob_loader, two_parquet_files
+    ):
+        """Overlapping scan_numbers across files produce unique spectrum_ids."""
+        glob_pattern = str(two_parquet_files / "*.parquet")
+        result, has_labels = glob_loader._load_spectrum_data(glob_pattern)
+        ids = result["spectrum_id"].to_list()
+        assert len(ids) == len(set(ids))
+        assert set(ids) == {"run_a:10", "run_a:12", "run_b:2", "run_b:3"}
+        assert has_labels is False
+
+    def test_load_spectrum_data_glob_ipc(self, glob_loader, two_ipc_files):
+        """Glob works with IPC files and produces unique spectrum_ids."""
+        glob_pattern = str(two_ipc_files / "*.ipc")
+        result, has_labels = glob_loader._load_spectrum_data(glob_pattern)
+        assert len(result) == 4
+        ids = result["spectrum_id"].to_list()
+        assert len(ids) == len(set(ids))
+        assert set(ids) == {"run_a:10", "run_a:12", "run_b:2", "run_b:3"}
+        assert has_labels is False
+
+    def test_load_spectrum_data_glob_no_matches_raises(self, glob_loader, tmp_path):
+        """Glob matching no files raises FileNotFoundError."""
+        glob_pattern = str(tmp_path / "nonexistent" / "*.parquet")
+        with pytest.raises(FileNotFoundError):
+            glob_loader._load_spectrum_data(glob_pattern)
+
+    def test_load_spectrum_data_glob_single_match(self, glob_loader, tmp_path):
+        """Glob matching a single file works like a direct path."""
+        data_dir = tmp_path / "single"
+        data_dir.mkdir()
+        df = pl.DataFrame(
+            {
+                "scan_number": [0, 1],
+                "mz_array": [[100.0], [200.0]],
+                "intensity_array": [[1.0], [2.0]],
+            }
+        )
+        df.write_parquet(data_dir / "only_file.parquet")
+        glob_pattern = str(data_dir / "*.parquet")
+        result, _ = glob_loader._load_spectrum_data(glob_pattern)
+        assert len(result) == 2
+        ids = result["spectrum_id"].to_list()
+        assert all(sid.startswith("only_file:") for sid in ids)
+
+    def test_load_spectrum_data_glob_has_labels_when_any_file_has_sequence(
+        self, glob_loader, tmp_path
+    ):
+        """has_labels is True if any matched file contains a sequence column."""
+        data_dir = tmp_path / "mixed_labels"
+        data_dir.mkdir()
+        df_with_seq1 = pl.DataFrame(
+            {
+                "scan_number": [0],
+                "sequence": ["AC"],
+                "mz_array": [[100.0]],
+                "intensity_array": [[1.0]],
+            }
+        )
+        df_with_seq2 = pl.DataFrame(
+            {
+                "scan_number": [0],
+                "sequence": ["AG"],
+                "mz_array": [[200.0]],
+                "intensity_array": [[2.0]],
+            }
+        )
+        df_with_seq1.write_parquet(data_dir / "has_seq1.parquet")
+        df_with_seq2.write_parquet(data_dir / "has_seq2.parquet")
+        glob_pattern = str(data_dir / "*.parquet")
+        _, has_labels = glob_loader._load_spectrum_data(glob_pattern)
+        assert has_labels is True
+
 
 # ---------------------------------------------------------------------------
 # MZTabDatasetLoader
