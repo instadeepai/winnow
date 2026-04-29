@@ -69,10 +69,14 @@ COPY entrypoint.koina.sh /usr/local/bin/entrypoint.koina.sh
 RUN chmod +x /usr/local/bin/entrypoint.koina.sh
 
 # Makes HOME_DIRECTORY and RUNS_DIRECTORY files owned by USER.
-# /models is owned by root in the upstream image; Triton reads it at startup so we leave it alone.
 RUN chown -R $USER:$GID $HOME_DIRECTORY
 RUN chown -R $USER:$GID $RUNS_DIRECTORY
 RUN chown -R $USER:$GID $VENV_DIRECTORY
+
+# /models is owned by root in the upstream Koina image, but Triton's start.py
+# wrapper writes per-model symlinks under /models/repo/ at startup. Hand the
+# whole tree to the non-root USER so it can do that.
+RUN chown -R $USER:$GID /models
 
 # Default user
 USER $USER

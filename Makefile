@@ -87,6 +87,79 @@ bash-koina:
 	docker run -it $(DOCKER_RUN_FLAGS_KOINA) $(DOCKER_KOINA_IMAGE) /bin/bash
 
 #################################################################################
+## In-pod Triton/Koina control (interactive use only)							#
+#################################################################################
+# When AIChor's vscode debug is enabled the container's ENTRYPOINT (which would
+# normally start Triton in the background) is replaced by the vscode tunnel, so
+# the in-pod Koina server is never brought up. Run `make koina-up` once at the
+# start of a debug session before any winnow target that talks to Koina.
+
+.PHONY: koina-up koina-down koina-status
+
+KOINA_PID_FILE := /tmp/koina.pid
+KOINA_LOG_FILE := /tmp/koina.log
+KOINA_HEALTH_URL := http://localhost:8501/v2/health/ready
+KOINA_READY_TIMEOUT_SECS ?= 1800
+
+## Start Triton/Koina in the background (no-op if already healthy)
+koina-up:
+	@if curl -fsS $(KOINA_HEALTH_URL) >/dev/null 2>&1; then \
+		echo "[koina-up] Koina already healthy at $(KOINA_HEALTH_URL)"; \
+		exit 0; \
+	fi
+	@if [ ! -x /models/start.py ]; then \
+		echo "[koina-up] /models/start.py not found - is this the winnow-koina image?"; \
+		exit 1; \
+	fi
+	@echo "[koina-up] starting Triton/Koina (logs: $(KOINA_LOG_FILE))..."
+	@nohup /models/start.py >$(KOINA_LOG_FILE) 2>&1 & echo $$! > $(KOINA_PID_FILE)
+	@echo "[koina-up] waiting for $(KOINA_HEALTH_URL) (timeout=$(KOINA_READY_TIMEOUT_SECS)s)..."
+	@DEADLINE=$$(( $$(date +%s) + $(KOINA_READY_TIMEOUT_SECS) )); \
+	until curl -fsS $(KOINA_HEALTH_URL) >/dev/null 2>&1; do \
+		KPID=$$(cat $(KOINA_PID_FILE)); \
+		if ! kill -0 $$KPID 2>/dev/null; then \
+			echo "[koina-up] Triton exited before becoming ready (last 40 lines of log):"; \
+			tail -n 40 $(KOINA_LOG_FILE) >&2 || true; \
+			exit 1; \
+		fi; \
+		if [ $$(date +%s) -gt $$DEADLINE ]; then \
+			echo "[koina-up] timeout after $(KOINA_READY_TIMEOUT_SECS)s waiting for Koina readiness" >&2; \
+			exit 1; \
+		fi; \
+		sleep 5; \
+	done
+	@echo "[koina-up] Koina is ready (pid=$$(cat $(KOINA_PID_FILE)))"
+
+## Stop the background Triton/Koina process started by `make koina-up`
+koina-down:
+	@if [ ! -f $(KOINA_PID_FILE) ]; then \
+		echo "[koina-down] no PID file at $(KOINA_PID_FILE); nothing to stop"; \
+		exit 0; \
+	fi
+	@KPID=$$(cat $(KOINA_PID_FILE)); \
+	if kill -0 $$KPID 2>/dev/null; then \
+		echo "[koina-down] stopping Triton (pid $$KPID)..."; \
+		kill $$KPID; \
+		while kill -0 $$KPID 2>/dev/null; do sleep 1; done; \
+		echo "[koina-down] stopped"; \
+	else \
+		echo "[koina-down] pid $$KPID is not running"; \
+	fi
+	@rm -f $(KOINA_PID_FILE)
+
+## Print Koina readiness state and last log lines
+koina-status:
+	@if curl -fsS $(KOINA_HEALTH_URL) >/dev/null 2>&1; then \
+		echo "[koina-status] healthy at $(KOINA_HEALTH_URL)"; \
+	else \
+		echo "[koina-status] not ready at $(KOINA_HEALTH_URL)"; \
+	fi
+	@if [ -f $(KOINA_LOG_FILE) ]; then \
+		echo "--- last 20 log lines ($(KOINA_LOG_FILE)) ---"; \
+		tail -n 20 $(KOINA_LOG_FILE); \
+	fi
+
+#################################################################################
 ## Install packages commands													#
 #################################################################################
 
