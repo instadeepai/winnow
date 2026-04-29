@@ -25,6 +25,21 @@ ENV TERM=xterm-256color
 
 WORKDIR $HOME_DIRECTORY
 
+# Re-install the Python deps that Koina's Triton-backend models import (numpy,
+# pandas, pyteomics, ms2pip, psm-utils, rdkit, requests). The upstream Koina
+# image installs these into the system Python that Triton's Python backend
+# uses, but the published `:latest` image periodically loses them when its base
+# tritonserver image is bumped. Installing them here (into the same system
+# Python via /usr/bin/pip) guarantees Triton's Python-backend models can load.
+RUN pip install --no-cache-dir \
+        requests \
+        numpy \
+        pandas \
+        pyteomics==4.6.2 \
+        ms2pip==3.13 \
+        psm-utils \
+        rdkit==2024.3.5
+
 # Install dependencies for Google Cloud CLI, AWS CLI, Make, and uv.
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
@@ -54,10 +69,12 @@ ENV UV_TOOL_DIR=/opt/uv-tools
 ENV UV_TOOL_BIN_DIR=/usr/local/bin
 RUN uv tool install awscli && aws --version
 
-# Create group and user
-RUN groupadd --force --gid $GID $USER && \
+# Create group and user. We use --non-unique because the upstream tritonserver
+# base image already occupies UID/GID 1000 (the host UID most contributors run
+# with), which would otherwise make `useradd` fail with "UID is not unique".
+RUN groupadd --force --gid $GID --non-unique $USER && \
         useradd -M --home $HOME_DIRECTORY --base-dir $HOME_DIRECTORY \
-        --uid $UID --gid $GID --shell "/bin/bash" $USER
+        --uid $UID --gid $GID --shell "/bin/bash" --non-unique $USER
 
 # Create runs directory
 RUN mkdir -p $RUNS_DIRECTORY
@@ -84,6 +101,12 @@ RUN chown -R $USER:$GID /models
 # Prosit_2025_irt_22PTM (plus their _core variants pulled in as dependencies).
 # Override at runtime with `-e MODEL_PATTERN=...` to load a different set.
 ENV MODEL_PATTERN="*22PTM*"
+
+# The base tritonserver image sets HOME=/home/triton-server for the pre-existing
+# triton-server user. Docker's USER directive does not update HOME, so without
+# this override `uv` (and any other tool that reads $HOME) tries to write its
+# cache under /home/triton-server which our $USER cannot access.
+ENV HOME=$HOME_DIRECTORY
 
 # Default user
 USER $USER
