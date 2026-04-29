@@ -78,6 +78,13 @@ RUN chown -R $USER:$GID $VENV_DIRECTORY
 # whole tree to the non-root USER so it can do that.
 RUN chown -R $USER:$GID /models
 
+# Limit which Koina models Triton loads. Without this, /models/start.py symlinks
+# every available model (~50+) which OOMs on smaller GPUs (e.g. H100 MIG slices).
+# Pattern is fnmatch-style; ``*22PTM*`` matches Prosit_2025_intensity_22PTM and
+# Prosit_2025_irt_22PTM (plus their _core variants pulled in as dependencies).
+# Override at runtime with `-e MODEL_PATTERN=...` to load a different set.
+ENV MODEL_PATTERN="*22PTM*"
+
 # Default user
 USER $USER
 

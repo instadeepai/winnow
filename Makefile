@@ -118,8 +118,8 @@ koina-up:
 	until curl -fsS $(KOINA_HEALTH_URL) >/dev/null 2>&1; do \
 		KPID=$$(cat $(KOINA_PID_FILE)); \
 		if ! kill -0 $$KPID 2>/dev/null; then \
-			echo "[koina-up] Triton exited before becoming ready (last 40 lines of log):"; \
-			tail -n 40 $(KOINA_LOG_FILE) >&2 || true; \
+			echo "[koina-up] Triton exited before becoming ready (last 200 lines of log):"; \
+			tail -n 200 $(KOINA_LOG_FILE) >&2 || true; \
 			exit 1; \
 		fi; \
 		if [ $$(date +%s) -gt $$DEADLINE ]; then \
