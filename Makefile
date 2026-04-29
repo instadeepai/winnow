@@ -112,7 +112,10 @@ koina-up:
 		exit 1; \
 	fi
 	@echo "[koina-up] starting Triton/Koina (logs: $(KOINA_LOG_FILE))..."
-	@nohup /models/start.py >$(KOINA_LOG_FILE) 2>&1 & echo $$! > $(KOINA_PID_FILE)
+	@# Triton's Python backend stub doesn't pick up /usr/local/lib/python3.10/dist-packages
+	@# from its computed sys.path; force it via PYTHONPATH so numpy / pandas / etc. import.
+	@PYTHONPATH=/usr/local/lib/python3.10/dist-packages$${PYTHONPATH:+:$$PYTHONPATH} \
+		nohup /models/start.py >$(KOINA_LOG_FILE) 2>&1 & echo $$! > $(KOINA_PID_FILE)
 	@echo "[koina-up] waiting for $(KOINA_HEALTH_URL) (timeout=$(KOINA_READY_TIMEOUT_SECS)s)..."
 	@DEADLINE=$$(( $$(date +%s) + $(KOINA_READY_TIMEOUT_SECS) )); \
 	until curl -fsS $(KOINA_HEALTH_URL) >/dev/null 2>&1; do \
