@@ -1,8 +1,6 @@
 # --- MZTab data loading configuration ---
 _target_: winnow.datasets.data_loaders.MZTabDatasetLoader
 
-residue_masses: ${residue_masses}
-
 # Whether to load beam predictions. Set to false if you do not have beam predictions or if you only
 # need metadata features (e.g., MassErrorFeature, FragmentMatchFeatures, RetentionTimeFeature).
 # Defaults to true.
@@ -14,6 +12,15 @@ load_beams: true
 # contain a spectrum_id column.
 add_index_cols: true
 
+# MZTab headers keyed by logical names (see loader ``column_mapping`` defaults).
+# Spectrum files may include optional ``sequence`` = ground-truth peptide for evaluation (distinct from Casanovo MZTab ``sequence``).
+column_mapping:
+  predictions: "opt_ms_run[1]_proforma"
+  log_probability: "search_engine_score[1]"
+  token_scores: "opt_ms_run[1]_aa_scores"
+  unmodified_prediction: "sequence"
+
+residue_masses: ${residue_masses}
 residue_remapping:  # Used to map Casanovo-specific notations to UNIMOD tokens.
   "M+15.995": "M[UNIMOD:35]"  # Oxidation
   "Q+0.984": "Q[UNIMOD:7]"  # Deamidation
@@ -27,6 +34,8 @@ residue_remapping:  # Used to map Casanovo-specific notations to UNIMOD tokens.
   "[Acetyl]": "[UNIMOD:1]"  # Acetylation
   "[Carbamyl]": "[UNIMOD:5]"  # Carbamylation
   "[Ammonia-loss]": "[UNIMOD:385]"  # Ammonia loss
-  "+42.011": "[UNIMOD:1]"  # Acetylation
-  "+43.006": "[UNIMOD:5]"  # Carbamylation
-  "-17.027": "[UNIMOD:385]"  # Ammonia loss
+  "[+42.011]": "[UNIMOD:1]"  # Acetylation
+  "[+43.006]": "[UNIMOD:5]"  # Carbamylation
+  "[-17.027]": "[UNIMOD:385]"  # Ammonia loss
+  "[+25.980265]": "(+25.98)" # Carbamylation & NH3 loss
+  "[+43.006-17.027]": "(+25.98)" # Carbamylation & NH3 loss

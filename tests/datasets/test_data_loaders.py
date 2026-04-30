@@ -14,6 +14,7 @@ from winnow.datasets.data_loaders import (
     InstaNovoDatasetLoader,
     MZTabDatasetLoader,
     PointNovoDatasetLoader,
+    PrimeNovoDatasetLoader,
     WinnowDatasetLoader,
 )
 
@@ -1413,6 +1414,7 @@ class TestMZTabDatasetLoader:
             {
                 "spectra_ref": ["ms_run[1]:index=42", "ms_run[1]:index=7"],
                 "sequence": ["PEPTIDE", "ACGM"],
+                "opt_ms_run[1]_proforma": ["PEPTIDE", "ACGM"],
                 "search_engine_score[1]": [0.9, 0.7],
             }
         )
@@ -1424,6 +1426,7 @@ class TestMZTabDatasetLoader:
             {
                 "spectra_ref": ["ms_run[1]:index=0"],
                 "sequence": ["PEP"],
+                "opt_ms_run[1]_proforma": ["PEP"],
                 "search_engine_score[1]": [0.95],
                 "opt_ms_run[1]_aa_scores": ["-0.1,-0.2,-0.3"],
             }
@@ -1440,11 +1443,79 @@ class TestMZTabDatasetLoader:
             {
                 "spectra_ref": ["ms_run[1]:index=0"],
                 "sequence": ["PEPTLDE"],
+                "opt_ms_run[1]_proforma": ["PEPTLDE"],
                 "search_engine_score[1]": [0.9],
             }
         )
         result = loader._process_predictions(df, ["index"])
         assert "L" not in result["prediction_untokenised"][0]
+        assert result["unmodified_prediction"][0] == "PEPTLDE"
+
+    def test_process_predictions_respects_column_mapping_proforma_sequence(
+        self, loader
+    ):
+        """Default predictions column opt_ms_run[1]_proforma vs stripped sequence."""
+        df = pl.DataFrame(
+            {
+                "spectra_ref": ["ms_run[1]:index=0"],
+                "sequence": ["CGHTNNLRPK"],
+                "opt_ms_run[1]_proforma": ["C[UNIMOD:4]GHTNNLRPK"],
+                "search_engine_score[1]": [0.9],
+            }
+        )
+        result = loader._process_predictions(df, ["index"])
+        assert result["prediction_untokenised"][0] == "C[UNIMOD:4]GHTNNIRPK"
+        assert result["unmodified_prediction"][0] == "CGHTNNLRPK"
+        assert "sequence" not in result.columns
+        assert "opt_ms_run[1]_proforma" not in result.columns
+
+    def test_column_mapping_legacy_sequence_key_alias(self):
+        """Legacy ``sequence`` key maps to ``predictions``."""
+        loader = MZTabDatasetLoader(
+            residue_masses=_FULL_RESIDUE_MASSES,
+            residue_remapping=_STANDARD_REMAPPING,
+            column_mapping={"sequence": "opt_ms_run[1]_proforma"},
+        )
+        assert loader.column_mapping["predictions"] == "opt_ms_run[1]_proforma"
+        assert "sequence" not in loader.column_mapping
+
+    def test_column_mapping_legacy_prediction_untokenised_alias(self):
+        """Legacy ``prediction_untokenised`` key maps to ``predictions``."""
+        loader = MZTabDatasetLoader(
+            residue_masses=_FULL_RESIDUE_MASSES,
+            residue_remapping=_STANDARD_REMAPPING,
+            column_mapping={"prediction_untokenised": "opt_ms_run[1]_proforma"},
+        )
+        assert loader.column_mapping["predictions"] == "opt_ms_run[1]_proforma"
+
+    def test_column_mapping_unmodified_prediction_none_skips_extra_column(self):
+        """``unmodified_prediction: null`` omits that metadata column."""
+        loader = MZTabDatasetLoader(
+            residue_masses=_FULL_RESIDUE_MASSES,
+            residue_remapping=_STANDARD_REMAPPING,
+            column_mapping={"unmodified_prediction": None},
+        )
+        df = pl.DataFrame(
+            {
+                "spectra_ref": ["ms_run[1]:index=0"],
+                "sequence": ["PEP"],
+                "opt_ms_run[1]_proforma": ["PEP"],
+                "search_engine_score[1]": [0.9],
+            }
+        )
+        result = loader._process_predictions(df, ["index"])
+        assert "unmodified_prediction" not in result.columns
+
+    def test_column_mapping_drops_predictions_tokenised_key(self):
+        """InstaNovo-only ``predictions_tokenised`` is not stored on MZTab loader."""
+        loader = MZTabDatasetLoader(
+            residue_masses=_FULL_RESIDUE_MASSES,
+            residue_remapping=_STANDARD_REMAPPING,
+            column_mapping={
+                "predictions_tokenised": "predictions_tokenised",
+            },
+        )
+        assert "predictions_tokenised" not in loader.column_mapping
 
     def test_process_predictions_renames_confidence_column(
         self, loader, minimal_predictions_df
@@ -1452,6 +1523,7 @@ class TestMZTabDatasetLoader:
         result = loader._process_predictions(minimal_predictions_df, ["index"])
         assert "confidence" in result.columns
         assert "search_engine_score[1]" not in result.columns
+        assert result["unmodified_prediction"].to_list() == ["ACGM", "PEPTIDE"]
 
     def test_process_predictions_without_aa_scores_creates_null_token_scores(
         self, loader, minimal_predictions_df
@@ -1477,6 +1549,7 @@ class TestMZTabDatasetLoader:
                     "ms_run[1]:index=1",
                 ],
                 "sequence": ["AA", "GG", "MM"],
+                "opt_ms_run[1]_proforma": ["AA", "GG", "MM"],
                 "search_engine_score[1]": [0.6, 0.9, 0.8],
             }
         )
@@ -1647,9 +1720,9 @@ class TestMZTabDatasetLoader:
             "MTD\tpsm_search_engine_score[1]\t[MS, MS:1003282, Casanovo score, ]\n"
             "MTD\tms_run[1]-location\tfile://sample.mzML\n"
             "\n"
-            "PSH\tsequence\tPSM_ID\taccession\tunique\tdatabase\tdatabase_version\tsearch_engine\tsearch_engine_score[1]\tmodifications\tretention_time\tcharge\texp_m/z\tcalc_m/z\tspectra_ref\n"
-            "PSM\tPEPTIDEK\t1\tnull\tnull\tnull\tnull\t[MS, MS:1003281, Casanovo, ]\t0.95\tnull\t100.0\t2\t455.732\t455.735\tms_run[1]:index=0\n"
-            "PSM\tM[UNIMOD:35]EVALK\t2\tnull\tnull\tnull\tnull\t[MS, MS:1003281, Casanovo, ]\t0.91\t1-UNIMOD:35\t120.5\t2\t389.210\t389.212\tms_run[1]:index=1\n"
+            "PSH\tsequence\topt_ms_run[1]_proforma\tPSM_ID\taccession\tunique\tdatabase\tdatabase_version\tsearch_engine\tsearch_engine_score[1]\tmodifications\tretention_time\tcharge\texp_m/z\tcalc_m/z\tspectra_ref\n"
+            "PSM\tPEPTIDEK\tPEPTIDEK\t1\tnull\tnull\tnull\tnull\t[MS, MS:1003281, Casanovo, ]\t0.95\tnull\t100.0\t2\t455.732\t455.735\tms_run[1]:index=0\n"
+            "PSM\tM[UNIMOD:35]EVALK\tM[UNIMOD:35]EVALK\t2\tnull\tnull\tnull\tnull\t[MS, MS:1003281, Casanovo, ]\t0.91\t1-UNIMOD:35\t120.5\t2\t389.210\t389.212\tms_run[1]:index=1\n"
         )
 
         # Define the file path within the pytest temp directory
@@ -1868,3 +1941,298 @@ class TestWinnowDatasetLoader:
 
         dataset = loader.load(data_path=metadata_dir)
         assert len(dataset.predictions) == len(dataset.metadata)
+
+
+# ---------------------------------------------------------------------------
+# PrimeNovoDatasetLoader
+# ---------------------------------------------------------------------------
+
+
+# PrimeNovo emits modifications in compact bracket form (e.g. M[+15.995]). Map them
+# back to the UNIMOD keys used in the global residue table (mirrors the bundled
+# ``winnow/configs/data_loader/primenovo.yaml`` config).
+_PRIMENOVO_REMAPPING = {
+    "M[+15.995]": "M[UNIMOD:35]",
+    "C[+57.021]": "C[UNIMOD:4]",
+    "N[+0.984]": "N[UNIMOD:7]",
+    "Q[+0.984]": "Q[UNIMOD:7]",
+    "[+42.011]": "[UNIMOD:1]",
+    "[+43.006]": "[UNIMOD:5]",
+    "[-17.027]": "[UNIMOD:385]",
+}
+
+
+class TestPrimeNovoDatasetLoader:
+    """Tests for PrimeNovoDatasetLoader: TSV + MGF aligned by row order, no beams."""
+
+    @pytest.fixture()
+    def loader(self):
+        return PrimeNovoDatasetLoader(
+            residue_masses=_FULL_RESIDUE_MASSES,
+            residue_remapping=_PRIMENOVO_REMAPPING,
+        )
+
+    @pytest.fixture()
+    def mgf_path(self, tmp_path):
+        path = tmp_path / "spectra.mgf"
+        path.write_text(
+            "BEGIN IONS\n"
+            "TITLE=run_X_SCANS_1\n"
+            "PEPMASS=358.5\n"
+            "CHARGE=3+\n"
+            "RTINSECONDS=757.5\n"
+            "SEQ=GVSREEIQR\n"
+            "100.0 1.0\n"
+            "200.0 2.0\n"
+            "END IONS\n"
+            "BEGIN IONS\n"
+            "TITLE=run_X_SCANS_2\n"
+            "PEPMASS=500.0\n"
+            "CHARGE=2+\n"
+            "RTINSECONDS=820.0\n"
+            "SEQ=YEDMNNYDPTK\n"
+            "150.0 1.5\n"
+            "END IONS\n",
+            encoding="utf-8",
+        )
+        return path
+
+    @pytest.fixture()
+    def tsv_path(self, tmp_path):
+        path = tmp_path / "denovo.tsv"
+        df = pd.DataFrame(
+            {
+                "label": ["run_X_SCANS_1", "run_X_SCANS_2"],
+                "prediction": ["GVSREELQR", "YEDM[+15.995]NNYDPTK"],
+                "charge": [3, 3],
+                "score": [0.9780, 0.0002],
+            }
+        )
+        df.to_csv(path, sep="\t", index=False)
+        return path
+
+    # ------------------------------------------------------------------
+    # Initialization
+    # ------------------------------------------------------------------
+
+    def test_initialization(self, loader):
+        assert loader.metrics is not None
+        assert loader.metrics.residue_set is not None
+        assert loader.add_index_cols is False
+
+    # ------------------------------------------------------------------
+    # _load_predictions
+    # ------------------------------------------------------------------
+
+    def test_load_predictions_reads_tsv(self, loader, tsv_path):
+        df = loader._load_predictions(tsv_path)
+        assert list(df.columns) == ["label", "prediction", "charge", "score"]
+        assert len(df) == 2
+
+    def test_load_predictions_rejects_unsupported_suffix(self, loader, tmp_path):
+        path = tmp_path / "preds.csv"
+        path.write_text("label\tprediction\tscore\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="Unsupported file format"):
+            loader._load_predictions(path)
+
+    def test_load_predictions_raises_on_missing_required_column(self, loader, tmp_path):
+        path = tmp_path / "missing.tsv"
+        pd.DataFrame({"label": ["a"], "prediction": ["AG"]}).to_csv(
+            path, sep="\t", index=False
+        )
+        with pytest.raises(ValueError, match="missing required column"):
+            loader._load_predictions(path)
+
+    # ------------------------------------------------------------------
+    # _load_spectrum_data
+    # ------------------------------------------------------------------
+
+    def test_load_spectrum_data_mgf_uses_add_index_cols(self, loader, mgf_path):
+        df, has_labels = loader._load_spectrum_data(mgf_path)
+        assert has_labels is True
+        # spectrum_id is `experiment_name:scan_number` exactly as MZTab MGF inputs
+        # produce; `title` comes from matchms MGF TITLE for joining to TSV `label`.
+        assert df["spectrum_id"].tolist() == ["spectra:0", "spectra:1"]
+        assert df["experiment_name"].tolist() == ["spectra", "spectra"]
+        assert df["title"].tolist() == ["run_X_SCANS_1", "run_X_SCANS_2"]
+
+    def test_load_spectrum_data_rejects_unsupported_suffix(self, loader, tmp_path):
+        path = tmp_path / "spec.csv"
+        path.write_text("col\n1\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="Unsupported file format"):
+            loader._load_spectrum_data(path)
+
+    # ------------------------------------------------------------------
+    # _process_predictions
+    # ------------------------------------------------------------------
+
+    def test_process_predictions_tokenises_and_remaps(self, loader):
+        merged = pd.DataFrame(
+            {
+                "spectrum_id": ["spectra:0"],
+                "label": ["t1"],
+                "prediction": ["YEDM[+15.995]NNYDPTK"],
+                "score": [0.42],
+            }
+        )
+        result = loader._process_predictions(merged)
+        assert result["confidence"].iloc[0] == pytest.approx(0.42)
+        assert result["prediction_untokenised"].iloc[0] == "YEDM[+15.995]NNYDPTK"
+        # M[+15.995] should be remapped to M[UNIMOD:35] per the residue_remapping.
+        assert "M[UNIMOD:35]" in result["prediction"].iloc[0]
+        # `score` is renamed to `confidence`; raw `score` column is gone.
+        assert "score" not in result.columns
+
+    def test_process_predictions_replaces_l_with_i(self, loader):
+        merged = pd.DataFrame(
+            {
+                "spectrum_id": ["spectra:0"],
+                "label": ["t"],
+                "prediction": ["GVSREELQR"],
+                "score": [0.5],
+            }
+        )
+        result = loader._process_predictions(merged)
+        assert "L" not in result["prediction_untokenised"].iloc[0]
+        assert "L" not in result["prediction"].iloc[0]
+
+    def test_process_predictions_keeps_score_in_unit_interval(self, loader):
+        """Confidence comes from `score` directly (no exp / log)."""
+        merged = pd.DataFrame(
+            {
+                "spectrum_id": ["spectra:0", "spectra:1"],
+                "label": ["a", "b"],
+                "prediction": ["AG", "MG"],
+                "score": [0.1, 0.95],
+            }
+        )
+        result = loader._process_predictions(merged)
+        assert result["confidence"].tolist() == pytest.approx([0.1, 0.95])
+
+    # ------------------------------------------------------------------
+    # _merge_on_title_label
+    # ------------------------------------------------------------------
+
+    def test_merge_on_title_label_inner_joins(self, loader):
+        preds = pd.DataFrame(
+            {"label": ["t1", "t2"], "prediction": ["AG", "MG"], "score": [0.9, 0.5]}
+        )
+        spectra = pd.DataFrame(
+            {
+                "spectrum_id": ["spectra:0", "spectra:1"],
+                "title": ["t1", "t2"],
+                "mz_array": [[1.0], [2.0]],
+            }
+        )
+        merged = loader._merge_on_title_label(spectra, preds)
+        assert len(merged) == 2
+        assert merged["spectrum_id"].tolist() == ["spectra:0", "spectra:1"]
+        assert merged["label"].tolist() == ["t1", "t2"]
+        assert "mz_array" in merged.columns
+
+    def test_merge_on_title_label_raises_when_no_matches(self, loader):
+        preds = pd.DataFrame(
+            {
+                "label": ["t1", "t2"],
+                "prediction": ["AG", "MG"],
+                "score": [0.9, 0.5],
+            }
+        )
+        spectra = pd.DataFrame(
+            {"spectrum_id": ["spectra:0"], "title": ["other"], "mz_array": [[1.0]]}
+        )
+        with pytest.raises(ValueError, match="inner join"):
+            loader._merge_on_title_label(spectra, preds)
+
+    def test_merge_on_title_label_drops_clashing_prediction_columns(self, loader):
+        # If predictions and spectra share a column name, the spectrum value wins
+        # (mirrors InstaNovo / MZTab merge semantics).
+        preds = pd.DataFrame(
+            {
+                "label": ["t1"],
+                "prediction": ["AG"],
+                "score": [0.9],
+                "experiment_name": ["wrong"],
+            }
+        )
+        spectra = pd.DataFrame(
+            {
+                "spectrum_id": ["spectra:0"],
+                "title": ["t1"],
+                "experiment_name": ["right"],
+            }
+        )
+        merged = loader._merge_on_title_label(spectra, preds)
+        assert merged["experiment_name"].tolist() == ["right"]
+
+    # ------------------------------------------------------------------
+    # load() – end-to-end
+    # ------------------------------------------------------------------
+
+    def test_load_raises_when_predictions_path_is_none(self, loader, tmp_path):
+        with pytest.raises(ValueError, match="predictions_path is required"):
+            loader.load(data_path=tmp_path)
+
+    def test_load_returns_calibration_dataset_without_beams(
+        self, loader, mgf_path, tsv_path
+    ):
+        dataset = loader.load(data_path=mgf_path, predictions_path=tsv_path)
+        assert isinstance(dataset, CalibrationDataset)
+        assert dataset.predictions is None
+
+    def test_load_aligns_spectra_and_predictions_by_title_label(
+        self, loader, mgf_path, tsv_path
+    ):
+        dataset = loader.load(data_path=mgf_path, predictions_path=tsv_path)
+        meta = dataset.metadata
+        assert len(meta) == 2
+        # spectrum_id comes from the MGF row (experiment_name:scan_number); label
+        # matches TITLE and is preserved from the TSV for traceability.
+        assert meta["spectrum_id"].tolist() == ["spectra:0", "spectra:1"]
+        assert meta["label"].tolist() == ["run_X_SCANS_1", "run_X_SCANS_2"]
+        assert all(isinstance(p, list) for p in meta["prediction"])
+        # `score` -> `confidence` unchanged (probabilities in [0,1])
+        assert "score" not in meta.columns
+        assert meta["confidence"].between(0.0, 1.0).all()
+
+    def test_load_inner_join_keeps_only_matching_titles(
+        self, loader, mgf_path, tmp_path
+    ):
+        # MGF has two spectra; only the first TITLE appears in the TSV.
+        path = tmp_path / "short.tsv"
+        pd.DataFrame(
+            {
+                "label": ["run_X_SCANS_1"],
+                "prediction": ["GVSREELQR"],
+                "charge": [3],
+                "score": [0.978],
+            }
+        ).to_csv(path, sep="\t", index=False)
+        dataset = loader.load(data_path=mgf_path, predictions_path=path)
+        assert len(dataset.metadata) == 1
+        assert dataset.metadata["spectrum_id"].tolist() == ["spectra:0"]
+
+    def test_load_raises_when_no_title_label_overlap(self, loader, mgf_path, tmp_path):
+        path = tmp_path / "bad.tsv"
+        pd.DataFrame(
+            {
+                "label": ["not_in_mgf"],
+                "prediction": ["GVSREELQR"],
+                "charge": [3],
+                "score": [0.978],
+            }
+        ).to_csv(path, sep="\t", index=False)
+        with pytest.raises(ValueError, match="inner join"):
+            loader.load(data_path=mgf_path, predictions_path=path)
+
+    def test_load_evaluates_against_ground_truth(self, loader, mgf_path, tsv_path):
+        dataset = loader.load(data_path=mgf_path, predictions_path=tsv_path)
+        meta = dataset.metadata
+        assert "valid_sequence" in meta.columns
+        assert "valid_prediction" in meta.columns
+        assert "num_matches" in meta.columns
+        assert "correct" in meta.columns
+        # GVSREEIQR (truth) vs GVSREEIQR (pred after L→I): all match.
+        row = meta.set_index("spectrum_id").loc["spectra:0"]
+        assert bool(row["correct"]) is True
+        assert row["num_matches"] == len(row["sequence"])

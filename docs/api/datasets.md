@@ -10,7 +10,12 @@ The main class for storing and processing calibration datasets for peptide seque
 
 ```python
 from winnow.datasets.calibration_dataset import CalibrationDataset
-from winnow.datasets.data_loaders import InstaNovoDatasetLoader, MZTabDatasetLoader, WinnowDatasetLoader
+from winnow.datasets.data_loaders import (
+    InstaNovoDatasetLoader,
+    MZTabDatasetLoader,
+    PrimeNovoDatasetLoader,
+    WinnowDatasetLoader,
+)
 from pathlib import Path
 
 # Load using InstaNovo data loader
@@ -25,6 +30,13 @@ mztab_loader = MZTabDatasetLoader()
 dataset = mztab_loader.load(
     data_path=Path("spectrum_data.parquet"),
     predictions_path=Path("predictions.mztab")
+)
+
+# Load using PrimeNovo data loader
+primenovo_loader = PrimeNovoDatasetLoader()
+dataset = primenovo_loader.load(
+    data_path=Path("spectra.mgf"),
+    predictions_path=Path("denovo.tsv"),
 )
 
 # Load previously saved dataset
@@ -77,6 +89,22 @@ dataset = loader.load(
 # Custom residue mapping
 custom_mapping = {"M+15.995": "M[UNIMOD:35]"}
 loader = MZTabDatasetLoader(residue_remapping=custom_mapping)
+```
+
+#### PrimeNovoDatasetLoader
+
+Loads PrimeNovo predictions from a tab-separated file along with spectrum data from MGF files.
+
+Beam predictions are not saved in PrimeNovo outputs, so the returned `CalibrationDataset` always has `predictions=None`.
+
+```python
+from winnow.datasets.data_loaders import PrimeNovoDatasetLoader
+
+loader = PrimeNovoDatasetLoader()
+dataset = loader.load(
+    data_path=Path("spectrum_data.mgf"),
+    predictions_path=Path("primenovo_predictions.tsv"),
+)
 ```
 
 #### WinnowDatasetLoader

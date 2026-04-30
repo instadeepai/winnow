@@ -2,7 +2,7 @@
 defaults:
   - _self_
   - residues
-  - data_loader: instanovo  # Options: instanovo, mztab, pointnovo, winnow
+  - data_loader: instanovo  # Options: instanovo, mztab, pointnovo, primenovo, winnow
   - fdr_method: nonparametric  # Options: nonparametric, database_grounded
 
 # --- Pipeline Execution Configuration ---

@@ -579,34 +579,46 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
 
 class MZTabDatasetLoader(DatasetLoader):
-    """Loader for MZTab predictions from both traditional search engines and Casanovo outputs.
+    """Loader for MZTab predictions from traditional search engines and Casanovo.
 
-    This loader expects MZTab files with specific column names and formats:
+    Column mapping
+    ~~~~~~~~~~~~~~
+    MZTab files from different tools use different column headers. The
+    ``column_mapping`` parameter maps logical roles to actual MZTab headers:
 
-    Required MZTab Columns:
-        - spectra_ref: Spectrum identifier with format containing "index=N" (e.g., "ms_run[1]:index=123")
-        - sequence: Peptide sequence string (may contain modifications in either UNIMOD or Casanovo format)
-        - search_engine_score[1]: Confidence score for the prediction
+    ========================  ==============================  ==========
+    Logical key               Default MZTab header            Required?
+    ========================  ==============================  ==========
+    ``predictions``           ``opt_ms_run[1]_proforma``      Yes
+    ``log_probability``       ``search_engine_score[1]``      Yes
+    ``token_scores``          ``opt_ms_run[1]_aa_scores``     No
+    ``unmodified_prediction`` ``sequence``                    No
+    ========================  ==============================  ==========
 
-    Optional MZTab Columns:
-        - opt_ms_run[1]_aa_scores: Comma-separated amino acid level scores (Casanovo)
-          If missing (traditional search engines), token_log_probabilities will be set to None
+    - ``predictions``: renamed to ``prediction_untokenised``, then tokenised.
+    - ``log_probability``: renamed to ``confidence``.
+    - ``token_scores``: per-residue scores (Casanovo). ``None`` when absent.
+    - ``unmodified_prediction``: the unmodified peptide string kept as metadata.
+      Set to ``null`` in config to omit.
 
-    Expected Spectrum Data Format:
-        - Parquet, IPC, or MGF file with spectrum metadata
-        - Row indices should match the extracted indices from MZTab spectra_ref
-        - Optional 'sequence' column for ground truth labels
+    The ``spectra_ref`` column (with ``index=N`` format) is always required and
+    not configurable. A ``sequence`` column on the **spectrum** file (not the MZTab
+    file) is treated as ground-truth for evaluation.
 
-    Note: The loader handles both single prediction per spectrum and multiple predictions
-    per spectrum, creating beam predictions with List[ScoredSequence] structure. Works with
-    both traditional database search engines and Casanovo outputs, returning a single beam
-    prediction if only one prediction is present.
+    The loader handles single and multi-prediction-per-spectrum MZTab files,
+    producing beam predictions as ``List[ScoredSequence]``.
 
-    When ``add_index_cols`` is enabled (or for MGF inputs), ``experiment_name`` and
-    ``spectrum_id`` columns are added to map input spectra to search engine output
-    predictions. The ``spectrum_id`` uses the format ``{file_stem}:{row_index}``,
-    which aligns with the 0-based index extracted from MZTab ``spectra_ref``.
+    When ``add_index_cols`` is enabled (or for MGF inputs), ``experiment_name``
+    and ``spectrum_id`` columns are added. ``spectrum_id`` uses
+    ``{file_stem}:{row_index}``, matching the 0-based MZTab ``spectra_ref`` index.
     """
+
+    _DEFAULT_COLUMN_MAPPING: dict[str, Optional[str]] = {
+        "predictions": "opt_ms_run[1]_proforma",
+        "log_probability": "search_engine_score[1]",
+        "token_scores": "opt_ms_run[1]_aa_scores",
+        "unmodified_prediction": "sequence",
+    }
 
     def __init__(
         self,
@@ -615,6 +627,7 @@ class MZTabDatasetLoader(DatasetLoader):
         isotope_error_range: Tuple[int, int] = (0, 1),
         load_beams: bool = True,
         add_index_cols: bool = False,
+        column_mapping: Optional[dict[str, Optional[str]]] = None,
     ) -> None:
         """Initialise the MZTabDatasetLoader.
 
@@ -628,6 +641,12 @@ class MZTabDatasetLoader(DatasetLoader):
             add_index_cols: If True, add ``experiment_name`` and ``spectrum_id`` to
                 parquet/ipc inputs. MGF inputs always get these columns regardless of
                 this flag. Defaults to False.
+            column_mapping: Override which MZTab headers map to each logical role.
+                See ``_DEFAULT_COLUMN_MAPPING`` for keys and defaults. Set
+                ``unmodified_prediction`` to ``null`` to omit that metadata column.
+                Legacy keys from InstaNovo configs (``prediction_untokenised``,
+                ``sequence``, ``confidence``, ``predictions_tokenised``) are
+                normalised automatically.
         """
         self.metrics = Metrics(
             residue_set=ResidueSet(
@@ -637,6 +656,7 @@ class MZTabDatasetLoader(DatasetLoader):
         )
         self.load_beams = load_beams
         self.add_index_cols = add_index_cols
+        self.column_mapping = self._resolve_column_mapping(column_mapping)
 
     @staticmethod
     def _load_dataset(predictions_path: Path | str) -> pl.DataFrame:
@@ -655,6 +675,32 @@ class MZTabDatasetLoader(DatasetLoader):
             )
         predictions = mztab.MzTab(str(predictions_path)).spectrum_match_table
         return pl.DataFrame(predictions)
+
+    @classmethod
+    def _resolve_column_mapping(
+        cls, user_mapping: Optional[dict[str, Optional[str]]]
+    ) -> dict[str, Optional[str]]:
+        """Merge user-supplied column mapping with defaults, normalising legacy keys."""
+        resolved = dict(user_mapping or {})
+
+        # Keys that are InstaNovo-specific and have no meaning for MZTab.
+        for ignore_key in ("spectra_ref", "predictions_tokenised"):
+            resolved.pop(ignore_key, None)
+
+        # Legacy key aliases: old_key -> canonical_key (applied only when the
+        # canonical key is not already explicitly provided).
+        legacy_aliases = {
+            "prediction_untokenised": "predictions",
+            "sequence": "predictions",
+            "confidence": "log_probability",
+        }
+        for legacy_key, canonical_key in legacy_aliases.items():
+            if legacy_key in resolved and canonical_key not in resolved:
+                resolved[canonical_key] = resolved.pop(legacy_key)
+            else:
+                resolved.pop(legacy_key, None)
+
+        return {**cls._DEFAULT_COLUMN_MAPPING, **resolved}
 
     def load(
         self, *, data_path: Path, predictions_path: Optional[Path] = None, **kwargs: Any
@@ -754,66 +800,114 @@ class MZTabDatasetLoader(DatasetLoader):
     def _process_predictions(
         self, predictions: pl.DataFrame, spectrum_data_columns: List[str]
     ) -> pl.DataFrame:
-        """Process raw predictions into a standardized format.
+        """Process raw MZTab predictions into a standardized format.
+
+        Renames columns according to ``self.column_mapping``, extracts the
+        spectrum index from ``spectra_ref``, and drops raw source columns so
+        they don't clash with the spectrum data on merge.
 
         Args:
-            predictions: Raw predictions from mzTab file
-            spectrum_data_columns: List of columns to drop from the predictions
+            predictions: Raw predictions from mzTab file.
+            spectrum_data_columns: Column names from the spectrum DataFrame;
+                any prediction columns that share these names (except ``index``)
+                are dropped to avoid collisions on merge.
 
         Returns:
-            Processed predictions with standardized columns
+            Processed predictions with standardized columns.
         """
-        # Check if amino acid scores are available (Casanovo) or missing (traditional search engines)
-        has_aa_scores = "opt_ms_run[1]_aa_scores" in predictions.columns
+        prediction_col = self.column_mapping["predictions"]
+        confidence_col = self.column_mapping["log_probability"]
+        token_score_col = self.column_mapping["token_scores"]
+        unmodified_col = self.column_mapping.get("unmodified_prediction")
 
-        # Build list of columns to process
-        columns_to_add = [
-            # Extract spectrum index from spectra_ref (e.g., "ms_run[1]:index=123" -> 123)
+        # --- Validate required columns ---
+        required = {
+            "predictions": prediction_col,
+            "log_probability": confidence_col,
+            "spectra_ref": "spectra_ref",
+        }
+        missing = [
+            (role, header)
+            for role, header in required.items()
+            if header not in predictions.columns
+        ]
+        if missing:
+            raise ValueError(
+                "MZTab predictions table is missing required column(s) "
+                f"(logical -> header): {missing}. "
+                f"Present columns: {list(predictions.columns)}"
+            )
+
+        # --- Copy the unmodified peptide string as metadata before we transform ---
+        if (
+            unmodified_col
+            and unmodified_col in predictions.columns
+            and unmodified_col != prediction_col
+        ):
+            predictions = predictions.with_columns(
+                pl.col(unmodified_col).alias("unmodified_prediction")
+            )
+
+        # --- Build renamed / derived columns ---
+        has_token_scores = token_score_col in predictions.columns
+
+        new_columns = [
             pl.col("spectra_ref")
             .str.extract(r"index=(\d+)")
             .cast(pl.Int64)
             .alias("index"),
-            # Replace L with I for proteomics normalisation
-            pl.col("sequence").str.replace("L", "I").alias("prediction_untokenised"),
-            pl.col("search_engine_score[1]").alias("confidence"),
+            pl.col(prediction_col)
+            .str.replace("L", "I")
+            .alias("prediction_untokenised"),
+            pl.col(confidence_col).alias("confidence"),
         ]
 
-        # Add amino acid scores if available, otherwise create None column
-        if has_aa_scores:
-            columns_to_add.append(
-                # Parse a string of comma-separated scores into list of floats
-                pl.col("opt_ms_run[1]_aa_scores")
+        if has_token_scores:
+            new_columns.append(
+                pl.col(token_score_col)
                 .str.split(",")
                 .cast(pl.List(pl.Float64))
                 .alias("token_scores")
             )
-            columns_to_drop = [
-                "search_engine_score[1]",
-                "opt_ms_run[1]_aa_scores",
-                "sequence",
-            ]
         else:
-            columns_to_add.append(
-                # Create None column for traditional search engines that don't provide token scores
+            new_columns.append(
                 pl.lit(None, dtype=pl.List(pl.Float64)).alias("token_scores")
             )
-            columns_to_drop = ["search_engine_score[1]", "sequence"]
 
-        predictions = predictions.with_columns(columns_to_add).drop(columns_to_drop)
+        # --- Determine which raw source columns to drop ---
+        raw_source_cols = {prediction_col, confidence_col}
+        if has_token_scores:
+            raw_source_cols.add(token_score_col)
+        if (
+            unmodified_col
+            and unmodified_col in predictions.columns
+            and unmodified_col != prediction_col
+        ):
+            raw_source_cols.add(unmodified_col)
+        elif (
+            not unmodified_col
+            and prediction_col != "sequence"
+            and "sequence" in predictions.columns
+        ):
+            raw_source_cols.add("sequence")
 
-        # Sort predictions by index and confidence to ensure correct ordering
+        columns_to_drop = [c for c in raw_source_cols if c in predictions.columns]
+
+        predictions = predictions.with_columns(new_columns).drop(columns_to_drop)
+
         predictions = predictions.sort(
             ["index", "confidence"], descending=[False, True]
         )
 
-        # Drop duplicate columns from the input dataset except index
-        predictions = predictions.drop(
-            [
-                col
-                for col in predictions.columns
-                if col in spectrum_data_columns and col != "index"
-            ]
-        )
+        # Drop prediction-side columns that clash with spectrum columns
+        # (e.g. both files may have ``sequence`` with different meanings).
+        clashing = [
+            col
+            for col in predictions.columns
+            if col in spectrum_data_columns and col != "index"
+        ]
+        if clashing:
+            predictions = predictions.drop(clashing)
 
         return predictions
 
@@ -1052,6 +1146,295 @@ class PointNovoDatasetLoader(DatasetLoader):
             ValueError: If predictions_path is None
         """
         raise NotImplementedError("PointNovoDatasetLoader is not yet implemented")
+
+
+class PrimeNovoDatasetLoader(DatasetLoader):
+    """Loader for PrimeNovo predictions in TSV format.
+
+    PrimeNovo writes predictions to a tab-separated file with fixed columns
+    ``label``, ``prediction``, ``charge``, ``score``. Spectra (``.mgf``) are loaded
+    with matchms; each spectrum's matchms ``title`` metadata must match the TSV
+    ``label`` for that spectrum. Rows are built with an **inner** merge on
+    ``title`` (MGF) and ``label`` (TSV), so unmatched spectra or predictions are
+    dropped and row-count mismatches between file length and prediction count are
+    avoided.
+
+    Score values are already probabilities in ``[0, 1]`` and are stored as
+    ``confidence`` without transformation. Beam predictions are not available from
+    PrimeNovo, so the returned :class:`CalibrationDataset` always has
+    ``predictions=None``.
+
+    Spectrum inputs:
+        - ``.mgf``: loaded with matchms and given ``experiment_name`` /
+          ``spectrum_id`` via :func:`_add_index_cols` (``spectrum_id`` is
+          ``{file_stem}:{scan_number}`` exactly as for the MZTab/InstaNovo loaders),
+          plus a ``title`` column from matchms metadata for joining to TSV ``label``.
+    """
+
+    _df_from_matchms = staticmethod(_df_from_matchms)
+    _add_index_cols = staticmethod(_add_index_cols)
+
+    def __init__(
+        self,
+        residue_masses: dict[str, float],
+        residue_remapping: Optional[dict[str, str]] = None,
+        isotope_error_range: Tuple[int, int] = (0, 1),
+        add_index_cols: bool = False,
+    ) -> None:
+        """Initialise the PrimeNovoDatasetLoader.
+
+        Args:
+            residue_masses: The mapping of residues to their masses (ProForma notation).
+            residue_remapping: Optional mapping from PrimeNovo tokens (e.g.
+                ``M[+15.995]``) to the keys used in ``residue_masses`` (typically
+                UNIMOD-style, e.g. ``M[UNIMOD:35]``).
+            isotope_error_range: The range of isotope errors to consider when matching peptides.
+            add_index_cols: If True, add ``experiment_name`` and ``spectrum_id`` to
+                parquet/ipc inputs. MGF inputs always get these columns.
+        """
+        self.metrics = Metrics(
+            residue_set=ResidueSet(
+                residue_masses=residue_masses, residue_remapping=residue_remapping
+            ),
+            isotope_error_range=isotope_error_range,
+        )
+        self.add_index_cols = add_index_cols
+
+    def load(
+        self, *, data_path: Path, predictions_path: Optional[Path] = None, **kwargs: Any
+    ) -> CalibrationDataset:
+        """Load a CalibrationDataset from PrimeNovo TSV predictions.
+
+        Args:
+            data_path: Path to the spectrum data file (``.mgf`` only).
+            predictions_path: Path to the PrimeNovo predictions TSV file.
+            **kwargs: Reserved for future use.
+
+        Returns:
+            CalibrationDataset: Dataset containing merged metadata. ``predictions`` is
+                always ``None`` because PrimeNovo does not produce beams.
+
+        Raises:
+            ValueError: If ``predictions_path`` is None, required TSV columns are
+                missing, or the inner join on title/label yields no rows.
+        """
+        if predictions_path is None:
+            raise ValueError("predictions_path is required for PrimeNovoDatasetLoader")
+
+        spectra_df, has_labels = self._load_spectrum_data(data_path)
+        spectra_df = self._process_spectrum_data(spectra_df, has_labels)
+
+        predictions_df = self._load_predictions(predictions_path)
+        merged = self._merge_on_title_label(spectra_df, predictions_df)
+        merged = self._process_predictions(merged)
+        merged = self._evaluate_predictions(merged, has_labels)
+
+        return CalibrationDataset(metadata=merged, predictions=None)
+
+    def _load_spectrum_data(
+        self, spectrum_path: Path | str
+    ) -> Tuple[pd.DataFrame, bool]:
+        """Load spectrum data and assign ``spectrum_id`` exactly as MZTab MGF inputs do."""
+        spectrum_path = Path(spectrum_path)
+
+        if spectrum_path.suffix == ".mgf":
+            from matchms.importing import load_from_mgf
+
+            spectra = list(load_from_mgf(str(spectrum_path)))
+            df = self._df_from_matchms(spectra)
+            titles = [s.metadata.get("title") for s in spectra]
+            df = df.with_columns(
+                pl.Series(
+                    "title",
+                    [
+                        str(t).strip()
+                        if t is not None and str(t).strip() != ""
+                        else None
+                        for t in titles
+                    ],
+                    dtype=pl.Utf8,
+                )
+            )
+        else:
+            raise ValueError(
+                f"Unsupported file format for spectrum data: {spectrum_path.suffix}. "
+                "Supported format is .mgf."
+            )
+
+        if spectrum_path.suffix == ".mgf" or self.add_index_cols:
+            df = self._add_index_cols(df, spectrum_path)
+        elif "experiment_name" not in df.columns:
+            df = df.with_columns(
+                pl.lit(Path(spectrum_path).stem).alias("experiment_name").cast(pl.Utf8)
+            )
+
+        has_labels = "sequence" in df.columns
+        return df.to_pandas(), has_labels
+
+    def _process_spectrum_data(
+        self, df: pd.DataFrame, has_labels: bool
+    ) -> pd.DataFrame:
+        """Tokenise ground-truth peptides and apply ``residue_remapping`` like predictions."""
+        if has_labels:
+            df["sequence"] = (
+                df["sequence"]
+                .apply(
+                    lambda peptide: (
+                        peptide.replace("L", "I")
+                        if isinstance(peptide, str)
+                        else peptide
+                    )
+                )
+                .apply(self.metrics._split_peptide)
+                .apply(
+                    lambda tokens: (
+                        self._remap_tokens(tokens)
+                        if isinstance(tokens, list)
+                        else tokens
+                    )
+                )
+            )
+        return df
+
+    def _load_predictions(self, predictions_path: Path | str) -> pd.DataFrame:
+        """Load the PrimeNovo TSV file as a pandas DataFrame.
+
+        Args:
+            predictions_path: Path to the predictions TSV file.
+
+        Returns:
+            DataFrame with the raw TSV columns (``label``, ``prediction``, ``score``,
+            ``charge``).
+
+        Raises:
+            ValueError: If the file extension is not ``.tsv`` or ``.txt``, or if any
+                required column is absent.
+        """
+        predictions_path = Path(predictions_path)
+        if predictions_path.suffix not in {".tsv", ".txt"}:
+            raise ValueError(
+                f"Unsupported file format for PrimeNovo predictions: "
+                f"{predictions_path.suffix}. Supported formats are .tsv and .txt."
+            )
+        df = pd.read_csv(predictions_path, sep="\t")
+
+        required = ("label", "prediction", "score")
+        missing = [col for col in required if col not in df.columns]
+        if missing:
+            raise ValueError(
+                f"PrimeNovo predictions file is missing required column(s): {missing}. "
+                f"Present columns: {list(df.columns)}."
+            )
+        return df
+
+    def _merge_on_title_label(
+        self, spectrum_df: pd.DataFrame, predictions_df: pd.DataFrame
+    ) -> pd.DataFrame:
+        """Inner-join spectra to predictions on MGF ``title`` and TSV ``label``.
+
+        Prediction columns that clash with spectrum columns (except the join key
+        ``label``) are dropped before merge so spectrum metadata wins, mirroring
+        InstaNovo/MZTab merge semantics.
+        """
+        if "title" not in spectrum_df.columns:
+            raise ValueError(
+                "PrimeNovo MGF spectra must expose a `title` column for joining to "
+                "TSV `label`; reload from .mgf via matchms."
+            )
+        preds = predictions_df.copy()
+        preds["label"] = preds["label"].apply(
+            lambda x: (
+                str(x).strip()
+                if x is not None and not (isinstance(x, float) and pd.isna(x))
+                else None
+            )
+        )
+        clash = [
+            column
+            for column in preds.columns
+            if column in spectrum_df.columns and column != "label"
+        ]
+        if clash:
+            preds = preds.drop(columns=clash)
+
+        merged = spectrum_df.merge(
+            preds,
+            left_on="title",
+            right_on="label",
+            how="inner",
+            sort=False,
+        )
+        if merged.empty:
+            raise ValueError(
+                "PrimeNovo inner join on spectrum `title` (matchms MGF metadata) and "
+                "TSV `label` produced no rows. Ensure each TSV label equals the "
+                "corresponding spectrum TITLE in the MGF."
+            )
+        return merged
+
+    def _process_predictions(self, merged: pd.DataFrame) -> pd.DataFrame:
+        """Tokenise predictions and rename ``score`` -> ``confidence``."""
+        prediction_untokenised = merged["prediction"].apply(
+            lambda peptide: (
+                peptide.replace("L", "I") if isinstance(peptide, str) else peptide
+            )
+        )
+        prediction_tokens = prediction_untokenised.apply(
+            lambda peptide: (
+                self._remap_tokens(self.metrics._split_peptide(peptide))
+                if isinstance(peptide, str)
+                else peptide
+            )
+        )
+
+        merged["prediction_untokenised"] = prediction_untokenised
+        merged["prediction"] = prediction_tokens
+        merged = merged.rename(columns={"score": "confidence"})
+        return merged
+
+    def _remap_tokens(self, tokens: list[str]) -> list[str]:
+        """Apply token-level residue remapping after tokenisation.
+
+        PrimeNovo emits modifications as ``M[+15.995]``; ``residue_remapping`` maps
+        these to the keys used in ``residue_masses`` (e.g. UNIMOD form). Mirrors
+        :meth:`MZTabDatasetLoader._remap_tokens`.
+        """
+        return [
+            self.metrics.residue_set.residue_remapping.get(token, token)
+            for token in tokens
+        ]
+
+    def _evaluate_predictions(
+        self, dataset: pd.DataFrame, has_labels: bool
+    ) -> pd.DataFrame:
+        """Add ``valid_*``, ``num_matches`` and ``correct`` columns (InstaNovo-style)."""
+        if has_labels:
+            dataset["valid_sequence"] = dataset["sequence"].apply(
+                lambda peptide: isinstance(peptide, list)
+            )
+        dataset["valid_prediction"] = dataset["prediction"].apply(
+            lambda peptide: isinstance(peptide, list)
+        )
+        if has_labels:
+            dataset["num_matches"] = dataset.apply(
+                lambda row: (
+                    self.metrics._novor_match(row["sequence"], row["prediction"])
+                    if isinstance(row["sequence"], list)
+                    and isinstance(row["prediction"], list)
+                    else 0
+                ),
+                axis=1,
+            )
+            dataset["correct"] = dataset.apply(
+                lambda row: (
+                    row["num_matches"] == len(row["sequence"]) == len(row["prediction"])
+                    if isinstance(row["sequence"], list)
+                    and isinstance(row["prediction"], list)
+                    else False
+                ),
+                axis=1,
+            )
+        return dataset
 
 
 class WinnowDatasetLoader(DatasetLoader):
