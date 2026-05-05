@@ -278,6 +278,58 @@ clean:
 clean-all: clean sample-data
 
 #################################################################################
+## Runtime benchmarking															#
+#################################################################################
+
+.PHONY: benchmark-train-models benchmark benchmark-no-prosit benchmark-scaling
+
+BENCHMARK_TRAIN_SPECTRA := held_out_projects/biological_validation/annotated/dataset-helaqc-annotated-0000-0001.parquet
+BENCHMARK_TRAIN_PREDS   := held_out_projects/biological_validation/annotated_predictions/dataset-helaqc-annotated-0000-0001.csv
+BENCHMARK_EVAL_SPECTRA  := held_out_projects/biological_validation/raw/dataset-helaqc-raw-0000-0001.parquet
+BENCHMARK_EVAL_PREDS    := held_out_projects/biological_validation/raw_predictions/dataset-helaqc-raw-0000-0001.csv
+
+## Train full and no-Prosit calibrators on HeLa QC annotated data
+benchmark-train-models:
+	uv run winnow train \
+	features_path=null \
+	dataset.spectrum_path_or_directory=$(BENCHMARK_TRAIN_SPECTRA) \
+	dataset.predictions_path=$(BENCHMARK_TRAIN_PREDS) \
+	model_output_dir=models/benchmark_model \
+	irt_regressor_output_path=null \
+	training_history_path=null \
+	dataset_output_path=null \
+	$(KOINA_OVERRIDES)
+	uv run winnow train \
+	features_path=null \
+	dataset.spectrum_path_or_directory=$(BENCHMARK_TRAIN_SPECTRA) \
+	dataset.predictions_path=$(BENCHMARK_TRAIN_PREDS) \
+	model_output_dir=models/benchmark_model_no_prosit \
+	irt_regressor_output_path=null \
+	training_history_path=null \
+	dataset_output_path=null \
+	'~calibrator.features.fragment_match_features' \
+	'~calibrator.features.retention_time_feature'
+
+## Benchmark predict pipeline on HeLa QC raw data (full and no-Prosit)
+benchmark: benchmark-train-models
+	uv run python scripts/benchmark_runtime.py \
+	--spectrum-path $(BENCHMARK_EVAL_SPECTRA) \
+	--predictions-path $(BENCHMARK_EVAL_PREDS) \
+	--model-path models/benchmark_model \
+	--model-path-no-prosit models/benchmark_model_no_prosit \
+	--output-json analysis/benchmark_results.json \
+	$(if $(KOINA_SERVER_URL),--koina-url $(KOINA_SERVER_URL)) \
+	$(if $(filter false,$(KOINA_SSL)),--koina-ssl false)
+
+## Scaling analysis: run no-Prosit pipeline at 10%, 50%, 100% of data
+benchmark-scaling: benchmark-train-models
+	uv run python scripts/benchmark_scaling.py \
+	--spectrum-path $(BENCHMARK_EVAL_SPECTRA) \
+	--predictions-path $(BENCHMARK_EVAL_PREDS) \
+	--model-path models/benchmark_model_no_prosit \
+	--output-dir analysis
+
+#################################################################################
 ## General model commands														#
 #################################################################################
 
@@ -342,7 +394,7 @@ train_general_model:
 ## Evaluate general model commands
 #########################################################
 
-.PHONY: evaluate_general_model_annotated_biological_validation evaluate_general_model_raw_biological_validation evaluate_general_model_labelled_external_datasets evaluate_general_model_unlabelled_external_datasets annotate_preds_proteome_hits
+.PHONY: evaluate_general_model_annotated_biological_validation evaluate_general_model_raw_biological_validation evaluate_general_model_labelled_external_datasets evaluate_general_model_unlabelled_external_datasets annotate_preds_proteome_hits generalisation_analysis generalisation_heatmaps analyze_features analyze_upscored_fps analyze_fdr_overlap
 
 BIOLOGICAL_VALIDATION_PROJECTS := gluc helaqc herceptin immuno sbrodae snakevenoms tplantibodies woundfluids
 
@@ -429,3 +481,91 @@ evaluate_general_model_unlabelled_external_datasets:
 	done
 	uv run python scripts/annotate_preds_proteome_hits.py unlabelled_external \
 		$(foreach p,$(EXTERNAL_DATASETS),$(if $(strip $(PROTEOME_FASTA_unlabelled_$(p))),--map $(p)=$(PROTEOME_FASTA_unlabelled_$(p)),))
+
+#########################################################
+## Calibrator generalisation analysis
+#########################################################
+
+## Train per-dataset calibrators and cross-evaluate on biological validation datasets
+generalisation_analysis:
+	uv run python scripts/evaluate_calibrator_generalisation.py \
+		--data-dir held_out_projects/biological_validation/annotated \
+		--predictions-dir held_out_projects/biological_validation/annotated_predictions \
+		--model-output-dir analysis/generalisation \
+		--results-output-dir analysis/generalisation \
+		$(if $(KOINA_SERVER_URL),--koina-server-url $(KOINA_SERVER_URL)) \
+		$(if $(filter false,$(KOINA_SSL)),--no-koina-ssl)
+
+## Plot PR-AUC heatmaps from generalisation results (runs generalisation_analysis first)
+generalisation_heatmaps: generalisation_analysis
+	uv run python scripts/plot_calibrator_generalisation_heatmap.py \
+		--results-path analysis/generalisation/calibrator_generalisation_results.csv \
+		--output-dir analysis/generalisation/plots
+
+#########################################################
+## Feature importance analysis
+#########################################################
+
+# Override these on the command line, e.g.:
+#   make analyze_features FEATURE_ANALYSIS_MODEL_PATH=general_model FEATURE_ANALYSIS_DATA_DIR=data/
+FEATURE_ANALYSIS_MODEL_PATH ?=
+FEATURE_ANALYSIS_DATA_DIR ?=
+
+## Analyze feature importance and SHAP values for a pretrained calibrator
+analyze_features:
+	@if [ -z "$(FEATURE_ANALYSIS_MODEL_PATH)" ] || [ -z "$(FEATURE_ANALYSIS_DATA_DIR)" ]; then \
+		echo "Error: set FEATURE_ANALYSIS_MODEL_PATH and FEATURE_ANALYSIS_DATA_DIR"; \
+		echo "  make analyze_features FEATURE_ANALYSIS_MODEL_PATH=general_model FEATURE_ANALYSIS_DATA_DIR=data/"; \
+		exit 1; \
+	fi
+	uv run python scripts/analyze_features.py \
+		--model-path $(FEATURE_ANALYSIS_MODEL_PATH) \
+		--data-dir $(FEATURE_ANALYSIS_DATA_DIR) \
+		--output-dir analysis/feature_analysis
+
+#########################################################
+## Reviewer analyses: up-scored FPs and post-FDR overlap
+#########################################################
+
+## Characterise false positives that calibration up-scores into high-confidence regions
+analyze_upscored_fps:
+	uv run python scripts/analyze_upscored_fps.py \
+		--predictions-root predictions/general_model \
+		--output-dir analysis/upscored_fps
+
+## Post-FDR overlap: Winnow-filtered identifications vs database-search ground truth
+analyze_fdr_overlap:
+	uv run python scripts/analyze_fdr_overlap.py \
+		--predictions-root predictions/general_model \
+		--output-dir analysis/fdr_overlap \
+		--include-unlabelled
+
+#########################################################
+## Compute features for new training dataset
+#########################################################
+
+NEW_TRAIN_S3 = s3://winnow-g88rh/revisions/new_datasets/new_training_set
+NEW_TRAIN_FEATURES_S3 = s3://winnow-g88rh/revisions/new_datasets/new_training_set_feature_matrices
+
+NEW_TRAIN_PROJECTS = PXD000865 PXD004452 PXD006939 PXD013868 PXD019483
+
+.PHONY: compute_features_new_training_dataset $(addprefix compute_features_,$(NEW_TRAIN_PROJECTS))
+
+define compute_features_project_template
+compute_features_$(1):
+	mkdir -p data/train/$(1)/
+	mkdir -p data/train_predictions/
+	aws s3 cp $(NEW_TRAIN_S3)/$(1)/ data/train/$(1)/ --recursive
+	aws s3 cp $(NEW_TRAIN_S3)/predictions/$(1).csv data/train_predictions/$(1).csv
+	uv run winnow compute-features \
+		dataset.spectrum_path_or_directory=data/train/$(1)/ \
+		dataset.predictions_path=data/train_predictions/$(1).csv \
+		training_matrix_output_path=train_feature_matrices/$(1)/ \
+		$$(KOINA_OVERRIDES)
+	aws s3 cp train_feature_matrices/$(1)/ $(NEW_TRAIN_FEATURES_S3)/$(1)/ --recursive
+endef
+
+$(foreach proj,$(NEW_TRAIN_PROJECTS),$(eval $(call compute_features_project_template,$(proj))))
+
+compute_features_new_training_dataset:
+	$(foreach proj,$(NEW_TRAIN_PROJECTS),$(MAKE) compute_features_$(proj) && ) true

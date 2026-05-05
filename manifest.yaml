@@ -42,13 +42,13 @@ builder:
 spec:
   debug:
       vscode:
-        enabled: true
+        enabled: false
         path: "/aichor/code"
         provider: "github"
   operator: jobset
   image: winnow-koina
   # Point winnow at the in-pod Triton/Koina server started by entrypoint.koina.sh.
-  command: make compute_train_features KOINA_SERVER_URL=localhost:8500 KOINA_SSL=false
+  command: make ccompute_features_PXD000865
 
   types:
     worker:
