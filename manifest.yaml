@@ -48,7 +48,7 @@ spec:
   operator: jobset
   image: winnow-koina
   # Point winnow at the in-pod Triton/Koina server started by entrypoint.koina.sh.
-  command: make compute_features_PXD004452
+  command: make compute_features_PXD006939
 
   types:
     worker:
