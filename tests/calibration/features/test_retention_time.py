@@ -165,6 +165,56 @@ class TestRetentionTimeFeature:
         assert "exp_a" not in feature.irt_predictors
 
     @patch("winnow.calibration.features.retention_time.koinapy.Koina")
+    def test_compute_skipped_experiment_learn_from_missing_false(self, mock_koina):
+        """Test that compute handles all spectra from a skipped experiment when learn_from_missing=False.
+
+        Reproduces the scenario where an experiment has insufficient data for iRT
+        calibration and learn_from_missing=False causes all its rows to be dropped,
+        leaving no valid input for the Koina model call.
+        """
+        mock_model_instance = Mock()
+        mock_koina.return_value = mock_model_instance
+        mock_model_instance.model_inputs = ["peptide_sequences"]
+        # Simulate koinapy crash on empty input
+        mock_model_instance.predict.side_effect = IndexError("list index out of range")
+
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.95, 0.90, 0.85, 0.80, 0.75],
+                "prediction": [
+                    ["A", "G"],
+                    ["G", "A"],
+                    ["L", "K"],
+                    ["M", "V"],
+                    ["P", "S"],
+                ],
+                "retention_time": [10.5, 15.2, 20.1, 25.3, 30.0],
+                "spectrum_id": [0, 1, 2, 3, 4],
+                "experiment_name": ["exp_a"] * 5,
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
+
+        feature = RetentionTimeFeature(
+            train_fraction=0.1,
+            min_train_points=10,
+            learn_from_missing=False,
+        )
+
+        with pytest.warns(UserWarning, match="Skipping experiment 'exp_a'"):
+            feature.prepare(dataset)
+
+        assert "exp_a" not in feature.irt_predictors
+
+        # compute should not crash even though all spectra will be dropped
+        feature.compute(dataset)
+
+        # All rows should have been dropped (learn_from_missing=False)
+        assert dataset.metadata.empty
+        # Koina should never have been called since there's nothing to predict
+        mock_model_instance.predict.assert_not_called()
+
+    @patch("winnow.calibration.features.retention_time.koinapy.Koina")
     def test_compute_with_mock(
         self, mock_koina, retention_time_feature, sample_dataset_with_rt
     ):

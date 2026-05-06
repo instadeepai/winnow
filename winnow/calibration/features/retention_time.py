@@ -266,11 +266,21 @@ class RetentionTimeFeature(CalibrationFeatures):
         """
         self._mark_missing_spectra(dataset)
 
+        if dataset.metadata.empty:
+            dataset.metadata["irt_error"] = pd.Series(dtype=float)
+            return
+
         original_indices = dataset.metadata.index
 
         valid_irt_input = dataset.filter_entries(
             metadata_predicate=lambda row: row["is_missing_irt_error"]
         )
+
+        if valid_irt_input.metadata.empty:
+            dataset.metadata["irt"] = np.nan
+            dataset.metadata["predicted_irt"] = np.nan
+            dataset.metadata["irt_error"] = 0.0
+            return
 
         inputs = pd.DataFrame()
         inputs["peptide_sequences"] = np.array(
