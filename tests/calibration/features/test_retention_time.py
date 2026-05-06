@@ -140,8 +140,8 @@ class TestRetentionTimeFeature:
         assert feature.irt_predictors["exp_b"] is not preloaded
 
     @patch("winnow.calibration.features.retention_time.koinapy.Koina")
-    def test_prepare_raises_on_insufficient_data(self, mock_koina):
-        """Test that prepare raises ValueError when min_train_points is not met."""
+    def test_prepare_warns_on_insufficient_data(self, mock_koina):
+        """Test that prepare warns and skips when min_train_points is not met."""
         mock_model_instance = Mock()
         mock_koina.return_value = mock_model_instance
         mock_model_instance.model_inputs = ["peptide_sequences"]
@@ -159,8 +159,10 @@ class TestRetentionTimeFeature:
 
         feature = RetentionTimeFeature(train_fraction=0.1, min_train_points=10)
 
-        with pytest.raises(ValueError, match="insufficient data for iRT"):
+        with pytest.warns(UserWarning, match="Skipping experiment 'exp_a'"):
             feature.prepare(dataset)
+
+        assert "exp_a" not in feature.irt_predictors
 
     @patch("winnow.calibration.features.retention_time.koinapy.Koina")
     def test_compute_with_mock(

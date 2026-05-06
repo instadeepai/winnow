@@ -75,6 +75,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         self.koina_server_url = koina_server_url
         self.koina_ssl = koina_ssl
         self.irt_predictors: Dict[str, LinearRegression] = {}
+        self._skipped_experiments: List[str] = []
 
     @property
     def dependencies(self) -> List[FeatureDependency]:
@@ -204,8 +205,11 @@ class RetentionTimeFeature(CalibrationFeatures):
             dataset: The dataset containing peptide sequences and retention times.
 
         Raises:
-            ValueError: If ``retention_time`` column is missing, or if any experiment
-                has fewer than ``min_train_points`` valid training spectra.
+            ValueError: If ``retention_time`` column is missing from the dataset.
+
+        Note:
+            Experiments with fewer than ``min_train_points`` valid training spectra
+            are skipped with a warning. Their iRT features will be imputed as zero.
         """
         if "retention_time" not in dataset.metadata.columns:
             raise ValueError(
@@ -213,33 +217,13 @@ class RetentionTimeFeature(CalibrationFeatures):
                 "This is required for iRT features computation."
             )
 
-        if "experiment_name" not in dataset.metadata.columns:
-            if "__global__" not in self.irt_predictors:
-                warnings.warn(
-                    "No 'experiment_name' column found. Fitting a single global "
-                    "RT->iRT regressor. For multi-experiment data, ensure each "
-                    "spectrum file includes an 'experiment_name' column or use "
-                    "MGF format (which derives it from the filename).",
-                    stacklevel=2,
-                )
-                experiments_to_fit = {"__global__": dataset.metadata}
-            else:
-                return
-        else:
-            experiments_to_fit = {
-                str(exp_name): group
-                for exp_name, group in dataset.metadata.groupby("experiment_name")
-                if exp_name not in self.irt_predictors
-            }
-            if not experiments_to_fit:
-                return
+        experiments_to_fit = self._resolve_experiments_to_fit(dataset)
+        if not experiments_to_fit:
+            return
 
-        # Select training data per experiment, validate counts, collect into
-        # a single DataFrame for one batched Koina call.
-        per_exp_train: Dict[str, pd.DataFrame] = {}
-        for exp_name, group in experiments_to_fit.items():
-            train_data = self._select_training_data(group, exp_name)
-            per_exp_train[exp_name] = train_data
+        per_exp_train = self._collect_training_data(experiments_to_fit)
+        if not per_exp_train:
+            return
 
         all_train = pd.concat(per_exp_train.values(), ignore_index=True)
 
@@ -280,41 +264,14 @@ class RetentionTimeFeature(CalibrationFeatures):
         Args:
             dataset: The dataset containing peptide sequences and retention times.
         """
-        # Check which predictions are valid for iRT prediction
-        is_valid_irt_prediction = self.check_valid_irt_prediction(dataset)
-        dataset.metadata["is_missing_irt_error"] = ~is_valid_irt_prediction
-
-        if not self.learn_from_missing:
-            # Filter invalid entries from the dataset in place so that they are dropped entirely
-            # (not imputed with zeros) and downstream features also do not see them.
-            n_invalid = (~is_valid_irt_prediction).sum()
-            if n_invalid > 0:
-                warnings.warn(
-                    f"Filtered {n_invalid} spectra that do not satisfy the validity constraints "
-                    f"for the Koina iRT model '{self.irt_model_name}' "
-                    f"(learn_from_missing=False). Constraints applied:\n"
-                    f"  - Retention time data required\n"
-                    f"  - max_peptide_length={self.max_peptide_length} residue tokens\n"
-                    f"  - unsupported_residues: {self.unsupported_residues[:3]}{'...' if len(self.unsupported_residues) > 3 else ''}\n"
-                    f"Set learn_from_missing=True to impute missing features instead of filtering.",
-                    stacklevel=2,
-                )
-            _filtered = dataset.filter_entries(
-                metadata_predicate=lambda row: row["is_missing_irt_error"]
-            )
-            dataset.metadata = _filtered.metadata
-            dataset.predictions = _filtered.predictions
-            # All remaining rows are valid — the reindex below will find every spectrum_id
-            # in predictions with no NaN fill needed.
+        self._mark_missing_spectra(dataset)
 
         original_indices = dataset.metadata.index
 
-        # Filter out invalid spectra for iRT prediction
         valid_irt_input = dataset.filter_entries(
             metadata_predicate=lambda row: row["is_missing_irt_error"]
         )
 
-        # Prepare input data
         inputs = pd.DataFrame()
         inputs["peptide_sequences"] = np.array(
             [
@@ -332,26 +289,12 @@ class RetentionTimeFeature(CalibrationFeatures):
         predictions = koina_model.predict(inputs)
         predictions["spectrum_id"] = predictions.index
 
-        # Match computed metadata to valid spectra and impute missing values for invalid spectra
-        # Reindex to match dataset.metadata.index and fill missing values with NaN
         dataset.metadata.index = dataset.metadata["spectrum_id"]
         dataset.metadata["irt"] = predictions["irt"].reindex(
             dataset.metadata["spectrum_id"], fill_value=np.nan
         )
 
-        # Apply per-experiment regressors
-        if "experiment_name" in dataset.metadata.columns:
-            predicted_irt = pd.Series(np.nan, index=dataset.metadata.index)
-            for exp_name, group in dataset.metadata.groupby("experiment_name"):
-                regressor = self.irt_predictors[exp_name]
-                predicted_irt.loc[group.index] = regressor.predict(
-                    group["retention_time"].values.reshape(-1, 1)
-                )
-            dataset.metadata["predicted_irt"] = predicted_irt
-        else:
-            dataset.metadata["predicted_irt"] = self.irt_predictors[
-                "__global__"
-            ].predict(dataset.metadata["retention_time"].values.reshape(-1, 1))
+        self._apply_regressors(dataset)
 
         # Revert to original indices
         dataset.metadata.index = original_indices
@@ -361,6 +304,102 @@ class RetentionTimeFeature(CalibrationFeatures):
         dataset.metadata["irt_error"] = np.abs(
             dataset.metadata["predicted_irt"] - dataset.metadata["irt"]
         ).fillna(0.0)
+
+    def _resolve_experiments_to_fit(
+        self, dataset: CalibrationDataset
+    ) -> Optional[Dict[str, pd.DataFrame]]:
+        """Determine which experiments need a regressor fitted.
+
+        Returns:
+            A dict mapping experiment name to its metadata subset, or None if
+            there is nothing to fit.
+        """
+        if "experiment_name" not in dataset.metadata.columns:
+            if "__global__" not in self.irt_predictors:
+                warnings.warn(
+                    "No 'experiment_name' column found. Fitting a single global "
+                    "RT->iRT regressor. For multi-experiment data, ensure each "
+                    "spectrum file includes an 'experiment_name' column or use "
+                    "MGF format (which derives it from the filename).",
+                    stacklevel=2,
+                )
+                return {"__global__": dataset.metadata}
+            return None
+
+        experiments_to_fit = {
+            str(exp_name): group
+            for exp_name, group in dataset.metadata.groupby("experiment_name")
+            if exp_name not in self.irt_predictors
+        }
+        return experiments_to_fit or None
+
+    def _collect_training_data(
+        self, experiments_to_fit: Dict[str, pd.DataFrame]
+    ) -> Dict[str, pd.DataFrame]:
+        """Select training data per experiment, skipping those with insufficient data."""
+        per_exp_train: Dict[str, pd.DataFrame] = {}
+        for exp_name, group in experiments_to_fit.items():
+            try:
+                train_data = self._select_training_data(group, exp_name)
+            except ValueError as e:
+                warnings.warn(
+                    f"Skipping experiment '{exp_name}': {e}. "
+                    f"Spectra from this experiment will be "
+                    f"{'dropped' if not self.learn_from_missing else 'imputed as zero'}.",
+                    stacklevel=2,
+                )
+                self._skipped_experiments.append(exp_name)
+                continue
+            per_exp_train[exp_name] = train_data
+        return per_exp_train
+
+    def _mark_missing_spectra(self, dataset: CalibrationDataset) -> None:
+        """Mark spectra that cannot produce iRT features as missing.
+
+        Sets the ``is_missing_irt_error`` column on ``dataset.metadata``. When
+        ``learn_from_missing`` is False, also drops those rows in place.
+        """
+        is_valid = self.check_valid_irt_prediction(dataset)
+        dataset.metadata["is_missing_irt_error"] = ~is_valid
+
+        if self._skipped_experiments and "experiment_name" in dataset.metadata.columns:
+            skipped_mask = dataset.metadata["experiment_name"].isin(
+                self._skipped_experiments
+            )
+            dataset.metadata.loc[skipped_mask, "is_missing_irt_error"] = True
+
+        if not self.learn_from_missing:
+            n_invalid = dataset.metadata["is_missing_irt_error"].sum()
+            if n_invalid > 0:
+                warnings.warn(
+                    f"Filtered {n_invalid} spectra that do not satisfy the validity "
+                    f"constraints for the Koina iRT model '{self.irt_model_name}' "
+                    f"(learn_from_missing=False).\n"
+                    f"Set learn_from_missing=True to impute missing features instead.",
+                    stacklevel=3,
+                )
+            _filtered = dataset.filter_entries(
+                metadata_predicate=lambda row: row["is_missing_irt_error"]
+            )
+            dataset.metadata = _filtered.metadata
+            dataset.predictions = _filtered.predictions
+
+    def _apply_regressors(self, dataset: CalibrationDataset) -> None:
+        """Apply per-experiment (or global) regressors to predict iRT from RT."""
+        if "experiment_name" in dataset.metadata.columns:
+            predicted_irt = pd.Series(np.nan, index=dataset.metadata.index)
+            for exp_name, group in dataset.metadata.groupby("experiment_name"):
+                regressor = self.irt_predictors.get(exp_name)
+                if regressor is None:
+                    continue
+                predicted_irt.loc[group.index] = regressor.predict(
+                    group["retention_time"].values.reshape(-1, 1)
+                )
+            dataset.metadata["predicted_irt"] = predicted_irt
+        else:
+            dataset.metadata["predicted_irt"] = self.irt_predictors[
+                "__global__"
+            ].predict(dataset.metadata["retention_time"].values.reshape(-1, 1))
 
     def _select_training_data(
         self, metadata: pd.DataFrame, experiment_name: str
