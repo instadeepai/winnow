@@ -560,7 +560,7 @@ compute_features_$(1):
 	uv run winnow compute-features \
 		dataset.spectrum_path_or_directory=data/train/$(1)/ \
 		dataset.predictions_path=data/train_predictions/$(1).csv \
-		training_matrix_output_path=train_feature_matrices/$(1)/ \
+		training_matrix_output_path=train_feature_matrices/$(1)/training_matrix.parquet \
 		$$(KOINA_OVERRIDES)
 	aws s3 cp train_feature_matrices/$(1)/ $(NEW_TRAIN_FEATURES_S3)/$(1)/ --recursive
 endef
