@@ -62,4 +62,3 @@ spec:
             count: 1
             type: gpu
             product: NVIDIA-H100-80GB-HBM3-MIG-3g.40gb
-
