@@ -38,8 +38,8 @@ calibrator:
       max_precursor_charge: ${koina.constraints.max_precursor_charge}  # Maximum precursor charge accepted by the Koina intensity model.
       max_peptide_length: ${koina.constraints.max_peptide_length}      # Maximum peptide length accepted by the Koina intensity model.
       unsupported_residues: ${koina.constraints.unsupported_residues}  # Residues unsupported by the configured Koina intensity model.
-      # model_input_constants: ${koina.input_constants}  # Shared Koina model inputs (e.g. collision_energies, fragmentation_types).
-      model_input_columns: ${koina.input_columns}  # Uncomment to use per-row metadata columns instead.
+      model_input_constants: ${koina.input_constants}  # Shared Koina model inputs (e.g. collision_energies, fragmentation_types).
+      # model_input_columns: ${koina.input_columns}  # Uncomment to use per-row metadata columns instead.
       koina_server_url: ${koina.server_url}  # Koina inference server URL.
       koina_ssl: ${koina.ssl}                # Whether to use SSL when talking to the Koina server.
 
@@ -95,13 +95,13 @@ koina:
   # To use a constant value tiled across all rows, specify it under input_constants.
   # To use per-row values from a metadata column, add the column mapping under input_columns.
   # Each input key must appear in at most one of these two dicts.
-  # input_constants:
-  #   collision_energies: 27
-  #   fragmentation_types: HCD
-  input_columns: {
-    collision_energies: "collision_energy",
-    fragmentation_types: "frag_type",
-  }
+  input_constants:
+    collision_energies: 27
+    fragmentation_types: HCD
+  # input_columns: {
+  #   collision_energies: "collision_energy",
+  #   fragmentation_types: "frag_type",
+  # }
 
   # Model constraints — adjust to match the capabilities of your Koina models.
   # See docs/configuration.md for guidance on choosing these values.

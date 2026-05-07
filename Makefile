@@ -547,7 +547,7 @@ analyze_fdr_overlap:
 NEW_TRAIN_S3 = s3://winnow-g88rh/revisions/new_datasets/new_training_set
 NEW_TRAIN_FEATURES_S3 = s3://winnow-g88rh/revisions/new_datasets/new_training_set_feature_matrices
 
-NEW_TRAIN_PROJECTS = PXD000865 PXD004452 PXD006939 PXD013868 PXD019483
+NEW_TRAIN_PROJECTS = acpt_validation massivekb_validation # PXD000865 PXD004452 PXD006939 PXD013868 PXD019483
 
 .PHONY: compute_features_new_training_dataset $(addprefix compute_features_,$(NEW_TRAIN_PROJECTS))
 
