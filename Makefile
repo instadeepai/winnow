@@ -570,7 +570,7 @@ compute_features_$(1):
 		dataset.spectrum_path_or_directory=data/train/$(1).parquet \
 		dataset.predictions_path=data/train_predictions/$(1).csv \
 		training_matrix_output_path=train_feature_matrices/$(1)/training_matrix.parquet \
-		$$(KOINA_OVERRIDES)
+		koina.server_url=localhost:8500 koina.ssl=false
 	aws s3 cp train_feature_matrices/$(1)/ $(NEW_TRAIN_FEATURES_S3)/$(1)/ --recursive
 endef
 
@@ -585,7 +585,7 @@ compute_features_$(1):
 		dataset.spectrum_path_or_directory=data/train/$(1)/ \
 		dataset.predictions_path=data/train_predictions/$(1).csv \
 		training_matrix_output_path=train_feature_matrices/$(1)/training_matrix.parquet \
-		$$(KOINA_OVERRIDES)
+		koina.server_url=localhost:8500 koina.ssl=false
 	aws s3 cp train_feature_matrices/$(1)/ $(NEW_TRAIN_FEATURES_S3)/$(1)/ --recursive
 endef
 
@@ -622,7 +622,7 @@ compute_features_$(1)_$(2):
 		dataset.spectrum_path_or_directory=data/train/$(1)/$(2)/ \
 		dataset.predictions_path=data/train_predictions/$(1)_$(2).csv \
 		training_matrix_output_path=train_feature_matrices/$(1)/$(2)/training_matrix.parquet \
-		$$(KOINA_OVERRIDES)
+		koina.server_url=localhost:8500 koina.ssl=false
 	aws s3 cp train_feature_matrices/$(1)/$(2)/ $(NEW_TRAIN_FEATURES_S3)/$(1)/$(2)/ --recursive
 	rm -rf data/train/$(1)/$(2)/
 	rm -f data/train_predictions/$(1)_$(2).csv
