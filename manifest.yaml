@@ -49,7 +49,7 @@ spec:
   image: winnow-koina
   # AIChor overrides the Docker ENTRYPOINT, so we must invoke the entrypoint
   # script explicitly to start Triton/Koina before running the make target.
-  command: /usr/local/bin/entrypoint.koina.sh make compute_features_PXD024364_batched_part2
+  command: /usr/local/bin/entrypoint.koina.sh make compute_features_PXD024364_batched_part1
 
   types:
     worker:
