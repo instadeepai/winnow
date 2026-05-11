@@ -565,13 +565,7 @@ compute_features_$(1):
 	aws s3 cp $(NEW_TRAIN_S3)/$(1)/ data/train/$(1)/ --recursive
 	aws s3 cp $(NEW_TRAIN_S3)/predictions/$(1).csv data/train_predictions/$(1).csv
 	@echo "Combining parquet shards in data/train/$(1)/ -> data/train/$(1).parquet"
-	uv run python -c "\
-	import polars as pl; from pathlib import Path; \
-	d = Path('data/train/$(1)'); \
-	parts = sorted(d.glob('*.parquet')); \
-	print(f'  Found {len(parts)} shard(s), {sum(pl.scan_parquet(p).select(pl.len()).collect().item() for p in parts):,} rows total'); \
-	pl.concat([pl.read_parquet(p) for p in parts]).write_parquet(d.parent / '$(1).parquet'); \
-	print(f'  Written to data/train/$(1).parquet')"
+	uv run python -c "import polars as pl; from pathlib import Path; d = Path('data/train/$(1)'); parts = sorted(d.glob('*.parquet')); print(f'  Found {len(parts)} shard(s), {sum(pl.scan_parquet(p).select(pl.len()).collect().item() for p in parts):,} rows total'); pl.concat([pl.read_parquet(p) for p in parts]).write_parquet(d.parent / '$(1).parquet'); print(f'  Written to data/train/$(1).parquet')"
 	uv run winnow compute-features \
 		dataset.spectrum_path_or_directory=data/train/$(1).parquet \
 		dataset.predictions_path=data/train_predictions/$(1).csv \
