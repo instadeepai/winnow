@@ -547,10 +547,40 @@ analyze_fdr_overlap:
 NEW_TRAIN_S3 = s3://winnow-g88rh/revisions/new_datasets/new_training_set
 NEW_TRAIN_FEATURES_S3 = s3://winnow-g88rh/revisions/new_datasets/new_training_set_feature_matrices
 
-NEW_TRAIN_PROJECTS = acpt massivekb # PXD000865 PXD004452 PXD006939 PXD013868 PXD019483
+NEW_TRAIN_PROJECTS = PXD000865 PXD004452 PXD006939 PXD013868 PXD019483
 
-.PHONY: compute_features_new_training_dataset $(addprefix compute_features_,$(NEW_TRAIN_PROJECTS))
+# Projects whose experiments are shuffled across parquet shards and must be
+# combined into a single file before feature computation.
+SHUFFLED_SHARD_PROJECTS = acpt massivekb
 
+.PHONY: compute_features_new_training_dataset \
+	$(addprefix compute_features_,$(NEW_TRAIN_PROJECTS))
+
+# Template for shuffled-shard projects: download, combine shards, compute
+# features on the single combined parquet, then upload.
+define compute_features_shuffled_project_template
+compute_features_$(1):
+	mkdir -p data/train/$(1)/
+	mkdir -p data/train_predictions/
+	aws s3 cp $(NEW_TRAIN_S3)/$(1)/ data/train/$(1)/ --recursive
+	aws s3 cp $(NEW_TRAIN_S3)/predictions/$(1).csv data/train_predictions/$(1).csv
+	@echo "Combining parquet shards in data/train/$(1)/ -> data/train/$(1).parquet"
+	uv run python -c "\
+	import polars as pl; from pathlib import Path; \
+	d = Path('data/train/$(1)'); \
+	parts = sorted(d.glob('*.parquet')); \
+	print(f'  Found {len(parts)} shard(s), {sum(pl.scan_parquet(p).select(pl.len()).collect().item() for p in parts):,} rows total'); \
+	pl.concat([pl.read_parquet(p) for p in parts]).write_parquet(d.parent / '$(1).parquet'); \
+	print(f'  Written to data/train/$(1).parquet')"
+	uv run winnow compute-features \
+		dataset.spectrum_path_or_directory=data/train/$(1).parquet \
+		dataset.predictions_path=data/train_predictions/$(1).csv \
+		training_matrix_output_path=train_feature_matrices/$(1)/training_matrix.parquet \
+		$$(KOINA_OVERRIDES)
+	aws s3 cp train_feature_matrices/$(1)/ $(NEW_TRAIN_FEATURES_S3)/$(1)/ --recursive
+endef
+
+# Template for normal projects: download directory, compute features per-file.
 define compute_features_project_template
 compute_features_$(1):
 	mkdir -p data/train/$(1)/
@@ -565,7 +595,8 @@ compute_features_$(1):
 	aws s3 cp train_feature_matrices/$(1)/ $(NEW_TRAIN_FEATURES_S3)/$(1)/ --recursive
 endef
 
-$(foreach proj,$(NEW_TRAIN_PROJECTS),$(eval $(call compute_features_project_template,$(proj))))
+$(foreach proj,$(SHUFFLED_SHARD_PROJECTS),$(eval $(call compute_features_shuffled_project_template,$(proj))))
+$(foreach proj,$(filter-out $(SHUFFLED_SHARD_PROJECTS),$(NEW_TRAIN_PROJECTS)),$(eval $(call compute_features_project_template,$(proj))))
 
 compute_features_new_training_dataset:
 	$(foreach proj,$(NEW_TRAIN_PROJECTS),$(MAKE) compute_features_$(proj) && ) true
