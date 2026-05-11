@@ -42,7 +42,7 @@ builder:
 spec:
   debug:
       vscode:
-        enabled: false
+        enabled: true
         path: "/aichor/code"
         provider: "github"
   operator: jobset
@@ -55,11 +55,11 @@ spec:
     worker:
       count: 1
       resources:
-        cpus: 12
+        cpus: 6
         ramRatio: 9 # >= 2
 
         accelerators:
           gpu:
-            count: 1
+            count: 0
             type: gpu
             product: NVIDIA-H100-80GB-HBM3-MIG-3g.40gb
