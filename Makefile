@@ -569,3 +569,51 @@ $(foreach proj,$(NEW_TRAIN_PROJECTS),$(eval $(call compute_features_project_temp
 
 compute_features_new_training_dataset:
 	$(foreach proj,$(NEW_TRAIN_PROJECTS),$(MAKE) compute_features_$(proj) && ) true
+
+#########################################################
+## Compute features for large, batched datasets
+#########################################################
+
+PXD000561_BATCHES = batch_1 sub_1 sub_2
+PXD010154_BATCHES = batch_1 batch_2 batch_3 batch_4
+PXD024364_BATCHES = batch_5 sub_1 sub_2 sub_3 sub_4 sub_5 sub_6 sub_7 sub_8 sub_9 sub_10 sub_11 sub_12 sub_13 sub_14
+
+NEW_TRAIN_BATCH_TARGETS = \
+	$(addprefix compute_features_PXD000561_,$(PXD000561_BATCHES)) \
+	$(addprefix compute_features_PXD010154_,$(PXD010154_BATCHES)) \
+	$(addprefix compute_features_PXD024364_,$(PXD024364_BATCHES))
+
+.PHONY: compute_features_new_training_dataset_batched \
+	compute_features_PXD000561_batched compute_features_PXD010154_batched compute_features_PXD024364_batched \
+	$(NEW_TRAIN_BATCH_TARGETS)
+
+define compute_features_batch_template
+compute_features_$(1)_$(2):
+	mkdir -p data/train/$(1)/$(2)/
+	mkdir -p data/train_predictions/
+	aws s3 cp $(NEW_TRAIN_S3)/$(1)/$(2)/ data/train/$(1)/$(2)/ --recursive
+	aws s3 cp $(NEW_TRAIN_S3)/predictions/$(1)_$(2).csv data/train_predictions/$(1)_$(2).csv
+	uv run winnow compute-features \
+		dataset.spectrum_path_or_directory=data/train/$(1)/$(2)/ \
+		dataset.predictions_path=data/train_predictions/$(1)_$(2).csv \
+		training_matrix_output_path=train_feature_matrices/$(1)/$(2)/training_matrix.parquet \
+		$$(KOINA_OVERRIDES)
+	aws s3 cp train_feature_matrices/$(1)/$(2)/ $(NEW_TRAIN_FEATURES_S3)/$(1)/$(2)/ --recursive
+	rm -rf data/train/$(1)/$(2)/
+	rm -f data/train_predictions/$(1)_$(2).csv
+endef
+
+$(foreach batch,$(PXD000561_BATCHES),$(eval $(call compute_features_batch_template,PXD000561,$(batch))))
+$(foreach batch,$(PXD010154_BATCHES),$(eval $(call compute_features_batch_template,PXD010154,$(batch))))
+$(foreach batch,$(PXD024364_BATCHES),$(eval $(call compute_features_batch_template,PXD024364,$(batch))))
+
+compute_features_PXD000561_batched:
+	$(foreach b,$(PXD000561_BATCHES),$(MAKE) compute_features_PXD000561_$(b) && ) true
+
+compute_features_PXD010154_batched:
+	$(foreach b,$(PXD010154_BATCHES),$(MAKE) compute_features_PXD010154_$(b) && ) true
+
+compute_features_PXD024364_batched:
+	$(foreach b,$(PXD024364_BATCHES),$(MAKE) compute_features_PXD024364_$(b) && ) true
+
+compute_features_new_training_dataset_batched: compute_features_PXD000561_batched compute_features_PXD010154_batched compute_features_PXD024364_batched

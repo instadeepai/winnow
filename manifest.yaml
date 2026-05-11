@@ -48,7 +48,7 @@ spec:
   operator: jobset
   image: winnow-koina
   # Point winnow at the in-pod Triton/Koina server started by entrypoint.koina.sh.
-  command: make compute_features_acpt && make compute_features_massivekb
+  command: make compute_features_PXD000561_batched
 
   types:
     worker:
@@ -62,4 +62,3 @@ spec:
             count: 1
             type: gpu
             product: NVIDIA-H100-80GB-HBM3-MIG-3g.40gb
-
