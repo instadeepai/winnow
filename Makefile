@@ -616,4 +616,15 @@ compute_features_PXD010154_batched:
 compute_features_PXD024364_batched:
 	$(foreach b,$(PXD024364_BATCHES),$(MAKE) compute_features_PXD024364_$(b) && ) true
 
+PXD024364_BATCHES_PART1 = batch_5 sub_1 sub_2 sub_3 sub_4 sub_5 sub_6
+PXD024364_BATCHES_PART2 = sub_7 sub_8 sub_9 sub_10 sub_11 sub_12 sub_13 sub_14
+
+.PHONY: compute_features_PXD024364_batched_part1 compute_features_PXD024364_batched_part2
+
+compute_features_PXD024364_batched_part1:
+	$(foreach b,$(PXD024364_BATCHES_PART1),$(MAKE) compute_features_PXD024364_$(b) && ) true
+
+compute_features_PXD024364_batched_part2:
+	$(foreach b,$(PXD024364_BATCHES_PART2),$(MAKE) compute_features_PXD024364_$(b) && ) true
+
 compute_features_new_training_dataset_batched: compute_features_PXD000561_batched compute_features_PXD010154_batched compute_features_PXD024364_batched
