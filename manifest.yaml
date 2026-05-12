@@ -16,7 +16,7 @@ spec:
         provider: "github"
   operator: jobset
   image: winnow-koina
-  command: /usr/local/bin/entrypoint.koina.sh make compute_features_PXD024364_batched_part1 # make hpo-pipeline
+  command: /usr/local/bin/entrypoint.koina.sh make compute_features_PXD024364_batched_part2 # make hpo-pipeline
 
   types:
     worker:
