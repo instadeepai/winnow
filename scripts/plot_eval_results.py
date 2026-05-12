@@ -33,14 +33,14 @@ app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 # Dataset display names
 # ---------------------------------------------------------------------------
 DATASET_DISPLAY_NAMES: dict[str, str] = {
-    "gluc": "HeLa Degradome",
-    "helaqc": "HeLa Single Shot",
+    "gluc": "HeLa degradome",
+    "helaqc": "HeLa single shot",
     "herceptin": "Herceptin",
     "immuno": "Immunopeptidomics-1",
-    "sbrodae": "Scalindua Brodae",
-    "snakevenoms": "Snake Venomics",
-    "tplantibodies": "Therapeutic Nanobodies",
-    "woundfluids": "Wound Exudates",
+    "sbrodae": "Scalindua brodae",
+    "snakevenoms": "Snake venomics",
+    "tplantibodies": "Therapeutic nanobodies",
+    "woundfluids": "Wound exudates",
     "PXD014877": "C. elegans",
     "PXD023064": "Immunopeptidomics-2",
     "PXD009935": "Immunopeptidomics-3",
