@@ -7,7 +7,7 @@ import json
 import logging
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from tqdm import tqdm
@@ -604,6 +604,7 @@ class ProbabilityCalibrator:
         train_dataset: FeatureDataset,
         val_dataset: Optional[FeatureDataset] = None,
         progress_bar: bool = True,
+        epoch_callback: Optional[Callable[[int, float], None]] = None,
     ) -> TrainingHistory:
         """Train the calibrator from pre-computed feature arrays.
 
@@ -619,11 +620,17 @@ class ProbabilityCalibrator:
                 is evaluated each epoch; after training, metrics on the full
                 validation set are stored in ``TrainingHistory.final_val_*``.
             progress_bar: Whether to display a progress bar during training.
+            epoch_callback: Optional callback invoked after each validation
+                step with ``(epoch, val_loss)``.  Useful for external
+                hyperparameter optimisation frameworks (e.g. Optuna pruning).
+                Only called when *val_dataset* is provided.
 
         Returns:
             Epoch-level training metrics.
         """
-        return self._fit_from_features(train_dataset, val_dataset, progress_bar)
+        return self._fit_from_features(
+            train_dataset, val_dataset, progress_bar, epoch_callback
+        )
 
     @torch.no_grad()
     def predict(self, dataset: CalibrationDataset) -> None:
@@ -755,6 +762,7 @@ class ProbabilityCalibrator:
         train_dataset: FeatureDataset,
         val_dataset: Optional[FeatureDataset] = None,
         progress_bar: bool = True,
+        epoch_callback: Optional[Callable[[int, float], None]] = None,
     ) -> TrainingHistory:
         """Train the calibrator network on pre-computed features.
 
@@ -762,6 +770,9 @@ class ProbabilityCalibrator:
             train_dataset: Training features and labels.
             val_dataset: Optional held-out validation set for early stopping.
             progress_bar: Whether to display a progress bar during training.
+            epoch_callback: Optional callback invoked after each validation
+                step with ``(epoch, val_loss)``.  Only called when
+                *val_dataset* is provided.
 
         Returns:
             Epoch-level training metrics.
@@ -839,6 +850,11 @@ class ProbabilityCalibrator:
                     epochs_without_improvement,
                 )
             )
+
+            if epoch_callback is not None:
+                assert history.val_losses is not None
+                epoch_callback(epoch, history.val_losses[-1])
+
             if should_stop:
                 break
 
