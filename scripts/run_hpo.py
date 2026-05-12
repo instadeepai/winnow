@@ -100,9 +100,7 @@ def suggest_hyperparameters(trial: optuna.Trial, cfg: Dict[str, Any]) -> Dict[st
     unit_choices = sorted(ss["n_units"]["choices"])
     dims: list[int] = []
     for i in range(n_layers):
-        max_width = dims[-1] if dims else unit_choices[-1]
-        choices = [w for w in unit_choices if w <= max_width]
-        dims.append(trial.suggest_categorical(f"n_units_l{i}", choices))
+        dims.append(trial.suggest_categorical(f"n_units_l{i}", unit_choices))
     hidden_dims = tuple(dims)
 
     return {
