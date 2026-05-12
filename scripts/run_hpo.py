@@ -309,6 +309,45 @@ def _print_study_summary(study: optuna.Study) -> None:
     print("=" * 60)
 
 
+def _retrain_and_save_best(
+    study: optuna.Study,
+    train_dataset: FeatureDataset,
+    val_dataset: FeatureDataset,
+    cfg: Dict[str, Any],
+    output_dir: Path,
+) -> None:
+    """Retrain the best trial's configuration and save the resulting model."""
+    from winnow.calibration.calibrator import ProbabilityCalibrator
+
+    best = study.best_trial
+    fixed = cfg["fixed"]
+
+    n_layers = best.params["n_layers"]
+    hidden_dims = tuple(best.params[f"n_units_l{i}"] for i in range(n_layers))
+
+    logger.info(
+        "Retraining best trial #%d (brier=%.6f) for saving ...",
+        best.number,
+        best.value,
+    )
+
+    calibrator = ProbabilityCalibrator(
+        hidden_dims=hidden_dims,
+        dropout=best.params["dropout"],
+        learning_rate=best.params["learning_rate"],
+        weight_decay=best.params["weight_decay"],
+        max_epochs=fixed["max_epochs"],
+        batch_size=best.params["batch_size"],
+        n_iter_no_change=fixed["n_iter_no_change"],
+        tol=fixed["tol"],
+        seed=fixed["seed"],
+    )
+    calibrator.fit_from_features(train_dataset, val_dataset)
+
+    ProbabilityCalibrator.save(calibrator, output_dir)
+    logger.info("Best model saved to %s", output_dir)
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments for the HPO script."""
     p = argparse.ArgumentParser(
@@ -355,6 +394,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--verbose",
         action="store_true",
         help="Show tqdm bars and winnow debug logging.",
+    )
+    p.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("hpo_best_model"),
+        help="Directory to save the best model to (default: hpo_best_model/).",
     )
     p.add_argument(
         "--set",
@@ -433,6 +478,15 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
 
     _print_study_summary(study)
+
+    # -- Save best model ------------------------------------------------
+    _retrain_and_save_best(
+        study,
+        train_dataset,
+        val_dataset,
+        cfg,
+        args.output_dir,
+    )
 
 
 if __name__ == "__main__":
