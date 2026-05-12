@@ -431,10 +431,280 @@ hpo-upload-model:
 		echo "Error: $(HPO_OUTPUT_DIR) does not exist. Run 'make hpo' first."; \
 		exit 1; \
 	fi
-	$(eval HPO_TIMESTAMP := $(shell date -u +%Y%m%dT%H%M%SZ))
-	aws s3 cp --recursive $(HPO_OUTPUT_DIR) $(HPO_MODEL_S3)/$(HPO_TIMESTAMP)/
-	@echo "Model uploaded to $(HPO_MODEL_S3)/$(HPO_TIMESTAMP)/"
+	aws s3 cp --recursive $(HPO_OUTPUT_DIR) $(RUN_S3)/$(RUN_TS)/model/
+	@echo "Model uploaded to $(RUN_S3)/$(RUN_TS)/model/"
 
+#########################################################
+## HPO end-to-end pipeline
+#########################################################
+
+.PHONY: hpo-pipeline download-eval-data eval-annotated eval-raw \
+        eval-external-labelled eval-external-unlabelled \
+        feature-analysis ablation
+
+S3_BASE         ?= s3://winnow-g88rh/revisions/new_datasets
+HELD_OUT_S3     ?= $(S3_BASE)/held_out_projects
+FASTA_S3        ?= $(S3_BASE)/fasta
+RUN_S3          ?= $(S3_BASE)/hpo_runs
+RUN_TS          ?= $(shell date -u +%Y%m%dT%H%M%SZ)
+PREDS_DIR       ?= predictions/hpo_model
+EVAL_PLOTS_DIR  ?= analysis/hpo_eval_plots
+
+EXTERNAL_FULL_PROJECTS := PXD009935 PXD014877
+PXD023064_FILES := MSB33410B MSB33411A MSB33659A MSB33663B MSB37876A MSB37878A MSB37880A MSB37884A
+
+# FASTA assignments for raw bio-val proteome annotation (HPO model)
+FASTA_RAW_gluc := fasta/human.fasta
+FASTA_RAW_helaqc := fasta/human.fasta
+FASTA_RAW_herceptin := fasta/herceptin.fasta
+FASTA_RAW_immuno := fasta/human.fasta
+FASTA_RAW_sbrodae := fasta/Sb_proteome.fasta
+FASTA_RAW_snakevenoms := fasta/uniprot-serpentes-2022.05.09.fasta
+FASTA_RAW_tplantibodies := fasta/nanobody_library.fasta
+FASTA_RAW_woundfluids := fasta/human.fasta
+
+# FASTA assignments for unlabelled external proteome annotation
+FASTA_UNLABELLED_PXD009935 := fasta/human.fasta
+FASTA_UNLABELLED_PXD014877 := fasta/Celegans.fasta
+FASTA_UNLABELLED_PXD023064 := fasta/human.fasta
+FASTA_UNLABELLED_Astral := fasta/UP000000625_83333.fasta
+
+## Download all evaluation data from S3
+download-eval-data:
+	mkdir -p held_out_projects/biological_validation fasta \
+	         held_out_projects/lcfm held_out_projects/acfm \
+	         astral/labelled astral/full astral/predictions
+	aws s3 cp --recursive $(HELD_OUT_S3)/biological_validation/ held_out_projects/biological_validation/
+	aws s3 cp --recursive $(FASTA_S3)/ fasta/
+	@# Full external projects (lcfm + acfm)
+	for project in $(EXTERNAL_FULL_PROJECTS); do \
+		aws s3 cp --recursive $(HELD_OUT_S3)/lcfm/$$project/ held_out_projects/lcfm/$$project/; \
+		aws s3 cp --recursive $(HELD_OUT_S3)/lcfm/$${project}_predictions/ held_out_projects/lcfm/$${project}_predictions/; \
+		aws s3 cp --recursive $(HELD_OUT_S3)/acfm/$$project/ held_out_projects/acfm/$$project/; \
+		aws s3 cp --recursive $(HELD_OUT_S3)/acfm/$${project}_predictions/ held_out_projects/acfm/$${project}_predictions/; \
+	done
+	@# PXD023064 -- only the selected files
+	mkdir -p held_out_projects/lcfm/PXD023064 held_out_projects/acfm/PXD023064
+	for file in $(PXD023064_FILES); do \
+		aws s3 cp $(HELD_OUT_S3)/lcfm/PXD023064/$$file.parquet held_out_projects/lcfm/PXD023064/$$file.parquet; \
+		aws s3 cp $(HELD_OUT_S3)/acfm/PXD023064/$$file.parquet held_out_projects/acfm/PXD023064/$$file.parquet; \
+	done
+	aws s3 cp --recursive $(HELD_OUT_S3)/lcfm/PXD023064_predictions/ held_out_projects/lcfm/PXD023064_predictions/
+	aws s3 cp --recursive $(HELD_OUT_S3)/acfm/PXD023064_predictions/ held_out_projects/acfm/PXD023064_predictions/
+	@# Astral
+	aws s3 cp --recursive $(S3_BASE)/astral/labelled/ astral/labelled/
+	aws s3 cp --recursive $(S3_BASE)/astral/full/ astral/full/
+	aws s3 cp --recursive $(S3_BASE)/astral/predictions/ astral/predictions/
+
+## Evaluate model on annotated bio-val, plot, and upload
+eval-annotated:
+	mkdir -p $(PREDS_DIR) $(EVAL_PLOTS_DIR)/annotated
+	for project in $(BIOLOGICAL_VALIDATION_PROJECTS); do \
+		uv run winnow predict \
+		dataset.spectrum_path_or_directory=held_out_projects/biological_validation/annotated/dataset-$$project-annotated-0000-0001.parquet \
+		dataset.predictions_path=held_out_projects/biological_validation/annotated_predictions/dataset-$$project-annotated-0000-0001.csv \
+		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
+		output_folder=$(PREDS_DIR)/$${project}_annotated/ \
+		koina.input_constants.collision_energies=27 \
+		koina.input_constants.fragmentation_types=HCD \
+		fdr_control.fdr_threshold=1.0 \
+		fdr_control.confidence_column=calibrated_confidence \
+		$(KOINA_OVERRIDES); \
+	done
+	uv run python scripts/plot_eval_results.py \
+		--predictions-root $(PREDS_DIR) \
+		--projects "$(BIOLOGICAL_VALIDATION_PROJECTS)" \
+		--eval-type annotated \
+		--output-dir $(EVAL_PLOTS_DIR)/annotated
+	for project in $(BIOLOGICAL_VALIDATION_PROJECTS); do \
+		aws s3 cp --recursive $(PREDS_DIR)/$${project}_annotated/ $(RUN_S3)/$(RUN_TS)/eval_annotated/$${project}_annotated/; \
+	done
+	aws s3 cp --recursive $(EVAL_PLOTS_DIR)/annotated/ $(RUN_S3)/$(RUN_TS)/eval_annotated/plots/
+
+## Evaluate model on raw bio-val, annotate proteome hits, plot, and upload
+eval-raw:
+	mkdir -p $(PREDS_DIR) $(EVAL_PLOTS_DIR)/raw
+	for project in $(BIOLOGICAL_VALIDATION_PROJECTS); do \
+		uv run winnow predict \
+		dataset.spectrum_path_or_directory=held_out_projects/biological_validation/raw/dataset-$$project-raw-0000-0001.parquet \
+		dataset.predictions_path=held_out_projects/biological_validation/raw_predictions/dataset-$$project-raw-0000-0001.csv \
+		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
+		output_folder=$(PREDS_DIR)/$${project}_raw/ \
+		koina.input_constants.collision_energies=27 \
+		koina.input_constants.fragmentation_types=HCD \
+		fdr_control.fdr_threshold=1.0 \
+		fdr_control.confidence_column=calibrated_confidence \
+		$(KOINA_OVERRIDES); \
+	done
+	uv run python scripts/annotate_preds_proteome_hits.py biological_validation_raw \
+		--predictions-root $(PREDS_DIR) \
+		$(foreach p,$(BIOLOGICAL_VALIDATION_PROJECTS),$(if $(strip $(FASTA_RAW_$(p))),--map $(p)=$(FASTA_RAW_$(p)),))
+	uv run python scripts/plot_eval_results.py \
+		--predictions-root $(PREDS_DIR) \
+		--projects "$(BIOLOGICAL_VALIDATION_PROJECTS)" \
+		--eval-type raw \
+		--output-dir $(EVAL_PLOTS_DIR)/raw
+	for project in $(BIOLOGICAL_VALIDATION_PROJECTS); do \
+		aws s3 cp --recursive $(PREDS_DIR)/$${project}_raw/ $(RUN_S3)/$(RUN_TS)/eval_raw/$${project}_raw/; \
+	done
+	aws s3 cp --recursive $(EVAL_PLOTS_DIR)/raw/ $(RUN_S3)/$(RUN_TS)/eval_raw/plots/
+
+## Evaluate model on external labelled datasets, plot, and upload
+eval-external-labelled:
+	mkdir -p $(PREDS_DIR) $(EVAL_PLOTS_DIR)/external_labelled
+	@# Full external projects
+	for project in $(EXTERNAL_FULL_PROJECTS); do \
+		uv run winnow predict \
+		dataset.spectrum_path_or_directory=held_out_projects/lcfm/$$project/ \
+		dataset.predictions_path=held_out_projects/lcfm/$${project}_predictions/$$project.csv \
+		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
+		output_folder=$(PREDS_DIR)/$${project}_labelled/ \
+		koina.input_columns.collision_energies=collision_energy \
+		koina.input_columns.fragmentation_types=frag_type \
+		fdr_control.fdr_threshold=1.0 \
+		fdr_control.confidence_column=calibrated_confidence \
+		$(KOINA_OVERRIDES); \
+	done
+	@# PXD023064 -- subset of files
+	uv run winnow predict \
+		dataset.spectrum_path_or_directory=held_out_projects/lcfm/PXD023064/ \
+		dataset.predictions_path=held_out_projects/lcfm/PXD023064_predictions/PXD023064.csv \
+		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
+		output_folder=$(PREDS_DIR)/PXD023064_labelled/ \
+		koina.input_columns.collision_energies=collision_energy \
+		koina.input_columns.fragmentation_types=frag_type \
+		fdr_control.fdr_threshold=1.0 \
+		fdr_control.confidence_column=calibrated_confidence \
+		$(KOINA_OVERRIDES)
+	@# Astral labelled
+	uv run winnow predict \
+		dataset.spectrum_path_or_directory=astral/labelled/ \
+		dataset.predictions_path=astral/predictions/astral_labelled.csv \
+		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
+		output_folder=$(PREDS_DIR)/Astral_labelled/ \
+		koina.input_constants.collision_energies=27 \
+		koina.input_constants.fragmentation_types=HCD \
+		fdr_control.fdr_threshold=1.0 \
+		fdr_control.confidence_column=calibrated_confidence \
+		$(KOINA_OVERRIDES)
+	uv run python scripts/plot_eval_results.py \
+		--predictions-root $(PREDS_DIR) \
+		--projects "$(EXTERNAL_FULL_PROJECTS) PXD023064 Astral" \
+		--eval-type labelled \
+		--output-dir $(EVAL_PLOTS_DIR)/external_labelled
+	for project in $(EXTERNAL_FULL_PROJECTS) PXD023064 Astral; do \
+		aws s3 cp --recursive $(PREDS_DIR)/$${project}_labelled/ $(RUN_S3)/$(RUN_TS)/eval_external_labelled/$${project}_labelled/; \
+	done
+	aws s3 cp --recursive $(EVAL_PLOTS_DIR)/external_labelled/ $(RUN_S3)/$(RUN_TS)/eval_external_labelled/plots/
+
+## Evaluate model on external unlabelled datasets, annotate proteome hits, plot, and upload
+eval-external-unlabelled:
+	mkdir -p $(PREDS_DIR) $(EVAL_PLOTS_DIR)/external_unlabelled
+	@# Full external projects (acfm)
+	for project in $(EXTERNAL_FULL_PROJECTS); do \
+		uv run winnow predict \
+		dataset.spectrum_path_or_directory=held_out_projects/acfm/$$project/ \
+		dataset.predictions_path=held_out_projects/acfm/$${project}_predictions/$$project.csv \
+		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
+		output_folder=$(PREDS_DIR)/$${project}_unlabelled/ \
+		koina.input_columns.collision_energies=collision_energy \
+		koina.input_columns.fragmentation_types=frag_type \
+		fdr_control.fdr_threshold=1.0 \
+		fdr_control.confidence_column=calibrated_confidence \
+		$(KOINA_OVERRIDES); \
+	done
+	@# PXD023064 -- subset of files (acfm)
+	uv run winnow predict \
+		dataset.spectrum_path_or_directory=held_out_projects/acfm/PXD023064/ \
+		dataset.predictions_path=held_out_projects/acfm/PXD023064_predictions/PXD023064.csv \
+		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
+		output_folder=$(PREDS_DIR)/PXD023064_unlabelled/ \
+		koina.input_columns.collision_energies=collision_energy \
+		koina.input_columns.fragmentation_types=frag_type \
+		fdr_control.fdr_threshold=1.0 \
+		fdr_control.confidence_column=calibrated_confidence \
+		$(KOINA_OVERRIDES)
+	@# Astral full (unlabelled)
+	uv run winnow predict \
+		dataset.spectrum_path_or_directory=astral/full/ \
+		dataset.predictions_path=astral/predictions/astral_full.csv \
+		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
+		output_folder=$(PREDS_DIR)/Astral_unlabelled/ \
+		koina.input_constants.collision_energies=27 \
+		koina.input_constants.fragmentation_types=HCD \
+		fdr_control.fdr_threshold=1.0 \
+		fdr_control.confidence_column=calibrated_confidence \
+		$(KOINA_OVERRIDES)
+	@# Annotate proteome hits for PXD projects
+	uv run python scripts/annotate_preds_proteome_hits.py unlabelled_external \
+		--predictions-root $(PREDS_DIR) \
+		$(foreach p,$(EXTERNAL_FULL_PROJECTS) PXD023064,$(if $(strip $(FASTA_UNLABELLED_$(p))),--map $(p)=$(FASTA_UNLABELLED_$(p)),))
+	@# Annotate proteome hits for Astral with UP000000625_83333.fasta
+	uv run python scripts/annotate_preds_proteome_hits.py unlabelled_external \
+		--predictions-root $(PREDS_DIR) \
+		--map Astral=$(FASTA_UNLABELLED_Astral)
+	uv run python scripts/plot_eval_results.py \
+		--predictions-root $(PREDS_DIR) \
+		--projects "$(EXTERNAL_FULL_PROJECTS) PXD023064 Astral" \
+		--eval-type unlabelled \
+		--output-dir $(EVAL_PLOTS_DIR)/external_unlabelled
+	for project in $(EXTERNAL_FULL_PROJECTS) PXD023064 Astral; do \
+		aws s3 cp --recursive $(PREDS_DIR)/$${project}_unlabelled/ $(RUN_S3)/$(RUN_TS)/eval_external_unlabelled/$${project}_unlabelled/; \
+	done
+	aws s3 cp --recursive $(EVAL_PLOTS_DIR)/external_unlabelled/ $(RUN_S3)/$(RUN_TS)/eval_external_unlabelled/plots/
+
+## Run feature importance analysis on 3 datasets, upload
+feature-analysis:
+	mkdir -p analysis/feature_analysis/celegans analysis/feature_analysis/sbrodae analysis/feature_analysis/helaqc
+	@# C. elegans (PXD014877) -- labelled lcfm, compute features from raw spectra via Koina
+	uv run python scripts/analyze_features.py \
+		--model-path $(HPO_OUTPUT_DIR) \
+		--data-dir . \
+		--output-dir analysis/feature_analysis/celegans \
+		--train-spectra held_out_projects/lcfm/PXD014877 \
+		--train-preds held_out_projects/lcfm/PXD014877_predictions/PXD014877.csv \
+		--test-spectra held_out_projects/lcfm/PXD014877 \
+		--test-preds held_out_projects/lcfm/PXD014877_predictions/PXD014877.csv \
+		--n-background-samples 200 --n-test-samples 500
+	@# S. brodae -- annotated bio-val
+	uv run python scripts/analyze_features.py \
+		--model-path $(HPO_OUTPUT_DIR) \
+		--data-dir . \
+		--output-dir analysis/feature_analysis/sbrodae \
+		--train-spectra held_out_projects/biological_validation/annotated/dataset-sbrodae-annotated-0000-0001.parquet \
+		--train-preds held_out_projects/biological_validation/annotated_predictions/dataset-sbrodae-annotated-0000-0001.csv \
+		--test-spectra held_out_projects/biological_validation/annotated/dataset-sbrodae-annotated-0000-0001.parquet \
+		--test-preds held_out_projects/biological_validation/annotated_predictions/dataset-sbrodae-annotated-0000-0001.csv \
+		--n-background-samples 200 --n-test-samples 500
+	@# HeLa QC -- annotated bio-val
+	uv run python scripts/analyze_features.py \
+		--model-path $(HPO_OUTPUT_DIR) \
+		--data-dir . \
+		--output-dir analysis/feature_analysis/helaqc \
+		--train-spectra held_out_projects/biological_validation/annotated/dataset-helaqc-annotated-0000-0001.parquet \
+		--train-preds held_out_projects/biological_validation/annotated_predictions/dataset-helaqc-annotated-0000-0001.csv \
+		--test-spectra held_out_projects/biological_validation/annotated/dataset-helaqc-annotated-0000-0001.parquet \
+		--test-preds held_out_projects/biological_validation/annotated_predictions/dataset-helaqc-annotated-0000-0001.csv \
+		--n-background-samples 200 --n-test-samples 500
+	aws s3 cp --recursive analysis/feature_analysis/ $(RUN_S3)/$(RUN_TS)/feature_analysis/
+
+## Run feature ablation study on 4 datasets, upload
+ablation:
+	uv run python scripts/run_feature_ablations.py \
+		--train-features $(HPO_TRAIN_FEATURES) \
+		--val-features $(HPO_VAL_FEATURES) \
+		--output-dir analysis/hpo_ablation \
+		--astral-spectra astral/labelled \
+		--astral-predictions astral/predictions/astral_labelled.csv \
+		--plot-format both \
+		$(if $(KOINA_SERVER_URL),--koina-url $(KOINA_SERVER_URL)) \
+		$(if $(filter false,$(KOINA_SSL)),--no-koina-ssl)
+	aws s3 cp --recursive analysis/hpo_ablation/ $(RUN_S3)/$(RUN_TS)/ablation/
+
+## Full HPO pipeline: tune, evaluate, analyse, upload
+hpo-pipeline: hpo-download-data hpo hpo-upload-model download-eval-data \
+              eval-annotated eval-raw eval-external-labelled \
+              eval-external-unlabelled feature-analysis ablation
 
 #########################################################
 ## Evaluate general model commands

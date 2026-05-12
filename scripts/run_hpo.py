@@ -5,6 +5,10 @@ Wraps ``ProbabilityCalibrator.fit_from_features`` in an Optuna study that
 tunes learning rate, architecture, regularisation and batch size while
 minimising the Brier score on a held-out validation set.
 
+The calibrator's feature set is loaded from the same ``calibrator.yaml``
+used by ``winnow train``, ensuring that saved models always record their
+feature columns correctly.
+
 Usage
 -----
     python scripts/run_hpo.py \
@@ -58,6 +62,36 @@ def _apply_overrides(cfg: Dict[str, Any], overrides: Sequence[str]) -> None:
             target = target[part]
         value: Any = yaml.safe_load(raw_value)
         target[parts[-1]] = value
+
+
+def _instantiate_reference_calibrator(
+    config_dir: str | None = None,
+):
+    """Instantiate a calibrator from calibrator.yaml to obtain the feature set.
+
+    This mirrors how ``winnow train`` builds its calibrator, ensuring that
+    the feature definitions (and therefore ``calibrator.columns``) are
+    identical.
+
+    Returns:
+        A ``ProbabilityCalibrator`` with features registered but no
+        trained network.
+    """
+    from hydra import compose, initialize_config_dir
+    from hydra.utils import instantiate
+
+    from winnow.utils.config_path import get_primary_config_dir
+
+    primary_config_dir = get_primary_config_dir(config_dir)
+
+    with initialize_config_dir(
+        config_dir=str(primary_config_dir),
+        version_base="1.3",
+        job_name="winnow_hpo",
+    ):
+        cfg = compose(config_name="train")
+
+    return instantiate(cfg.calibrator)
 
 
 # ---------------------------------------------------------------------------
@@ -201,9 +235,19 @@ def make_objective(
     train_dataset: FeatureDataset,
     val_dataset: FeatureDataset,
     cfg: Dict[str, Any],
+    features: Dict,
     verbose: bool = False,
 ):
-    """Return a closure suitable for ``study.optimize``."""
+    """Return a closure suitable for ``study.optimize``.
+
+    Args:
+        train_dataset: Training features and labels.
+        val_dataset: Validation features and labels.
+        cfg: HPO search-space configuration.
+        features: Feature dict from the reference calibrator, passed to
+            each trial's calibrator so ``columns`` is always populated.
+        verbose: Whether to show tqdm bars during training.
+    """
 
     def objective(trial: optuna.Trial) -> float:
         from winnow.calibration.calibrator import ProbabilityCalibrator
@@ -211,6 +255,7 @@ def make_objective(
         hp = suggest_hyperparameters(trial, cfg)
 
         calibrator = ProbabilityCalibrator(
+            features=features,
             hidden_dims=hp["hidden_dims"],
             dropout=hp["dropout"],
             learning_rate=hp["learning_rate"],
@@ -312,6 +357,7 @@ def _retrain_and_save_best(
     train_dataset: FeatureDataset,
     val_dataset: FeatureDataset,
     cfg: Dict[str, Any],
+    features: Dict,
     output_dir: Path,
 ) -> None:
     """Retrain the best trial's configuration and save the resulting model."""
@@ -330,6 +376,7 @@ def _retrain_and_save_best(
     )
 
     calibrator = ProbabilityCalibrator(
+        features=features,
         hidden_dims=hidden_dims,
         dropout=best.params["dropout"],
         learning_rate=best.params["learning_rate"],
@@ -370,6 +417,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=_DEFAULT_CONFIG,
         help="YAML config with search space and fixed params "
         f"(default: {_DEFAULT_CONFIG}).",
+    )
+    p.add_argument(
+        "--calibrator-config-dir",
+        type=str,
+        default=None,
+        help="Custom config directory for calibrator.yaml. "
+        "Defaults to the standard winnow config directory.",
     )
     p.add_argument(
         "--n-trials",
@@ -432,9 +486,20 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     logger.info("Search space config:\n%s", yaml.dump(cfg, default_flow_style=False))
 
+    # -- Reference calibrator (for feature definitions) -----------------
+    ref_calibrator = _instantiate_reference_calibrator(args.calibrator_config_dir)
+    feature_columns = ["confidence"] + ref_calibrator.columns
+    logger.info(
+        "Feature set from calibrator.yaml: %d columns %s",
+        len(feature_columns),
+        feature_columns,
+    )
+
     # -- Data -----------------------------------------------------------
     logger.info("Loading training features from %s ...", args.train_features_path)
-    train_dataset = FeatureDataset.from_parquet(args.train_features_path)
+    train_dataset = FeatureDataset.from_parquet(
+        args.train_features_path, feature_columns
+    )
     logger.info(
         "Training set: %d samples, %d features",
         len(train_dataset),
@@ -442,7 +507,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
 
     logger.info("Loading validation features from %s ...", args.val_features_path)
-    val_dataset = FeatureDataset.from_parquet(args.val_features_path)
+    val_dataset = FeatureDataset.from_parquet(args.val_features_path, feature_columns)
     logger.info(
         "Validation set: %d samples, %d features",
         len(val_dataset),
@@ -461,7 +526,13 @@ def main(argv: Sequence[str] | None = None) -> None:
         study_name="winnow-calibrator-hpo",
     )
 
-    objective = make_objective(train_dataset, val_dataset, cfg, verbose=args.verbose)
+    objective = make_objective(
+        train_dataset,
+        val_dataset,
+        cfg,
+        features=ref_calibrator.feature_dict,
+        verbose=args.verbose,
+    )
 
     logger.info(
         "Starting Optuna study: %d trials, timeout=%ds, pruning=%s",
@@ -483,7 +554,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         train_dataset,
         val_dataset,
         cfg,
-        args.output_dir,
+        features=ref_calibrator.feature_dict,
+        output_dir=args.output_dir,
     )
 
 
