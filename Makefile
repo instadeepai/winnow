@@ -391,6 +391,52 @@ train_general_model:
 
 
 #########################################################
+## Hyperparameter optimisation (HPO)
+#########################################################
+
+.PHONY: hpo hpo-download-data hpo-upload-model
+
+HPO_TRAIN_FEATURES ?= new_train_shuffled/
+HPO_VAL_FEATURES   ?= new_val_feature_matrices/PXD010154/
+HPO_N_TRIALS       ?= 100
+HPO_TIMEOUT        ?= 43200
+HPO_CONFIG         ?= scripts/hpo_config.yaml
+HPO_OUTPUT_DIR     ?= hpo_best_model
+
+HPO_MODEL_S3 ?= s3://winnow-g88rh/revisions/new_datasets/models
+
+HPO_TRAIN_S3 ?= s3://winnow-g88rh/revisions/new_datasets/new_train_shuffled
+HPO_VAL_S3   ?= s3://winnow-g88rh/revisions/new_datasets/new_val_feature_matrices/PXD010154
+
+## Download feature matrices from S3 for HPO (training + validation)
+hpo-download-data:
+	mkdir -p $(HPO_TRAIN_FEATURES) $(HPO_VAL_FEATURES)
+	aws s3 cp --recursive $(HPO_TRAIN_S3) $(HPO_TRAIN_FEATURES)
+	aws s3 cp --recursive $(HPO_VAL_S3) $(HPO_VAL_FEATURES)
+
+## Run Optuna HPO for the calibrator on pre-computed feature matrices
+hpo: hpo-download-data
+	uv run python scripts/run_hpo.py \
+		--train-features-path $(HPO_TRAIN_FEATURES) \
+		--val-features-path $(HPO_VAL_FEATURES) \
+		--config $(HPO_CONFIG) \
+		--n-trials $(HPO_N_TRIALS) \
+		--timeout $(HPO_TIMEOUT) \
+		--output-dir $(HPO_OUTPUT_DIR) \
+		--pruning
+
+## Upload the best HPO model to S3 under models/<timestamp>/
+hpo-upload-model:
+	@if [ ! -d "$(HPO_OUTPUT_DIR)" ]; then \
+		echo "Error: $(HPO_OUTPUT_DIR) does not exist. Run 'make hpo' first."; \
+		exit 1; \
+	fi
+	$(eval HPO_TIMESTAMP := $(shell date -u +%Y%m%dT%H%M%SZ))
+	aws s3 cp --recursive $(HPO_OUTPUT_DIR) $(HPO_MODEL_S3)/$(HPO_TIMESTAMP)/
+	@echo "Model uploaded to $(HPO_MODEL_S3)/$(HPO_TIMESTAMP)/"
+
+
+#########################################################
 ## Evaluate general model commands
 #########################################################
 
