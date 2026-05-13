@@ -1,0 +1,34 @@
+# Hyperparameter search space for Optuna calibrator tuning.
+# Edit ranges here or override from the CLI with --set, e.g.:
+#   --set search_space.dropout.high=0.7
+#   --set fixed.max_epochs=300
+
+search_space:
+  learning_rate:
+    type: log_uniform
+    low: 1.0e-5
+    high: 1.0e-2
+  weight_decay:
+    type: log_uniform
+    low: 1.0e-6
+    high: 1.0e-2
+  n_layers:
+    type: int
+    low: 1
+    high: 3
+  n_units:
+    type: categorical
+    choices: [64, 128, 256, 512]
+  dropout:
+    type: uniform
+    low: 0.0
+    high: 0.5
+  batch_size:
+    type: categorical
+    choices: [1024, 2048, 4096, 8192]
+
+fixed:
+  max_epochs: 200
+  n_iter_no_change: 10
+  tol: 0.0001
+  seed: 42
