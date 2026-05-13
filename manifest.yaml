@@ -23,7 +23,7 @@ spec:
       count: 1
       resources:
         cpus: 12
-        ramRatio: 8 # >= 2
+        ramRatio: 9 # >= 2
 
         accelerators:
           gpu:
