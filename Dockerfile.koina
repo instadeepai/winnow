@@ -114,7 +114,7 @@ USER $USER
 # Install a private Python 3.12 (matches the standard Dockerfile) and the winnow venv.
 ENV UV_PROJECT_ENVIRONMENT=$VENV_DIRECTORY
 ENV UV_PYTHON=3.12
-RUN uv python install 3.12 && uv sync --frozen --no-cache --dev
+RUN uv python install 3.12 && uv sync --frozen --no-cache --all-groups
 
 # Set path to virtual environment
 ENV PATH="$VENV_DIRECTORY/bin:$PATH"
