@@ -24,6 +24,7 @@ dependencies = [
     "safetensors>=0.7.0",
     "polars>=1.39.3",
     "biopython>=1.87",
+    "pyahocorasick>=2.3.1",
 ]
 
 [project.urls]
@@ -58,6 +59,7 @@ notebook = [
     "ipykernel>=6.29.5",
     "ipywidgets>=8.1.7",
     "jupyter>=1.1.1",
+    "matplotlib-venn>=1.1.2",
     "seaborn>=0.13.2",
     "tqdm>=4.67.1",
 ]

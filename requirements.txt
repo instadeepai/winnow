@@ -1454,11 +1454,7 @@ matplotlib==3.10.8 \
     --hash=sha256:fb061f596dad3a0f52b60dc6a5dec4a0c300dec41e058a7efe09256188d170b7
     # via
     #   matchms
-    #   matplotlib-venn
     #   spectrum-utils
-matplotlib-venn==1.1.2 \
-    --hash=sha256:6f2b07a03e9bb5a62de2f32f965216739e175176f9d654dd19e7af2c22ec36e3
-    # via winnow-fdr
 mdurl==0.1.2 \
     --hash=sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8 \
     --hash=sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba
@@ -1783,7 +1779,6 @@ numpy==2.2.6 \
     #   instanovo
     #   matchms
     #   matplotlib
-    #   matplotlib-venn
     #   numba
     #   pandas
     #   rdkit
@@ -2914,7 +2909,6 @@ scipy==1.15.3 \
     --hash=sha256:f77f853d584e72e874d87357ad70f44b437331507d1c311457bed8ed2b956126
     # via
     #   matchms
-    #   matplotlib-venn
     #   pynndescent
     #   scikit-learn
     #   sparsestack
