@@ -56,8 +56,13 @@ KOINA_SSL ?= true
 KOINA_OVERRIDES = koina.server_url=$(KOINA_SERVER_URL) \
                   koina.ssl=$(KOINA_SSL)
 
-# predict.yaml is neutral (no default collision energy / fragmentation type
-# source). Each eval target must supply exactly one of these two blocks.
+# predict.yaml has local defaults (model path, irt_regressor_path, etc.).
+# Makefile eval targets override everything explicitly so they work
+# regardless of local config.
+
+# Null out predict.yaml defaults that don't apply to eval targets.
+PREDICT_EVAL_OVERRIDES = calibrator.irt_regressor_path=null
+
 # Biological validation datasets have no per-row CE/frag metadata:
 KOINA_PREDICT_CONSTANTS = +koina.input_constants.collision_energies=27 \
                           +koina.input_constants.fragmentation_types=HCD
@@ -514,6 +519,7 @@ eval-annotated:
 		dataset.predictions_path=held_out_projects/biological_validation/annotated_predictions/dataset-$$project-annotated-0000-0001.csv \
 		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
 		output_folder=$(PREDS_DIR)/$${project}_annotated/ \
+		$(PREDICT_EVAL_OVERRIDES) \
 		$(KOINA_PREDICT_CONSTANTS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
@@ -538,6 +544,7 @@ eval-raw:
 		dataset.predictions_path=held_out_projects/biological_validation/raw_predictions/dataset-$$project-raw-0000-0001.csv \
 		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
 		output_folder=$(PREDS_DIR)/$${project}_raw/ \
+		$(PREDICT_EVAL_OVERRIDES) \
 		$(KOINA_PREDICT_CONSTANTS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
@@ -566,6 +573,7 @@ eval-external-labelled:
 		dataset.predictions_path=held_out_projects/lcfm/$${project}_predictions/$$project.csv \
 		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
 		output_folder=$(PREDS_DIR)/$${project}_labelled/ \
+		$(PREDICT_EVAL_OVERRIDES) \
 		$(KOINA_PREDICT_COLUMNS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
@@ -577,6 +585,7 @@ eval-external-labelled:
 		dataset.predictions_path=held_out_projects/lcfm/PXD023064_predictions/PXD023064.csv \
 		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
 		output_folder=$(PREDS_DIR)/PXD023064_labelled/ \
+		$(PREDICT_EVAL_OVERRIDES) \
 		$(KOINA_PREDICT_COLUMNS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
@@ -587,6 +596,7 @@ eval-external-labelled:
 		dataset.predictions_path=astral/predictions/astral_labelled.csv \
 		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
 		output_folder=$(PREDS_DIR)/Astral_labelled/ \
+		$(PREDICT_EVAL_OVERRIDES) \
 		$(KOINA_PREDICT_COLUMNS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
@@ -611,6 +621,7 @@ eval-external-unlabelled:
 		dataset.predictions_path=held_out_projects/acfm/$${project}_predictions/$$project.csv \
 		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
 		output_folder=$(PREDS_DIR)/$${project}_unlabelled/ \
+		$(PREDICT_EVAL_OVERRIDES) \
 		$(KOINA_PREDICT_COLUMNS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
@@ -622,6 +633,7 @@ eval-external-unlabelled:
 		dataset.predictions_path=held_out_projects/acfm/PXD023064_predictions/PXD023064.csv \
 		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
 		output_folder=$(PREDS_DIR)/PXD023064_unlabelled/ \
+		$(PREDICT_EVAL_OVERRIDES) \
 		$(KOINA_PREDICT_COLUMNS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
@@ -632,6 +644,7 @@ eval-external-unlabelled:
 		dataset.predictions_path=astral/predictions/astral_full.csv \
 		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
 		output_folder=$(PREDS_DIR)/Astral_unlabelled/ \
+		$(PREDICT_EVAL_OVERRIDES) \
 		$(KOINA_PREDICT_COLUMNS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
@@ -775,6 +788,7 @@ evaluate_general_model_annotated_biological_validation:
 		dataset.predictions_path=held_out_projects/biological_validation/annotated_predictions/dataset-$$project-annotated-0000-0001.csv \
 		calibrator.pretrained_model_name_or_path=general_model \
 		output_folder=predictions/general_model/$${project}_annotated/ \
+		$(PREDICT_EVAL_OVERRIDES) \
 		$(KOINA_PREDICT_CONSTANTS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
@@ -788,6 +802,7 @@ evaluate_general_model_raw_biological_validation:
 		dataset.predictions_path=held_out_projects/biological_validation/raw_predictions/dataset-$$project-raw-0000-0001.csv \
 		calibrator.pretrained_model_name_or_path=general_model \
 		output_folder=predictions/general_model/$${project}_raw/ \
+		$(PREDICT_EVAL_OVERRIDES) \
 		$(KOINA_PREDICT_CONSTANTS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
@@ -816,6 +831,7 @@ evaluate_general_model_labelled_external_datasets:
 		dataset.predictions_path=held_out_projects/lcfm/$${project}_predictions/$$project.csv \
 		calibrator.pretrained_model_name_or_path=general_model \
 		output_folder=predictions/general_model/$${project}_labelled/ \
+		$(PREDICT_EVAL_OVERRIDES) \
 		$(KOINA_PREDICT_COLUMNS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
@@ -829,6 +845,7 @@ evaluate_general_model_unlabelled_external_datasets:
 		dataset.predictions_path=held_out_projects/acfm/$${project}_predictions/$$project.csv \
 		calibrator.pretrained_model_name_or_path=general_model \
 		output_folder=predictions/general_model/$${project}_unlabelled/ \
+		$(PREDICT_EVAL_OVERRIDES) \
 		$(KOINA_PREDICT_COLUMNS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
