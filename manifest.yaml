@@ -16,7 +16,7 @@ spec:
         provider: "github"
   operator: jobset
   image: winnow-koina
-  command: /usr/local/bin/entrypoint.koina.sh make hpo-pipeline
+  command: /usr/local/bin/entrypoint.koina.sh make hpo-reeval HPO_RUN_TS=20260514T012035Z KOINA_SERVER_URL=localhost:8500 KOINA_SSL=false
 
   types:
     worker:

@@ -56,6 +56,15 @@ KOINA_SSL ?= true
 KOINA_OVERRIDES = koina.server_url=$(KOINA_SERVER_URL) \
                   koina.ssl=$(KOINA_SSL)
 
+# predict.yaml is neutral (no default collision energy / fragmentation type
+# source). Each eval target must supply exactly one of these two blocks.
+# Biological validation datasets have no per-row CE/frag metadata:
+KOINA_PREDICT_CONSTANTS = +koina.input_constants.collision_energies=27 \
+                          +koina.input_constants.fragmentation_types=HCD
+# External / Astral datasets carry per-row metadata columns:
+KOINA_PREDICT_COLUMNS = +koina.input_columns.collision_energies=collision_energy \
+                        +koina.input_columns.fragmentation_types=frag_type
+
 #################################################################################
 ## Docker build commands																#
 #################################################################################
@@ -505,8 +514,7 @@ eval-annotated:
 		dataset.predictions_path=held_out_projects/biological_validation/annotated_predictions/dataset-$$project-annotated-0000-0001.csv \
 		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
 		output_folder=$(PREDS_DIR)/$${project}_annotated/ \
-		koina.input_constants.collision_energies=27 \
-		koina.input_constants.fragmentation_types=HCD \
+		$(KOINA_PREDICT_CONSTANTS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES); \
@@ -530,8 +538,7 @@ eval-raw:
 		dataset.predictions_path=held_out_projects/biological_validation/raw_predictions/dataset-$$project-raw-0000-0001.csv \
 		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
 		output_folder=$(PREDS_DIR)/$${project}_raw/ \
-		koina.input_constants.collision_energies=27 \
-		koina.input_constants.fragmentation_types=HCD \
+		$(KOINA_PREDICT_CONSTANTS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES); \
@@ -552,38 +559,35 @@ eval-raw:
 ## Evaluate model on external labelled datasets, plot, and upload
 eval-external-labelled:
 	mkdir -p $(PREDS_DIR) $(EVAL_PLOTS_DIR)/external_labelled
-	@# Full external projects
+	@# Full external projects (have per-row CE/frag columns)
 	for project in $(EXTERNAL_FULL_PROJECTS); do \
 		uv run winnow predict \
 		dataset.spectrum_path_or_directory=held_out_projects/lcfm/$$project/ \
 		dataset.predictions_path=held_out_projects/lcfm/$${project}_predictions/$$project.csv \
 		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
 		output_folder=$(PREDS_DIR)/$${project}_labelled/ \
-		koina.input_columns.collision_energies=collision_energy \
-		koina.input_columns.fragmentation_types=frag_type \
+		$(KOINA_PREDICT_COLUMNS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES); \
 	done
-	@# PXD023064 -- subset of files
+	@# PXD023064 -- subset of files (has per-row CE/frag columns)
 	uv run winnow predict \
 		dataset.spectrum_path_or_directory=held_out_projects/lcfm/PXD023064/ \
 		dataset.predictions_path=held_out_projects/lcfm/PXD023064_predictions/PXD023064.csv \
 		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
 		output_folder=$(PREDS_DIR)/PXD023064_labelled/ \
-		koina.input_columns.collision_energies=collision_energy \
-		koina.input_columns.fragmentation_types=frag_type \
+		$(KOINA_PREDICT_COLUMNS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES)
-	@# Astral labelled
+	@# Astral labelled (has per-row CE/frag columns)
 	uv run winnow predict \
 		dataset.spectrum_path_or_directory=astral/labelled/ \
 		dataset.predictions_path=astral/predictions/astral_labelled.csv \
 		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
 		output_folder=$(PREDS_DIR)/Astral_labelled/ \
-		koina.input_constants.collision_energies=27 \
-		koina.input_constants.fragmentation_types=HCD \
+		$(KOINA_PREDICT_COLUMNS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES)
@@ -600,38 +604,35 @@ eval-external-labelled:
 ## Evaluate model on external unlabelled datasets, annotate proteome hits, plot, and upload
 eval-external-unlabelled:
 	mkdir -p $(PREDS_DIR) $(EVAL_PLOTS_DIR)/external_unlabelled
-	@# Full external projects (acfm)
+	@# Full external projects (acfm; have per-row CE/frag columns)
 	for project in $(EXTERNAL_FULL_PROJECTS); do \
 		uv run winnow predict \
 		dataset.spectrum_path_or_directory=held_out_projects/acfm/$$project/ \
 		dataset.predictions_path=held_out_projects/acfm/$${project}_predictions/$$project.csv \
 		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
 		output_folder=$(PREDS_DIR)/$${project}_unlabelled/ \
-		koina.input_columns.collision_energies=collision_energy \
-		koina.input_columns.fragmentation_types=frag_type \
+		$(KOINA_PREDICT_COLUMNS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES); \
 	done
-	@# PXD023064 -- subset of files (acfm)
+	@# PXD023064 -- subset of files (acfm; has per-row CE/frag columns)
 	uv run winnow predict \
 		dataset.spectrum_path_or_directory=held_out_projects/acfm/PXD023064/ \
 		dataset.predictions_path=held_out_projects/acfm/PXD023064_predictions/PXD023064.csv \
 		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
 		output_folder=$(PREDS_DIR)/PXD023064_unlabelled/ \
-		koina.input_columns.collision_energies=collision_energy \
-		koina.input_columns.fragmentation_types=frag_type \
+		$(KOINA_PREDICT_COLUMNS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES)
-	@# Astral full (unlabelled)
+	@# Astral full (unlabelled; has per-row CE/frag columns)
 	uv run winnow predict \
 		dataset.spectrum_path_or_directory=astral/full/ \
 		dataset.predictions_path=astral/predictions/astral_full.csv \
 		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
 		output_folder=$(PREDS_DIR)/Astral_unlabelled/ \
-		koina.input_constants.collision_energies=27 \
-		koina.input_constants.fragmentation_types=HCD \
+		$(KOINA_PREDICT_COLUMNS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES)
@@ -707,6 +708,48 @@ hpo-pipeline: hpo-download-data hpo hpo-upload-model download-eval-data \
               eval-external-unlabelled feature-analysis ablation
 
 #########################################################
+## Re-run eval pipeline with a saved HPO model from S3
+#########################################################
+
+.PHONY: hpo-download-model hpo-reeval hpo-reeval-annotated hpo-reeval-raw \
+        hpo-reeval-external-labelled hpo-reeval-external-unlabelled \
+        hpo-reeval-feature-analysis hpo-reeval-ablation
+
+# S3 path to the HPO run whose model you want to evaluate.
+# Override on the command line:
+#   make hpo-reeval HPO_RUN_TS=20260514T012035Z
+HPO_RUN_TS ?= 20260514T012035Z
+HPO_MODEL_S3_PATH ?= $(RUN_S3)/$(HPO_RUN_TS)/model
+
+## Download a saved HPO model from S3
+hpo-download-model:
+	mkdir -p $(HPO_OUTPUT_DIR)
+	aws s3 cp --recursive $(HPO_MODEL_S3_PATH)/ $(HPO_OUTPUT_DIR)/
+
+## Re-run the full eval pipeline using a previously saved HPO model
+hpo-reeval: hpo-download-model download-eval-data \
+            eval-annotated eval-raw eval-external-labelled \
+            eval-external-unlabelled
+
+## Re-run only annotated bio-val evaluation
+hpo-reeval-annotated: hpo-download-model download-eval-data eval-annotated
+
+## Re-run only raw bio-val evaluation
+hpo-reeval-raw: hpo-download-model download-eval-data eval-raw
+
+## Re-run only external labelled evaluation
+hpo-reeval-external-labelled: hpo-download-model download-eval-data eval-external-labelled
+
+## Re-run only external unlabelled evaluation
+hpo-reeval-external-unlabelled: hpo-download-model download-eval-data eval-external-unlabelled
+
+## Re-run feature analysis with a saved HPO model
+hpo-reeval-feature-analysis: hpo-download-model download-eval-data feature-analysis
+
+## Re-run ablation study with a saved HPO model
+hpo-reeval-ablation: hpo-download-model hpo-download-data ablation
+
+#########################################################
 ## Evaluate general model commands
 #########################################################
 
@@ -732,8 +775,7 @@ evaluate_general_model_annotated_biological_validation:
 		dataset.predictions_path=held_out_projects/biological_validation/annotated_predictions/dataset-$$project-annotated-0000-0001.csv \
 		calibrator.pretrained_model_name_or_path=general_model \
 		output_folder=predictions/general_model/$${project}_annotated/ \
-		koina.input_constants.collision_energies=27 \
-		koina.input_constants.fragmentation_types=HCD \
+		$(KOINA_PREDICT_CONSTANTS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES); \
@@ -746,8 +788,7 @@ evaluate_general_model_raw_biological_validation:
 		dataset.predictions_path=held_out_projects/biological_validation/raw_predictions/dataset-$$project-raw-0000-0001.csv \
 		calibrator.pretrained_model_name_or_path=general_model \
 		output_folder=predictions/general_model/$${project}_raw/ \
-		koina.input_constants.collision_energies=27 \
-		koina.input_constants.fragmentation_types=HCD \
+		$(KOINA_PREDICT_CONSTANTS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES); \
@@ -775,8 +816,7 @@ evaluate_general_model_labelled_external_datasets:
 		dataset.predictions_path=held_out_projects/lcfm/$${project}_predictions/$$project.csv \
 		calibrator.pretrained_model_name_or_path=general_model \
 		output_folder=predictions/general_model/$${project}_labelled/ \
-		koina.input_columns.collision_energies=collision_energy \
-		koina.input_columns.fragmentation_types=frag_type \
+		$(KOINA_PREDICT_COLUMNS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES); \
@@ -789,8 +829,7 @@ evaluate_general_model_unlabelled_external_datasets:
 		dataset.predictions_path=held_out_projects/acfm/$${project}_predictions/$$project.csv \
 		calibrator.pretrained_model_name_or_path=general_model \
 		output_folder=predictions/general_model/$${project}_unlabelled/ \
-		koina.input_columns.collision_energies=collision_energy \
-		koina.input_columns.fragmentation_types=frag_type \
+		$(KOINA_PREDICT_COLUMNS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES); \

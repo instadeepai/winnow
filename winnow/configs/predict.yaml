@@ -10,10 +10,10 @@ defaults:
 dataset:
   # Dataset paths:
   # Path to the spectrum data file or to folder containing saved internal Winnow dataset.
-  spectrum_path_or_directory: examples/example_data/spectra.ipc
+  spectrum_path_or_directory: old_helaqc_results/test.parquet # helaqc_exps/test.parquet
   # Path to the beam predictions file.
   # Leave as `null` if data source is `winnow`, or loading will fail.
-  predictions_path: examples/example_data/predictions.csv
+  predictions_path: old_helaqc_results/test.csv # helaqc_exps/test.csv
   # NOTE: Make sure that the data loader type matches the data source type in this dataset section.
 
 # Drop rows with empty or non-list predictions before feature computation (same as compute-features / train).
@@ -23,7 +23,7 @@ calibrator:
   # Model loading:
   # Path to the local calibrator directory or the HuggingFace model identifier.
   # If the path is a local directory path, it will be used directly. If it is a HuggingFace repository identifier, it will be downloaded from HuggingFace.
-  pretrained_model_name_or_path: InstaDeepAI/winnow-general-model
+  pretrained_model_name_or_path: models/helaqc_model_with_old_splits
   # Directory to cache the HuggingFace model.
   cache_dir: null  # can be set to `null` if using local model or for the default cache directory from HuggingFace.
   # Optional: path to pre-fitted iRT regressors saved during training.
@@ -31,7 +31,7 @@ calibrator:
   # Leave as null for the general pretrained model workflow (regressors re-fit automatically).
   # Useful for within-experiment use cases where the unlabelled data has an unreliable confidence distribution
   # for training a new RT->iRT regressor.
-  irt_regressor_path: null
+  irt_regressor_path: models/helaqc_model_with_old_splits/irt_regressors.safetensors
 
 # Koina inference-time overrides: same `input_constants` / `input_columns` keys as
 # the `koina` block in calibrator.yaml. Merged into FragmentMatchFeatures / ChimericFeatures
@@ -43,18 +43,20 @@ koina:
   # manifest.koina.yaml).
   server_url: koina.wilhelmlab.org:443
   ssl: true
+  # Collision energy / fragmentation type source — each invocation must supply
+  # exactly one of input_constants or input_columns for these keys.
   # input_constants:
   #   collision_energies: 27
   #   fragmentation_types: HCD
-  input_columns: {
-    collision_energies: "collision_energy",
-    fragmentation_types: "frag_type",
-  }
+  # input_columns: {
+  #   collision_energies: "collision_energy",
+  #   fragmentation_types: "frag_type",
+  # }
 
 fdr_control:
   # FDR settings:
   # Target FDR threshold (e.g. 0.01 for 1%, 0.05 for 5% etc.).
-  fdr_threshold: 0.05
+  fdr_threshold: 1.0
   # Name of the column with confidence scores to use for FDR estimation.
   confidence_column: calibrated_confidence
 
@@ -62,4 +64,4 @@ fdr_control:
 # This will create two CSV files in the output folder:
 # - metadata.csv: Contains all metadata and feature columns from the input dataset.
 # - preds_and_fdr_metrics.csv: Contains predictions and FDR metrics.
-output_folder: results/predictions
+output_folder: results/helaqc_predictions_test_with_old_splits
