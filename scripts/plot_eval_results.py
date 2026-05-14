@@ -51,6 +51,7 @@ DATASET_DISPLAY_NAMES: dict[str, str] = {
 _PALETTE = sns.color_palette("colorblind")
 _CORRECT_COLOUR = _PALETTE[0]
 _INCORRECT_COLOUR = _PALETTE[3]
+_RAW_LINE_COLOUR = _PALETTE[2]
 _MAIN_LINE_COLOUR = _PALETTE[1]
 _IDEAL_LINE_COLOUR = "grey"
 
@@ -79,9 +80,11 @@ def _save_fig(fig: plt.Figure, base_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # PR curve (non-standard cumulative definition)
 # ---------------------------------------------------------------------------
-def _compute_precision_recall(df: pd.DataFrame) -> pd.DataFrame:
+def _compute_precision_recall(
+    df: pd.DataFrame, confidence_col: str = "calibrated_confidence"
+) -> pd.DataFrame:
     """Non-standard cumulative PR curve matching the codebase convention."""
-    sorted_df = df.sort_values("calibrated_confidence", ascending=False)
+    sorted_df = df.sort_values(confidence_col, ascending=False)
     labels = sorted_df["correct"].values
     cum_correct = np.cumsum(labels)
     n = len(labels)
@@ -99,15 +102,30 @@ def plot_precision_recall(
     """Plot precision-recall curve."""
     display = _display_name(project)
     qualifier = _ground_truth_qualifier(eval_type)
-    pr = _compute_precision_recall(df)
+    pr_cal = _compute_precision_recall(df, "calibrated_confidence")
+    pr_raw = _compute_precision_recall(df, "confidence")
 
     fig, ax = plt.subplots(figsize=(6, 4))
-    ax.plot(pr["recall"], pr["precision"], color=_MAIN_LINE_COLOUR, lw=1.5)
+    ax.plot(
+        pr_raw["recall"],
+        pr_raw["precision"],
+        color=_RAW_LINE_COLOUR,
+        lw=1.5,
+        label="Raw confidence",
+    )
+    ax.plot(
+        pr_cal["recall"],
+        pr_cal["precision"],
+        color=_MAIN_LINE_COLOUR,
+        lw=1.5,
+        label="Calibrated confidence",
+    )
     ax.set_xlabel("Recall")
     ax.set_ylabel("Precision")
     ax.set_title(f"Precision\u2013recall curve \u2014 {display}")
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1.02)
+    ax.legend(fontsize=9)
     ax.text(
         0.02,
         0.02,
@@ -129,13 +147,25 @@ def plot_fdr_run(
     eval_type: str,
     output_dir: Path,
 ) -> None:
-    """Plot calibrated confidence vs estimated PSM FDR."""
+    """Plot calibrated confidence vs estimated and true PSM FDR."""
     display = _display_name(project)
+    qualifier = _ground_truth_qualifier(eval_type)
 
     fdr_ctrl = NonParametricFDRControl()
     fdr_ctrl.fit(dataset=df["calibrated_confidence"])
     fdr_df = fdr_ctrl.add_psm_fdr(df.copy(), confidence_col="calibrated_confidence")
     fdr_df = fdr_df.sort_values("calibrated_confidence")
+
+    sorted_desc = df.sort_values("calibrated_confidence", ascending=False)
+    labels = sorted_desc["correct"].values.astype(float)
+    ranks = np.arange(1, len(labels) + 1)
+    true_fdr = 1.0 - np.cumsum(labels) / ranks
+    true_fdr_df = pd.DataFrame(
+        {
+            "calibrated_confidence": sorted_desc["calibrated_confidence"].values,
+            "true_fdr": true_fdr,
+        }
+    ).sort_values("calibrated_confidence")
 
     fig, ax = plt.subplots(figsize=(6, 4))
     ax.plot(
@@ -143,10 +173,19 @@ def plot_fdr_run(
         fdr_df["psm_fdr"].values,
         color=_MAIN_LINE_COLOUR,
         lw=1.5,
+        label="Estimated FDR",
+    )
+    ax.plot(
+        true_fdr_df["calibrated_confidence"].values,
+        true_fdr_df["true_fdr"].values,
+        color=_RAW_LINE_COLOUR,
+        lw=1.5,
+        label=f"True FDR ({qualifier})",
     )
     ax.set_xlabel("Calibrated confidence")
-    ax.set_ylabel("Estimated PSM FDR")
+    ax.set_ylabel("PSM FDR")
     ax.set_title(f"FDR run plot \u2014 {display}")
+    ax.legend(fontsize=9)
     fig.tight_layout()
     _save_fig(fig, output_dir / f"fdr_run_{project}")
 
@@ -206,9 +245,6 @@ def plot_true_vs_estimated_fdr(
     if zoomed:
         ax.set_xlim(0, 0.1)
         ax.set_ylim(0, 0.1)
-    else:
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
     ax.legend(fontsize=9)
     fig.tight_layout()
     tag = "fdr_true_vs_est_zoom" if zoomed else "fdr_true_vs_est"
@@ -253,15 +289,23 @@ def plot_calibration(
     """Plot probability calibration (reliability diagram)."""
     display = _display_name(project)
     qualifier = _ground_truth_qualifier(eval_type)
-    cal = _compute_calibration_curve(df, "calibrated_confidence", "correct")
+    cal_calibrated = _compute_calibration_curve(df, "calibrated_confidence", "correct")
+    cal_raw = _compute_calibration_curve(df, "confidence", "correct")
 
     fig, ax = plt.subplots(figsize=(6, 4))
     ax.plot(
-        cal["pred_mean"],
-        cal["empirical"],
+        cal_raw["pred_mean"],
+        cal_raw["empirical"],
+        marker="s",
+        color=_RAW_LINE_COLOUR,
+        label="Raw confidence",
+    )
+    ax.plot(
+        cal_calibrated["pred_mean"],
+        cal_calibrated["empirical"],
         marker="o",
         color=_MAIN_LINE_COLOUR,
-        label="Calibrator",
+        label="Calibrated confidence",
     )
     ax.plot([0, 1], [0, 1], ls="--", color=_IDEAL_LINE_COLOUR, lw=1, label="Ideal")
     ax.set_xlabel("Mean predicted probability")
