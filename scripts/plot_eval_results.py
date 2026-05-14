@@ -351,13 +351,26 @@ def _load_project_data(
     suffix: str,
     eval_type: str,
 ) -> pd.DataFrame:
-    """Load preds_and_fdr_metrics.csv for a project and resolve the correct column."""
+    """Load and merge metadata.csv and preds_and_fdr_metrics.csv for a project."""
     folder = predictions_root / f"{project}_{suffix}"
     preds_path = folder / "preds_and_fdr_metrics.csv"
+    meta_path = folder / "metadata.csv"
     if not preds_path.is_file():
         raise FileNotFoundError(f"Missing predictions file: {preds_path}")
 
-    df = pd.read_csv(preds_path)
+    preds_df = pd.read_csv(preds_path)
+
+    if meta_path.is_file():
+        meta_df = pd.read_csv(meta_path)
+        # Drop columns already present in preds to avoid duplicates on merge
+        overlap = [
+            c for c in meta_df.columns if c in preds_df.columns and c != "spectrum_id"
+        ]
+        if overlap:
+            meta_df = meta_df.drop(columns=overlap)
+        df = preds_df.merge(meta_df, on="spectrum_id", how="left")
+    else:
+        df = preds_df
 
     if eval_type in ("raw", "unlabelled"):
         if "proteome_hit" not in df.columns:
