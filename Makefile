@@ -506,8 +506,8 @@ download-eval-data:
 	aws s3 cp --recursive $(HELD_OUT_S3)/lcfm/PXD023064_predictions/ held_out_projects/lcfm/PXD023064_predictions/
 	aws s3 cp --recursive $(HELD_OUT_S3)/acfm/PXD023064_predictions/ held_out_projects/acfm/PXD023064_predictions/
 	@# Astral
-	aws s3 cp --recursive $(S3_BASE)/astral/labelled/ astral/labelled/
-	aws s3 cp --recursive $(S3_BASE)/astral/full/ astral/full/
+	aws s3 cp --recursive --exclude "*.ipc" $(S3_BASE)/astral/labelled/ astral/labelled/
+	aws s3 cp --recursive --exclude "*.ipc" $(S3_BASE)/astral/full/ astral/full/
 	aws s3 cp --recursive $(S3_BASE)/astral/predictions/ astral/predictions/
 
 ## Evaluate model on annotated bio-val, plot, and upload

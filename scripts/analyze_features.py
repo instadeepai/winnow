@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Annotated, Dict, Optional
 
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -28,11 +29,33 @@ from winnow.calibration.calibrator import ProbabilityCalibrator
 from winnow.datasets.data_loaders import InstaNovoDatasetLoader
 
 # ---------------------------------------------------------------------------
-# Style
+# Style — Paul Tol "bright" palette + "sunset" diverging colourmap
 # ---------------------------------------------------------------------------
-sns.set_theme(style="white", palette="colorblind", context="paper", font_scale=1.5)
+_PALETTE = ["#4477AA", "#EE6677", "#228833", "#CCBB44", "#66CCEE", "#AA3377", "#BBBBBB"]
 
-_PALETTE = sns.color_palette("colorblind")
+_SUNSET_COLORS = [
+    "#364B9A",
+    "#4A7BB7",
+    "#6EA6CD",
+    "#98CAE1",
+    "#C2E4EF",
+    "#EAECCC",
+    "#FEDA8B",
+    "#FDB366",
+    "#F67E4B",
+    "#DD3D2D",
+    "#A50026",
+]
+_BAD_COLOUR = "#FFFFFF"
+
+
+def _sunset_cmap() -> LinearSegmentedColormap:
+    cmap = LinearSegmentedColormap.from_list("tol_sunset", _SUNSET_COLORS, N=256)
+    cmap.set_bad(color=_BAD_COLOUR)
+    return cmap
+
+
+sns.set_theme(style="white", palette=_PALETTE, context="paper", font_scale=1.5)
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -177,7 +200,7 @@ def plot_feature_correlations(features: pd.DataFrame, output_path_base: Path) ->
     sns.heatmap(
         corr_matrix,
         mask=mask,
-        cmap="RdBu_r",
+        cmap=_sunset_cmap(),
         vmin=-1,
         vmax=1,
         center=0,
@@ -200,7 +223,7 @@ def plot_shap_summary(shap_values, correct_class_idx: int, output_dir: Path) -> 
         shap_values[:, :, correct_class_idx],
         show=False,
         max_display=12,
-        color=plt.cm.viridis,
+        color=_sunset_cmap(),
     )
     plt.title(r"SHAP feature impact on $P(\text{correct})$")
 
@@ -308,7 +331,7 @@ def plot_shap_interactions(
                 shap_values[:, f1_display, correct_class_idx],
                 color=shap_values[:, f2_display, correct_class_idx],
                 show=False,
-                cmap="viridis",
+                cmap=_sunset_cmap(),
             )
             plt.title(
                 "SHAP interaction plot for "
@@ -344,7 +367,7 @@ def plot_shap_heatmap(shap_values, correct_class_idx: int, output_dir: Path) -> 
         shap_values[:, :, correct_class_idx],
         max_display=12,
         show=False,
-        cmap="RdBu_r",
+        cmap=_sunset_cmap(),
     )
     plt.title("SHAP feature impact heatmap\n" + r"(impact on $P(\text{correct})$)")
 
