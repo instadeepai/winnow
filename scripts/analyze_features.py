@@ -57,6 +57,16 @@ def _sunset_cmap() -> LinearSegmentedColormap:
 
 sns.set_theme(style="white", palette=_PALETTE, context="paper", font_scale=1.5)
 
+
+def _style_axes(ax: plt.Axes) -> None:
+    """Apply standard axes formatting: no grid, black spines."""
+    ax.set_axisbelow(True)
+    ax.grid(False)
+    for spine in ax.spines.values():
+        spine.set_edgecolor("black")
+        spine.set_linewidth(0.8)
+
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -185,6 +195,7 @@ def plot_feature_importance(
     plt.yticks(range(len(features)), features)
     plt.xlabel("Importance score")
     plt.title(title)
+    _style_axes(plt.gca())
 
     plt.savefig(f"{output_path_base}.pdf", bbox_inches="tight", dpi=300)
     plt.savefig(f"{output_path_base}.png", bbox_inches="tight", dpi=300)
@@ -210,6 +221,7 @@ def plot_feature_correlations(features: pd.DataFrame, output_path_base: Path) ->
         cbar_kws={"shrink": 0.5},
     )
     plt.title("Feature correlation matrix")
+    _style_axes(plt.gca())
 
     plt.savefig(f"{output_path_base}.pdf", bbox_inches="tight", dpi=300)
     plt.savefig(f"{output_path_base}.png", bbox_inches="tight", dpi=300)
@@ -226,6 +238,7 @@ def plot_shap_summary(shap_values, correct_class_idx: int, output_dir: Path) -> 
         color=_sunset_cmap(),
     )
     plt.title(r"SHAP feature impact on $P(\text{correct})$")
+    _style_axes(plt.gca())
 
     plt.savefig(output_dir / "shap_summary.pdf", bbox_inches="tight", dpi=300)
     plt.savefig(output_dir / "shap_summary.png", bbox_inches="tight", dpi=300)
@@ -253,6 +266,7 @@ def plot_shap_bar(
     for patch in ax.patches:
         patch.set_facecolor(_PALETTE[1])
     plt.title(r"SHAP feature importance for $P(\text{correct})$")
+    _style_axes(plt.gca())
 
     plt.savefig(output_dir / "shap_importance.pdf", bbox_inches="tight", dpi=300)
     plt.savefig(output_dir / "shap_importance.png", bbox_inches="tight", dpi=300)
@@ -292,6 +306,7 @@ def plot_shap_dependence(
         if "SHAP value for" in ylabel:
             ax.set_ylabel(ylabel.replace(feature_name, to_sentence_case(feature_name)))
 
+        _style_axes(ax)
         plt.savefig(
             output_dir / f"shap_dependence_{original_feature_name}.pdf",
             bbox_inches="tight",
@@ -347,6 +362,7 @@ def plot_shap_interactions(
             if "SHAP value for" in ylabel:
                 ax.set_ylabel(ylabel.replace(f1_display, to_sentence_case(f1_display)))
 
+            _style_axes(ax)
             plt.savefig(
                 output_dir / f"shap_interaction_{f1_orig}_vs_{f2_orig}.pdf",
                 bbox_inches="tight",
@@ -370,6 +386,7 @@ def plot_shap_heatmap(shap_values, correct_class_idx: int, output_dir: Path) -> 
         cmap=_sunset_cmap(),
     )
     plt.title("SHAP feature impact heatmap\n" + r"(impact on $P(\text{correct})$)")
+    _style_axes(plt.gca())
 
     plt.savefig(output_dir / "shap_heatmap.pdf", bbox_inches="tight", dpi=300)
     plt.savefig(output_dir / "shap_heatmap.png", bbox_inches="tight", dpi=300)
