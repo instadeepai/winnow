@@ -36,11 +36,11 @@ if not logger.handlers:
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
 # ---------------------------------------------------------------------------
-# Plot theme and colour assignments
+# Plot theme and colour assignments — Paul Tol "bright" palette (colour-blind safe)
 # ---------------------------------------------------------------------------
-sns.set_theme(style="white", palette="colorblind", context="paper", font_scale=1.5)
+_PALETTE = ["#4477AA", "#EE6677", "#228833", "#CCBB44", "#66CCEE", "#AA3377", "#BBBBBB"]
 
-_PALETTE = sns.color_palette("colorblind")
+sns.set_theme(style="white", palette=_PALETTE, context="paper", font_scale=1.5)
 
 DATASET_DISPLAY_NAMES: dict[str, str] = {
     "gluc": "HeLa degradome",
@@ -94,7 +94,7 @@ ABLATION_CONFIGS: dict[str, list[str]] = {
     "Full model": ALL_FEATURE_COLUMNS,
 }
 
-ABLATION_COLORS: dict[str, tuple] = {
+ABLATION_COLORS: dict[str, str] = {
     name: _PALETTE[i] for i, name in enumerate(ABLATION_CONFIGS)
 }
 ORIGINAL_COLOR = _PALETTE[len(ABLATION_CONFIGS)]
@@ -582,6 +582,15 @@ def evaluate_single(
 # ---------------------------------------------------------------------------
 # Plotting
 # ---------------------------------------------------------------------------
+def _style_axes(ax: plt.Axes) -> None:
+    """Apply standard axes formatting: no grid, black spines."""
+    ax.set_axisbelow(True)
+    ax.grid(False)
+    for spine in ax.spines.values():
+        spine.set_edgecolor("black")
+        spine.set_linewidth(0.8)
+
+
 def _save_fig(fig: plt.Figure, base_path: Path, plot_format: str) -> None:
     """Save figure in the requested format(s)."""
     if plot_format in ("pdf", "both"):
@@ -630,6 +639,7 @@ def plot_precision_recall(
         title=f"Precision\u2013recall curve \u2014 {display}",
     )
     ax.legend(fontsize=9)
+    _style_axes(ax)
     fig.tight_layout()
     _save_fig(fig, output_dir / f"pr_curve_{dataset_name}", plot_format)
 
@@ -675,6 +685,7 @@ def plot_calibration(
         title=f"Probability calibration \u2014 {display}",
     )
     ax.legend(fontsize=9)
+    _style_axes(ax)
     fig.tight_layout()
     _save_fig(fig, output_dir / f"calibration_{dataset_name}", plot_format)
 
@@ -741,8 +752,8 @@ def plot_fdr_vs_confidence(
         ax.set_xlabel("Calibrated confidence")
         ax.set_ylabel("PSM FDR")
         ax.set_title(r.config_name)
-        ax.grid(True)
         ax.legend(fontsize=8)
+        _style_axes(ax)
 
     display = DATASET_DISPLAY_NAMES.get(dataset_name, dataset_name)
     fig.suptitle(f"PSM FDR vs calibrated confidence \u2014 {display}", fontsize=12)
@@ -800,6 +811,7 @@ def plot_fdr_accepted_psms(
     ax.set_ylabel("Accepted PSMs")
     ax.set_title(f"Accepted PSMs vs q-value \u2014 {display}")
     ax.legend(fontsize=9)
+    _style_axes(ax)
     fig.tight_layout()
     _save_fig(fig, output_dir / f"fdr_accepted_psms_{dataset_name}", plot_format)
 
