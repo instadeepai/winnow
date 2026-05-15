@@ -213,11 +213,13 @@ def train_entry_point(
         annotated_dataset, dataset_output_path = _load_and_prepare_dataset(
             cfg, instantiate
         )
+        train_data, val_data = _maybe_split_calibration_dataset(cfg, annotated_dataset)
         logger.info(
-            "Training on %d samples.",
-            len(annotated_dataset),
+            "Training on %d samples%s.",
+            len(train_data),
+            f" (val={len(val_data)})" if val_data is not None else "",
         )
-        history = calibrator.fit(annotated_dataset)
+        history = calibrator.fit(train_data, val_data)
         if dataset_output_path:
             logger.info(f"Saving training metadata to {dataset_output_path}")
             annotated_dataset.save_metadata(dataset_output_path)
@@ -336,6 +338,56 @@ def _maybe_split_validation(cfg, train_dataset):
     )
 
     return train_split, val_split
+
+
+def _maybe_split_calibration_dataset(cfg, dataset):
+    """Optionally split a random validation set from a CalibrationDataset.
+
+    Args:
+        cfg: Resolved Hydra config.
+        dataset: The full CalibrationDataset.
+
+    Returns:
+        Tuple of (train_dataset, val_dataset). val_dataset is ``None`` when
+        ``validation_fraction`` is 0 or absent.
+    """
+    import numpy as np
+    from winnow.datasets.calibration_dataset import CalibrationDataset
+
+    validation_fraction = cfg.get("validation_fraction", 0.1)
+
+    if not validation_fraction or validation_fraction <= 0:
+        return dataset, None
+
+    logger.warning(
+        "Using automatic validation split (%.0f%%). This performs a random "
+        "split that may leak peptides or experiment artifacts between train "
+        "and validation sets. For rigorous evaluation, provide separate "
+        "train/val Parquet files via features_path and val_features_path.",
+        validation_fraction * 100,
+    )
+
+    n = len(dataset)
+    n_val = max(1, int(n * validation_fraction))
+
+    rng = np.random.default_rng(cfg.get("calibrator", {}).get("seed", 42))
+    indices = rng.permutation(n)
+    train_idx = indices[: n - n_val]
+    val_idx = indices[n - n_val :]
+
+    train_meta = dataset.metadata.iloc[train_idx].reset_index(drop=True)
+    val_meta = dataset.metadata.iloc[val_idx].reset_index(drop=True)
+
+    train_preds = None
+    val_preds = None
+    if dataset.predictions is not None:
+        train_preds = [dataset.predictions[i] for i in train_idx]
+        val_preds = [dataset.predictions[i] for i in val_idx]
+
+    return (
+        CalibrationDataset(metadata=train_meta, predictions=train_preds),
+        CalibrationDataset(metadata=val_meta, predictions=val_preds),
+    )
 
 
 def _save_training_artifacts(cfg, calibrator, history):
@@ -459,6 +511,8 @@ def _compute_features_batched_metadata(
     filter_empty: bool,
 ) -> list[pd.DataFrame]:
     """Run feature computation over a directory (one file at a time) or a single spectrum file."""
+    if not spectrum_path.exists():
+        raise FileNotFoundError(f"Spectrum path does not exist: {spectrum_path}")
     if spectrum_path.is_dir():
         return _compute_features_directory(
             spectrum_path,

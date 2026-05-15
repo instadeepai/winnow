@@ -760,7 +760,7 @@ hpo-reeval-external-unlabelled: hpo-download-model download-eval-data eval-exter
 hpo-reeval-feature-analysis: hpo-download-model download-eval-data feature-analysis
 
 ## Re-run ablation study with a saved HPO model
-hpo-reeval-ablation: hpo-download-model hpo-download-data ablation
+hpo-reeval-ablation: hpo-download-model hpo-download-data download-eval-data ablation
 
 #########################################################
 ## Evaluate general model commands
