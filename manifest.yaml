@@ -16,7 +16,7 @@ spec:
         provider: "github"
   operator: jobset
   image: winnow-koina
-  command: /usr/local/bin/entrypoint.koina.sh make hpo-reeval-ablation HPO_RUN_TS=20260514T012035Z KOINA_SERVER_URL=localhost:8500 KOINA_SSL=false # make hpo-reeval-feature-analysis HPO_RUN_TS=20260514T012035Z
+  command: /usr/local/bin/entrypoint.koina.sh make hpo-reeval-feature-analysis HPO_RUN_TS=20260514T012035Z # make hpo-reeval-ablation HPO_RUN_TS=20260514T012035Z KOINA_SERVER_URL=localhost:8500 KOINA_SSL=false
 
   types:
     worker:

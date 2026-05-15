@@ -26,6 +26,7 @@ from rich.theme import Theme
 from sklearn.inspection import permutation_importance
 
 from winnow.calibration.calibrator import ProbabilityCalibrator
+from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.datasets.data_loaders import InstaNovoDatasetLoader
 
 # ---------------------------------------------------------------------------
@@ -129,6 +130,45 @@ app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 def to_sentence_case(name: str) -> str:
     """Convert a feature display name to sentence case."""
     return name.lower()
+
+
+_SUPPORTED_EXTENSIONS = {".parquet", ".ipc", ".mgf"}
+
+
+def _load_and_compute_features(
+    spectrum_path: Path,
+    predictions_path: Path,
+    loader: InstaNovoDatasetLoader,
+    calibrator: ProbabilityCalibrator,
+) -> CalibrationDataset:
+    """Load spectra (single file or directory) and compute calibration features.
+
+    When *spectrum_path* is a directory the contained spectrum files are
+    processed one at a time and the resulting metadata frames are
+    concatenated, mirroring the batched logic in
+    ``winnow.scripts.main._compute_features_directory``.
+    """
+    if spectrum_path.is_dir():
+        files = sorted(
+            f for f in spectrum_path.iterdir() if f.suffix in _SUPPORTED_EXTENSIONS
+        )
+        if not files:
+            raise FileNotFoundError(
+                f"No spectrum files found in {spectrum_path}. "
+                f"Supported extensions: {', '.join(sorted(_SUPPORTED_EXTENSIONS))}"
+            )
+        all_metadata: list[pd.DataFrame] = []
+        for file_path in files:
+            logger.info("  Processing experiment file: %s", file_path.name)
+            ds = loader.load(data_path=file_path, predictions_path=predictions_path)
+            calibrator.compute_features(ds)
+            all_metadata.append(ds.metadata)
+        combined = pd.concat(all_metadata, ignore_index=True)
+        return CalibrationDataset(metadata=combined, predictions=None)
+
+    dataset = loader.load(data_path=spectrum_path, predictions_path=predictions_path)
+    calibrator.compute_features(dataset)
+    return dataset
 
 
 # ---------------------------------------------------------------------------
@@ -557,31 +597,30 @@ def main(
         feature_names = feature_columns
     else:
         assert data_dir is not None
-        logger.info("Loading training dataset from raw spectra...")
         loader = InstaNovoDatasetLoader(
             residue_masses=RESIDUE_MASSES,
             residue_remapping=RESIDUE_REMAPPING,
             beam_columns=BEAM_COLUMNS,
         )
-        train_dataset = loader.load(
-            data_path=data_dir / train_spectra,
-            predictions_path=data_dir / train_preds,
-        )
 
-        logger.info("Loading test dataset from raw spectra...")
-        test_dataset = loader.load(
-            data_path=data_dir / test_spectra,
-            predictions_path=data_dir / test_preds,
+        logger.info("Loading and computing features for training set...")
+        train_dataset = _load_and_compute_features(
+            data_dir / train_spectra,
+            data_dir / train_preds,
+            loader,
+            calibrator,
         )
-
-        logger.info("Computing features for training set...")
-        calibrator.compute_features(train_dataset)
         train_features, train_labels = calibrator._extract_feature_matrix(
             train_dataset, labelled=True
         )
 
-        logger.info("Computing features for test set...")
-        calibrator.compute_features(test_dataset)
+        logger.info("Loading and computing features for test set...")
+        test_dataset = _load_and_compute_features(
+            data_dir / test_spectra,
+            data_dir / test_preds,
+            loader,
+            calibrator,
+        )
         test_features, test_labels = calibrator._extract_feature_matrix(
             test_dataset, labelled=True
         )
