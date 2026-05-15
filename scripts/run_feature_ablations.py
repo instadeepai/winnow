@@ -115,16 +115,19 @@ EVAL_DATASETS = {
         "label": "C. elegans",
         "spectra": "held_out_projects/lcfm/PXD014877/",
         "predictions": "held_out_projects/lcfm/PXD014877_predictions/PXD014877.csv",
+        "koina_mode": "columns",
     },
     "PXD023064": {
         "label": "Immunopeptidomics-2",
         "spectra": "held_out_projects/lcfm/PXD023064/",
         "predictions": "held_out_projects/lcfm/PXD023064_predictions/PXD023064.csv",
+        "koina_mode": "columns",
     },
     "helaqc": {
         "label": "HeLa single shot",
         "spectra": "held_out_projects/biological_validation/annotated/dataset-helaqc-annotated-0000-0001.parquet",
         "predictions": "held_out_projects/biological_validation/annotated_predictions/dataset-helaqc-annotated-0000-0001.csv",
+        "koina_mode": "constants",
     },
 }
 
@@ -160,8 +163,15 @@ def _compute_eval_features_for_dataset(
     cache_dir: Path,
     koina_url: str,
     koina_ssl: bool,
+    koina_mode: str = "columns",
 ) -> Path:
-    """Compute the full feature matrix for an eval dataset and cache as Parquet."""
+    """Compute the full feature matrix for an eval dataset and cache as Parquet.
+
+    Args:
+        koina_mode: ``"columns"`` to read collision_energy / frag_type from
+            per-row metadata columns, or ``"constants"`` to use fixed values
+            (CE=27, HCD).
+    """
     cache_path = cache_dir / f"{name}.parquet"
     if cache_path.exists():
         logger.info("Using cached eval features for %s at %s", name, cache_path)
@@ -176,6 +186,17 @@ def _compute_eval_features_for_dataset(
 
     logger.info("Computing features for eval dataset %s ...", name)
 
+    if koina_mode == "columns":
+        koina_overrides = [
+            "koina.input_columns.collision_energies=collision_energy",
+            "koina.input_columns.fragmentation_types=frag_type",
+        ]
+    else:
+        koina_overrides = [
+            "koina.input_constants.collision_energies=27",
+            "koina.input_constants.fragmentation_types=HCD",
+        ]
+
     with initialize_config_dir(
         config_dir=str(primary_config_dir),
         version_base="1.3",
@@ -188,8 +209,7 @@ def _compute_eval_features_for_dataset(
                 f"dataset.predictions_path={predictions_path}",
                 f"koina.server_url={koina_url}",
                 f"koina.ssl={koina_ssl}",
-                "koina.input_columns.collision_energies=collision_energy",
-                "koina.input_columns.fragmentation_types=frag_type",
+                *koina_overrides,
                 "labelled=true",
                 "filter_empty_predictions=true",
             ],
@@ -281,6 +301,7 @@ def compute_all_eval_features(
                 cache_dir,
                 koina_url,
                 koina_ssl,
+                koina_mode=info.get("koina_mode", "columns"),
             )
 
     if astral_spectra and astral_predictions:
