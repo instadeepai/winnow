@@ -362,8 +362,8 @@ benchmark-scaling: benchmark-train-models
 PROJECTS := PXD003868 PXD004325 PXD004424 PXD004452 PXD004467 PXD004536 PXD004732 PXD004947 PXD009449 PXD021013 PXD056559
 
 copy_down_train_dataset:
-	aws s3 cp --recursive s3://winnow-g88rh/revisions/new_datasets/train/ data/train/
-	aws s3 cp --recursive s3://winnow-g88rh/revisions/new_datasets/train_predictions/ data/train_predictions/
+	$(S3_CP) --recursive s3://winnow-g88rh/revisions/new_datasets/train/ data/train/
+	$(S3_CP) --recursive s3://winnow-g88rh/revisions/new_datasets/train_predictions/ data/train_predictions/
 
 compute_train_features: copy_down_train_dataset
 	@mkdir -p train_feature_matrices
@@ -374,7 +374,7 @@ compute_train_features: copy_down_train_dataset
 		dataset.predictions_path=data/train_predictions/$$project.csv \
 		training_matrix_output_path=train_feature_matrices/$$project.parquet \
 		$(KOINA_OVERRIDES); \
-		aws s3 cp train_feature_matrices/$$project.parquet s3://winnow-g88rh/revisions/new_datasets/train_feature_matrices/$$project.parquet; \
+		$(S3_CP) train_feature_matrices/$$project.parquet s3://winnow-g88rh/revisions/new_datasets/train_feature_matrices/$$project.parquet; \
 	done
 
 
@@ -425,8 +425,8 @@ HPO_VAL_S3   ?= s3://winnow-g88rh/revisions/new_datasets/new_val_feature_matrice
 ## Download feature matrices from S3 for HPO (training + validation)
 hpo-download-data:
 	mkdir -p $(HPO_TRAIN_FEATURES) $(HPO_VAL_FEATURES)
-	aws s3 cp --recursive $(HPO_TRAIN_S3) $(HPO_TRAIN_FEATURES)
-	aws s3 cp --recursive $(HPO_VAL_S3) $(HPO_VAL_FEATURES)
+	$(S3_CP) --recursive $(HPO_TRAIN_S3) $(HPO_TRAIN_FEATURES)
+	$(S3_CP) --recursive $(HPO_VAL_S3) $(HPO_VAL_FEATURES)
 
 ## Run Optuna HPO for the calibrator on pre-computed feature matrices
 hpo: hpo-download-data
@@ -445,7 +445,7 @@ hpo-upload-model:
 		echo "Error: $(HPO_OUTPUT_DIR) does not exist. Run 'make hpo' first."; \
 		exit 1; \
 	fi
-	aws s3 cp --recursive $(HPO_OUTPUT_DIR) $(RUN_S3)/$(RUN_TS)/model/
+	$(S3_CP) --recursive $(HPO_OUTPUT_DIR) $(RUN_S3)/$(RUN_TS)/model/
 	@echo "Model uploaded to $(RUN_S3)/$(RUN_TS)/model/"
 
 #########################################################
@@ -456,6 +456,7 @@ hpo-upload-model:
         eval-external-labelled eval-external-unlabelled \
         feature-analysis ablation
 
+S3_CP           := aws s3 cp --no-progress
 S3_BASE         ?= s3://winnow-g88rh/revisions/new_datasets
 HELD_OUT_S3     ?= $(S3_BASE)/held_out_projects
 FASTA_S3        ?= $(S3_BASE)/fasta
@@ -488,27 +489,27 @@ download-eval-data:
 	mkdir -p held_out_projects/biological_validation fasta \
 	         held_out_projects/lcfm held_out_projects/acfm \
 	         astral/labelled astral/full astral/predictions
-	aws s3 cp --recursive $(HELD_OUT_S3)/biological_validation/ held_out_projects/biological_validation/
-	aws s3 cp --recursive $(FASTA_S3)/ fasta/
+	$(S3_CP) --recursive $(HELD_OUT_S3)/biological_validation/ held_out_projects/biological_validation/
+	$(S3_CP) --recursive $(FASTA_S3)/ fasta/
 	@# Full external projects (lcfm + acfm)
 	for project in $(EXTERNAL_FULL_PROJECTS); do \
-		aws s3 cp --recursive $(HELD_OUT_S3)/lcfm/$$project/ held_out_projects/lcfm/$$project/; \
-		aws s3 cp --recursive $(HELD_OUT_S3)/lcfm/$${project}_predictions/ held_out_projects/lcfm/$${project}_predictions/; \
-		aws s3 cp --recursive $(HELD_OUT_S3)/acfm/$$project/ held_out_projects/acfm/$$project/; \
-		aws s3 cp --recursive $(HELD_OUT_S3)/acfm/$${project}_predictions/ held_out_projects/acfm/$${project}_predictions/; \
+		$(S3_CP) --recursive $(HELD_OUT_S3)/lcfm/$$project/ held_out_projects/lcfm/$$project/; \
+		$(S3_CP) --recursive $(HELD_OUT_S3)/lcfm/$${project}_predictions/ held_out_projects/lcfm/$${project}_predictions/; \
+		$(S3_CP) --recursive $(HELD_OUT_S3)/acfm/$$project/ held_out_projects/acfm/$$project/; \
+		$(S3_CP) --recursive $(HELD_OUT_S3)/acfm/$${project}_predictions/ held_out_projects/acfm/$${project}_predictions/; \
 	done
 	@# PXD023064 -- only the selected files
 	mkdir -p held_out_projects/lcfm/PXD023064 held_out_projects/acfm/PXD023064
 	for file in $(PXD023064_FILES); do \
-		aws s3 cp $(HELD_OUT_S3)/lcfm/PXD023064/$$file.parquet held_out_projects/lcfm/PXD023064/$$file.parquet; \
-		aws s3 cp $(HELD_OUT_S3)/acfm/PXD023064/$$file.parquet held_out_projects/acfm/PXD023064/$$file.parquet; \
+		$(S3_CP) $(HELD_OUT_S3)/lcfm/PXD023064/$$file.parquet held_out_projects/lcfm/PXD023064/$$file.parquet; \
+		$(S3_CP) $(HELD_OUT_S3)/acfm/PXD023064/$$file.parquet held_out_projects/acfm/PXD023064/$$file.parquet; \
 	done
-	aws s3 cp --recursive $(HELD_OUT_S3)/lcfm/PXD023064_predictions/ held_out_projects/lcfm/PXD023064_predictions/
-	aws s3 cp --recursive $(HELD_OUT_S3)/acfm/PXD023064_predictions/ held_out_projects/acfm/PXD023064_predictions/
+	$(S3_CP) --recursive $(HELD_OUT_S3)/lcfm/PXD023064_predictions/ held_out_projects/lcfm/PXD023064_predictions/
+	$(S3_CP) --recursive $(HELD_OUT_S3)/acfm/PXD023064_predictions/ held_out_projects/acfm/PXD023064_predictions/
 	@# Astral
-	aws s3 cp --recursive --exclude "*.ipc" $(S3_BASE)/astral/labelled/ astral/labelled/
-	aws s3 cp --recursive --exclude "*.ipc" $(S3_BASE)/astral/full/ astral/full/
-	aws s3 cp --recursive $(S3_BASE)/astral/predictions/ astral/predictions/
+	$(S3_CP) --recursive --exclude "*.ipc" $(S3_BASE)/astral/labelled/ astral/labelled/
+	$(S3_CP) --recursive --exclude "*.ipc" $(S3_BASE)/astral/full/ astral/full/
+	$(S3_CP) --recursive $(S3_BASE)/astral/predictions/ astral/predictions/
 
 ## Evaluate model on annotated bio-val, plot, and upload
 eval-annotated:
@@ -531,9 +532,9 @@ eval-annotated:
 		--eval-type annotated \
 		--output-dir $(EVAL_PLOTS_DIR)/annotated
 	for project in $(BIOLOGICAL_VALIDATION_PROJECTS); do \
-		aws s3 cp --recursive $(PREDS_DIR)/$${project}_annotated/ $(RUN_S3)/$(RUN_TS)/eval_annotated/$${project}_annotated/; \
+		$(S3_CP) --recursive $(PREDS_DIR)/$${project}_annotated/ $(RUN_S3)/$(RUN_TS)/eval_annotated/$${project}_annotated/; \
 	done
-	aws s3 cp --recursive $(EVAL_PLOTS_DIR)/annotated/ $(RUN_S3)/$(RUN_TS)/eval_annotated/plots/
+	$(S3_CP) --recursive $(EVAL_PLOTS_DIR)/annotated/ $(RUN_S3)/$(RUN_TS)/eval_annotated/plots/
 
 ## Evaluate model on raw bio-val, annotate proteome hits, plot, and upload
 eval-raw:
@@ -559,9 +560,9 @@ eval-raw:
 		--eval-type raw \
 		--output-dir $(EVAL_PLOTS_DIR)/raw
 	for project in $(BIOLOGICAL_VALIDATION_PROJECTS); do \
-		aws s3 cp --recursive $(PREDS_DIR)/$${project}_raw/ $(RUN_S3)/$(RUN_TS)/eval_raw/$${project}_raw/; \
+		$(S3_CP) --recursive $(PREDS_DIR)/$${project}_raw/ $(RUN_S3)/$(RUN_TS)/eval_raw/$${project}_raw/; \
 	done
-	aws s3 cp --recursive $(EVAL_PLOTS_DIR)/raw/ $(RUN_S3)/$(RUN_TS)/eval_raw/plots/
+	$(S3_CP) --recursive $(EVAL_PLOTS_DIR)/raw/ $(RUN_S3)/$(RUN_TS)/eval_raw/plots/
 
 ## Evaluate model on external labelled datasets, plot, and upload
 eval-external-labelled:
@@ -607,9 +608,9 @@ eval-external-labelled:
 		--eval-type labelled \
 		--output-dir $(EVAL_PLOTS_DIR)/external_labelled
 	for project in $(EXTERNAL_FULL_PROJECTS) PXD023064 Astral; do \
-		aws s3 cp --recursive $(PREDS_DIR)/$${project}_labelled/ $(RUN_S3)/$(RUN_TS)/eval_external_labelled/$${project}_labelled/; \
+		$(S3_CP) --recursive $(PREDS_DIR)/$${project}_labelled/ $(RUN_S3)/$(RUN_TS)/eval_external_labelled/$${project}_labelled/; \
 	done
-	aws s3 cp --recursive $(EVAL_PLOTS_DIR)/external_labelled/ $(RUN_S3)/$(RUN_TS)/eval_external_labelled/plots/
+	$(S3_CP) --recursive $(EVAL_PLOTS_DIR)/external_labelled/ $(RUN_S3)/$(RUN_TS)/eval_external_labelled/plots/
 
 ## Evaluate model on external unlabelled datasets, annotate proteome hits, plot, and upload
 eval-external-unlabelled:
@@ -663,9 +664,9 @@ eval-external-unlabelled:
 		--eval-type unlabelled \
 		--output-dir $(EVAL_PLOTS_DIR)/external_unlabelled
 	for project in $(EXTERNAL_FULL_PROJECTS) PXD023064 Astral; do \
-		aws s3 cp --recursive $(PREDS_DIR)/$${project}_unlabelled/ $(RUN_S3)/$(RUN_TS)/eval_external_unlabelled/$${project}_unlabelled/; \
+		$(S3_CP) --recursive $(PREDS_DIR)/$${project}_unlabelled/ $(RUN_S3)/$(RUN_TS)/eval_external_unlabelled/$${project}_unlabelled/; \
 	done
-	aws s3 cp --recursive $(EVAL_PLOTS_DIR)/external_unlabelled/ $(RUN_S3)/$(RUN_TS)/eval_external_unlabelled/plots/
+	$(S3_CP) --recursive $(EVAL_PLOTS_DIR)/external_unlabelled/ $(RUN_S3)/$(RUN_TS)/eval_external_unlabelled/plots/
 
 ## Run feature importance analysis on 3 datasets, upload
 feature-analysis:
@@ -700,7 +701,7 @@ feature-analysis:
 		--test-spectra held_out_projects/biological_validation/annotated/dataset-helaqc-annotated-0000-0001.parquet \
 		--test-preds held_out_projects/biological_validation/annotated_predictions/dataset-helaqc-annotated-0000-0001.csv \
 		--n-background-samples 200 --n-test-samples 500
-	aws s3 cp --recursive analysis/feature_analysis/ $(RUN_S3)/$(RUN_TS)/feature_analysis/
+	$(S3_CP) --recursive analysis/feature_analysis/ $(RUN_S3)/$(RUN_TS)/feature_analysis/
 
 ## Run feature ablation study on 4 datasets, upload
 ablation:
@@ -713,7 +714,7 @@ ablation:
 		--plot-format both \
 		$(if $(KOINA_SERVER_URL),--koina-url $(KOINA_SERVER_URL)) \
 		$(if $(filter false,$(KOINA_SSL)),--no-koina-ssl)
-	aws s3 cp --recursive analysis/hpo_ablation/ $(RUN_S3)/$(RUN_TS)/ablation/
+	$(S3_CP) --recursive analysis/hpo_ablation/ $(RUN_S3)/$(RUN_TS)/ablation/
 
 ## Full HPO pipeline: tune, evaluate, analyse, upload
 hpo-pipeline: hpo-download-data hpo hpo-upload-model download-eval-data \
@@ -737,7 +738,7 @@ HPO_MODEL_S3_PATH ?= $(RUN_S3)/$(HPO_RUN_TS)/model
 ## Download a saved HPO model from S3
 hpo-download-model:
 	mkdir -p $(HPO_OUTPUT_DIR)
-	aws s3 cp --recursive $(HPO_MODEL_S3_PATH)/ $(HPO_OUTPUT_DIR)/
+	$(S3_CP) --recursive $(HPO_MODEL_S3_PATH)/ $(HPO_OUTPUT_DIR)/
 
 ## Re-run the full eval pipeline using a previously saved HPO model
 hpo-reeval: hpo-download-model download-eval-data \
@@ -934,8 +935,8 @@ define compute_features_shuffled_project_template
 compute_features_$(1):
 	mkdir -p data/train/$(1)/
 	mkdir -p data/train_predictions/
-	aws s3 cp $(NEW_TRAIN_S3)/$(1)/ data/train/$(1)/ --recursive
-	aws s3 cp $(NEW_TRAIN_S3)/predictions/$(1).csv data/train_predictions/$(1).csv
+	$(S3_CP) $(NEW_TRAIN_S3)/$(1)/ data/train/$(1)/ --recursive
+	$(S3_CP) $(NEW_TRAIN_S3)/predictions/$(1).csv data/train_predictions/$(1).csv
 	@echo "Combining parquet shards in data/train/$(1)/ -> data/train/$(1).parquet"
 	uv run python -c "import polars as pl; from pathlib import Path; d = Path('data/train/$(1)'); parts = sorted(d.glob('*.parquet')); print(f'  Found {len(parts)} shard(s), {sum(pl.scan_parquet(p).select(pl.len()).collect().item() for p in parts):,} rows total'); pl.concat([pl.read_parquet(p) for p in parts]).write_parquet(d.parent / '$(1).parquet'); print(f'  Written to data/train/$(1).parquet')"
 	uv run winnow compute-features \
@@ -943,7 +944,7 @@ compute_features_$(1):
 		dataset.predictions_path=data/train_predictions/$(1).csv \
 		training_matrix_output_path=train_feature_matrices/$(1)/training_matrix.parquet \
 		koina.server_url=localhost:8500 koina.ssl=false
-	aws s3 cp train_feature_matrices/$(1)/ $(NEW_TRAIN_FEATURES_S3)/$(1)/ --recursive
+	$(S3_CP) train_feature_matrices/$(1)/ $(NEW_TRAIN_FEATURES_S3)/$(1)/ --recursive
 endef
 
 # Template for normal projects: download directory, compute features per-file.
@@ -951,14 +952,14 @@ define compute_features_project_template
 compute_features_$(1):
 	mkdir -p data/train/$(1)/
 	mkdir -p data/train_predictions/
-	aws s3 cp $(NEW_TRAIN_S3)/$(1)/ data/train/$(1)/ --recursive
-	aws s3 cp $(NEW_TRAIN_S3)/predictions/$(1).csv data/train_predictions/$(1).csv
+	$(S3_CP) $(NEW_TRAIN_S3)/$(1)/ data/train/$(1)/ --recursive
+	$(S3_CP) $(NEW_TRAIN_S3)/predictions/$(1).csv data/train_predictions/$(1).csv
 	uv run winnow compute-features \
 		dataset.spectrum_path_or_directory=data/train/$(1)/ \
 		dataset.predictions_path=data/train_predictions/$(1).csv \
 		training_matrix_output_path=train_feature_matrices/$(1)/training_matrix.parquet \
 		koina.server_url=localhost:8500 koina.ssl=false
-	aws s3 cp train_feature_matrices/$(1)/ $(NEW_TRAIN_FEATURES_S3)/$(1)/ --recursive
+	$(S3_CP) train_feature_matrices/$(1)/ $(NEW_TRAIN_FEATURES_S3)/$(1)/ --recursive
 endef
 
 $(foreach proj,$(SHUFFLED_SHARD_PROJECTS),$(eval $(call compute_features_shuffled_project_template,$(proj))))
@@ -988,14 +989,14 @@ define compute_features_batch_template
 compute_features_$(1)_$(2):
 	mkdir -p data/train/$(1)/$(2)/
 	mkdir -p data/train_predictions/
-	aws s3 cp $(NEW_TRAIN_S3)/$(1)/$(2)/ data/train/$(1)/$(2)/ --recursive
-	aws s3 cp $(NEW_TRAIN_S3)/predictions/$(1)_$(2).csv data/train_predictions/$(1)_$(2).csv
+	$(S3_CP) $(NEW_TRAIN_S3)/$(1)/$(2)/ data/train/$(1)/$(2)/ --recursive
+	$(S3_CP) $(NEW_TRAIN_S3)/predictions/$(1)_$(2).csv data/train_predictions/$(1)_$(2).csv
 	uv run winnow compute-features \
 		dataset.spectrum_path_or_directory=data/train/$(1)/$(2)/ \
 		dataset.predictions_path=data/train_predictions/$(1)_$(2).csv \
 		training_matrix_output_path=train_feature_matrices/$(1)/$(2)/training_matrix.parquet \
 		koina.server_url=localhost:8500 koina.ssl=false
-	aws s3 cp train_feature_matrices/$(1)/$(2)/ $(NEW_TRAIN_FEATURES_S3)/$(1)/$(2)/ --recursive
+	$(S3_CP) train_feature_matrices/$(1)/$(2)/ $(NEW_TRAIN_FEATURES_S3)/$(1)/$(2)/ --recursive
 	rm -rf data/train/$(1)/$(2)/
 	rm -f data/train_predictions/$(1)_$(2).csv
 endef
