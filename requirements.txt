@@ -1795,6 +1795,7 @@ numpy==2.2.6 \
     #   spectrum-utils
     #   tensorboard
     #   tritonclient
+    #   xgboost
 nvidia-cublas-cu12==12.8.4.1 ; platform_machine == 'x86_64' and sys_platform == 'linux' \
     --hash=sha256:8ac4e771d5a348c551b2a426eda6193c19aa630236b418086020df5ba9667142
     # via
@@ -1833,9 +1834,12 @@ nvidia-cusparse-cu12==12.5.8.93 ; platform_machine == 'x86_64' and sys_platform 
 nvidia-cusparselt-cu12==0.7.1 ; platform_machine == 'x86_64' and sys_platform == 'linux' \
     --hash=sha256:f1bb701d6b930d5a7cea44c19ceb973311500847f81b634d802b7b539dc55623
     # via torch
-nvidia-nccl-cu12==2.27.5 ; platform_machine == 'x86_64' and sys_platform == 'linux' \
+nvidia-nccl-cu12==2.27.5 ; sys_platform == 'linux' \
+    --hash=sha256:31432ad4d1fb1004eb0c56203dc9bc2178a1ba69d1d9e02d64a6938ab5e40e7a \
     --hash=sha256:ad730cf15cb5d25fe849c6e6ca9eb5b76db16a80f13f425ac68d8e2e55624457
-    # via torch
+    # via
+    #   torch
+    #   xgboost
 nvidia-nvjitlink-cu12==12.8.93 ; platform_machine == 'x86_64' and sys_platform == 'linux' \
     --hash=sha256:81ff63371a7ebd6e6451970684f916be2eab07321b73c9d244dc2b4da7f73b88
     # via
@@ -2924,6 +2928,7 @@ scipy==1.15.3 \
     #   scikit-learn
     #   shap
     #   sparsestack
+    #   xgboost
 setuptools==82.0.1 \
     --hash=sha256:7d872682c5d01cfde07da7bccc7b65469d3dca203318515ada1de5eda35efbf9 \
     --hash=sha256:a59e362652f08dcd477c78bb6e7bd9d80a7995bc73ce773050228a348ce2e5bb
@@ -3374,6 +3379,14 @@ wrapt==2.1.2 \
     # via
     #   aiobotocore
     #   deprecated
+xgboost==3.2.0 \
+    --hash=sha256:0d169736fd836fc13646c7ab787167b3a8110351c2c6bc770c755ee1618f0442 \
+    --hash=sha256:2f661966d3e322536d9c448090a870fcba1e32ee5760c10b7c46bac7a342079a \
+    --hash=sha256:852eabc6d3b3702a59bf78dbfdcd1cb9c4d3a3b6e5ed1f8781d8b9512354fdd2 \
+    --hash=sha256:99b0e9a2a64896cdaf509c5e46372d336c692406646d20f2af505003c0c5d70d \
+    --hash=sha256:99b4a6bbcb47212fec5cf5fbe12347215f073c08967431b0122cfbd1ee70312c \
+    --hash=sha256:eabbd40d474b8dbf6cb3536325f9150b9e6f0db32d18de9914fb3227d0bef5b7
+    # via winnow-fdr
 xxhash==3.6.0 \
     --hash=sha256:01262da8798422d0685f7cef03b2bd3f4f46511b02830861df548d7def4402ad \
     --hash=sha256:01362c4331775398e7bb34e3ab403bc9ee9f7c497bc7dee6272114055277dd3c \
