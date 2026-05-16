@@ -188,13 +188,17 @@ def _compute_eval_features_for_dataset(
 
     if koina_mode == "columns":
         koina_overrides = [
-            "koina.input_columns.collision_energies=collision_energy",
-            "koina.input_columns.fragmentation_types=frag_type",
+            "+koina.input_columns.collision_energies=collision_energy",
+            "+koina.input_columns.fragmentation_types=frag_type",
+            "+calibrator.features.fragment_match_features.model_input_columns.collision_energies=collision_energy",
+            "+calibrator.features.fragment_match_features.model_input_columns.fragmentation_types=frag_type",
         ]
     else:
         koina_overrides = [
-            "koina.input_constants.collision_energies=27",
-            "koina.input_constants.fragmentation_types=HCD",
+            "+koina.input_constants.collision_energies=27",
+            "+koina.input_constants.fragmentation_types=HCD",
+            "+calibrator.features.fragment_match_features.model_input_constants.collision_energies=27",
+            "+calibrator.features.fragment_match_features.model_input_constants.fragmentation_types=HCD",
         ]
 
     with initialize_config_dir(

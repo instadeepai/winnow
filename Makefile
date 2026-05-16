@@ -64,14 +64,19 @@ KOINA_OVERRIDES = koina.server_url=$(KOINA_SERVER_URL) \
 PREDICT_EVAL_OVERRIDES = calibrator.irt_regressor_path=null
 
 # Biological validation datasets have no per-row CE/frag metadata:
-KOINA_PREDICT_CONSTANTS = +koina.input_constants.collision_energies=27 \
-                          +koina.input_constants.fragmentation_types=HCD
+KOINA_FRAGMENT_MATCH_CONSTANTS = +koina.input_constants.collision_energies=27 \
+                          +koina.input_constants.fragmentation_types=HCD \
+						  +calibrator.features.fragment_match_features.model_input_constants.collision_energies=27 \
+						  +calibrator.features.fragment_match_features.model_input_constants.fragmentation_types=HCD
+
 # External / Astral datasets carry per-row metadata columns:
-KOINA_PREDICT_COLUMNS = +koina.input_columns.collision_energies=collision_energy \
-                        +koina.input_columns.fragmentation_types=frag_type
+KOINA_FRAGMENT_MATCH_COLUMNS = +koina.input_columns.collision_energies=collision_energy \
+                        +koina.input_columns.fragmentation_types=frag_type \
+						+calibrator.features.fragment_match_features.model_input_columns.collision_energies=collision_energy \
+						+calibrator.features.fragment_match_features.model_input_columns.fragmentation_types=frag_type
 
 #################################################################################
-## Docker build commands																#
+## Docker build commands													    #
 #################################################################################
 
 .PHONY: build build-arm build-koina bash-koina
@@ -312,7 +317,8 @@ benchmark-train-models:
 	irt_regressor_output_path=null \
 	training_history_path=null \
 	dataset_output_path=null \
-	$(KOINA_OVERRIDES)
+	$(KOINA_OVERRIDES) \
+	$(KOINA_FRAGMENT_MATCH_CONSTANTS)
 	uv run winnow train \
 	features_path=null \
 	dataset.spectrum_path_or_directory=$(BENCHMARK_TRAIN_SPECTRA) \
@@ -521,7 +527,7 @@ eval-annotated:
 		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
 		output_folder=$(PREDS_DIR)/$${project}_annotated/ \
 		$(PREDICT_EVAL_OVERRIDES) \
-		$(KOINA_PREDICT_CONSTANTS) \
+		$(KOINA_FRAGMENT_MATCH_CONSTANTS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES); \
@@ -546,7 +552,7 @@ eval-raw:
 		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
 		output_folder=$(PREDS_DIR)/$${project}_raw/ \
 		$(PREDICT_EVAL_OVERRIDES) \
-		$(KOINA_PREDICT_CONSTANTS) \
+		$(KOINA_FRAGMENT_MATCH_CONSTANTS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES); \
@@ -575,7 +581,7 @@ eval-external-labelled:
 		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
 		output_folder=$(PREDS_DIR)/$${project}_labelled/ \
 		$(PREDICT_EVAL_OVERRIDES) \
-		$(KOINA_PREDICT_COLUMNS) \
+		$(KOINA_FRAGMENT_MATCH_COLUMNS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES); \
@@ -587,7 +593,7 @@ eval-external-labelled:
 		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
 		output_folder=$(PREDS_DIR)/PXD023064_labelled/ \
 		$(PREDICT_EVAL_OVERRIDES) \
-		$(KOINA_PREDICT_COLUMNS) \
+		$(KOINA_FRAGMENT_MATCH_COLUMNS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES)
@@ -598,7 +604,7 @@ eval-external-labelled:
 		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
 		output_folder=$(PREDS_DIR)/Astral_labelled/ \
 		$(PREDICT_EVAL_OVERRIDES) \
-		$(KOINA_PREDICT_COLUMNS) \
+		$(KOINA_FRAGMENT_MATCH_COLUMNS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES)
@@ -623,7 +629,7 @@ eval-external-unlabelled:
 		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
 		output_folder=$(PREDS_DIR)/$${project}_unlabelled/ \
 		$(PREDICT_EVAL_OVERRIDES) \
-		$(KOINA_PREDICT_COLUMNS) \
+		$(KOINA_FRAGMENT_MATCH_COLUMNS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES); \
@@ -635,7 +641,7 @@ eval-external-unlabelled:
 		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
 		output_folder=$(PREDS_DIR)/PXD023064_unlabelled/ \
 		$(PREDICT_EVAL_OVERRIDES) \
-		$(KOINA_PREDICT_COLUMNS) \
+		$(KOINA_FRAGMENT_MATCH_COLUMNS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES)
@@ -646,7 +652,7 @@ eval-external-unlabelled:
 		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
 		output_folder=$(PREDS_DIR)/Astral_unlabelled/ \
 		$(PREDICT_EVAL_OVERRIDES) \
-		$(KOINA_PREDICT_COLUMNS) \
+		$(KOINA_FRAGMENT_MATCH_COLUMNS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES)
@@ -790,7 +796,7 @@ evaluate_general_model_annotated_biological_validation:
 		calibrator.pretrained_model_name_or_path=general_model \
 		output_folder=predictions/general_model/$${project}_annotated/ \
 		$(PREDICT_EVAL_OVERRIDES) \
-		$(KOINA_PREDICT_CONSTANTS) \
+		$(KOINA_FRAGMENT_MATCH_CONSTANTS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES); \
@@ -804,7 +810,7 @@ evaluate_general_model_raw_biological_validation:
 		calibrator.pretrained_model_name_or_path=general_model \
 		output_folder=predictions/general_model/$${project}_raw/ \
 		$(PREDICT_EVAL_OVERRIDES) \
-		$(KOINA_PREDICT_CONSTANTS) \
+		$(KOINA_FRAGMENT_MATCH_CONSTANTS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES); \
@@ -833,7 +839,7 @@ evaluate_general_model_labelled_external_datasets:
 		calibrator.pretrained_model_name_or_path=general_model \
 		output_folder=predictions/general_model/$${project}_labelled/ \
 		$(PREDICT_EVAL_OVERRIDES) \
-		$(KOINA_PREDICT_COLUMNS) \
+		$(KOINA_FRAGMENT_MATCH_COLUMNS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES); \
@@ -847,7 +853,7 @@ evaluate_general_model_unlabelled_external_datasets:
 		calibrator.pretrained_model_name_or_path=general_model \
 		output_folder=predictions/general_model/$${project}_unlabelled/ \
 		$(PREDICT_EVAL_OVERRIDES) \
-		$(KOINA_PREDICT_COLUMNS) \
+		$(KOINA_FRAGMENT_MATCH_COLUMNS) \
 		fdr_control.fdr_threshold=1.0 \
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES); \
