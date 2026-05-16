@@ -601,6 +601,7 @@ def main(
             residue_masses=RESIDUE_MASSES,
             residue_remapping=RESIDUE_REMAPPING,
             beam_columns=BEAM_COLUMNS,
+            add_index_cols=True,
         )
 
         logger.info("Loading and computing features for training set...")
