@@ -686,6 +686,8 @@ feature-analysis:
 		--train-preds held_out_projects/lcfm/PXD014877_predictions/PXD014877.csv \
 		--test-spectra held_out_projects/lcfm/PXD014877 \
 		--test-preds held_out_projects/lcfm/PXD014877_predictions/PXD014877.csv \
+		--koina-input-constant collision_energies=27 \
+		--koina-input-constant fragmentation_types=HCD \
 		--n-background-samples 200 --n-test-samples 500
 	@# S. brodae -- annotated bio-val
 	uv run python scripts/analyze_features.py \
@@ -696,6 +698,8 @@ feature-analysis:
 		--train-preds held_out_projects/biological_validation/annotated_predictions/dataset-sbrodae-annotated-0000-0001.csv \
 		--test-spectra held_out_projects/biological_validation/annotated/dataset-sbrodae-annotated-0000-0001.parquet \
 		--test-preds held_out_projects/biological_validation/annotated_predictions/dataset-sbrodae-annotated-0000-0001.csv \
+		--koina-input-constant collision_energies=27 \
+		--koina-input-constant fragmentation_types=HCD \
 		--n-background-samples 200 --n-test-samples 500
 	@# HeLa QC -- annotated bio-val
 	uv run python scripts/analyze_features.py \
@@ -706,6 +710,8 @@ feature-analysis:
 		--train-preds held_out_projects/biological_validation/annotated_predictions/dataset-helaqc-annotated-0000-0001.csv \
 		--test-spectra held_out_projects/biological_validation/annotated/dataset-helaqc-annotated-0000-0001.parquet \
 		--test-preds held_out_projects/biological_validation/annotated_predictions/dataset-helaqc-annotated-0000-0001.csv \
+		--koina-input-constant collision_energies=27 \
+		--koina-input-constant fragmentation_types=HCD \
 		--n-background-samples 200 --n-test-samples 500
 	$(S3_CP) --recursive analysis/feature_analysis/ $(RUN_S3)/$(RUN_TS)/feature_analysis/
 

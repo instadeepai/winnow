@@ -10,7 +10,7 @@ This script provides comprehensive analysis of feature importance:
 import logging
 import pickle
 from pathlib import Path
-from typing import Annotated, Dict, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
@@ -500,6 +500,27 @@ def _load_features_from_parquet(
     return features, labels
 
 
+def _parse_koina_constants(raw: Optional[List[str]]) -> Optional[Dict[str, Any]]:
+    """Parse ``KEY=VALUE`` pairs into a dict, casting numeric strings."""
+    if not raw:
+        return None
+    out: Dict[str, Any] = {}
+    for item in raw:
+        if "=" not in item:
+            raise typer.BadParameter(
+                f"Invalid --koina-input-constant format: '{item}'. Expected KEY=VALUE."
+            )
+        key, value = item.split("=", 1)
+        try:
+            out[key] = int(value)
+        except ValueError:
+            try:
+                out[key] = float(value)
+            except ValueError:
+                out[key] = value
+    return out
+
+
 @app.command()
 def main(
     model_path: Annotated[
@@ -538,6 +559,14 @@ def main(
     test_preds: Annotated[
         str, typer.Option(help="Filename of test predictions CSV inside data-dir.")
     ] = "general_test_beams.csv",
+    koina_input_constant: Annotated[
+        Optional[List[str]],
+        typer.Option(
+            help="Koina model input constant as KEY=VALUE (repeatable). "
+            "E.g. --koina-input-constant collision_energies=27 "
+            "--koina-input-constant fragmentation_types=HCD",
+        ),
+    ] = None,
     n_background_samples: Annotated[
         int, typer.Option(help="Background samples for SHAP.", min=1, max=10000)
     ] = 500,
@@ -564,6 +593,13 @@ def main(
     # Load calibrator
     logger.info("Loading pretrained calibrator from %s", model_path)
     calibrator = ProbabilityCalibrator.load(model_path)
+
+    koina_constants = _parse_koina_constants(koina_input_constant)
+    if koina_constants:
+        logger.info("Applying Koina input constant overrides: %s", koina_constants)
+        calibrator.apply_koina_model_input_overrides(
+            model_input_constants=koina_constants,
+        )
 
     # Build sklearn-compatible predictor wrapper
     predictor = _CalibratorPredictor(calibrator)
