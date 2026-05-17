@@ -1,0 +1,32 @@
+# --- InstaNovo model: prediction config overrides ---
+# Uses the default instanovo data_loader from winnow/configs/data_loader/instanovo.yaml.
+# Pass via: winnow predict --config-dir configs/instanovo
+defaults:
+  - _self_
+  - /residues
+  - /data_loader: instanovo
+  - /fdr_method: nonparametric
+
+dataset:
+  spectrum_path_or_directory: null  # Override per organism/split in Makefile
+  predictions_path: null
+
+filter_empty_predictions: true
+
+calibrator:
+  pretrained_model_name_or_path: null  # Override in Makefile
+  cache_dir: null
+  irt_regressor_path: null
+
+koina:
+  server_url: koina.wilhelmlab.org:443
+  ssl: true
+  # input_constants:
+  #   collision_energies: 27
+  #   fragmentation_types: HCD
+
+fdr_control:
+  fdr_threshold: 1.0
+  confidence_column: calibrated_confidence
+
+output_folder: null  # Override in Makefile

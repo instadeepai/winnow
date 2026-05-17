@@ -931,6 +931,64 @@ analyze_features:
 ## Reviewer analyses: up-scored FPs and post-FDR overlap
 #########################################################
 
+.PHONY: download-hpo-eval-preds hpo-analyze-upscored-fps hpo-analyze-fdr-overlap \
+        analyze_upscored_fps analyze_fdr_overlap
+
+# S3 timestamps for each evaluation stage (override on CLI if needed)
+EVAL_TS_ANNOTATED          ?= 20260514T155345Z
+EVAL_TS_RAW                ?= 20260514T160855Z
+EVAL_TS_EXTERNAL_LABELLED  ?= 20260514T191009Z
+EVAL_TS_EXTERNAL_UNLABELLED ?= 20260514T204748Z
+
+ANALYSIS_PREDS_DIR ?= $(PREDS_DIR)
+
+## Download winnow predict outputs from S3 HPO eval runs into $(ANALYSIS_PREDS_DIR).
+## Downloads preds_and_fdr_metrics.csv from all evals, and metadata.csv only from labelled evals.
+download-hpo-eval-preds:
+	@echo "=== Downloading HPO eval predictions ==="
+	@# Annotated bio-val (labelled) — preds + metadata
+	for project in $(BIOLOGICAL_VALIDATION_PROJECTS); do \
+		mkdir -p $(ANALYSIS_PREDS_DIR)/$${project}_annotated; \
+		$(S3_CP) $(RUN_S3)/$(EVAL_TS_ANNOTATED)/eval_annotated/$${project}_annotated/preds_and_fdr_metrics.csv \
+			$(ANALYSIS_PREDS_DIR)/$${project}_annotated/preds_and_fdr_metrics.csv; \
+		$(S3_CP) $(RUN_S3)/$(EVAL_TS_ANNOTATED)/eval_annotated/$${project}_annotated/metadata.csv \
+			$(ANALYSIS_PREDS_DIR)/$${project}_annotated/metadata.csv; \
+	done
+	@# Raw bio-val (unlabelled) — preds only
+	for project in $(BIOLOGICAL_VALIDATION_PROJECTS); do \
+		mkdir -p $(ANALYSIS_PREDS_DIR)/$${project}_raw; \
+		$(S3_CP) $(RUN_S3)/$(EVAL_TS_RAW)/eval_raw/$${project}_raw/preds_and_fdr_metrics.csv \
+			$(ANALYSIS_PREDS_DIR)/$${project}_raw/preds_and_fdr_metrics.csv; \
+	done
+	@# External labelled — preds + metadata
+	for project in $(EXTERNAL_FULL_PROJECTS) PXD023064 Astral; do \
+		mkdir -p $(ANALYSIS_PREDS_DIR)/$${project}_labelled; \
+		$(S3_CP) $(RUN_S3)/$(EVAL_TS_EXTERNAL_LABELLED)/eval_external_labelled/$${project}_labelled/preds_and_fdr_metrics.csv \
+			$(ANALYSIS_PREDS_DIR)/$${project}_labelled/preds_and_fdr_metrics.csv; \
+		$(S3_CP) $(RUN_S3)/$(EVAL_TS_EXTERNAL_LABELLED)/eval_external_labelled/$${project}_labelled/metadata.csv \
+			$(ANALYSIS_PREDS_DIR)/$${project}_labelled/metadata.csv; \
+	done
+	@# External unlabelled — preds only
+	for project in $(EXTERNAL_FULL_PROJECTS) PXD023064 Astral; do \
+		mkdir -p $(ANALYSIS_PREDS_DIR)/$${project}_unlabelled; \
+		$(S3_CP) $(RUN_S3)/$(EVAL_TS_EXTERNAL_UNLABELLED)/eval_external_unlabelled/$${project}_unlabelled/preds_and_fdr_metrics.csv \
+			$(ANALYSIS_PREDS_DIR)/$${project}_unlabelled/preds_and_fdr_metrics.csv; \
+	done
+	@echo "=== download-hpo-eval-preds complete ==="
+
+## Characterise up-scored FPs using HPO eval predictions
+hpo-analyze-upscored-fps: download-hpo-eval-preds
+	uv run python scripts/analyze_upscored_fps.py \
+		--predictions-root $(ANALYSIS_PREDS_DIR) \
+		--output-dir analysis/upscored_fps
+
+## Post-FDR overlap using HPO eval predictions (labelled + unlabelled)
+hpo-analyze-fdr-overlap: download-hpo-eval-preds
+	uv run python scripts/analyze_fdr_overlap.py \
+		--predictions-root $(ANALYSIS_PREDS_DIR) \
+		--output-dir analysis/fdr_overlap \
+		--include-unlabelled
+
 ## Characterise false positives that calibration up-scores into high-confidence regions
 analyze_upscored_fps:
 	uv run python scripts/analyze_upscored_fps.py \
@@ -1068,8 +1126,10 @@ ANALYSIS_FASTA_helaqc   := fasta/human.fasta
 ANALYSIS_FASTA_celegans := fasta/Celegans.fasta
 
 # ── External model repo roots ──────────────────────────
-CASANOVO_ROOT  := /home/j-daniel/repos/casanovo
-PRIMENOVO_ROOT := /home/j-daniel/repos/pi-PrimeNovo
+# Locally these point to sibling repos; on the cluster they live under
+# analysis_data/ (populated by `make download-analysis-data`).
+CASANOVO_ROOT  ?= /home/j-daniel/repos/casanovo
+PRIMENOVO_ROOT ?= /home/j-daniel/repos/pi-PrimeNovo
 
 # ── Result directory roots ─────────────────────────────
 ANALYSIS_MODELS  := models
@@ -1085,18 +1145,20 @@ ANALYSIS_PREDICT_OVERRIDES = $(PREDICT_EVAL_OVERRIDES)
 # ═══════════════════════════════════════════════════════
 
 # -- helaqc --
-.PHONY: train-instanovo-helaqc predict-instanovo-helaqc-test predict-instanovo-helaqc-unlabelled predict-instanovo-helaqc-raw_less_train plot-instanovo-helaqc
+.PHONY: train-instanovo-helaqc plot-feature-investigation-instanovo-helaqc predict-instanovo-helaqc-test predict-instanovo-helaqc-unlabelled predict-instanovo-helaqc-raw_less_train plot-instanovo-helaqc
 
 train-instanovo-helaqc:
 	uv run winnow compute-features --config-dir configs/instanovo \
 	dataset.spectrum_path_or_directory=helaqc_split_parquet/annotated_train.parquet \
 	dataset.predictions_path=held_out_projects/biological_validation/annotated_predictions/dataset-helaqc-annotated-0000-0001.csv \
 	training_matrix_output_path=$(ANALYSIS_MODELS)/instanovo_helaqc/features_train.parquet \
+	metadata_output_path=$(ANALYSIS_MODELS)/instanovo_helaqc/metadata_train.parquet \
 	$(ANALYSIS_KOINA_OVERRIDES)
 	uv run winnow compute-features --config-dir configs/instanovo \
 	dataset.spectrum_path_or_directory=helaqc_split_parquet/annotated_val.parquet \
 	dataset.predictions_path=held_out_projects/biological_validation/annotated_predictions/dataset-helaqc-annotated-0000-0001.csv \
 	training_matrix_output_path=$(ANALYSIS_MODELS)/instanovo_helaqc/features_val.parquet \
+	metadata_output_path=$(ANALYSIS_MODELS)/instanovo_helaqc/metadata_val.parquet \
 	$(ANALYSIS_KOINA_OVERRIDES)
 	uv run winnow train --config-dir configs/instanovo \
 	features_path=$(ANALYSIS_MODELS)/instanovo_helaqc/features_train.parquet \
@@ -1105,6 +1167,12 @@ train-instanovo-helaqc:
 	dataset_output_path=null \
 	irt_regressor_output_path=$(ANALYSIS_MODELS)/instanovo_helaqc/irt_regressors.safetensors \
 	training_history_path=$(ANALYSIS_MODELS)/instanovo_helaqc/training_history.json
+
+plot-feature-investigation-instanovo-helaqc:
+	uv run python scripts/plot_feature_investigation.py \
+		--features-train $(ANALYSIS_MODELS)/instanovo_helaqc/features_train.parquet \
+		--features-val $(ANALYSIS_MODELS)/instanovo_helaqc/features_val.parquet \
+		--output-dir $(ANALYSIS_MODELS)/instanovo_helaqc/feature_investigation_plots
 
 predict-instanovo-helaqc-test:
 	uv run winnow predict --config-dir configs/instanovo \
@@ -1510,6 +1578,113 @@ create-raw-less-train-primenovo:
 		--output-tsv $(PRIMENOVO_ROOT)/predictions/celegans/celegans_denovo_raw_less_train.tsv
 
 create-raw-less-train: create-raw-less-train-parquet create-raw-less-train-casanovo create-raw-less-train-primenovo
+
+# ═══════════════════════════════════════════════════════
+# Upload / download analysis data for cluster runs
+# ═══════════════════════════════════════════════════════
+
+ANALYSIS_S3 ?= $(S3_BASE)/analysis
+
+.PHONY: local-upload-analysis-data local-upload-analysis-models download-analysis-data download-analysis-models upload-analysis-results download-analysis-results analysis-pipeline
+
+## Upload all datasets needed by train-all / predict-all / plot-all to S3.
+## Run this locally before launching a cluster job.
+local-upload-analysis-data:
+	@echo "=== Uploading winnow-repo datasets ==="
+	$(S3_CP) --recursive helaqc_split_parquet/          $(ANALYSIS_S3)/helaqc_split_parquet/ --profile winnow
+	$(S3_CP) --recursive celegans_split_parquet/         $(ANALYSIS_S3)/celegans_split_parquet/ --profile winnow
+	@echo "=== Uploading Casanovo data ==="
+	$(S3_CP) --recursive $(CASANOVO_ROOT)/helaqc_mgf/    $(ANALYSIS_S3)/casanovo/helaqc_mgf/ --profile winnow
+	$(S3_CP) --recursive $(CASANOVO_ROOT)/celegans_mgf/  $(ANALYSIS_S3)/casanovo/celegans_mgf/ --profile winnow
+	$(S3_CP) --recursive $(CASANOVO_ROOT)/predictions/   $(ANALYSIS_S3)/casanovo/predictions/ --profile winnow
+	@echo "=== Uploading PrimeNovo data ==="
+	$(S3_CP) --recursive $(PRIMENOVO_ROOT)/helaqc_mgf/   $(ANALYSIS_S3)/primenovo/helaqc_mgf/ --profile winnow
+	$(S3_CP) --recursive $(PRIMENOVO_ROOT)/celegans_mgf/ $(ANALYSIS_S3)/primenovo/celegans_mgf/ --profile winnow
+	$(S3_CP) --recursive $(PRIMENOVO_ROOT)/predictions/  $(ANALYSIS_S3)/primenovo/predictions/ --profile winnow
+	@echo "=== upload-analysis-data complete ==="
+
+## Upload locally-trained models to S3 so the cluster can skip training.
+local-upload-analysis-models:
+	@echo "=== Uploading trained models ==="
+	for m in instanovo_helaqc instanovo_celegans casanovo_helaqc casanovo_celegans primenovo_helaqc primenovo_celegans; do \
+		if [ -d $(ANALYSIS_MODELS)/$$m ]; then \
+			$(S3_CP) --recursive $(ANALYSIS_MODELS)/$$m/ $(ANALYSIS_S3)/models/$$m/ --profile winnow; \
+		else \
+			echo "WARN: $(ANALYSIS_MODELS)/$$m not found, skipping"; \
+		fi; \
+	done
+	@echo "=== upload-analysis-models complete ==="
+
+## Download pre-trained models from S3 (used on cluster to skip training).
+download-analysis-models:
+	@echo "=== Downloading trained models ==="
+	for m in instanovo_helaqc instanovo_celegans casanovo_helaqc casanovo_celegans primenovo_helaqc primenovo_celegans; do \
+		mkdir -p $(ANALYSIS_MODELS)/$$m; \
+		$(S3_CP) --recursive $(ANALYSIS_S3)/models/$$m/ $(ANALYSIS_MODELS)/$$m/; \
+	done
+	@echo "=== download-analysis-models complete ==="
+
+## Download analysis datasets from S3 into the container working directory.
+## Sets CASANOVO_ROOT / PRIMENOVO_ROOT to analysis_data/{casanovo,primenovo}.
+download-analysis-data:
+	@echo "=== Downloading winnow-repo datasets ==="
+	mkdir -p helaqc_split_parquet celegans_split_parquet fasta \
+	         held_out_projects/biological_validation/annotated_predictions \
+	         held_out_projects/biological_validation/raw_predictions \
+	         held_out_projects/lcfm/PXD014877_predictions \
+	         held_out_projects/acfm/PXD014877_predictions
+	$(S3_CP) --recursive $(ANALYSIS_S3)/helaqc_split_parquet/          helaqc_split_parquet/
+	$(S3_CP) --recursive $(ANALYSIS_S3)/celegans_split_parquet/         celegans_split_parquet/
+	$(S3_CP) --recursive $(ANALYSIS_S3)/held_out_projects/biological_validation/annotated_predictions/ \
+	         held_out_projects/biological_validation/annotated_predictions/
+	$(S3_CP) --recursive $(ANALYSIS_S3)/held_out_projects/biological_validation/raw_predictions/ \
+	         held_out_projects/biological_validation/raw_predictions/
+	$(S3_CP) --recursive $(ANALYSIS_S3)/held_out_projects/lcfm/PXD014877_predictions/ \
+	         held_out_projects/lcfm/PXD014877_predictions/
+	$(S3_CP) --recursive $(ANALYSIS_S3)/held_out_projects/acfm/PXD014877_predictions/ \
+	         held_out_projects/acfm/PXD014877_predictions/
+	$(S3_CP) --recursive $(ANALYSIS_S3)/fasta/ fasta/
+	@echo "=== Downloading Casanovo data ==="
+	mkdir -p analysis_data/casanovo/helaqc_mgf analysis_data/casanovo/celegans_mgf analysis_data/casanovo/predictions
+	$(S3_CP) --recursive $(ANALYSIS_S3)/casanovo/helaqc_mgf/    analysis_data/casanovo/helaqc_mgf/
+	$(S3_CP) --recursive $(ANALYSIS_S3)/casanovo/celegans_mgf/  analysis_data/casanovo/celegans_mgf/
+	$(S3_CP) --recursive $(ANALYSIS_S3)/casanovo/predictions/   analysis_data/casanovo/predictions/
+	@echo "=== Downloading PrimeNovo data ==="
+	mkdir -p analysis_data/primenovo/helaqc_mgf analysis_data/primenovo/celegans_mgf analysis_data/primenovo/predictions
+	$(S3_CP) --recursive $(ANALYSIS_S3)/primenovo/helaqc_mgf/   analysis_data/primenovo/helaqc_mgf/
+	$(S3_CP) --recursive $(ANALYSIS_S3)/primenovo/celegans_mgf/ analysis_data/primenovo/celegans_mgf/
+	$(S3_CP) --recursive $(ANALYSIS_S3)/primenovo/predictions/  analysis_data/primenovo/predictions/
+	@echo "=== download-analysis-data complete ==="
+
+## Upload trained models, predictions, and plots to S3 after a cluster run.
+upload-analysis-results:
+	@echo "=== Uploading models ==="
+	for m in instanovo_helaqc instanovo_celegans casanovo_helaqc casanovo_celegans primenovo_helaqc primenovo_celegans; do \
+		if [ -d $(ANALYSIS_MODELS)/$$m ]; then \
+			$(S3_CP) --recursive $(ANALYSIS_MODELS)/$$m/ $(ANALYSIS_S3)/models/$$m/; \
+		fi; \
+	done
+	@echo "=== Uploading predictions + plots ==="
+	$(S3_CP) --recursive $(ANALYSIS_RESULTS)/ $(ANALYSIS_S3)/results/
+	@echo "=== upload-analysis-results complete ==="
+
+## Download trained models, predictions, and plots from S3 after a cluster run.
+download-analysis-results:
+	@echo "=== Downloading models ==="
+	for m in instanovo_helaqc instanovo_celegans casanovo_helaqc casanovo_celegans primenovo_helaqc primenovo_celegans; do \
+		mkdir -p $(ANALYSIS_MODELS)/$$m; \
+		$(S3_CP) --recursive $(ANALYSIS_S3)/models/$$m/ $(ANALYSIS_MODELS)/$$m/; \
+	done
+	@echo "=== Downloading predictions + plots ==="
+	mkdir -p $(ANALYSIS_RESULTS)
+	$(S3_CP) --recursive $(ANALYSIS_S3)/results/ $(ANALYSIS_RESULTS)/
+	@echo "=== download-analysis-results complete ==="
+
+## Full cluster pipeline: download data + pre-trained models, predict, plot,
+## upload results. Intended to be the manifest.yaml entrypoint command.
+## Override CASANOVO_ROOT / PRIMENOVO_ROOT to analysis_data/ paths on the
+## cluster since the external repos are not present there.
+analysis-pipeline: download-analysis-data download-analysis-models predict-all plot-all upload-analysis-results
 
 # ═══════════════════════════════════════════════════════
 # Convenience targets

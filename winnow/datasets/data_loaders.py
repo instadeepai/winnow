@@ -943,6 +943,21 @@ class MZTabDatasetLoader(DatasetLoader):
             .alias(tokenised_column)
         )
 
+    @staticmethod
+    def _casanovo_score_to_log_prob(score: float) -> float:
+        """Convert a Casanovo confidence score to a log-probability.
+
+        Casanovo scores range from -1 to 1. Negative scores indicate a
+        precursor-mass mismatch: the original probability (in [0, 1]) was
+        penalised by subtracting 1, so we reverse this by adding 1 back.
+        See: https://casanovo.readthedocs.io/en/latest/file_formats.html#output-understanding-the-mztab-format
+
+        After recovering the probability we clamp to a small epsilon to
+        avoid log(0) = -inf.
+        """
+        prob = score + 1.0 if score < 0 else score
+        return float(np.log(max(prob, 1e-10)))
+
     def _create_beam_predictions(
         self, predictions: pl.DataFrame, valid_spectra_indices: List[int]
     ) -> List[Optional[List[ScoredSequence]]]:
@@ -969,8 +984,12 @@ class MZTabDatasetLoader(DatasetLoader):
                     ScoredSequence(
                         sequence=row["prediction"],
                         mass_error=None,
-                        sequence_log_probability=np.log(row["confidence"]),
-                        token_log_probabilities=np.log(row["token_scores"])
+                        sequence_log_probability=self._casanovo_score_to_log_prob(
+                            row["confidence"]
+                        ),
+                        token_log_probabilities=np.log(
+                            np.maximum(row["token_scores"], 1e-10)
+                        )  # prevent log(0) = -inf
                         if row["token_scores"] is not None
                         else None,  # None for traditional search engines
                     )
@@ -1174,6 +1193,11 @@ class PrimeNovoDatasetLoader(DatasetLoader):
     _df_from_matchms = staticmethod(_df_from_matchms)
     _add_index_cols = staticmethod(_add_index_cols)
 
+    # N-terminal modifications that PrimeNovo sometimes incorrectly places in
+    # the middle of a peptide sequence. These are physically impossible and are
+    # an artefact of the model lacking better alternatives during beam search.
+    _NT_MODS = ("[+43.006-17.027]", "[+42.011]", "[+43.006]", "[-17.027]")
+
     def __init__(
         self,
         residue_masses: dict[str, float],
@@ -1372,13 +1396,44 @@ class PrimeNovoDatasetLoader(DatasetLoader):
             )
         return merged
 
+    @classmethod
+    def _has_nterm_mod_in_middle(cls, seq: object) -> bool:
+        """Return True if *seq* contains an N-terminal mod anywhere but position 0."""
+        if not isinstance(seq, str):
+            return False
+        for mod in cls._NT_MODS:
+            if mod not in seq:
+                continue
+            first = seq.find(mod)
+            if first != 0:
+                return True
+            if seq.find(mod, len(mod)) != -1:
+                return True
+        return False
+
     def _process_predictions(self, merged: pd.DataFrame) -> pd.DataFrame:
-        """Tokenise predictions and rename ``score`` -> ``confidence``."""
+        """Tokenise predictions, filter bad N-terminal mods, rename ``score`` -> ``confidence``."""
         prediction_untokenised = merged["prediction"].apply(
             lambda peptide: (
                 peptide.replace("L", "I") if isinstance(peptide, str) else peptide
             )
         )
+
+        bad_mask = prediction_untokenised.apply(self._has_nterm_mod_in_middle)
+        n_bad = bad_mask.sum()
+        if n_bad:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Filtered %d spectra with PrimeNovo N-terminal modifications "
+                "incorrectly placed in the middle of the peptide sequence.",
+                n_bad,
+            )
+            merged = merged[~bad_mask].reset_index(drop=True)
+            prediction_untokenised = prediction_untokenised[~bad_mask].reset_index(
+                drop=True
+            )
+
         prediction_tokens = prediction_untokenised.apply(
             lambda peptide: (
                 self._remap_tokens(self.metrics._split_peptide(peptide))

@@ -16,7 +16,7 @@ spec:
         provider: "github"
   operator: jobset
   image: winnow-koina
-  command: /usr/local/bin/entrypoint.koina.sh make ablation-replot HPO_RUN_TS=20260516T104911Z
+  command: /usr/local/bin/entrypoint.koina.sh make analysis-pipeline KOINA_SERVER_URL=localhost:8500 KOINA_SSL=false CASANOVO_ROOT=analysis_data/casanovo PRIMENOVO_ROOT=analysis_data/primenovo
 
   types:
     worker:

@@ -213,13 +213,18 @@ def train_entry_point(
         annotated_dataset, dataset_output_path = _load_and_prepare_dataset(
             cfg, instantiate
         )
+        # Compute features on the full dataset first so that
+        # annotated_dataset.metadata contains all feature columns when
+        # saved below. Splitting happens afterwards to avoid computing
+        # features twice (once per split).
+        calibrator.compute_features(annotated_dataset)
         train_data, val_data = _maybe_split_calibration_dataset(cfg, annotated_dataset)
         logger.info(
             "Training on %d samples%s.",
             len(train_data),
             f" (val={len(val_data)})" if val_data is not None else "",
         )
-        history = calibrator.fit(train_data, val_data)
+        history = _fit_from_calibration_datasets(calibrator, train_data, val_data)
         if dataset_output_path:
             logger.info(f"Saving training metadata to {dataset_output_path}")
             annotated_dataset.save_metadata(dataset_output_path)
@@ -388,6 +393,41 @@ def _maybe_split_calibration_dataset(cfg, dataset):
         CalibrationDataset(metadata=train_meta, predictions=train_preds),
         CalibrationDataset(metadata=val_meta, predictions=val_preds),
     )
+
+
+def _fit_from_calibration_datasets(calibrator, train_data, val_data):
+    """Extract features from already-featurised CalibrationDatasets and train.
+
+    This bridges the gap between single-phase feature computation (which
+    happens on the full dataset before splitting) and the calibrator's
+    ``fit_from_features`` method that expects ``FeatureDataset`` objects.
+
+    Args:
+        calibrator: Instantiated calibrator with feature columns already
+            present in the datasets' metadata.
+        train_data: Training CalibrationDataset with feature columns.
+        val_data: Optional validation CalibrationDataset with feature columns,
+            or ``None``.
+
+    Returns:
+        TrainingHistory from the calibrator.
+    """
+    import numpy as np
+    from winnow.datasets.feature_dataset import FeatureDataset
+
+    features, labels = calibrator._extract_feature_matrix(train_data, labelled=True)
+    train_fd = FeatureDataset(features=np.asarray(features), labels=np.asarray(labels))
+
+    val_fd = None
+    if val_data is not None:
+        val_features, val_labels = calibrator._extract_feature_matrix(
+            val_data, labelled=True
+        )
+        val_fd = FeatureDataset(
+            features=np.asarray(val_features), labels=np.asarray(val_labels)
+        )
+
+    return calibrator.fit_from_features(train_fd, val_fd)
 
 
 def _save_training_artifacts(cfg, calibrator, history):

@@ -1,0 +1,16 @@
+# --- Casanovo: compute-features config overrides ---
+# Uses the mztab data_loader from winnow/configs/data_loader/mztab.yaml.
+# Pass via: winnow compute-features --config-dir configs/casanovo
+defaults:
+  - _self_
+  - /residues
+  - /calibrator
+  - /data_loader: mztab
+
+dataset:
+  spectrum_path_or_directory: null
+  predictions_path: null
+
+training_matrix_output_path: null
+filter_empty_predictions: true
+labelled: true

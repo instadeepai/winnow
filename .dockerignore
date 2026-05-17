@@ -28,3 +28,5 @@
 
 # Entrypoint script for the Koina-bundled image (started by Dockerfile.koina)
 !entrypoint.koina.sh
+
+!configs

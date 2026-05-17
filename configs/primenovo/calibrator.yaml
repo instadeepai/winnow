@@ -1,0 +1,58 @@
+# --- PrimeNovo calibrator: no beam or token score features ---
+# PrimeNovo TSV predictions have no beam search or per-token scores.
+
+calibrator:
+  _target_: winnow.calibration.calibrator.ProbabilityCalibrator
+
+  hidden_dims: [50, 50]
+  dropout: 0.3
+  learning_rate: 0.0001
+  weight_decay: 0.001
+  max_epochs: 1000
+  batch_size: 1024
+  n_iter_no_change: 10
+  tol: 0.0001
+  seed: 42
+  val_early_stopping_max_psms: null
+  val_subsample_seed: null
+
+  features:
+    mass_error:
+      _target_: winnow.calibration.calibration_features.MassErrorFeature
+      residue_masses: ${residue_masses}
+
+    fragment_match_features:
+      _target_: winnow.calibration.calibration_features.FragmentMatchFeatures
+      mz_tolerance_ppm: 20
+      learn_from_missing: false
+      intensity_model_name: ${koina.intensity_model}
+      max_precursor_charge: ${koina.constraints.max_precursor_charge}
+      max_peptide_length: ${koina.constraints.max_peptide_length}
+      unsupported_residues: ${koina.constraints.unsupported_residues}
+      koina_server_url: ${koina.server_url}
+      koina_ssl: ${koina.ssl}
+
+    retention_time_feature:
+      _target_: winnow.calibration.calibration_features.RetentionTimeFeature
+      train_fraction: 0.1
+      min_train_points: 5
+      learn_from_missing: false
+      seed: 42
+      irt_model_name: ${koina.irt_model}
+      max_peptide_length: ${koina.constraints.max_peptide_length}
+      unsupported_residues: ${koina.constraints.unsupported_residues}
+      koina_server_url: ${koina.server_url}
+      koina_ssl: ${koina.ssl}
+
+koina:
+  server_url: koina.wilhelmlab.org:443
+  ssl: true
+  intensity_model: Prosit_2025_intensity_22PTM
+  irt_model: Prosit_2025_irt_22PTM
+  constraints:
+    max_precursor_charge: 6
+    max_peptide_length: 30
+    unsupported_residues:
+      - "[UNIMOD:5]"
+      - "[UNIMOD:385]"
+      - "(+25.98)"

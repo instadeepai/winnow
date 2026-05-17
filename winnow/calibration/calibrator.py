@@ -153,11 +153,13 @@ class TrainingHistory:
         ax.plot(epochs, self.train_losses, label="Train Loss", linestyle="-")
 
         if self.val_losses is not None:
-            ax.plot(epochs, self.val_losses, label="Val Loss", linestyle="--")
+            ax.plot(epochs, self.val_losses, label="Validation Loss", linestyle="--")
 
         if self.val_accuracies is not None:
             ax2 = ax.twinx()
-            ax2.plot(epochs, self.val_accuracies, label="Val Accuracy", linestyle=":")
+            ax2.plot(
+                epochs, self.val_accuracies, label="Validation Accuracy", linestyle=":"
+            )
             ax2.set_ylabel("Validation Accuracy")
             ax2.legend(loc="lower left")
 
