@@ -16,7 +16,7 @@ spec:
         provider: "github"
   operator: jobset
   image: winnow-koina
-  command: /usr/local/bin/entrypoint.koina.sh make analysis-pipeline KOINA_SERVER_URL=localhost:8500 KOINA_SSL=false CASANOVO_ROOT=analysis_data/casanovo PRIMENOVO_ROOT=analysis_data/primenovo
+  command: make replot-eval
 
   types:
     worker:
@@ -27,6 +27,6 @@ spec:
 
         accelerators:
           gpu:
-            count: 1
+            count: 0
             type: gpu
             product: NVIDIA-H100-80GB-HBM3-MIG-3g.40gb

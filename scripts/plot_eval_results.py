@@ -47,9 +47,17 @@ DATASET_DISPLAY_NAMES: dict[str, str] = {
     "Astral": "Astral $\\it{E.\\;coli}$",
 }
 
-# Paul Tol "bright" palette (colorblind-safe)
-_PALETTE = ["#4477AA", "#EE6677", "#228833", "#CCBB44", "#66CCEE", "#AA3377", "#BBBBBB"]
-_CORRECT_COLOUR = _PALETTE[2]
+# Paul Tol "bright" palette (colour-blind safe)
+_PALETTE = [
+    "#4477AA",
+    "#EE6677",
+    "#228833",
+    "#CCBB44",
+    "#66CCEE",
+    "#AA3377",
+    "#BBBBBB",
+]
+_CORRECT_COLOUR = _PALETTE[0]
 _INCORRECT_COLOUR = _PALETTE[1]
 _MAIN_LINE_COLOUR = _PALETTE[0]
 _RAW_LINE_COLOUR = _PALETTE[5]
@@ -79,6 +87,13 @@ def _save_fig(fig: plt.Figure, base_path: Path) -> None:
     fig.savefig(f"{base_path}.png", bbox_inches="tight", dpi=300)
     fig.savefig(f"{base_path}.pdf", bbox_inches="tight", dpi=300)
     plt.close(fig)
+
+
+def _style_ax(ax: plt.Axes) -> None:
+    ax.grid(False)
+    for spine in ax.spines.values():
+        spine.set_edgecolor("black")
+        spine.set_linewidth(0.8)
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +144,8 @@ def plot_precision_recall(
     ax.set_title(f"{display} precision-recall {qualifier}")
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1.02)
-    ax.legend(fontsize=9, loc="lower right")
+    ax.legend(loc="lower right")
+    _style_ax(ax)
     fig.tight_layout()
     _save_fig(fig, output_dir / f"pr_curve_{project}")
 
@@ -176,7 +192,8 @@ def plot_fdr_run(
     ax.set_xlabel("Calibrated confidence")
     ax.set_ylabel("PSM FDR")
     ax.set_title(f"{display} FDR run {qualifier}")
-    ax.legend(fontsize=9, loc="upper right")
+    ax.legend(loc="upper right")
+    _style_ax(ax)
     fig.tight_layout()
     _save_fig(fig, output_dir / f"fdr_run_{project}")
 
@@ -250,7 +267,8 @@ def plot_q_value_run(
     ax.set_xlabel("Calibrated confidence")
     ax.set_ylabel("PSM q-value")
     ax.set_title(f"{display} q-value run {qualifier}")
-    ax.legend(fontsize=9, loc="upper right")
+    ax.legend(loc="upper right")
+    _style_ax(ax)
     fig.tight_layout()
     _save_fig(fig, output_dir / f"qvalue_run_{project}")
 
@@ -316,7 +334,8 @@ def plot_fdr_run_with_bands(
     ax.set_xlabel("Calibrated confidence")
     ax.set_ylabel("PSM FDR")
     ax.set_title(f"{display} FDR run with sampling error bounds {qualifier}")
-    ax.legend(fontsize=9, loc="upper right")
+    ax.legend(loc="upper right")
+    _style_ax(ax)
     fig.tight_layout()
     _save_fig(fig, output_dir / f"fdr_run_bands_{project}")
 
@@ -378,7 +397,8 @@ def plot_q_value_run_with_bands(
     ax.set_xlabel("Calibrated confidence")
     ax.set_ylabel("PSM q-value")
     ax.set_title(f"{display} q-value run with sampling error bounds {qualifier}")
-    ax.legend(fontsize=9, loc="upper right")
+    ax.legend(loc="upper right")
+    _style_ax(ax)
     fig.tight_layout()
     _save_fig(fig, output_dir / f"qvalue_run_bands_{project}")
 
@@ -448,7 +468,8 @@ def plot_true_vs_estimated_fdr(
     if zoomed:
         ax.set_xlim(0, 0.1)
         ax.set_ylim(0, 0.1)
-    ax.legend(fontsize=9, loc="upper left")
+    ax.legend(loc="upper left")
+    _style_ax(ax)
     fig.tight_layout()
     tag = "fdr_true_vs_est_zoom" if zoomed else "fdr_true_vs_est"
     _save_fig(fig, output_dir / f"{tag}_{project}")
@@ -553,7 +574,8 @@ def plot_calibration(
     ax.set_title(f"{display} probability calibration {qualifier}")
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
-    ax.legend(fontsize=9, loc="lower right")
+    ax.legend(loc="lower right")
+    _style_ax(ax)
     fig.tight_layout()
     _save_fig(fig, output_dir / f"calibration_{project}")
 
@@ -581,21 +603,24 @@ def plot_score_histograms(
     ax.hist(
         df.loc[correct_mask, "confidence"],
         bins=bins_before,
-        alpha=0.6,
+        alpha=0.5,
         color=_CORRECT_COLOUR,
+        edgecolor="black",
         label="Correct",
     )
     ax.hist(
         df.loc[~correct_mask, "confidence"],
         bins=bins_before,
-        alpha=0.6,
+        alpha=0.5,
         color=_INCORRECT_COLOUR,
+        edgecolor="black",
         label="Incorrect",
     )
     ax.set_xlabel("Raw confidence")
     ax.set_ylabel("Count")
     ax.set_title("Before calibration")
-    ax.legend(fontsize=8)
+    ax.legend(loc="upper center")
+    _style_ax(ax)
 
     # After calibration
     ax = axes[1]
@@ -603,21 +628,24 @@ def plot_score_histograms(
     ax.hist(
         df.loc[correct_mask, "calibrated_confidence"],
         bins=bins_after,
-        alpha=0.6,
+        alpha=0.5,
         color=_CORRECT_COLOUR,
+        edgecolor="black",
         label="Correct",
     )
     ax.hist(
         df.loc[~correct_mask, "calibrated_confidence"],
         bins=bins_after,
-        alpha=0.6,
+        alpha=0.5,
         color=_INCORRECT_COLOUR,
+        edgecolor="black",
         label="Incorrect",
     )
     ax.set_xlabel("Calibrated confidence")
     ax.set_ylabel("Count")
     ax.set_title("After calibration")
-    ax.legend(fontsize=8)
+    ax.legend(loc="upper center")
+    _style_ax(ax)
 
     fig.suptitle(f"{display} score distributions {qualifier}", fontsize=13)
     fig.tight_layout()

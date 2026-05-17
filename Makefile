@@ -664,6 +664,68 @@ eval-external-unlabelled:
 	done
 	$(S3_CP) --recursive $(EVAL_PLOTS_DIR)/external_unlabelled/ $(RUN_S3)/$(RUN_TS)/eval_external_unlabelled/plots/
 
+.PHONY: replot-eval-plots-annotated replot-eval-plots-raw \
+        replot-eval-plots-external-labelled replot-eval-plots-external-unlabelled \
+        replot-eval-plots upload-eval-plots-annotated upload-eval-plots-raw \
+        upload-eval-plots-external-labelled upload-eval-plots-external-unlabelled \
+        upload-eval-plots
+
+## Replot eval results from local predictions (no predict)
+replot-eval-plots-annotated:
+	mkdir -p $(EVAL_PLOTS_DIR)/annotated
+	uv run python scripts/plot_eval_results.py \
+		--predictions-root $(PREDS_DIR) \
+		--projects "$(BIOLOGICAL_VALIDATION_PROJECTS)" \
+		--eval-type annotated \
+		--output-dir $(EVAL_PLOTS_DIR)/annotated
+
+replot-eval-plots-raw:
+	mkdir -p $(EVAL_PLOTS_DIR)/raw
+	uv run python scripts/plot_eval_results.py \
+		--predictions-root $(PREDS_DIR) \
+		--projects "$(BIOLOGICAL_VALIDATION_PROJECTS)" \
+		--eval-type raw \
+		--output-dir $(EVAL_PLOTS_DIR)/raw
+
+replot-eval-plots-external-labelled:
+	mkdir -p $(EVAL_PLOTS_DIR)/external_labelled
+	uv run python scripts/plot_eval_results.py \
+		--predictions-root $(PREDS_DIR) \
+		--projects "$(EXTERNAL_FULL_PROJECTS) PXD023064 Astral" \
+		--eval-type labelled \
+		--output-dir $(EVAL_PLOTS_DIR)/external_labelled
+
+replot-eval-plots-external-unlabelled:
+	mkdir -p $(EVAL_PLOTS_DIR)/external_unlabelled
+	uv run python scripts/plot_eval_results.py \
+		--predictions-root $(PREDS_DIR) \
+		--projects "$(EXTERNAL_FULL_PROJECTS) PXD023064 Astral" \
+		--eval-type unlabelled \
+		--output-dir $(EVAL_PLOTS_DIR)/external_unlabelled
+
+replot-eval-plots: replot-eval-plots-annotated replot-eval-plots-raw \
+                   replot-eval-plots-external-labelled replot-eval-plots-external-unlabelled
+
+## Upload replotted eval figures to the S3 eval run prefixes (uses EVAL_TS_*)
+upload-eval-plots-annotated:
+	$(S3_CP) --recursive $(EVAL_PLOTS_DIR)/annotated/ \
+		$(RUN_S3)/$(EVAL_TS_ANNOTATED)/eval_annotated/plots/
+
+upload-eval-plots-raw:
+	$(S3_CP) --recursive $(EVAL_PLOTS_DIR)/raw/ \
+		$(RUN_S3)/$(EVAL_TS_RAW)/eval_raw/plots/
+
+upload-eval-plots-external-labelled:
+	$(S3_CP) --recursive $(EVAL_PLOTS_DIR)/external_labelled/ \
+		$(RUN_S3)/$(EVAL_TS_EXTERNAL_LABELLED)/eval_external_labelled/plots/
+
+upload-eval-plots-external-unlabelled:
+	$(S3_CP) --recursive $(EVAL_PLOTS_DIR)/external_unlabelled/ \
+		$(RUN_S3)/$(EVAL_TS_EXTERNAL_UNLABELLED)/eval_external_unlabelled/plots/
+
+upload-eval-plots: upload-eval-plots-annotated upload-eval-plots-raw \
+                   upload-eval-plots-external-labelled upload-eval-plots-external-unlabelled
+
 ## Run feature importance analysis on 3 datasets, upload
 feature-analysis:
 	mkdir -p analysis/feature_analysis/celegans analysis/feature_analysis/sbrodae analysis/feature_analysis/helaqc
@@ -729,7 +791,9 @@ hpo-pipeline: hpo-download-data hpo hpo-upload-model download-eval-data \
 
 .PHONY: hpo-download-model hpo-reeval hpo-reeval-annotated hpo-reeval-raw \
         hpo-reeval-external-labelled hpo-reeval-external-unlabelled \
-        hpo-reeval-feature-analysis hpo-reeval-ablation
+        hpo-reeval-feature-analysis hpo-reeval-ablation \
+        hpo-replot-eval hpo-replot-eval-annotated hpo-replot-eval-raw \
+        hpo-replot-eval-external-labelled hpo-replot-eval-external-unlabelled
 
 # S3 path to the HPO run whose model you want to evaluate.
 # Override on the command line:
@@ -764,6 +828,31 @@ hpo-reeval-feature-analysis: hpo-download-model download-eval-data feature-analy
 
 ## Re-run ablation study with a saved HPO model
 hpo-reeval-ablation: hpo-download-model hpo-download-data download-eval-data ablation
+
+# Replot eval figures from saved S3 predictions and upload to each eval run prefix.
+# Override EVAL_TS_* to match the hpo_runs/ folders on S3, e.g.:
+#   make hpo-replot-eval \
+#     EVAL_TS_ANNOTATED=20260514T155345Z \
+#     EVAL_TS_RAW=20260514T160855Z \
+#     EVAL_TS_EXTERNAL_LABELLED=20260514T191009Z \
+#     EVAL_TS_EXTERNAL_UNLABELLED=20260514T204748Z \
+#     S3_CP='aws s3 cp --no-progress --profile winnow'
+## Download eval preds from S3, replot, and upload plots (no predict)
+hpo-replot-eval: download-eval-preds replot-eval-plots upload-eval-plots
+
+## Replot and upload only annotated bio-val eval
+hpo-replot-eval-annotated: download-eval-preds replot-eval-plots-annotated upload-eval-plots-annotated
+
+## Replot and upload only raw bio-val eval
+hpo-replot-eval-raw: download-eval-preds replot-eval-plots-raw upload-eval-plots-raw
+
+## Replot and upload only external labelled eval
+hpo-replot-eval-external-labelled: download-eval-preds \
+	replot-eval-plots-external-labelled upload-eval-plots-external-labelled
+
+## Replot and upload only external unlabelled eval
+hpo-replot-eval-external-unlabelled: download-eval-preds \
+	replot-eval-plots-external-unlabelled upload-eval-plots-external-unlabelled
 
 ABLATION_OUTPUT_DIR ?= analysis/hpo_ablation
 ABLATION_S3_PATH   ?= $(RUN_S3)/$(HPO_RUN_TS)/ablation
