@@ -1715,15 +1715,16 @@ download-analysis-data:
 	         held_out_projects/acfm/PXD014877_predictions
 	$(S3_CP) --recursive $(ANALYSIS_S3)/helaqc_split_parquet/          helaqc_split_parquet/
 	$(S3_CP) --recursive $(ANALYSIS_S3)/celegans_split_parquet/         celegans_split_parquet/
-	$(S3_CP) --recursive $(ANALYSIS_S3)/held_out_projects/biological_validation/annotated_predictions/ \
+	@# Predictions + FASTA live under held_out_projects/ on S3 (not under analysis/).
+	$(S3_CP) --recursive $(HELD_OUT_S3)/biological_validation/annotated_predictions/ \
 	         held_out_projects/biological_validation/annotated_predictions/
-	$(S3_CP) --recursive $(ANALYSIS_S3)/held_out_projects/biological_validation/raw_predictions/ \
+	$(S3_CP) --recursive $(HELD_OUT_S3)/biological_validation/raw_predictions/ \
 	         held_out_projects/biological_validation/raw_predictions/
-	$(S3_CP) --recursive $(ANALYSIS_S3)/held_out_projects/lcfm/PXD014877_predictions/ \
+	$(S3_CP) --recursive $(HELD_OUT_S3)/lcfm/PXD014877_predictions/ \
 	         held_out_projects/lcfm/PXD014877_predictions/
-	$(S3_CP) --recursive $(ANALYSIS_S3)/held_out_projects/acfm/PXD014877_predictions/ \
+	$(S3_CP) --recursive $(HELD_OUT_S3)/acfm/PXD014877_predictions/ \
 	         held_out_projects/acfm/PXD014877_predictions/
-	$(S3_CP) --recursive $(ANALYSIS_S3)/fasta/ fasta/
+	$(S3_CP) --recursive $(FASTA_S3)/ fasta/
 	@echo "=== Downloading Casanovo data ==="
 	mkdir -p analysis_data/casanovo/helaqc_mgf analysis_data/casanovo/celegans_mgf analysis_data/casanovo/predictions
 	$(S3_CP) --recursive $(ANALYSIS_S3)/casanovo/helaqc_mgf/    analysis_data/casanovo/helaqc_mgf/
