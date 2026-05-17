@@ -16,7 +16,7 @@ spec:
         provider: "github"
   operator: jobset
   image: winnow-koina
-  command: /usr/local/bin/entrypoint.koina.sh make download-eval-preds reviewer-analyses novelty-pipeline
+  command: /usr/local/bin/entrypoint.koina.sh make analysis-pipeline KOINA_SERVER_URL=localhost:8500 KOINA_SSL=false CASANOVO_ROOT=analysis_data/casanovo PRIMENOVO_ROOT=analysis_data/primenovo
 
   types:
     worker:
