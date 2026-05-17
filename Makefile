@@ -355,16 +355,6 @@ benchmark-scaling: benchmark-train-models
 
 .PHONY: copy_down_train_dataset compute_train_features
 
-# PXD000561 PXD00900 PXD001258 done
-# PROJECTS := PXD002052 PXD003868 PXD004325 \
-#             PXD004424 PXD004452 PXD004467 PXD004536 PXD004732 PXD004947 \
-#             PXD004948 PXD005025 PXD005573 PXD006201 PXD009449 \
-#             PXD010154 PXD010595 PXD013868 PXD019483 PXD021013 PXD025859 \
-#             PXD026629 PXD026649 PXD029360 PXD031025 PXD031032 PXD035158 \
-#             PXD037009 PXD043989 PXD044301 PXD044325 PXD044641 PXD044830 \
-#             PXD045299 PXD045457 PXD045471 PXD045662 PXD046182 PXD046460 \
-#             PXD046802 PXD047134 PXD047641 PXD047761 PXD048219 PXD056559
-# PROJECTS := PXD035158 PXD037009 PXD043989 PXD044301 PXD044325 PXD044641 PXD044830
 PROJECTS := PXD003868 PXD004325 PXD004424 PXD004452 PXD004467 PXD004536 PXD004732 PXD004947 PXD009449 PXD021013 PXD056559
 
 copy_down_train_dataset:
@@ -931,7 +921,8 @@ analyze_features:
 ## Reviewer analyses: up-scored FPs and post-FDR overlap
 #########################################################
 
-.PHONY: download-hpo-eval-preds hpo-analyze-upscored-fps hpo-analyze-fdr-overlap \
+.PHONY: download-eval-preds analyze-upscored-fps analyze-fdr-overlap \
+        upload-reviewer-analyses reviewer-analyses \
         analyze_upscored_fps analyze_fdr_overlap
 
 # S3 timestamps for each evaluation stage (override on CLI if needed)
@@ -942,10 +933,10 @@ EVAL_TS_EXTERNAL_UNLABELLED ?= 20260514T204748Z
 
 ANALYSIS_PREDS_DIR ?= $(PREDS_DIR)
 
-## Download winnow predict outputs from S3 HPO eval runs into $(ANALYSIS_PREDS_DIR).
+## Download winnow predict outputs from S3 eval runs into $(ANALYSIS_PREDS_DIR).
 ## Downloads preds_and_fdr_metrics.csv from all evals, and metadata.csv only from labelled evals.
-download-hpo-eval-preds:
-	@echo "=== Downloading HPO eval predictions ==="
+download-eval-preds:
+	@echo "=== Downloading eval predictions ==="
 	@# Annotated bio-val (labelled) — preds + metadata
 	for project in $(BIOLOGICAL_VALIDATION_PROJECTS); do \
 		mkdir -p $(ANALYSIS_PREDS_DIR)/$${project}_annotated; \
@@ -974,20 +965,28 @@ download-hpo-eval-preds:
 		$(S3_CP) $(RUN_S3)/$(EVAL_TS_EXTERNAL_UNLABELLED)/eval_external_unlabelled/$${project}_unlabelled/preds_and_fdr_metrics.csv \
 			$(ANALYSIS_PREDS_DIR)/$${project}_unlabelled/preds_and_fdr_metrics.csv; \
 	done
-	@echo "=== download-hpo-eval-preds complete ==="
+	@echo "=== download-eval-preds complete ==="
 
-## Characterise up-scored FPs using HPO eval predictions
-hpo-analyze-upscored-fps: download-hpo-eval-preds
+## Characterise up-scored FPs from downloaded eval predictions
+analyze-upscored-fps: download-eval-preds
 	uv run python scripts/analyze_upscored_fps.py \
 		--predictions-root $(ANALYSIS_PREDS_DIR) \
 		--output-dir analysis/upscored_fps
 
-## Post-FDR overlap using HPO eval predictions (labelled + unlabelled)
-hpo-analyze-fdr-overlap: download-hpo-eval-preds
+## Post-FDR overlap from downloaded eval predictions (labelled + unlabelled)
+analyze-fdr-overlap: download-eval-preds
 	uv run python scripts/analyze_fdr_overlap.py \
 		--predictions-root $(ANALYSIS_PREDS_DIR) \
 		--output-dir analysis/fdr_overlap \
 		--include-unlabelled
+
+## Upload reviewer analysis results to S3
+upload-reviewer-analyses:
+	$(S3_CP) --recursive analysis/upscored_fps/ $(RUN_S3)/$(HPO_RUN_TS)/reviewer_analyses/upscored_fps/
+	$(S3_CP) --recursive analysis/fdr_overlap/  $(RUN_S3)/$(HPO_RUN_TS)/reviewer_analyses/fdr_overlap/
+
+## Download eval predictions, run both reviewer analyses, and upload results
+reviewer-analyses: analyze-upscored-fps analyze-fdr-overlap upload-reviewer-analyses
 
 ## Characterise false positives that calibration up-scores into high-confidence regions
 analyze_upscored_fps:
@@ -1001,6 +1000,87 @@ analyze_fdr_overlap:
 		--predictions-root predictions/general_model \
 		--output-dir analysis/fdr_overlap \
 		--include-unlabelled
+
+#########################################################
+## Novelty analysis (reviewer response)
+#########################################################
+
+.PHONY: download-pxd004732 eval-novelty analyze-novelty \
+        upload-novelty-analysis novelty-pipeline
+
+PXD004732_S3 := $(S3_BASE)/PXD004732
+NOVELTY_ANALYSIS_DIR ?= analysis/novelty
+
+## Download PXD004732 lcfm/acfm data and predictions from S3
+download-pxd004732:
+	mkdir -p held_out_projects/PXD004732/lcfm \
+	         held_out_projects/PXD004732/acfm \
+	         held_out_projects/PXD004732/predictions
+	$(S3_CP) --recursive $(PXD004732_S3)/lcfm/ held_out_projects/PXD004732/lcfm/ --exclude "*.parque"
+	$(S3_CP) --recursive $(PXD004732_S3)/acfm/ held_out_projects/PXD004732/acfm/ --exclude "*.parque"
+	$(S3_CP) $(PXD004732_S3)/lcfm/PXD004732.csv held_out_projects/PXD004732/predictions/PXD004732_lcfm.csv
+	$(S3_CP) $(PXD004732_S3)/acfm/predictions/PXD004732.csv held_out_projects/PXD004732/predictions/PXD004732_acfm.csv
+
+## Run winnow predict on GluC raw + PXD004732 lcfm + PXD004732 acfm
+eval-novelty: download-pxd004732 download-eval-data hpo-download-model
+	@# GluC raw (biological validation, no per-row CE/frag columns)
+	uv run winnow predict \
+		dataset.spectrum_path_or_directory=held_out_projects/biological_validation/raw/dataset-gluc-raw-0000-0001.parquet \
+		dataset.predictions_path=held_out_projects/biological_validation/raw_predictions/dataset-gluc-raw-0000-0001.csv \
+		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
+		output_folder=$(PREDS_DIR)/gluc_raw/ \
+		$(PREDICT_EVAL_OVERRIDES) \
+		$(KOINA_FRAGMENT_MATCH_CONSTANTS) \
+		fdr_control.fdr_threshold=1.0 \
+		fdr_control.confidence_column=calibrated_confidence \
+		$(KOINA_OVERRIDES)
+	@# PXD004732 lcfm (labelled, has per-row CE/frag columns)
+	uv run winnow predict \
+		dataset.spectrum_path_or_directory=held_out_projects/PXD004732/lcfm/ \
+		dataset.predictions_path=held_out_projects/PXD004732/predictions/PXD004732_lcfm.csv \
+		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
+		output_folder=$(PREDS_DIR)/PXD004732_labelled/ \
+		$(PREDICT_EVAL_OVERRIDES) \
+		$(KOINA_FRAGMENT_MATCH_COLUMNS) \
+		fdr_control.fdr_threshold=1.0 \
+		fdr_control.confidence_column=calibrated_confidence \
+		$(KOINA_OVERRIDES)
+	@# PXD004732 acfm (unlabelled, has per-row CE/frag columns)
+	uv run winnow predict \
+		dataset.spectrum_path_or_directory=held_out_projects/PXD004732/acfm/ \
+		dataset.predictions_path=held_out_projects/PXD004732/predictions/PXD004732_acfm.csv \
+		calibrator.pretrained_model_name_or_path=$(HPO_OUTPUT_DIR) \
+		output_folder=$(PREDS_DIR)/PXD004732_unlabelled/ \
+		$(PREDICT_EVAL_OVERRIDES) \
+		$(KOINA_FRAGMENT_MATCH_COLUMNS) \
+		fdr_control.fdr_threshold=1.0 \
+		fdr_control.confidence_column=calibrated_confidence \
+		$(KOINA_OVERRIDES)
+
+## Run novelty analysis (GluC + ProteomeTools) and produce plots/tables
+analyze-novelty: eval-novelty
+	uv run python scripts/analyze_novelty.py gluc \
+		--predictions-dir $(PREDS_DIR)/gluc_raw \
+		--fasta fasta/human.fasta \
+		--output-dir $(NOVELTY_ANALYSIS_DIR)/gluc
+	uv run python scripts/analyze_novelty.py proteometools \
+		--lcfm-predictions-dir $(PREDS_DIR)/PXD004732_labelled \
+		--acfm-predictions-dir $(PREDS_DIR)/PXD004732_unlabelled \
+		--output-dir $(NOVELTY_ANALYSIS_DIR)/proteometools
+	uv run python scripts/analyze_novelty.py summary \
+		--gluc-dir $(NOVELTY_ANALYSIS_DIR)/gluc \
+		--proteometools-dir $(NOVELTY_ANALYSIS_DIR)/proteometools \
+		--output-dir $(NOVELTY_ANALYSIS_DIR)
+
+## Upload novelty analysis artefacts to S3
+upload-novelty-analysis:
+	$(S3_CP) --recursive $(NOVELTY_ANALYSIS_DIR)/ $(RUN_S3)/$(HPO_RUN_TS)/reviewer_analyses/novelty/
+	$(S3_CP) --recursive $(PREDS_DIR)/gluc_raw/ $(RUN_S3)/$(HPO_RUN_TS)/eval_novelty/gluc_raw/
+	$(S3_CP) --recursive $(PREDS_DIR)/PXD004732_labelled/ $(RUN_S3)/$(HPO_RUN_TS)/eval_novelty/PXD004732_labelled/
+	$(S3_CP) --recursive $(PREDS_DIR)/PXD004732_unlabelled/ $(RUN_S3)/$(HPO_RUN_TS)/eval_novelty/PXD004732_unlabelled/
+
+## Full novelty pipeline: download, predict, analyze, upload
+novelty-pipeline: analyze-novelty upload-novelty-analysis
 
 #########################################################
 ## Compute features for new training dataset
