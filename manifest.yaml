@@ -16,7 +16,7 @@ spec:
         provider: "github"
   operator: jobset
   image: winnow-koina
-  command: /usr/local/bin/entrypoint.koina.sh make ablation-replot HPO_RUN_TS=20260514T012035Z
+  command: /usr/local/bin/entrypoint.koina.sh make ablation-replot HPO_RUN_TS=20260516T104911Z
 
   types:
     worker:
