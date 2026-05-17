@@ -16,7 +16,7 @@ spec:
         provider: "github"
   operator: jobset
   image: winnow-koina
-  command: make hpo-reeval
+  command: /usr/local/bin/entrypoint.koina.sh make download-eval-preds reviewer-analyses novelty-pipeline
 
   types:
     worker:

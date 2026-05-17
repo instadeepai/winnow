@@ -67,6 +67,24 @@ _MOD_UNIMOD = re.compile(r"\[UNIMOD:\d+\]-?")
 
 FDR_THRESHOLDS = [0.01, 0.05, 0.10]
 
+DATASET_DISPLAY_NAMES: dict[str, str] = {
+    "gluc": "HeLa degradome",
+    "helaqc": "HeLa single shot",
+    "herceptin": "Herceptin",
+    "immuno": "Immunopeptidomics-1",
+    "sbrodae": "S. brodae",
+    "snakevenoms": "Snake venomics",
+    "tplantibodies": "Therapeutic nanobodies",
+    "woundfluids": "Wound exudates",
+    "PXD014877": "C. elegans",
+    "PXD023064": "Immunopeptidomics-2",
+    "PXD009935": "Immunopeptidomics-3",
+    "PXD004732": "ProteomeTools",
+    "Astral": "Astral E. coli",
+}
+
+_FOLDER_SUFFIXES = ("_annotated", "_labelled", "_raw", "_unlabelled")
+
 # Common PTM mass deltas (Da) for mass-shift categorisation
 _PTM_DELTAS = {
     "oxidation": 15.995,
@@ -102,6 +120,16 @@ def _style_ax(ax: plt.Axes) -> None:
     for spine in ax.spines.values():
         spine.set_edgecolor("black")
         spine.set_linewidth(0.8)
+
+
+def _folder_display_name(folder_name: str) -> str:
+    """Map an evaluation folder name to a publication-ready dataset label."""
+    key = folder_name
+    for suffix in _FOLDER_SUFFIXES:
+        if key.endswith(suffix):
+            key = key[: -len(suffix)]
+            break
+    return DATASET_DISPLAY_NAMES.get(key, key)
 
 
 def _strip_mods(seq: str) -> str:
@@ -340,6 +368,7 @@ def _plot_venn(
     plot_format: str,
 ) -> None:
     """Venn diagrams at each FDR threshold: DB-search peptides vs Winnow-retained peptides."""
+    display = _folder_display_name(dataset_name)
     df = _add_q_values(df)
     db_peptides = set(df["sequence"].dropna().map(_peptide_key))
 
@@ -353,27 +382,24 @@ def _plot_venn(
         winnow_peptides = set(retained["prediction"].dropna().map(_peptide_key))
 
         if len(winnow_peptides) == 0 and len(db_peptides) == 0:
-            ax.set_title(f"FDR {fdr_t:.0%}\n(no peptides)")
+            ax.set_title(f"No peptides retained at {int(fdr_t * 100)}% FDR")
             ax.set_visible(False)
             continue
 
         venn2(
             [db_peptides, winnow_peptides],
-            set_labels=("DB search", "Winnow"),
+            set_labels=("Database search", "Winnow"),
             set_colors=(_CORRECT_COLOUR, _INCORRECT_COLOUR),
             alpha=0.6,
             ax=ax,
         )
-        overlap = len(db_peptides & winnow_peptides)
-        only_db = len(db_peptides - winnow_peptides)
-        only_winnow = len(winnow_peptides - db_peptides)
-        ax.set_title(
-            f"FDR {fdr_t:.0%}\n"
-            f"overlap={overlap:,}  DB-only={only_db:,}  Winnow-only={only_winnow:,}"
-        )
+        ax.set_title(f"Unique peptides retained at {int(fdr_t * 100)}% FDR")
         _style_ax(ax)
 
-    fig.suptitle(f"Peptide-level overlap — {dataset_name}", fontsize=13)
+    fig.suptitle(
+        f"Peptide-level overlap between database search and Winnow for {display}",
+        fontsize=13,
+    )
     fig.tight_layout()
     _save_fig(fig, output_dir / f"venn_{dataset_name}", plot_format)
 

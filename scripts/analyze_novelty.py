@@ -112,6 +112,38 @@ def _save(fig: plt.Figure, out_dir: Path, name: str) -> None:
     print(f"  saved {name}")
 
 
+def _annotate_grouped_bars(
+    ax: plt.Axes,
+    bar_groups: list,
+    *,
+    y_headroom: float = 1.28,
+    fontsize: int = 8,
+) -> None:
+    """Label grouped bars and reserve vertical space above the tallest bar."""
+    max_h = 0.0
+    for bar_group in bar_groups:
+        for bar in bar_group:
+            max_h = max(max_h, float(bar.get_height()))
+
+    for bar_group in bar_groups:
+        for bar in bar_group:
+            h = float(bar.get_height())
+            if h <= 0:
+                continue
+            ax.annotate(
+                f"{h:.2f}",
+                xy=(bar.get_x() + bar.get_width() / 2, h),
+                xytext=(0, 4),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                fontsize=fontsize,
+            )
+
+    if max_h > 0:
+        ax.set_ylim(0, max(max_h * y_headroom, 0.08))
+
+
 def _strip_mods(seq: str) -> str:
     """Strip PTM annotations and normalise I -> L."""
     if not seq or not isinstance(seq, str):
@@ -288,7 +320,10 @@ def _plot_gluc_conf_by_terminus(
     for ax, fdr_t in zip(axes, FDR_THRESHOLDS):
         retained = df[(df["psm_q_value"] <= fdr_t) & df["proteome_hit"]]
         if len(retained) < 5:
-            ax.set_title(f"{int(fdr_t * 100)}% FDR (n={len(retained)})")
+            ax.set_title(
+                f"Too few proteome-hit PSMs at {int(fdr_t * 100)}% FDR "
+                f"(n={len(retained):,})"
+            )
             ax.set_visible(False)
             continue
         retained = retained.copy()
@@ -308,7 +343,9 @@ def _plot_gluc_conf_by_terminus(
         ax.set_xlabel("")
         ax.set_ylabel("Calibrated confidence")
         pct = int(fdr_t * 100)
-        ax.set_title(f"Proteome-hit PSMs at {pct}% FDR\n(n={len(retained):,})")
+        ax.set_title(
+            f"Proteome-hit identifications at {pct}% FDR (n={len(retained):,})"
+        )
         ax.grid(False)
         _spine_fmt(ax)
 
@@ -425,9 +462,9 @@ def _plot_gluc_feature_comparison(
 
     feature_labels = [_nice_feature_label(c.replace("median_", "")) for c in med_cols]
     x = np.arange(len(med_cols))
-    width, gap = 0.32, 0.04
+    width, gap = 0.38, 0.08
 
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig, ax = plt.subplots(figsize=(9, 6.5))
     tryp_vals = (
         normed.loc["tryptic"].values
         if "tryptic" in normed.index
@@ -458,25 +495,14 @@ def _plot_gluc_feature_comparison(
         linewidth=1,
     )
 
-    for bar_group in [bars_t, bars_n]:
-        for bar in bar_group:
-            h = bar.get_height()
-            ax.annotate(
-                f"{h:.2f}",
-                xy=(bar.get_x() + bar.get_width() / 2, h),
-                xytext=(0, 3),
-                textcoords="offset points",
-                ha="center",
-                va="bottom",
-                fontsize=10,
-            )
+    _annotate_grouped_bars(ax, [bars_t, bars_n])
 
     ax.set_xticks(x)
     ax.set_xticklabels(feature_labels, rotation=30, ha="right")
     ax.set_ylabel("Normalised median value")
     ax.set_title(
-        "Median feature values for HeLa degradome\n"
-        "tryptic vs non-tryptic proteome hits at 5% FDR"
+        "Median feature values for HeLa degradome tryptic versus "
+        "non-tryptic proteome hits at 5% FDR"
     )
     ax.legend(loc="upper left")
     ax.grid(False)
@@ -647,7 +673,10 @@ def _plot_proteometools_conf_by_category(
     for ax, fdr_t in zip(axes, FDR_THRESHOLDS):
         retained = df[df["psm_q_value"] <= fdr_t].copy()
         if len(retained) < 5:
-            ax.set_title(f"{int(fdr_t * 100)}% FDR (n={len(retained)})")
+            ax.set_title(
+                f"Too few retained predictions at {int(fdr_t * 100)}% FDR "
+                f"(n={len(retained):,})"
+            )
             ax.set_visible(False)
             continue
 
@@ -672,7 +701,9 @@ def _plot_proteometools_conf_by_category(
         ax.set_xlabel("")
         ax.set_ylabel("Calibrated confidence")
         pct = int(fdr_t * 100)
-        ax.set_title(f"Predictions at {pct}% FDR (n={len(retained):,})")
+        ax.set_title(
+            f"Retained ProteomeTools predictions at {pct}% FDR (n={len(retained):,})"
+        )
         ax.tick_params(axis="x", rotation=20)
         ax.grid(False)
         _spine_fmt(ax)
@@ -796,7 +827,8 @@ def _plot_proteometools_feature_comparison(
         "neither": "Neither",
     }
 
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig, ax = plt.subplots(figsize=(9, 6.5))
+    all_bars = []
     for i, cat in enumerate(normed.index):
         offset = (i - (n_groups - 1) / 2) * bar_w
         vals = normed.loc[cat].values
@@ -809,24 +841,16 @@ def _plot_proteometools_feature_comparison(
             edgecolor="black",
             linewidth=1,
         )
-        for bar in bars:
-            h = bar.get_height()
-            ax.annotate(
-                f"{h:.2f}",
-                xy=(bar.get_x() + bar.get_width() / 2, h),
-                xytext=(0, 3),
-                textcoords="offset points",
-                ha="center",
-                va="bottom",
-                fontsize=10,
-            )
+        all_bars.append(bars)
+
+    _annotate_grouped_bars(ax, all_bars)
 
     ax.set_xticks(x)
     ax.set_xticklabels(feature_labels, rotation=30, ha="right")
     ax.set_ylabel("Normalised median value")
     ax.set_title(
-        "Median feature values for ProteomeTools predictions\n"
-        "by novelty category at 5% FDR"
+        "Median feature values for ProteomeTools predictions by novelty "
+        "category at 5% FDR"
     )
     ax.legend(loc="upper left")
     ax.grid(False)

@@ -22,6 +22,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from matplotlib.colors import LinearSegmentedColormap
 import typer
 import yaml
 from instanovo.utils.metrics import Metrics
@@ -63,6 +64,24 @@ _MOD_PLUS = re.compile(r"\(\+\d+\.?\d*\)-?")
 _MOD_UNIMOD = re.compile(r"\[UNIMOD:\d+\]-?")
 
 FDR_THRESHOLDS = [0.01, 0.05, 0.10]
+
+DATASET_DISPLAY_NAMES: dict[str, str] = {
+    "gluc": "HeLa degradome",
+    "helaqc": "HeLa single shot",
+    "herceptin": "Herceptin",
+    "immuno": "Immunopeptidomics-1",
+    "sbrodae": "S. brodae",
+    "snakevenoms": "Snake venomics",
+    "tplantibodies": "Therapeutic nanobodies",
+    "woundfluids": "Wound exudates",
+    "PXD014877": "C. elegans",
+    "PXD023064": "Immunopeptidomics-2",
+    "PXD009935": "Immunopeptidomics-3",
+    "PXD004732": "ProteomeTools",
+    "Astral": "Astral E. coli",
+}
+
+_FOLDER_SUFFIXES = ("_annotated", "_labelled", "_raw", "_unlabelled")
 
 FEATURE_COLUMNS_OF_INTEREST = [
     "spectral_angle",
@@ -123,6 +142,25 @@ def _style_ax(ax: plt.Axes) -> None:
     for spine in ax.spines.values():
         spine.set_edgecolor("black")
         spine.set_linewidth(0.8)
+
+
+def _folder_display_name(folder_name: str) -> str:
+    """Map an evaluation folder name to a publication-ready dataset label."""
+    key = folder_name
+    for suffix in _FOLDER_SUFFIXES:
+        if key.endswith(suffix):
+            key = key[: -len(suffix)]
+            break
+    return DATASET_DISPLAY_NAMES.get(key, key)
+
+
+def _density_cmap(base_colour: str) -> LinearSegmentedColormap:
+    """Light-to-saturated colormap anchored on a Paul Tol palette colour."""
+    return LinearSegmentedColormap.from_list(
+        "density",
+        ["#F5F5F5", base_colour],
+        N=256,
+    )
 
 
 def _strip_mods(seq: str) -> str:
@@ -225,36 +263,56 @@ def _plot_confidence_scatter(
     output_dir: Path,
     plot_format: str,
 ) -> None:
-    """Hex-bin of raw confidence vs calibrated confidence, split by correct/incorrect."""
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharex=True, sharey=True)
+    """2D density of raw vs calibrated confidence, split by correctness."""
+    display = _folder_display_name(dataset_name)
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5.5), sharex=True, sharey=True)
 
-    for ax, (label, _color, mask) in zip(
-        axes,
-        [
-            ("Correct (TP)", TP_COLOR, df["correct"].astype(bool)),
-            ("Incorrect (FP)", FP_COLOR, ~df["correct"].astype(bool)),
-        ],
-    ):
-        sub = df[mask]
+    panels = [
+        ("Correct", TP_COLOR, df["correct"].astype(bool)),
+        ("Incorrect", FP_COLOR, ~df["correct"].astype(bool)),
+    ]
+
+    for ax, (label, colour, mask) in zip(axes, panels):
+        sub = df.loc[mask, ["confidence", "calibrated_confidence"]].dropna()
         if len(sub) < 2:
-            ax.set_title(f"{label} (n={len(sub)})")
+            ax.set_title(f"{label} (n={len(sub):,})")
+            _style_ax(ax)
             continue
-        hb = ax.hexbin(
-            sub["confidence"],
-            sub["calibrated_confidence"],
-            gridsize=60,
-            cmap="Blues" if "TP" in label else "RdPu",
-            mincnt=1,
-            linewidths=0.2,
+
+        x = sub["confidence"].to_numpy()
+        y = sub["calibrated_confidence"].to_numpy()
+        cmap = _density_cmap(colour)
+        _, _, _, im = ax.hist2d(
+            x,
+            y,
+            bins=55,
+            range=[[0, 1], [0, 1]],
+            cmap=cmap,
+            cmin=1,
         )
-        fig.colorbar(hb, ax=ax, label="count")
-        ax.plot([0, 1], [0, 1], ls="--", color="gray", lw=1)
+        cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cbar.set_label("PSM count", rotation=270, labelpad=14)
+        ax.plot(
+            [0, 1],
+            [0, 1],
+            ls="--",
+            color=_PALETTE[6],
+            lw=1,
+            label="No recalibration",
+            zorder=5,
+        )
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
         ax.set_xlabel("Raw confidence")
         ax.set_ylabel("Calibrated confidence")
         ax.set_title(f"{label} (n={len(sub):,})")
+        ax.legend(loc="lower right", fontsize=9)
         _style_ax(ax)
 
-    fig.suptitle(f"Confidence recalibration — {dataset_name}", fontsize=13)
+    fig.suptitle(
+        f"Raw versus calibrated confidence for {display}",
+        fontsize=13,
+    )
     fig.tight_layout()
     _save_fig(fig, output_dir / f"confidence_scatter_{dataset_name}", plot_format)
 
@@ -318,8 +376,10 @@ def _plot_feature_distributions(
     for i in range(len(available), len(axes)):
         axes[i].set_visible(False)
 
+    display = _folder_display_name(dataset_name)
     fig.suptitle(
-        f"Up-scored PSM features (delta > {delta_threshold:.2f}) — {dataset_name}",
+        f"Feature distributions for up-scored PSMs "
+        f"(calibration increase > {delta_threshold:.2f}) on {display}",
         fontsize=13,
     )
     fig.tight_layout()
