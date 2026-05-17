@@ -16,7 +16,7 @@ spec:
         provider: "github"
   operator: jobset
   image: winnow-koina
-  command: make replot-eval
+  command: make hpo-replot-eval
 
   types:
     worker:
