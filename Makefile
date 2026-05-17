@@ -775,6 +775,25 @@ hpo-reeval-feature-analysis: hpo-download-model download-eval-data feature-analy
 ## Re-run ablation study with a saved HPO model
 hpo-reeval-ablation: hpo-download-model hpo-download-data download-eval-data ablation
 
+ABLATION_OUTPUT_DIR ?= analysis/hpo_ablation
+ABLATION_S3_PATH   ?= $(RUN_S3)/$(HPO_RUN_TS)/ablation
+
+.PHONY: ablation-download ablation-replot
+
+## Download saved ablation models and cached eval features from S3
+ablation-download:
+	mkdir -p $(ABLATION_OUTPUT_DIR)
+	$(S3_CP) --recursive $(ABLATION_S3_PATH)/ $(ABLATION_OUTPUT_DIR)/
+
+## Re-run evaluation and replot from saved ablation models (no training, no feature compute)
+ablation-replot: ablation-download
+	uv run python scripts/run_feature_ablations.py \
+		--output-dir $(ABLATION_OUTPUT_DIR) \
+		--skip-training \
+		--skip-feature-compute \
+		--plot-format both
+	$(S3_CP) --recursive $(ABLATION_OUTPUT_DIR)/ $(ABLATION_S3_PATH)/
+
 #########################################################
 ## Evaluate general model commands
 #########################################################
@@ -1038,3 +1057,476 @@ compute_features_PXD024364_batched_part2:
 	$(foreach b,$(PXD024364_BATCHES_PART2),$(MAKE) compute_features_PXD024364_$(b) && ) true
 
 compute_features_new_training_dataset_batched: compute_features_PXD000561_batched compute_features_PXD010154_batched compute_features_PXD024364_batched
+
+#########################################################
+## Per-model analysis: train / predict / plot
+## (instanovo, casanovo, primenovo × helaqc, celegans)
+#########################################################
+
+# ── FASTA per organism ─────────────────────────────────
+ANALYSIS_FASTA_helaqc   := fasta/human.fasta
+ANALYSIS_FASTA_celegans := fasta/Celegans.fasta
+
+# ── External model repo roots ──────────────────────────
+CASANOVO_ROOT  := /home/j-daniel/repos/casanovo
+PRIMENOVO_ROOT := /home/j-daniel/repos/pi-PrimeNovo
+
+# ── Result directory roots ─────────────────────────────
+ANALYSIS_MODELS  := models
+ANALYSIS_RESULTS := results
+
+# ── Common Hydra overrides for per-model analysis ──────
+# These datasets use constant CE/frag, not per-row columns.
+ANALYSIS_KOINA_OVERRIDES = $(KOINA_OVERRIDES) $(KOINA_FRAGMENT_MATCH_CONSTANTS)
+ANALYSIS_PREDICT_OVERRIDES = $(PREDICT_EVAL_OVERRIDES)
+
+# ═══════════════════════════════════════════════════════
+# InstaNovo — data lives in winnow repo as parquet + CSV
+# ═══════════════════════════════════════════════════════
+
+# -- helaqc --
+.PHONY: train-instanovo-helaqc predict-instanovo-helaqc-test predict-instanovo-helaqc-unlabelled predict-instanovo-helaqc-raw_less_train plot-instanovo-helaqc
+
+train-instanovo-helaqc:
+	uv run winnow compute-features --config-dir configs/instanovo \
+	dataset.spectrum_path_or_directory=helaqc_split_parquet/annotated_train.parquet \
+	dataset.predictions_path=held_out_projects/biological_validation/annotated_predictions/dataset-helaqc-annotated-0000-0001.csv \
+	training_matrix_output_path=$(ANALYSIS_MODELS)/instanovo_helaqc/features_train.parquet \
+	$(ANALYSIS_KOINA_OVERRIDES)
+	uv run winnow compute-features --config-dir configs/instanovo \
+	dataset.spectrum_path_or_directory=helaqc_split_parquet/annotated_val.parquet \
+	dataset.predictions_path=held_out_projects/biological_validation/annotated_predictions/dataset-helaqc-annotated-0000-0001.csv \
+	training_matrix_output_path=$(ANALYSIS_MODELS)/instanovo_helaqc/features_val.parquet \
+	$(ANALYSIS_KOINA_OVERRIDES)
+	uv run winnow train --config-dir configs/instanovo \
+	features_path=$(ANALYSIS_MODELS)/instanovo_helaqc/features_train.parquet \
+	val_features_path=$(ANALYSIS_MODELS)/instanovo_helaqc/features_val.parquet \
+	model_output_dir=$(ANALYSIS_MODELS)/instanovo_helaqc \
+	dataset_output_path=null \
+	irt_regressor_output_path=$(ANALYSIS_MODELS)/instanovo_helaqc/irt_regressors.safetensors \
+	training_history_path=$(ANALYSIS_MODELS)/instanovo_helaqc/training_history.json
+
+predict-instanovo-helaqc-test:
+	uv run winnow predict --config-dir configs/instanovo \
+	dataset.spectrum_path_or_directory=helaqc_split_parquet/annotated_test.parquet \
+	dataset.predictions_path=held_out_projects/biological_validation/annotated_predictions/dataset-helaqc-annotated-0000-0001.csv \
+	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_helaqc \
+	output_folder=$(ANALYSIS_RESULTS)/instanovo_helaqc_predictions_test/ \
+	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+
+predict-instanovo-helaqc-unlabelled:
+	uv run winnow predict --config-dir configs/instanovo \
+	dataset.spectrum_path_or_directory=helaqc_split_parquet/raw_unlabelled.parquet \
+	dataset.predictions_path=held_out_projects/biological_validation/raw_predictions/dataset-helaqc-raw-0000-0001.csv \
+	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_helaqc \
+	output_folder=$(ANALYSIS_RESULTS)/instanovo_helaqc_predictions_unlabelled/ \
+	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+
+predict-instanovo-helaqc-raw_less_train:
+	uv run winnow predict --config-dir configs/instanovo \
+	dataset.spectrum_path_or_directory=helaqc_split_parquet/raw_less_train.parquet \
+	dataset.predictions_path=helaqc_split_parquet/raw_less_train.csv \
+	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_helaqc \
+	output_folder=$(ANALYSIS_RESULTS)/instanovo_helaqc_predictions_raw_less_train/ \
+	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+
+plot-instanovo-helaqc:
+	uv run python scripts/plot_analysis.py \
+		--predictions-dir $(ANALYSIS_RESULTS)/instanovo_helaqc_predictions_test \
+		--split test --label-mode labelled \
+		--fasta $(ANALYSIS_FASTA_helaqc) \
+		--model-dir $(ANALYSIS_MODELS)/instanovo_helaqc
+	uv run python scripts/plot_analysis.py \
+		--predictions-dir $(ANALYSIS_RESULTS)/instanovo_helaqc_predictions_unlabelled \
+		--split unlabelled --label-mode unlabelled \
+		--fasta $(ANALYSIS_FASTA_helaqc)
+	uv run python scripts/plot_analysis.py \
+		--predictions-dir $(ANALYSIS_RESULTS)/instanovo_helaqc_predictions_raw_less_train \
+		--split raw_less_train --label-mode unlabelled \
+		--fasta $(ANALYSIS_FASTA_helaqc)
+
+# -- celegans --
+.PHONY: train-instanovo-celegans predict-instanovo-celegans-test predict-instanovo-celegans-unlabelled predict-instanovo-celegans-raw_less_train plot-instanovo-celegans
+
+train-instanovo-celegans:
+	uv run winnow compute-features --config-dir configs/instanovo \
+	dataset.spectrum_path_or_directory=celegans_split_parquet/annotated_train.parquet \
+	dataset.predictions_path=held_out_projects/lcfm/PXD014877_predictions/PXD014877.csv \
+	training_matrix_output_path=$(ANALYSIS_MODELS)/instanovo_celegans/features_train.parquet \
+	$(ANALYSIS_KOINA_OVERRIDES)
+	uv run winnow compute-features --config-dir configs/instanovo \
+	dataset.spectrum_path_or_directory=celegans_split_parquet/annotated_val.parquet \
+	dataset.predictions_path=held_out_projects/lcfm/PXD014877_predictions/PXD014877.csv \
+	training_matrix_output_path=$(ANALYSIS_MODELS)/instanovo_celegans/features_val.parquet \
+	$(ANALYSIS_KOINA_OVERRIDES)
+	uv run winnow train --config-dir configs/instanovo \
+	features_path=$(ANALYSIS_MODELS)/instanovo_celegans/features_train.parquet \
+	val_features_path=$(ANALYSIS_MODELS)/instanovo_celegans/features_val.parquet \
+	model_output_dir=$(ANALYSIS_MODELS)/instanovo_celegans \
+	dataset_output_path=null \
+	irt_regressor_output_path=$(ANALYSIS_MODELS)/instanovo_celegans/irt_regressors.safetensors \
+	training_history_path=$(ANALYSIS_MODELS)/instanovo_celegans/training_history.json
+
+predict-instanovo-celegans-test:
+	uv run winnow predict --config-dir configs/instanovo \
+	dataset.spectrum_path_or_directory=celegans_split_parquet/annotated_test.parquet \
+	dataset.predictions_path=held_out_projects/lcfm/PXD014877_predictions/PXD014877.csv \
+	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_celegans \
+	output_folder=$(ANALYSIS_RESULTS)/instanovo_celegans_predictions_test/ \
+	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+
+predict-instanovo-celegans-unlabelled:
+	uv run winnow predict --config-dir configs/instanovo \
+	dataset.spectrum_path_or_directory=celegans_split_parquet/raw_unlabelled.parquet \
+	dataset.predictions_path=held_out_projects/acfm/PXD014877_predictions/PXD014877.csv \
+	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_celegans \
+	output_folder=$(ANALYSIS_RESULTS)/instanovo_celegans_predictions_unlabelled/ \
+	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+
+predict-instanovo-celegans-raw_less_train:
+	uv run winnow predict --config-dir configs/instanovo \
+	dataset.spectrum_path_or_directory=celegans_split_parquet/raw_less_train.parquet \
+	dataset.predictions_path=celegans_split_parquet/raw_less_train.csv \
+	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_celegans \
+	output_folder=$(ANALYSIS_RESULTS)/instanovo_celegans_predictions_raw_less_train/ \
+	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+
+plot-instanovo-celegans:
+	uv run python scripts/plot_analysis.py \
+		--predictions-dir $(ANALYSIS_RESULTS)/instanovo_celegans_predictions_test \
+		--split test --label-mode labelled \
+		--fasta $(ANALYSIS_FASTA_celegans) \
+		--model-dir $(ANALYSIS_MODELS)/instanovo_celegans
+	uv run python scripts/plot_analysis.py \
+		--predictions-dir $(ANALYSIS_RESULTS)/instanovo_celegans_predictions_unlabelled \
+		--split unlabelled --label-mode unlabelled \
+		--fasta $(ANALYSIS_FASTA_celegans)
+	uv run python scripts/plot_analysis.py \
+		--predictions-dir $(ANALYSIS_RESULTS)/instanovo_celegans_predictions_raw_less_train \
+		--split raw_less_train --label-mode unlabelled \
+		--fasta $(ANALYSIS_FASTA_celegans)
+
+# ═══════════════════════════════════════════════════════
+# Casanovo — data lives in external repo as MGF + mztab
+# ═══════════════════════════════════════════════════════
+
+# -- helaqc --
+.PHONY: train-casanovo-helaqc predict-casanovo-helaqc-test predict-casanovo-helaqc-unlabelled predict-casanovo-helaqc-raw_less_train plot-casanovo-helaqc
+
+train-casanovo-helaqc:
+	uv run winnow compute-features --config-dir configs/casanovo \
+	dataset.spectrum_path_or_directory=$(CASANOVO_ROOT)/helaqc_mgf/helaqc_annotated_train.mgf \
+	dataset.predictions_path=$(CASANOVO_ROOT)/predictions/helaqc/helaqc_annotated_train.mztab \
+	training_matrix_output_path=$(ANALYSIS_MODELS)/casanovo_helaqc/features_train.parquet \
+	$(ANALYSIS_KOINA_OVERRIDES)
+	uv run winnow compute-features --config-dir configs/casanovo \
+	dataset.spectrum_path_or_directory=$(CASANOVO_ROOT)/helaqc_mgf/helaqc_annotated_val.mgf \
+	dataset.predictions_path=$(CASANOVO_ROOT)/predictions/helaqc/helaqc_annotated_val.mztab \
+	training_matrix_output_path=$(ANALYSIS_MODELS)/casanovo_helaqc/features_val.parquet \
+	$(ANALYSIS_KOINA_OVERRIDES)
+	uv run winnow train --config-dir configs/casanovo \
+	features_path=$(ANALYSIS_MODELS)/casanovo_helaqc/features_train.parquet \
+	val_features_path=$(ANALYSIS_MODELS)/casanovo_helaqc/features_val.parquet \
+	model_output_dir=$(ANALYSIS_MODELS)/casanovo_helaqc \
+	dataset_output_path=null \
+	irt_regressor_output_path=$(ANALYSIS_MODELS)/casanovo_helaqc/irt_regressors.safetensors \
+	training_history_path=$(ANALYSIS_MODELS)/casanovo_helaqc/training_history.json
+
+predict-casanovo-helaqc-test:
+	uv run winnow predict --config-dir configs/casanovo \
+	dataset.spectrum_path_or_directory=$(CASANOVO_ROOT)/helaqc_mgf/helaqc_annotated_test.mgf \
+	dataset.predictions_path=$(CASANOVO_ROOT)/predictions/helaqc/helaqc_annotated_test.mztab \
+	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/casanovo_helaqc \
+	output_folder=$(ANALYSIS_RESULTS)/casanovo_helaqc_predictions_test/ \
+	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+
+predict-casanovo-helaqc-unlabelled:
+	uv run winnow predict --config-dir configs/casanovo \
+	dataset.spectrum_path_or_directory=$(CASANOVO_ROOT)/helaqc_mgf/helaqc_raw_unlabelled.mgf \
+	dataset.predictions_path=$(CASANOVO_ROOT)/predictions/helaqc/helaqc_raw_unlabelled.mztab \
+	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/casanovo_helaqc \
+	output_folder=$(ANALYSIS_RESULTS)/casanovo_helaqc_predictions_unlabelled/ \
+	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+
+predict-casanovo-helaqc-raw_less_train:
+	uv run winnow predict --config-dir configs/casanovo \
+	dataset.spectrum_path_or_directory=$(CASANOVO_ROOT)/helaqc_mgf/helaqc_raw_less_train.mgf \
+	dataset.predictions_path=$(CASANOVO_ROOT)/predictions/helaqc/helaqc_raw_less_train.mztab \
+	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/casanovo_helaqc \
+	output_folder=$(ANALYSIS_RESULTS)/casanovo_helaqc_predictions_raw_less_train/ \
+	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+
+plot-casanovo-helaqc:
+	uv run python scripts/plot_analysis.py \
+		--predictions-dir $(ANALYSIS_RESULTS)/casanovo_helaqc_predictions_test \
+		--split test --label-mode labelled \
+		--fasta $(ANALYSIS_FASTA_helaqc) \
+		--model-dir $(ANALYSIS_MODELS)/casanovo_helaqc
+	uv run python scripts/plot_analysis.py \
+		--predictions-dir $(ANALYSIS_RESULTS)/casanovo_helaqc_predictions_unlabelled \
+		--split unlabelled --label-mode unlabelled \
+		--fasta $(ANALYSIS_FASTA_helaqc)
+	uv run python scripts/plot_analysis.py \
+		--predictions-dir $(ANALYSIS_RESULTS)/casanovo_helaqc_predictions_raw_less_train \
+		--split raw_less_train --label-mode unlabelled \
+		--fasta $(ANALYSIS_FASTA_helaqc)
+
+# -- celegans --
+.PHONY: train-casanovo-celegans predict-casanovo-celegans-test predict-casanovo-celegans-unlabelled predict-casanovo-celegans-raw_less_train plot-casanovo-celegans
+
+train-casanovo-celegans:
+	uv run winnow compute-features --config-dir configs/casanovo \
+	dataset.spectrum_path_or_directory=$(CASANOVO_ROOT)/celegans_mgf/celegans_annotated_train.mgf \
+	dataset.predictions_path=$(CASANOVO_ROOT)/predictions/celegans/celegans_annotated_train.mztab \
+	training_matrix_output_path=$(ANALYSIS_MODELS)/casanovo_celegans/features_train.parquet \
+	$(ANALYSIS_KOINA_OVERRIDES)
+	uv run winnow compute-features --config-dir configs/casanovo \
+	dataset.spectrum_path_or_directory=$(CASANOVO_ROOT)/celegans_mgf/celegans_annotated_val.mgf \
+	dataset.predictions_path=$(CASANOVO_ROOT)/predictions/celegans/celegans_annotated_val.mztab \
+	training_matrix_output_path=$(ANALYSIS_MODELS)/casanovo_celegans/features_val.parquet \
+	$(ANALYSIS_KOINA_OVERRIDES)
+	uv run winnow train --config-dir configs/casanovo \
+	features_path=$(ANALYSIS_MODELS)/casanovo_celegans/features_train.parquet \
+	val_features_path=$(ANALYSIS_MODELS)/casanovo_celegans/features_val.parquet \
+	model_output_dir=$(ANALYSIS_MODELS)/casanovo_celegans \
+	dataset_output_path=null \
+	irt_regressor_output_path=$(ANALYSIS_MODELS)/casanovo_celegans/irt_regressors.safetensors \
+	training_history_path=$(ANALYSIS_MODELS)/casanovo_celegans/training_history.json
+
+predict-casanovo-celegans-test:
+	uv run winnow predict --config-dir configs/casanovo \
+	dataset.spectrum_path_or_directory=$(CASANOVO_ROOT)/celegans_mgf/celegans_annotated_test.mgf \
+	dataset.predictions_path=$(CASANOVO_ROOT)/predictions/celegans/celegans_annotated_test.mztab \
+	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/casanovo_celegans \
+	output_folder=$(ANALYSIS_RESULTS)/casanovo_celegans_predictions_test/ \
+	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+
+predict-casanovo-celegans-unlabelled:
+	uv run winnow predict --config-dir configs/casanovo \
+	dataset.spectrum_path_or_directory=$(CASANOVO_ROOT)/celegans_mgf/celegans_raw_unlabelled.mgf \
+	dataset.predictions_path=$(CASANOVO_ROOT)/predictions/celegans/celegans_raw_unlabelled.mztab \
+	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/casanovo_celegans \
+	output_folder=$(ANALYSIS_RESULTS)/casanovo_celegans_predictions_unlabelled/ \
+	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+
+predict-casanovo-celegans-raw_less_train:
+	uv run winnow predict --config-dir configs/casanovo \
+	dataset.spectrum_path_or_directory=$(CASANOVO_ROOT)/celegans_mgf/celegans_raw_less_train.mgf \
+	dataset.predictions_path=$(CASANOVO_ROOT)/predictions/celegans/celegans_raw_less_train.mztab \
+	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/casanovo_celegans \
+	output_folder=$(ANALYSIS_RESULTS)/casanovo_celegans_predictions_raw_less_train/ \
+	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+
+plot-casanovo-celegans:
+	uv run python scripts/plot_analysis.py \
+		--predictions-dir $(ANALYSIS_RESULTS)/casanovo_celegans_predictions_test \
+		--split test --label-mode labelled \
+		--fasta $(ANALYSIS_FASTA_celegans) \
+		--model-dir $(ANALYSIS_MODELS)/casanovo_celegans
+	uv run python scripts/plot_analysis.py \
+		--predictions-dir $(ANALYSIS_RESULTS)/casanovo_celegans_predictions_unlabelled \
+		--split unlabelled --label-mode unlabelled \
+		--fasta $(ANALYSIS_FASTA_celegans)
+	uv run python scripts/plot_analysis.py \
+		--predictions-dir $(ANALYSIS_RESULTS)/casanovo_celegans_predictions_raw_less_train \
+		--split raw_less_train --label-mode unlabelled \
+		--fasta $(ANALYSIS_FASTA_celegans)
+
+# ═══════════════════════════════════════════════════════
+# PrimeNovo — data lives in external repo as MGF + TSV
+# ═══════════════════════════════════════════════════════
+
+# -- helaqc --
+.PHONY: train-primenovo-helaqc predict-primenovo-helaqc-test predict-primenovo-helaqc-unlabelled predict-primenovo-helaqc-raw_less_train plot-primenovo-helaqc
+
+train-primenovo-helaqc:
+	uv run winnow compute-features --config-dir configs/primenovo \
+	dataset.spectrum_path_or_directory=$(PRIMENOVO_ROOT)/helaqc_mgf/helaqc_annotated_train.mgf \
+	dataset.predictions_path=$(PRIMENOVO_ROOT)/predictions/helaqc/helaqc_denovo_annotated_train.tsv \
+	training_matrix_output_path=$(ANALYSIS_MODELS)/primenovo_helaqc/features_train.parquet \
+	$(ANALYSIS_KOINA_OVERRIDES)
+	uv run winnow compute-features --config-dir configs/primenovo \
+	dataset.spectrum_path_or_directory=$(PRIMENOVO_ROOT)/helaqc_mgf/helaqc_annotated_val.mgf \
+	dataset.predictions_path=$(PRIMENOVO_ROOT)/predictions/helaqc/helaqc_denovo_annotated_val.tsv \
+	training_matrix_output_path=$(ANALYSIS_MODELS)/primenovo_helaqc/features_val.parquet \
+	$(ANALYSIS_KOINA_OVERRIDES)
+	uv run winnow train --config-dir configs/primenovo \
+	features_path=$(ANALYSIS_MODELS)/primenovo_helaqc/features_train.parquet \
+	val_features_path=$(ANALYSIS_MODELS)/primenovo_helaqc/features_val.parquet \
+	model_output_dir=$(ANALYSIS_MODELS)/primenovo_helaqc \
+	dataset_output_path=null \
+	irt_regressor_output_path=$(ANALYSIS_MODELS)/primenovo_helaqc/irt_regressors.safetensors \
+	training_history_path=$(ANALYSIS_MODELS)/primenovo_helaqc/training_history.json
+
+predict-primenovo-helaqc-test:
+	uv run winnow predict --config-dir configs/primenovo \
+	dataset.spectrum_path_or_directory=$(PRIMENOVO_ROOT)/helaqc_mgf/helaqc_annotated_test.mgf \
+	dataset.predictions_path=$(PRIMENOVO_ROOT)/predictions/helaqc/helaqc_denovo_annotated_test.tsv \
+	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/primenovo_helaqc \
+	output_folder=$(ANALYSIS_RESULTS)/primenovo_helaqc_predictions_test/ \
+	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+
+predict-primenovo-helaqc-unlabelled:
+	uv run winnow predict --config-dir configs/primenovo \
+	dataset.spectrum_path_or_directory=$(PRIMENOVO_ROOT)/helaqc_mgf/helaqc_raw_unlabelled.mgf \
+	dataset.predictions_path=$(PRIMENOVO_ROOT)/predictions/helaqc/helaqc_denovo_raw_unlabelled.tsv \
+	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/primenovo_helaqc \
+	output_folder=$(ANALYSIS_RESULTS)/primenovo_helaqc_predictions_unlabelled/ \
+	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+
+predict-primenovo-helaqc-raw_less_train:
+	uv run winnow predict --config-dir configs/primenovo \
+	dataset.spectrum_path_or_directory=$(PRIMENOVO_ROOT)/helaqc_mgf/helaqc_raw_less_train.mgf \
+	dataset.predictions_path=$(PRIMENOVO_ROOT)/predictions/helaqc/helaqc_denovo_raw_less_train.tsv \
+	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/primenovo_helaqc \
+	output_folder=$(ANALYSIS_RESULTS)/primenovo_helaqc_predictions_raw_less_train/ \
+	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+
+plot-primenovo-helaqc:
+	uv run python scripts/plot_analysis.py \
+		--predictions-dir $(ANALYSIS_RESULTS)/primenovo_helaqc_predictions_test \
+		--split test --label-mode labelled \
+		--fasta $(ANALYSIS_FASTA_helaqc) \
+		--model-dir $(ANALYSIS_MODELS)/primenovo_helaqc
+	uv run python scripts/plot_analysis.py \
+		--predictions-dir $(ANALYSIS_RESULTS)/primenovo_helaqc_predictions_unlabelled \
+		--split unlabelled --label-mode unlabelled \
+		--fasta $(ANALYSIS_FASTA_helaqc)
+	uv run python scripts/plot_analysis.py \
+		--predictions-dir $(ANALYSIS_RESULTS)/primenovo_helaqc_predictions_raw_less_train \
+		--split raw_less_train --label-mode unlabelled \
+		--fasta $(ANALYSIS_FASTA_helaqc)
+
+# -- celegans --
+.PHONY: train-primenovo-celegans predict-primenovo-celegans-test predict-primenovo-celegans-unlabelled predict-primenovo-celegans-raw_less_train plot-primenovo-celegans
+
+train-primenovo-celegans:
+	uv run winnow compute-features --config-dir configs/primenovo \
+	dataset.spectrum_path_or_directory=$(PRIMENOVO_ROOT)/celegans_mgf/celegans_annotated_train.mgf \
+	dataset.predictions_path=$(PRIMENOVO_ROOT)/predictions/celegans/celegans_denovo_annotated_train.tsv \
+	training_matrix_output_path=$(ANALYSIS_MODELS)/primenovo_celegans/features_train.parquet \
+	$(ANALYSIS_KOINA_OVERRIDES)
+	uv run winnow compute-features --config-dir configs/primenovo \
+	dataset.spectrum_path_or_directory=$(PRIMENOVO_ROOT)/celegans_mgf/celegans_annotated_val.mgf \
+	dataset.predictions_path=$(PRIMENOVO_ROOT)/predictions/celegans/celegans_denovo_annotated_val.tsv \
+	training_matrix_output_path=$(ANALYSIS_MODELS)/primenovo_celegans/features_val.parquet \
+	$(ANALYSIS_KOINA_OVERRIDES)
+	uv run winnow train --config-dir configs/primenovo \
+	features_path=$(ANALYSIS_MODELS)/primenovo_celegans/features_train.parquet \
+	val_features_path=$(ANALYSIS_MODELS)/primenovo_celegans/features_val.parquet \
+	model_output_dir=$(ANALYSIS_MODELS)/primenovo_celegans \
+	dataset_output_path=null \
+	irt_regressor_output_path=$(ANALYSIS_MODELS)/primenovo_celegans/irt_regressors.safetensors \
+	training_history_path=$(ANALYSIS_MODELS)/primenovo_celegans/training_history.json
+
+predict-primenovo-celegans-test:
+	uv run winnow predict --config-dir configs/primenovo \
+	dataset.spectrum_path_or_directory=$(PRIMENOVO_ROOT)/celegans_mgf/celegans_annotated_test.mgf \
+	dataset.predictions_path=$(PRIMENOVO_ROOT)/predictions/celegans/celegans_denovo_annotated_test.tsv \
+	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/primenovo_celegans \
+	output_folder=$(ANALYSIS_RESULTS)/primenovo_celegans_predictions_test/ \
+	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+
+predict-primenovo-celegans-unlabelled:
+	uv run winnow predict --config-dir configs/primenovo \
+	dataset.spectrum_path_or_directory=$(PRIMENOVO_ROOT)/celegans_mgf/celegans_raw_unlabelled.mgf \
+	dataset.predictions_path=$(PRIMENOVO_ROOT)/predictions/celegans/celegans_denovo_raw_unlabelled.tsv \
+	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/primenovo_celegans \
+	output_folder=$(ANALYSIS_RESULTS)/primenovo_celegans_predictions_unlabelled/ \
+	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+
+predict-primenovo-celegans-raw_less_train:
+	uv run winnow predict --config-dir configs/primenovo \
+	dataset.spectrum_path_or_directory=$(PRIMENOVO_ROOT)/celegans_mgf/celegans_raw_less_train.mgf \
+	dataset.predictions_path=$(PRIMENOVO_ROOT)/predictions/celegans/celegans_denovo_raw_less_train.tsv \
+	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/primenovo_celegans \
+	output_folder=$(ANALYSIS_RESULTS)/primenovo_celegans_predictions_raw_less_train/ \
+	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+
+plot-primenovo-celegans:
+	uv run python scripts/plot_analysis.py \
+		--predictions-dir $(ANALYSIS_RESULTS)/primenovo_celegans_predictions_test \
+		--split test --label-mode labelled \
+		--fasta $(ANALYSIS_FASTA_celegans) \
+		--model-dir $(ANALYSIS_MODELS)/primenovo_celegans
+	uv run python scripts/plot_analysis.py \
+		--predictions-dir $(ANALYSIS_RESULTS)/primenovo_celegans_predictions_unlabelled \
+		--split unlabelled --label-mode unlabelled \
+		--fasta $(ANALYSIS_FASTA_celegans)
+	uv run python scripts/plot_analysis.py \
+		--predictions-dir $(ANALYSIS_RESULTS)/primenovo_celegans_predictions_raw_less_train \
+		--split raw_less_train --label-mode unlabelled \
+		--fasta $(ANALYSIS_FASTA_celegans)
+
+# ═══════════════════════════════════════════════════════
+# raw_less_train creation
+# ═══════════════════════════════════════════════════════
+.PHONY: create-raw-less-train create-raw-less-train-parquet create-raw-less-train-casanovo create-raw-less-train-primenovo
+
+create-raw-less-train-parquet:
+	uv run python scripts/create_raw_less_train.py parquet \
+		--test-parquet helaqc_split_parquet/annotated_test.parquet \
+		--raw-parquet helaqc_split_parquet/raw_unlabelled.parquet \
+		--predictions-csv held_out_projects/biological_validation/raw_predictions/dataset-helaqc-raw-0000-0001.csv \
+		--output-parquet helaqc_split_parquet/raw_less_train.parquet \
+		--output-csv helaqc_split_parquet/raw_less_train.csv
+	uv run python scripts/create_raw_less_train.py parquet \
+		--test-parquet celegans_split_parquet/annotated_test.parquet \
+		--raw-parquet celegans_split_parquet/raw_unlabelled.parquet \
+		--predictions-csv held_out_projects/acfm/PXD014877_predictions/PXD014877.csv \
+		--output-parquet celegans_split_parquet/raw_less_train.parquet \
+		--output-csv celegans_split_parquet/raw_less_train.csv
+
+create-raw-less-train-casanovo:
+	python3 scripts/create_raw_less_train.py mgf-mztab \
+		--test-mgf $(CASANOVO_ROOT)/helaqc_mgf/helaqc_annotated_test.mgf \
+		--raw-mgf $(CASANOVO_ROOT)/helaqc_mgf/helaqc_raw_unlabelled.mgf \
+		--test-mztab $(CASANOVO_ROOT)/predictions/helaqc/helaqc_annotated_test.mztab \
+		--raw-mztab $(CASANOVO_ROOT)/predictions/helaqc/helaqc_raw_unlabelled.mztab \
+		--output-mgf $(CASANOVO_ROOT)/helaqc_mgf/helaqc_raw_less_train.mgf \
+		--output-mztab $(CASANOVO_ROOT)/predictions/helaqc/helaqc_raw_less_train.mztab
+	python3 scripts/create_raw_less_train.py mgf-mztab \
+		--test-mgf $(CASANOVO_ROOT)/celegans_mgf/celegans_annotated_test.mgf \
+		--raw-mgf $(CASANOVO_ROOT)/celegans_mgf/celegans_raw_unlabelled.mgf \
+		--test-mztab $(CASANOVO_ROOT)/predictions/celegans/celegans_annotated_test.mztab \
+		--raw-mztab $(CASANOVO_ROOT)/predictions/celegans/celegans_raw_unlabelled.mztab \
+		--output-mgf $(CASANOVO_ROOT)/celegans_mgf/celegans_raw_less_train.mgf \
+		--output-mztab $(CASANOVO_ROOT)/predictions/celegans/celegans_raw_less_train.mztab
+
+create-raw-less-train-primenovo:
+	python3 scripts/create_raw_less_train.py mgf-tsv \
+		--test-mgf $(PRIMENOVO_ROOT)/helaqc_mgf/helaqc_annotated_test.mgf \
+		--raw-mgf $(PRIMENOVO_ROOT)/helaqc_mgf/helaqc_raw_unlabelled.mgf \
+		--test-tsv $(PRIMENOVO_ROOT)/predictions/helaqc/helaqc_denovo_annotated_test.tsv \
+		--raw-tsv $(PRIMENOVO_ROOT)/predictions/helaqc/helaqc_denovo_raw_unlabelled.tsv \
+		--output-mgf $(PRIMENOVO_ROOT)/helaqc_mgf/helaqc_raw_less_train.mgf \
+		--output-tsv $(PRIMENOVO_ROOT)/predictions/helaqc/helaqc_denovo_raw_less_train.tsv
+	python3 scripts/create_raw_less_train.py mgf-tsv \
+		--test-mgf $(PRIMENOVO_ROOT)/celegans_mgf/celegans_annotated_test.mgf \
+		--raw-mgf $(PRIMENOVO_ROOT)/celegans_mgf/celegans_raw_unlabelled.mgf \
+		--test-tsv $(PRIMENOVO_ROOT)/predictions/celegans/celegans_denovo_annotated_test.tsv \
+		--raw-tsv $(PRIMENOVO_ROOT)/predictions/celegans/celegans_denovo_raw_unlabelled.tsv \
+		--output-mgf $(PRIMENOVO_ROOT)/celegans_mgf/celegans_raw_less_train.mgf \
+		--output-tsv $(PRIMENOVO_ROOT)/predictions/celegans/celegans_denovo_raw_less_train.tsv
+
+create-raw-less-train: create-raw-less-train-parquet create-raw-less-train-casanovo create-raw-less-train-primenovo
+
+# ═══════════════════════════════════════════════════════
+# Convenience targets
+# ═══════════════════════════════════════════════════════
+.PHONY: train-all predict-all plot-all
+
+train-all: train-instanovo-helaqc train-instanovo-celegans \
+           train-casanovo-helaqc train-casanovo-celegans \
+           train-primenovo-helaqc train-primenovo-celegans
+
+predict-all: predict-instanovo-helaqc-test predict-instanovo-helaqc-unlabelled predict-instanovo-helaqc-raw_less_train \
+             predict-instanovo-celegans-test predict-instanovo-celegans-unlabelled predict-instanovo-celegans-raw_less_train \
+             predict-casanovo-helaqc-test predict-casanovo-helaqc-unlabelled predict-casanovo-helaqc-raw_less_train \
+             predict-casanovo-celegans-test predict-casanovo-celegans-unlabelled predict-casanovo-celegans-raw_less_train \
+             predict-primenovo-helaqc-test predict-primenovo-helaqc-unlabelled predict-primenovo-helaqc-raw_less_train \
+             predict-primenovo-celegans-test predict-primenovo-celegans-unlabelled predict-primenovo-celegans-raw_less_train
+
+plot-all: plot-instanovo-helaqc plot-instanovo-celegans \
+          plot-casanovo-helaqc plot-casanovo-celegans \
+          plot-primenovo-helaqc plot-primenovo-celegans

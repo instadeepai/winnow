@@ -84,14 +84,14 @@ ALL_FEATURE_COLUMNS = (
 
 ABLATION_CONFIGS: dict[str, list[str]] = {
     "Confidence only": ["confidence"],
-    "Beam + Token": ["confidence"] + BEAM_COLUMNS + TOKEN_COLUMNS,
-    "Prosit": (
+    "Confidence + beam search": ["confidence"] + BEAM_COLUMNS + TOKEN_COLUMNS,
+    "Confidence + fragment matching": (
         ["confidence"]
         + FRAGMENT_MATCH_COLUMNS
         + RETENTION_TIME_COLUMNS
         + MASS_ERROR_COLUMNS
     ),
-    "Full model": ALL_FEATURE_COLUMNS,
+    "All features": ALL_FEATURE_COLUMNS,
 }
 
 ABLATION_COLORS: dict[str, str] = {
@@ -360,6 +360,35 @@ def _column_slice_to_feature_dataset(
     return FeatureDataset(features=features, labels=labels)
 
 
+def _config_dir_name(config_name: str) -> str:
+    """Derive the on-disk directory name for an ablation config."""
+    return config_name.lower().replace(" ", "_").replace("+", "and")
+
+
+_LEGACY_DIR_NAMES: dict[str, list[str]] = {
+    "Confidence only": ["confidence_only"],
+    "Confidence + beam search": ["confidence_and_beam_search", "beam_and_token"],
+    "Confidence + fragment matching": [
+        "confidence_and_fragment_matching",
+        "prosit",
+    ],
+    "All features": ["all_features", "full_model"],
+}
+
+
+def _resolve_model_dir(output_dir: Path, config_name: str) -> Path:
+    """Find the model directory for a config, falling back to legacy names."""
+    candidates = _LEGACY_DIR_NAMES.get(config_name, [_config_dir_name(config_name)])
+    for candidate in candidates:
+        model_dir = output_dir / "models" / candidate
+        if model_dir.exists():
+            return model_dir
+    raise FileNotFoundError(
+        f"No saved model found for '{config_name}'. "
+        f"Searched: {[str(output_dir / 'models' / c) for c in candidates]}"
+    )
+
+
 def train_ablation_models(
     train_df: pl.DataFrame,
     val_df: pl.DataFrame,
@@ -383,11 +412,7 @@ def train_ablation_models(
         )
         history = calibrator.fit_from_features(train_ds, val_ds)
 
-        model_dir = (
-            output_dir
-            / "models"
-            / config_name.lower().replace(" ", "_").replace("+", "and")
-        )
+        model_dir = output_dir / "models" / _config_dir_name(config_name)
         ProbabilityCalibrator.save(calibrator, model_dir)
         logger.info(
             "  Trained %s: %d epochs, best_epoch=%d",
@@ -396,6 +421,21 @@ def train_ablation_models(
             history.best_epoch,
         )
 
+        models[config_name] = calibrator
+
+    return models
+
+
+def load_ablation_models(
+    output_dir: Path,
+) -> dict[str, ProbabilityCalibrator]:
+    """Load pre-trained ablation calibrators from ``{output_dir}/models/``."""
+    models: dict[str, ProbabilityCalibrator] = {}
+
+    for config_name in ABLATION_CONFIGS:
+        model_dir = _resolve_model_dir(output_dir, config_name)
+        calibrator = ProbabilityCalibrator.load(model_dir)
+        logger.info("  Loaded %s from %s", config_name, model_dir)
         models[config_name] = calibrator
 
     return models
@@ -636,13 +676,13 @@ def plot_precision_recall(
 
     # Raw confidence baseline (shared across all ablations -- use first result)
     raw_pr = compute_precision_recall_curve(
-        results[0].eval_df, "confidence", "correct", "Original"
+        results[0].eval_df, "confidence", "correct", "Raw confidence"
     )
     sns.lineplot(
         data=raw_pr,
         x="recall",
         y="precision",
-        label="Original",
+        label="Raw confidence",
         color=ORIGINAL_COLOR,
         ax=ax,
     )
@@ -661,7 +701,7 @@ def plot_precision_recall(
     ax.set(
         xlabel="Recall",
         ylabel="Precision",
-        title=f"Precision\u2013recall curve \u2014 {display}",
+        title=f"{display} precision-recall by feature set",
     )
     ax.legend(fontsize=9)
     _style_axes(ax)
@@ -679,13 +719,13 @@ def plot_calibration(
     fig, ax = plt.subplots(figsize=(6, 4))
 
     raw_cal = compute_calibration_curve(
-        results[0].eval_df, "confidence", "correct", "Original"
+        results[0].eval_df, "confidence", "correct", "Raw confidence"
     )
     sns.lineplot(
         data=raw_cal,
         x="pred_mean",
         y="empirical",
-        label="Original",
+        label="Raw confidence",
         color=ORIGINAL_COLOR,
         marker="o",
         ax=ax,
@@ -707,7 +747,7 @@ def plot_calibration(
     ax.set(
         xlabel="Mean predicted probability",
         ylabel="Empirical accuracy (database label)",
-        title=f"Probability calibration \u2014 {display}",
+        title=f"{display} probability calibration by feature set",
     )
     ax.legend(fontsize=9)
     _style_axes(ax)
@@ -781,7 +821,9 @@ def plot_fdr_vs_confidence(
         _style_axes(ax)
 
     display = DATASET_DISPLAY_NAMES.get(dataset_name, dataset_name)
-    fig.suptitle(f"PSM FDR vs calibrated confidence \u2014 {display}", fontsize=12)
+    fig.suptitle(
+        f"{display} PSM FDR vs calibrated confidence by feature set", fontsize=12
+    )
     fig.tight_layout()
     _save_fig(fig, output_dir / f"fdr_vs_confidence_{dataset_name}", plot_format)
 
@@ -822,23 +864,42 @@ def plot_fdr_accepted_psms(
     for fdr_line in [0.01, 0.05, 0.10]:
         ax.axvline(fdr_line, ls="--", color="gray", lw=0.8, alpha=0.7)
         ax.text(
-            fdr_line,
+            fdr_line + 0.002,
             ax.get_ylim()[1] * 0.02,
             f"{fdr_line:.0%}",
-            ha="center",
+            ha="left",
             va="bottom",
             fontsize=8,
             color="gray",
         )
 
     display = DATASET_DISPLAY_NAMES.get(dataset_name, dataset_name)
-    ax.set_xlabel("Q-value threshold")
+    ax.set_xlabel("Non-parametric q-value threshold")
     ax.set_ylabel("Accepted PSMs")
-    ax.set_title(f"Accepted PSMs vs q-value \u2014 {display}")
+    ax.set_title(f"{display} accepted PSMs at non-parametric q-value threshold")
     ax.legend(fontsize=9)
     _style_axes(ax)
     fig.tight_layout()
     _save_fig(fig, output_dir / f"fdr_accepted_psms_{dataset_name}", plot_format)
+
+
+# ---------------------------------------------------------------------------
+# Saving eval results
+# ---------------------------------------------------------------------------
+def save_eval_results(all_results: list[EvalResult], output_dir: Path) -> None:
+    """Persist per-PSM eval DataFrames so plots can be reproduced without re-inference."""
+    results_dir = output_dir / "eval_results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    for r in all_results:
+        safe_config = r.config_name.lower().replace(" ", "_").replace("+", "and")
+        path = results_dir / f"{r.dataset_name}_{safe_config}.parquet"
+        df = r.eval_df.copy()
+        df["config_name"] = r.config_name
+        df["dataset_name"] = r.dataset_name
+        df.to_parquet(path, index=False)
+
+    logger.info("Saved %d eval result Parquets to %s", len(all_results), results_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -863,23 +924,32 @@ def build_summary_table(all_results: list[EvalResult]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+_DEFAULT_OUTPUT_DIR = Path("analysis/hpo_ablation")
+
+
 # ---------------------------------------------------------------------------
 # Main CLI
 # ---------------------------------------------------------------------------
 @app.command()
 def main(
     train_features: Annotated[
-        Path,
-        typer.Option(help="Path to pre-computed training Parquet file or directory."),
-    ],
+        Optional[Path],
+        typer.Option(
+            help="Path to pre-computed training Parquet file or directory. "
+            "Required unless --skip-training is set.",
+        ),
+    ] = None,
     val_features: Annotated[
-        Path,
-        typer.Option(help="Path to pre-computed validation Parquet."),
-    ],
+        Optional[Path],
+        typer.Option(
+            help="Path to pre-computed validation Parquet. "
+            "Required unless --skip-training is set.",
+        ),
+    ] = None,
     output_dir: Annotated[
         Path,
         typer.Option(help="Directory for cached features, models, metrics, and plots."),
-    ],
+    ] = _DEFAULT_OUTPUT_DIR,
     astral_spectra: Annotated[
         Optional[str],
         typer.Option(help="Optional: path to Astral spectra directory."),
@@ -911,8 +981,21 @@ def main(
             help="Skip eval feature computation; assume cache exists.",
         ),
     ] = False,
+    skip_training: Annotated[
+        bool,
+        typer.Option(
+            "--skip-training",
+            help="Load pre-trained ablation models from {output-dir}/models/ "
+            "instead of training from scratch.",
+        ),
+    ] = False,
 ) -> None:
     """Run feature ablation study for the Winnow calibrator."""
+    if not skip_training and (train_features is None or val_features is None):
+        raise typer.BadParameter(
+            "--train-features and --val-features are required unless --skip-training is set."
+        )
+
     output_dir.mkdir(parents=True, exist_ok=True)
     plots_dir = output_dir / "plots"
     plots_dir.mkdir(parents=True, exist_ok=True)
@@ -928,19 +1011,24 @@ def main(
         skip_feature_compute,
     )
 
-    # 2. Load all Parquets
-    logger.info("Step 2: Loading training/validation Parquets...")
-    train_df = _load_parquet_as_polars(train_features)
-    val_df = _load_parquet_as_polars(val_features)
-
+    # 2. Load eval Parquets (training data only needed when training)
+    logger.info("Step 2: Loading Parquets...")
     eval_dfs: dict[str, pl.DataFrame] = {}
     for name, path in eval_parquets.items():
         eval_dfs[name] = _load_parquet_as_polars(path)
         logger.info("  Loaded eval %s: %d rows", name, len(eval_dfs[name]))
 
-    # 3. Train ablation models
-    logger.info("Step 3: Training ablation models...")
-    models = train_ablation_models(train_df, val_df, output_dir, seed)
+    # 3. Train or load ablation models
+    if skip_training:
+        logger.info("Step 3: Loading pre-trained ablation models...")
+        models = load_ablation_models(output_dir)
+    else:
+        logger.info("Step 3: Training ablation models...")
+        assert train_features is not None
+        assert val_features is not None
+        train_df = _load_parquet_as_polars(train_features)
+        val_df = _load_parquet_as_polars(val_features)
+        models = train_ablation_models(train_df, val_df, output_dir, seed)
 
     # 4. Evaluate
     logger.info("Step 4: Evaluating ablation models...")
@@ -972,8 +1060,12 @@ def main(
         plot_fdr_vs_confidence(ds_results, ds_name, plots_dir, plot_format)
         plot_fdr_accepted_psms(ds_results, ds_name, plots_dir, plot_format)
 
-    # 6. Summary table
-    logger.info("Step 6: Writing summary...")
+    # 6. Save per-PSM eval results for later replotting
+    logger.info("Step 6: Saving eval results...")
+    save_eval_results(all_results, output_dir)
+
+    # 7. Summary table
+    logger.info("Step 7: Writing summary...")
     summary = build_summary_table(all_results)
     summary.to_csv(output_dir / "ablation_summary.csv", index=False)
 
