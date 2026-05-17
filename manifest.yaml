@@ -16,7 +16,7 @@ spec:
         provider: "github"
   operator: jobset
   image: winnow-koina
-  command: make hpo-replot-eval
+  command: make hpo-reeval
 
   types:
     worker:
@@ -27,6 +27,6 @@ spec:
 
         accelerators:
           gpu:
-            count: 0
+            count: 1
             type: gpu
             product: NVIDIA-H100-80GB-HBM3-MIG-3g.40gb
