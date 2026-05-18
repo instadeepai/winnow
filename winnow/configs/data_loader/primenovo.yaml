@@ -1,0 +1,24 @@
+# --- PrimeNovo data loading configuration ---
+_target_: winnow.datasets.data_loaders.PrimeNovoDatasetLoader
+
+# When true, add experiment_name + spectrum_id to spectrum data. This maps input spectra
+# to search engine output predictions. MGF files always receive these columns regardless
+# of this setting.
+add_index_cols: true
+
+residue_masses: ${residue_masses}
+residue_remapping:  # Used to map PrimeNovo-specific notations to UNIMOD tokens.
+  "M[+15.995]": "M[UNIMOD:35]"  # Oxidation
+  "C[+57.021]": "C[UNIMOD:4]"  # Carbamidomethylation
+  "N[+0.984]": "N[UNIMOD:7]"  # Deamidation
+  "Q[+0.984]": "Q[UNIMOD:7]"  # Deamidation
+  "[+42.011]": "[UNIMOD:1]"  # Acetylation
+  "[+43.006]": "[UNIMOD:5]"  # Carbamylation
+  "[-17.027]": "[UNIMOD:385]"  # Ammonia loss
+  "[+43.006-17.027]": "(+25.98)"  # Carbamylation & NH3 loss
+  "C[Carbamidomethyl]": "C[UNIMOD:4]"  # Carbamidomethylation
+  "M[Oxidation]": "M[UNIMOD:35]"  # Oxidation
+  "N[Deamidated]": "N[UNIMOD:7]"  # Deamidation
+  "Q[Deamidated]": "Q[UNIMOD:7]"  # Deamidation
+  "[Acetyl]": "[UNIMOD:1]"  # Acetylation
+  "[Carbamyl]": "[UNIMOD:5]"  # Carbamylation
