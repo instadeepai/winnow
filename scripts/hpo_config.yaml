@@ -18,9 +18,8 @@ search_space:
     type: categorical
     choices: [32, 64, 128]
   dropout:
-    type: uniform
-    low: 0.1
-    high: 0.3
+    type: categorical
+    choices: [0.1, 0.2, 0.3]
 
 fixed:
   batch_size: 8192
