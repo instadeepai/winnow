@@ -5,30 +5,28 @@
 
 search_space:
   learning_rate:
-    type: log_uniform
-    low: 1.0e-5
-    high: 1.0e-2
+    type: categorical
+    choices: [0.0001, 0.0003, 0.001]
   weight_decay:
-    type: log_uniform
-    low: 1.0e-6
-    high: 1.0e-2
+    type: categorical
+    choices: [0.0001, 0.001]
   n_layers:
     type: int
     low: 1
-    high: 3
+    high: 2
   n_units:
     type: categorical
-    choices: [64, 128, 256, 512]
+    choices: [32, 64, 128]
   dropout:
     type: uniform
-    low: 0.0
-    high: 0.5
-  batch_size:
-    type: categorical
-    choices: [1024, 2048, 4096, 8192]
+    low: 0.1
+    high: 0.3
 
 fixed:
+  batch_size: 8192
   max_epochs: 200
   n_iter_no_change: 10
   tol: 0.0001
   seed: 42
+  # Use every validation PSM each epoch (no 10k subsample for early stopping).
+  val_early_stopping_max_psms: null

@@ -99,7 +99,7 @@ ABLATION_COLORS: dict[str, str] = {
 }
 ORIGINAL_COLOR = _PALETTE[len(ABLATION_CONFIGS)]
 
-# Training hyperparameters (matching train_general_model Makefile target)
+# Default training hyperparameters (overridden by --hyperparams-from-model).
 TRAIN_HYPERPARAMS = {
     "hidden_dims": [128, 64],
     "learning_rate": 0.0001,
@@ -109,6 +109,26 @@ TRAIN_HYPERPARAMS = {
     "n_iter_no_change": 10,
     "tol": 1e-4,
 }
+
+
+def train_hyperparams_from_model(model_dir: Path) -> dict[str, object]:
+    """Load MLP training hyperparameters from a saved calibrator ``config.json``."""
+    config_path = model_dir / "config.json"
+    if not config_path.is_file():
+        raise FileNotFoundError(f"No config.json at {model_dir}")
+    with open(config_path) as f:
+        config = json.load(f)
+    return {
+        "hidden_dims": tuple(config["hidden_dims"]),
+        "dropout": config["dropout"],
+        "learning_rate": config["learning_rate"],
+        "weight_decay": config["weight_decay"],
+        "batch_size": config["batch_size"],
+        "max_epochs": config["max_epochs"],
+        "n_iter_no_change": config["n_iter_no_change"],
+        "tol": config["tol"],
+    }
+
 
 EVAL_DATASETS = {
     "PXD014877": {
@@ -394,9 +414,11 @@ def train_ablation_models(
     val_df: pl.DataFrame,
     output_dir: Path,
     seed: int,
+    train_hyperparams: dict[str, object] | None = None,
 ) -> dict[str, ProbabilityCalibrator]:
     """Train one calibrator per ablation config, return dict of fitted calibrators."""
     models: dict[str, ProbabilityCalibrator] = {}
+    hp = {**TRAIN_HYPERPARAMS, **(train_hyperparams or {})}
 
     for config_name, columns in ABLATION_CONFIGS.items():
         logger.info(
@@ -408,7 +430,7 @@ def train_ablation_models(
 
         calibrator = ProbabilityCalibrator(
             seed=seed,
-            **TRAIN_HYPERPARAMS,  # type: ignore[arg-type]
+            **hp,  # type: ignore[arg-type]
         )
         history = calibrator.fit_from_features(train_ds, val_ds)
 
@@ -989,6 +1011,13 @@ def main(
             "instead of training from scratch.",
         ),
     ] = False,
+    hyperparams_from_model: Annotated[
+        Optional[Path],
+        typer.Option(
+            help="Use training hyperparameters from this saved calibrator directory "
+            "(e.g. HPO best model). Reads config.json.",
+        ),
+    ] = None,
 ) -> None:
     """Run feature ablation study for the Winnow calibrator."""
     if not skip_training and (train_features is None or val_features is None):
@@ -1028,7 +1057,17 @@ def main(
         assert val_features is not None
         train_df = _load_parquet_as_polars(train_features)
         val_df = _load_parquet_as_polars(val_features)
-        models = train_ablation_models(train_df, val_df, output_dir, seed)
+        train_hp = None
+        if hyperparams_from_model is not None:
+            train_hp = train_hyperparams_from_model(hyperparams_from_model)
+            logger.info(
+                "Using training hyperparameters from %s: %s",
+                hyperparams_from_model,
+                train_hp,
+            )
+        models = train_ablation_models(
+            train_df, val_df, output_dir, seed, train_hyperparams=train_hp
+        )
 
     # 4. Evaluate
     logger.info("Step 4: Evaluating ablation models...")

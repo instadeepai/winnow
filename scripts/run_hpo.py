@@ -99,38 +99,62 @@ def _instantiate_reference_calibrator(
 # ---------------------------------------------------------------------------
 
 
+def _suggest_from_spec(trial: optuna.Trial, name: str, spec: Dict[str, Any]) -> Any:
+    """Sample one hyperparameter from a YAML search-space entry.
+
+    Supported ``type`` values (``scripts/hpo_config.yaml``):
+
+    - ``categorical``: ``choices`` list
+    - ``int``: ``low`` / ``high`` inclusive range
+    - ``uniform``: ``low`` / ``high`` continuous float range
+    - ``log_uniform``: ``low`` / ``high`` log-spaced float range
+
+    Entries without ``type`` fall back to key detection: ``choices`` → categorical,
+    ``low``/``high`` → log-uniform float (legacy).
+    """
+    param_type = spec.get("type")
+    if param_type == "categorical" or (param_type is None and "choices" in spec):
+        return trial.suggest_categorical(name, spec["choices"])
+    if param_type == "int" or (
+        param_type is None and "high" in spec and "choices" not in spec
+    ):
+        if "choices" in spec:
+            return trial.suggest_categorical(name, spec["choices"])
+        return trial.suggest_int(name, spec["low"], spec["high"])
+    if param_type == "uniform":
+        return trial.suggest_float(name, spec["low"], spec["high"])
+    if param_type == "log_uniform":
+        return trial.suggest_float(name, spec["low"], spec["high"], log=True)
+    if "low" in spec and "high" in spec:
+        return trial.suggest_float(
+            name, spec["low"], spec["high"], log=spec.get("log", True)
+        )
+    raise ValueError(
+        f"Cannot interpret search-space entry for {name!r}: {spec!r}. "
+        "Expected type in {categorical, int, uniform, log_uniform} or "
+        "choices / low+high keys."
+    )
+
+
 def suggest_hyperparameters(trial: optuna.Trial, cfg: Dict[str, Any]) -> Dict[str, Any]:
     """Sample hyperparameters from the config-driven search space."""
     ss = cfg["search_space"]
     fixed = cfg["fixed"]
 
-    lr = trial.suggest_float(
-        "learning_rate",
-        ss["learning_rate"]["low"],
-        ss["learning_rate"]["high"],
-        log=True,
-    )
-    wd = trial.suggest_float(
-        "weight_decay",
-        ss["weight_decay"]["low"],
-        ss["weight_decay"]["high"],
-        log=True,
-    )
-    dropout = trial.suggest_float(
-        "dropout",
-        ss["dropout"]["low"],
-        ss["dropout"]["high"],
-    )
-    batch_size = trial.suggest_categorical(
-        "batch_size",
-        ss["batch_size"]["choices"],
-    )
+    lr = _suggest_from_spec(trial, "learning_rate", ss["learning_rate"])
+    wd = _suggest_from_spec(trial, "weight_decay", ss["weight_decay"])
+    dropout = _suggest_from_spec(trial, "dropout", ss["dropout"])
 
-    n_layers = trial.suggest_int(
-        "n_layers",
-        ss["n_layers"]["low"],
-        ss["n_layers"]["high"],
-    )
+    if "batch_size" in ss:
+        batch_size = _suggest_from_spec(trial, "batch_size", ss["batch_size"])
+    elif "batch_size" in fixed:
+        batch_size = fixed["batch_size"]
+    else:
+        raise KeyError(
+            "batch_size must appear under search_space or fixed in hpo_config.yaml"
+        )
+
+    n_layers = _suggest_from_spec(trial, "n_layers", ss["n_layers"])
     unit_choices = sorted(ss["n_units"]["choices"])
     dims: list[int] = []
     for i in range(n_layers):
@@ -147,6 +171,7 @@ def suggest_hyperparameters(trial: optuna.Trial, cfg: Dict[str, Any]) -> Dict[st
         "n_iter_no_change": fixed["n_iter_no_change"],
         "tol": fixed["tol"],
         "seed": fixed["seed"],
+        "val_early_stopping_max_psms": fixed.get("val_early_stopping_max_psms", 10000),
     }
 
 
@@ -265,6 +290,7 @@ def make_objective(
             n_iter_no_change=hp["n_iter_no_change"],
             tol=hp["tol"],
             seed=hp["seed"],
+            val_early_stopping_max_psms=hp["val_early_stopping_max_psms"],
         )
 
         def epoch_callback(epoch: int, val_loss: float) -> None:
@@ -386,6 +412,7 @@ def _retrain_and_save_best(
         n_iter_no_change=fixed["n_iter_no_change"],
         tol=fixed["tol"],
         seed=fixed["seed"],
+        val_early_stopping_max_psms=fixed.get("val_early_stopping_max_psms", 10000),
     )
     calibrator.fit_from_features(train_dataset, val_dataset)
 
@@ -428,8 +455,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--n-trials",
         type=int,
-        default=100,
-        help="Number of Optuna trials (default: 100).",
+        default=50,
+        help="Number of Optuna trials (default: 50).",
     )
     p.add_argument(
         "--timeout",

@@ -406,19 +406,25 @@ train_general_model:
 
 .PHONY: hpo hpo-download-data hpo-upload-model
 
-HPO_TRAIN_FEATURES ?= new_train_shuffled/
+HPO_TRAIN_FEATURES ?= small_train_shuffled/
 HPO_VAL_FEATURES   ?= new_val_feature_matrices/PXD010154/
-HPO_N_TRIALS       ?= 100
+HPO_N_TRIALS       ?= 50
 HPO_TIMEOUT        ?= 43200
 HPO_CONFIG         ?= scripts/hpo_config.yaml
-HPO_OUTPUT_DIR     ?= hpo_best_model
+# RUN_TS is fixed for one make invocation; override on CLI to resume a run.
+ifndef RUN_TS
+RUN_TS := $(shell date -u +%Y%m%dT%H%M%SZ)
+endif
+HPO_OUTPUT_DIR     ?= models/hpo_$(RUN_TS)
 
 HPO_MODEL_S3 ?= s3://winnow-g88rh/revisions/new_datasets/models
 
-HPO_TRAIN_S3 ?= s3://winnow-g88rh/revisions/new_datasets/new_train_shuffled
+HPO_TRAIN_S3 ?= s3://winnow-g88rh/revisions/new_datasets/small_train_shuffled
 HPO_VAL_S3   ?= s3://winnow-g88rh/revisions/new_datasets/new_val_feature_matrices/PXD010154
 
-## Download feature matrices from S3 for HPO (training + validation)
+## Download feature matrices from S3 for HPO (training + validation).
+## Training: all shards under small_train_shuffled/ (~14M PSMs).
+## Validation: all shards under new_val_feature_matrices/PXD010154/ (full PXD010154 val).
 hpo-download-data:
 	mkdir -p $(HPO_TRAIN_FEATURES) $(HPO_VAL_FEATURES)
 	$(S3_CP) --recursive $(HPO_TRAIN_S3) $(HPO_TRAIN_FEATURES)
@@ -426,6 +432,7 @@ hpo-download-data:
 
 ## Run Optuna HPO for the calibrator on pre-computed feature matrices
 hpo: hpo-download-data
+	mkdir -p $(HPO_OUTPUT_DIR)
 	uv run python scripts/run_hpo.py \
 		--train-features-path $(HPO_TRAIN_FEATURES) \
 		--val-features-path $(HPO_VAL_FEATURES) \
@@ -448,7 +455,7 @@ hpo-upload-model:
 ## HPO end-to-end pipeline
 #########################################################
 
-.PHONY: hpo-pipeline download-eval-data eval-annotated eval-raw \
+.PHONY: hpo-pipeline hpo-pipeline-banner download-eval-data eval-annotated eval-raw \
         eval-external-labelled eval-external-unlabelled \
         feature-analysis ablation
 
@@ -457,9 +464,8 @@ S3_BASE         ?= s3://winnow-g88rh/revisions/new_datasets
 HELD_OUT_S3     ?= $(S3_BASE)/held_out_projects
 FASTA_S3        ?= $(S3_BASE)/fasta
 RUN_S3          ?= $(S3_BASE)/hpo_runs
-RUN_TS          ?= $(shell date -u +%Y%m%dT%H%M%SZ)
-PREDS_DIR       ?= predictions/hpo_model
-EVAL_PLOTS_DIR  ?= analysis/hpo_eval_plots
+PREDS_DIR       ?= predictions/hpo_$(RUN_TS)
+EVAL_PLOTS_DIR  ?= analysis/hpo_eval_plots/$(RUN_TS)
 
 EXTERNAL_FULL_PROJECTS := PXD009935 PXD014877
 PXD023064_FILES := MSB33410B MSB33411A MSB33659A MSB33663B MSB37876A MSB37878A MSB37880A MSB37884A
@@ -728,12 +734,12 @@ upload-eval-plots: upload-eval-plots-annotated upload-eval-plots-raw \
 
 ## Run feature importance analysis on 3 datasets, upload
 feature-analysis:
-	mkdir -p analysis/feature_analysis/celegans analysis/feature_analysis/sbrodae analysis/feature_analysis/helaqc
+	mkdir -p analysis/feature_analysis/$(RUN_TS)/celegans analysis/feature_analysis/$(RUN_TS)/sbrodae analysis/feature_analysis/$(RUN_TS)/helaqc
 	@# C. elegans (PXD014877) -- labelled lcfm, compute features from raw spectra via Koina
 	uv run python scripts/analyze_features.py \
 		--model-path $(HPO_OUTPUT_DIR) \
 		--data-dir . \
-		--output-dir analysis/feature_analysis/celegans \
+		--output-dir analysis/feature_analysis/$(RUN_TS)/celegans \
 		--train-spectra held_out_projects/lcfm/PXD014877 \
 		--train-preds held_out_projects/lcfm/PXD014877_predictions/PXD014877.csv \
 		--test-spectra held_out_projects/lcfm/PXD014877 \
@@ -745,7 +751,7 @@ feature-analysis:
 	uv run python scripts/analyze_features.py \
 		--model-path $(HPO_OUTPUT_DIR) \
 		--data-dir . \
-		--output-dir analysis/feature_analysis/sbrodae \
+		--output-dir analysis/feature_analysis/$(RUN_TS)/sbrodae \
 		--train-spectra held_out_projects/biological_validation/annotated/dataset-sbrodae-annotated-0000-0001.parquet \
 		--train-preds held_out_projects/biological_validation/annotated_predictions/dataset-sbrodae-annotated-0000-0001.csv \
 		--test-spectra held_out_projects/biological_validation/annotated/dataset-sbrodae-annotated-0000-0001.parquet \
@@ -757,7 +763,7 @@ feature-analysis:
 	uv run python scripts/analyze_features.py \
 		--model-path $(HPO_OUTPUT_DIR) \
 		--data-dir . \
-		--output-dir analysis/feature_analysis/helaqc \
+		--output-dir analysis/feature_analysis/$(RUN_TS)/helaqc \
 		--train-spectra held_out_projects/biological_validation/annotated/dataset-helaqc-annotated-0000-0001.parquet \
 		--train-preds held_out_projects/biological_validation/annotated_predictions/dataset-helaqc-annotated-0000-0001.csv \
 		--test-spectra held_out_projects/biological_validation/annotated/dataset-helaqc-annotated-0000-0001.parquet \
@@ -765,23 +771,32 @@ feature-analysis:
 		--koina-input-constant collision_energies=27 \
 		--koina-input-constant fragmentation_types=HCD \
 		--n-background-samples 200 --n-test-samples 500
-	$(S3_CP) --recursive analysis/feature_analysis/ $(RUN_S3)/$(RUN_TS)/feature_analysis/
+	$(S3_CP) --recursive analysis/feature_analysis/$(RUN_TS)/ $(RUN_S3)/$(RUN_TS)/feature_analysis/
 
 ## Run feature ablation study on 4 datasets, upload
 ablation:
 	uv run python scripts/run_feature_ablations.py \
 		--train-features $(HPO_TRAIN_FEATURES) \
 		--val-features $(HPO_VAL_FEATURES) \
-		--output-dir analysis/hpo_ablation \
+		--hyperparams-from-model $(HPO_OUTPUT_DIR) \
+		--output-dir analysis/hpo_ablation/$(RUN_TS) \
 		--astral-spectra astral/labelled \
 		--astral-predictions astral/predictions/astral_labelled.csv \
 		--plot-format both \
 		$(if $(KOINA_SERVER_URL),--koina-url $(KOINA_SERVER_URL)) \
 		$(if $(filter false,$(KOINA_SSL)),--no-koina-ssl)
-	$(S3_CP) --recursive analysis/hpo_ablation/ $(RUN_S3)/$(RUN_TS)/ablation/
+	$(S3_CP) --recursive analysis/hpo_ablation/$(RUN_TS)/ $(RUN_S3)/$(RUN_TS)/ablation/
+
+## Print run identifiers then run the full HPO pipeline
+hpo-pipeline-banner:
+	@echo "=== HPO pipeline ==="
+	@echo "  RUN_TS=$(RUN_TS)"
+	@echo "  HPO_OUTPUT_DIR=$(HPO_OUTPUT_DIR)"
+	@echo "  PREDS_DIR=$(PREDS_DIR)"
+	@echo "  S3 prefix=$(RUN_S3)/$(RUN_TS)/"
 
 ## Full HPO pipeline: tune, evaluate, analyse, upload
-hpo-pipeline: hpo-download-data hpo hpo-upload-model download-eval-data \
+hpo-pipeline: hpo-pipeline-banner hpo-download-data hpo hpo-upload-model download-eval-data \
               eval-annotated eval-raw eval-external-labelled \
               eval-external-unlabelled feature-analysis ablation
 
