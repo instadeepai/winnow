@@ -1461,7 +1461,7 @@ predict-instanovo-helaqc-unlabelled:
 predict-instanovo-helaqc-raw_less_train:
 	uv run winnow predict --config-dir configs/instanovo \
 	dataset.spectrum_path_or_directory=helaqc_split_parquet/raw_less_train.parquet \
-	dataset.predictions_path=helaqc_split_parquet/raw_less_train.csv \
+	dataset.predictions_path=held_out_projects/biological_validation/raw_predictions/dataset-helaqc-raw-0000-0001.csv \
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_helaqc \
 	output_folder=$(ANALYSIS_RESULTS)/instanovo_helaqc_predictions_raw_less_train/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
@@ -1485,16 +1485,16 @@ plot-instanovo-helaqc:
 # -- celegans (MGF-matched predictions in celegans_split_parquet/*.csv) --
 .PHONY: train-instanovo-celegans predict-instanovo-celegans-test predict-instanovo-celegans-unlabelled predict-instanovo-celegans-raw_less_train plot-instanovo-celegans
 
-train-instanovo-celegans: rekey-celegans-split-parquet-spectrum-ids
+train-instanovo-celegans:
 	uv run winnow compute-features --config-dir configs/instanovo \
 	dataset.spectrum_path_or_directory=celegans_split_parquet/annotated_train.parquet \
-	dataset.predictions_path=celegans_split_parquet/annotated_train.csv \
+	dataset.predictions_path=held_out_projects/lcfm/PXD014877_predictions/PXD014877.csv \
 	training_matrix_output_path=$(ANALYSIS_MODELS)/instanovo_celegans/features_train.parquet \
 	+metadata_output_path=$(ANALYSIS_MODELS)/instanovo_celegans/metadata_train.parquet \
 	$(ANALYSIS_KOINA_OVERRIDES)
 	uv run winnow compute-features --config-dir configs/instanovo \
 	dataset.spectrum_path_or_directory=celegans_split_parquet/annotated_val.parquet \
-	dataset.predictions_path=celegans_split_parquet/annotated_val.csv \
+	dataset.predictions_path=held_out_projects/lcfm/PXD014877_predictions/PXD014877.csv \
 	training_matrix_output_path=$(ANALYSIS_MODELS)/instanovo_celegans/features_val.parquet \
 	+metadata_output_path=$(ANALYSIS_MODELS)/instanovo_celegans/metadata_val.parquet \
 	$(ANALYSIS_KOINA_OVERRIDES)
@@ -1506,19 +1506,19 @@ train-instanovo-celegans: rekey-celegans-split-parquet-spectrum-ids
 	irt_regressor_output_path=$(ANALYSIS_MODELS)/instanovo_celegans/irt_regressors.safetensors \
 	training_history_path=$(ANALYSIS_MODELS)/instanovo_celegans/training_history.json
 
-predict-instanovo-celegans-test: rekey-celegans-split-parquet-spectrum-ids
+predict-instanovo-celegans-test:
 	uv run winnow predict --config-dir configs/instanovo \
 	dataset.spectrum_path_or_directory=celegans_split_parquet/annotated_test.parquet \
-	dataset.predictions_path=celegans_split_parquet/annotated_test.csv \
+	dataset.predictions_path=held_out_projects/lcfm/PXD014877_predictions/PXD014877.csv \
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_celegans \
 	output_folder=$(ANALYSIS_RESULTS)/instanovo_celegans_predictions_test/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
 	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/instanovo_celegans_predictions_test)
 
-predict-instanovo-celegans-unlabelled: rekey-celegans-split-parquet-spectrum-ids
+predict-instanovo-celegans-unlabelled:
 	uv run winnow predict --config-dir configs/instanovo \
 	dataset.spectrum_path_or_directory=celegans_split_parquet/raw_unlabelled.parquet \
-	dataset.predictions_path=celegans_split_parquet/raw_unlabelled.csv \
+	dataset.predictions_path=held_out_projects/acfm/PXD014877_predictions/PXD014877.csv \
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_celegans \
 	output_folder=$(ANALYSIS_RESULTS)/instanovo_celegans_predictions_unlabelled/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
@@ -1527,7 +1527,7 @@ predict-instanovo-celegans-unlabelled: rekey-celegans-split-parquet-spectrum-ids
 predict-instanovo-celegans-raw_less_train:
 	uv run winnow predict --config-dir configs/instanovo \
 	dataset.spectrum_path_or_directory=celegans_split_parquet/raw_less_train.parquet \
-	dataset.predictions_path=celegans_split_parquet/raw_less_train.csv \
+	dataset.predictions_path=held_out_projects/acfm/PXD014877_predictions/PXD014877.csv \
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_celegans \
 	output_folder=$(ANALYSIS_RESULTS)/instanovo_celegans_predictions_raw_less_train/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
