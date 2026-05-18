@@ -1109,11 +1109,14 @@ analyze_fdr_overlap:
 ## Novelty analysis (reviewer response)
 #########################################################
 
-.PHONY: download-pxd004732 eval-novelty analyze-novelty \
-        upload-novelty-analysis novelty-pipeline
+.PHONY: download-pxd004732 download-novelty-preds replot-novelty-plots \
+        replot-novelty upload-novelty-plots upload-novelty-replot \
+        eval-novelty analyze-novelty upload-novelty-analysis novelty-pipeline
 
 PXD004732_S3 := $(S3_BASE)/PXD004732
 NOVELTY_ANALYSIS_DIR ?= analysis/novelty
+# Local folder for novelty predict outputs; defaults to match HPO_RUN_TS on S3.
+NOVELTY_PREDS_DIR ?= predictions/hpo_$(HPO_RUN_TS)
 
 ## Download PXD004732 lcfm/acfm data and predictions from S3
 download-pxd004732:
@@ -1161,20 +1164,55 @@ eval-novelty: download-pxd004732 download-eval-data hpo-download-model
 		fdr_control.confidence_column=calibrated_confidence \
 		$(KOINA_OVERRIDES)
 
-## Run novelty analysis (GluC + ProteomeTools) and produce plots/tables
-analyze-novelty: eval-novelty
+## Download saved novelty predict outputs from S3 (no winnow predict).
+## Override HPO_RUN_TS to match the hpo_runs/ folder on S3, e.g.:
+#   make download-novelty-preds HPO_RUN_TS=20260514T012035Z \
+#     S3_CP='aws s3 cp --no-progress --profile winnow'
+download-novelty-preds:
+	@echo "=== Downloading novelty predictions from $(RUN_S3)/$(HPO_RUN_TS)/eval_novelty/ ==="
+	mkdir -p $(NOVELTY_PREDS_DIR)/gluc_raw \
+	         $(NOVELTY_PREDS_DIR)/PXD004732_labelled \
+	         $(NOVELTY_PREDS_DIR)/PXD004732_unlabelled \
+	         fasta
+	$(S3_CP) --recursive $(RUN_S3)/$(HPO_RUN_TS)/eval_novelty/gluc_raw/ \
+		$(NOVELTY_PREDS_DIR)/gluc_raw/
+	$(S3_CP) --recursive $(RUN_S3)/$(HPO_RUN_TS)/eval_novelty/PXD004732_labelled/ \
+		$(NOVELTY_PREDS_DIR)/PXD004732_labelled/
+	$(S3_CP) --recursive $(RUN_S3)/$(HPO_RUN_TS)/eval_novelty/PXD004732_unlabelled/ \
+		$(NOVELTY_PREDS_DIR)/PXD004732_unlabelled/
+	$(S3_CP) $(FASTA_S3)/human.fasta fasta/human.fasta
+	@echo "=== download-novelty-preds complete ==="
+
+## Replot novelty analysis from local predictions (no predict)
+replot-novelty-plots:
+	mkdir -p $(NOVELTY_ANALYSIS_DIR)/gluc $(NOVELTY_ANALYSIS_DIR)/proteometools
 	uv run python scripts/analyze_novelty.py gluc \
-		--predictions-dir $(PREDS_DIR)/gluc_raw \
+		--predictions-dir $(NOVELTY_PREDS_DIR)/gluc_raw \
 		--fasta fasta/human.fasta \
 		--output-dir $(NOVELTY_ANALYSIS_DIR)/gluc
 	uv run python scripts/analyze_novelty.py proteometools \
-		--lcfm-predictions-dir $(PREDS_DIR)/PXD004732_labelled \
-		--acfm-predictions-dir $(PREDS_DIR)/PXD004732_unlabelled \
+		--lcfm-predictions-dir $(NOVELTY_PREDS_DIR)/PXD004732_labelled \
+		--acfm-predictions-dir $(NOVELTY_PREDS_DIR)/PXD004732_unlabelled \
 		--output-dir $(NOVELTY_ANALYSIS_DIR)/proteometools
 	uv run python scripts/analyze_novelty.py summary \
 		--gluc-dir $(NOVELTY_ANALYSIS_DIR)/gluc \
 		--proteometools-dir $(NOVELTY_ANALYSIS_DIR)/proteometools \
 		--output-dir $(NOVELTY_ANALYSIS_DIR)
+
+## Download novelty preds from S3 and replot (no predict, no upload)
+replot-novelty: download-novelty-preds replot-novelty-plots
+
+## Upload replotted novelty figures/tables only
+upload-novelty-plots:
+	$(S3_CP) --recursive $(NOVELTY_ANALYSIS_DIR)/ \
+		$(RUN_S3)/$(HPO_RUN_TS)/reviewer_analyses/novelty/
+
+## Download, replot, and upload novelty analysis artefacts
+upload-novelty-replot: replot-novelty upload-novelty-plots
+
+## Run novelty analysis (GluC + ProteomeTools) and produce plots/tables
+analyze-novelty: eval-novelty
+	$(MAKE) replot-novelty-plots NOVELTY_PREDS_DIR=$(PREDS_DIR)
 
 ## Upload novelty analysis artefacts to S3
 upload-novelty-analysis:
@@ -1306,8 +1344,10 @@ compute_features_new_training_dataset_batched: compute_features_PXD000561_batche
 #########################################################
 
 # ── FASTA per organism ─────────────────────────────────
-ANALYSIS_FASTA_helaqc   := fasta/human.fasta
-ANALYSIS_FASTA_celegans := fasta/Celegans.fasta
+ANALYSIS_FASTA_helaqc     := fasta/human.fasta
+ANALYSIS_FASTA_celegans    := fasta/Celegans.fasta
+ANALYSIS_FASTA_pxd019483  := fasta/human.fasta
+ANALYSIS_FASTA_sbrodae     := fasta/Sb_proteome.fasta
 
 # ── External model repo roots ──────────────────────────
 # Locally these point to sibling repos; on the cluster they live under
@@ -1323,6 +1363,27 @@ ANALYSIS_RESULTS := results
 # These datasets use constant CE/frag, not per-row columns.
 ANALYSIS_KOINA_OVERRIDES = $(KOINA_OVERRIDES) $(KOINA_FRAGMENT_MATCH_CONSTANTS)
 ANALYSIS_PREDICT_OVERRIDES = $(PREDICT_EVAL_OVERRIDES)
+
+# Split parquets predicted from MGF exports use spectrum_id = {mgf_stem}:{index}.
+# Re-key parquet spectrum_id to match before train/predict (see scripts/rekey_split_parquet_spectrum_ids.py).
+.PHONY: rekey-split-parquet-spectrum-ids \
+	rekey-pxd019483-split-parquet-spectrum-ids \
+	rekey-sbrodae-split-parquet-spectrum-ids \
+	rekey-celegans-split-parquet-spectrum-ids
+
+rekey-split-parquet-spectrum-ids: \
+	rekey-pxd019483-split-parquet-spectrum-ids \
+	rekey-sbrodae-split-parquet-spectrum-ids \
+	rekey-celegans-split-parquet-spectrum-ids
+
+rekey-pxd019483-split-parquet-spectrum-ids:
+	uv run python scripts/rekey_split_parquet_spectrum_ids.py --split-dir PXD019483_split_parquet
+
+rekey-sbrodae-split-parquet-spectrum-ids:
+	uv run python scripts/rekey_split_parquet_spectrum_ids.py --split-dir sbrodae_split_parquet
+
+rekey-celegans-split-parquet-spectrum-ids:
+	uv run python scripts/rekey_split_parquet_spectrum_ids.py --split-dir celegans_split_parquet
 
 # ═══════════════════════════════════════════════════════
 # InstaNovo — data lives in winnow repo as parquet + CSV
@@ -1397,19 +1458,21 @@ plot-instanovo-helaqc:
 		--split raw_less_train --label-mode unlabelled \
 		--fasta $(ANALYSIS_FASTA_helaqc)
 
-# -- celegans --
+# -- celegans (MGF-matched predictions in celegans_split_parquet/*.csv) --
 .PHONY: train-instanovo-celegans predict-instanovo-celegans-test predict-instanovo-celegans-unlabelled predict-instanovo-celegans-raw_less_train plot-instanovo-celegans
 
-train-instanovo-celegans:
+train-instanovo-celegans: rekey-celegans-split-parquet-spectrum-ids
 	uv run winnow compute-features --config-dir configs/instanovo \
 	dataset.spectrum_path_or_directory=celegans_split_parquet/annotated_train.parquet \
-	dataset.predictions_path=held_out_projects/lcfm/PXD014877_predictions/PXD014877.csv \
+	dataset.predictions_path=celegans_split_parquet/annotated_train.csv \
 	training_matrix_output_path=$(ANALYSIS_MODELS)/instanovo_celegans/features_train.parquet \
+	+metadata_output_path=$(ANALYSIS_MODELS)/instanovo_celegans/metadata_train.parquet \
 	$(ANALYSIS_KOINA_OVERRIDES)
 	uv run winnow compute-features --config-dir configs/instanovo \
 	dataset.spectrum_path_or_directory=celegans_split_parquet/annotated_val.parquet \
-	dataset.predictions_path=held_out_projects/lcfm/PXD014877_predictions/PXD014877.csv \
+	dataset.predictions_path=celegans_split_parquet/annotated_val.csv \
 	training_matrix_output_path=$(ANALYSIS_MODELS)/instanovo_celegans/features_val.parquet \
+	+metadata_output_path=$(ANALYSIS_MODELS)/instanovo_celegans/metadata_val.parquet \
 	$(ANALYSIS_KOINA_OVERRIDES)
 	uv run winnow train --config-dir configs/instanovo \
 	features_path=$(ANALYSIS_MODELS)/instanovo_celegans/features_train.parquet \
@@ -1419,18 +1482,18 @@ train-instanovo-celegans:
 	irt_regressor_output_path=$(ANALYSIS_MODELS)/instanovo_celegans/irt_regressors.safetensors \
 	training_history_path=$(ANALYSIS_MODELS)/instanovo_celegans/training_history.json
 
-predict-instanovo-celegans-test:
+predict-instanovo-celegans-test: rekey-celegans-split-parquet-spectrum-ids
 	uv run winnow predict --config-dir configs/instanovo \
 	dataset.spectrum_path_or_directory=celegans_split_parquet/annotated_test.parquet \
-	dataset.predictions_path=held_out_projects/lcfm/PXD014877_predictions/PXD014877.csv \
+	dataset.predictions_path=celegans_split_parquet/annotated_test.csv \
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_celegans \
 	output_folder=$(ANALYSIS_RESULTS)/instanovo_celegans_predictions_test/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
 
-predict-instanovo-celegans-unlabelled:
+predict-instanovo-celegans-unlabelled: rekey-celegans-split-parquet-spectrum-ids
 	uv run winnow predict --config-dir configs/instanovo \
 	dataset.spectrum_path_or_directory=celegans_split_parquet/raw_unlabelled.parquet \
-	dataset.predictions_path=held_out_projects/acfm/PXD014877_predictions/PXD014877.csv \
+	dataset.predictions_path=celegans_split_parquet/raw_unlabelled.csv \
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_celegans \
 	output_folder=$(ANALYSIS_RESULTS)/instanovo_celegans_predictions_unlabelled/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
@@ -1457,6 +1520,108 @@ plot-instanovo-celegans:
 		--predictions-dir $(ANALYSIS_RESULTS)/instanovo_celegans_predictions_raw_less_train \
 		--split raw_less_train --label-mode unlabelled \
 		--fasta $(ANALYSIS_FASTA_celegans)
+
+# -- PXD019483 (HepG2; MGF-matched predictions in PXD019483_split_parquet/*.csv) --
+.PHONY: train-instanovo-pxd019483 predict-instanovo-pxd019483-test predict-instanovo-pxd019483-unlabelled plot-instanovo-pxd019483
+
+train-instanovo-pxd019483: rekey-pxd019483-split-parquet-spectrum-ids
+	uv run winnow compute-features --config-dir configs/instanovo \
+	dataset.spectrum_path_or_directory=PXD019483_split_parquet/annotated_train.parquet \
+	dataset.predictions_path=PXD019483_split_parquet/annotated_train.csv \
+	training_matrix_output_path=$(ANALYSIS_MODELS)/instanovo_pxd019483/features_train.parquet \
+	+metadata_output_path=$(ANALYSIS_MODELS)/instanovo_pxd019483/metadata_train.parquet \
+	$(ANALYSIS_KOINA_OVERRIDES)
+	uv run winnow compute-features --config-dir configs/instanovo \
+	dataset.spectrum_path_or_directory=PXD019483_split_parquet/annotated_val.parquet \
+	dataset.predictions_path=PXD019483_split_parquet/annotated_val.csv \
+	training_matrix_output_path=$(ANALYSIS_MODELS)/instanovo_pxd019483/features_val.parquet \
+	+metadata_output_path=$(ANALYSIS_MODELS)/instanovo_pxd019483/metadata_val.parquet \
+	$(ANALYSIS_KOINA_OVERRIDES)
+	uv run winnow train --config-dir configs/instanovo \
+	features_path=$(ANALYSIS_MODELS)/instanovo_pxd019483/features_train.parquet \
+	val_features_path=$(ANALYSIS_MODELS)/instanovo_pxd019483/features_val.parquet \
+	model_output_dir=$(ANALYSIS_MODELS)/instanovo_pxd019483 \
+	dataset_output_path=null \
+	irt_regressor_output_path=$(ANALYSIS_MODELS)/instanovo_pxd019483/irt_regressors.safetensors \
+	training_history_path=$(ANALYSIS_MODELS)/instanovo_pxd019483/training_history.json
+
+predict-instanovo-pxd019483-test: rekey-pxd019483-split-parquet-spectrum-ids
+	uv run winnow predict --config-dir configs/instanovo \
+	dataset.spectrum_path_or_directory=PXD019483_split_parquet/annotated_test.parquet \
+	dataset.predictions_path=PXD019483_split_parquet/annotated_test.csv \
+	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_pxd019483 \
+	output_folder=$(ANALYSIS_RESULTS)/instanovo_pxd019483_predictions_test/ \
+	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+
+predict-instanovo-pxd019483-unlabelled: rekey-pxd019483-split-parquet-spectrum-ids
+	uv run winnow predict --config-dir configs/instanovo \
+	dataset.spectrum_path_or_directory=PXD019483_split_parquet/raw_unlabelled.parquet \
+	dataset.predictions_path=PXD019483_split_parquet/raw_unlabelled.csv \
+	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_pxd019483 \
+	output_folder=$(ANALYSIS_RESULTS)/instanovo_pxd019483_predictions_unlabelled/ \
+	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+
+plot-instanovo-pxd019483:
+	uv run python scripts/plot_analysis.py \
+		--predictions-dir $(ANALYSIS_RESULTS)/instanovo_pxd019483_predictions_test \
+		--split test --label-mode labelled \
+		--fasta $(ANALYSIS_FASTA_pxd019483) \
+		--model-dir $(ANALYSIS_MODELS)/instanovo_pxd019483
+	uv run python scripts/plot_analysis.py \
+		--predictions-dir $(ANALYSIS_RESULTS)/instanovo_pxd019483_predictions_unlabelled \
+		--split unlabelled --label-mode unlabelled \
+		--fasta $(ANALYSIS_FASTA_pxd019483)
+
+# -- sbrodae (MGF-matched predictions in sbrodae_split_parquet/*.csv) --
+.PHONY: train-instanovo-sbrodae predict-instanovo-sbrodae-test predict-instanovo-sbrodae-unlabelled plot-instanovo-sbrodae
+
+train-instanovo-sbrodae: rekey-sbrodae-split-parquet-spectrum-ids
+	uv run winnow compute-features --config-dir configs/instanovo \
+	dataset.spectrum_path_or_directory=sbrodae_split_parquet/annotated_train.parquet \
+	dataset.predictions_path=sbrodae_split_parquet/annotated_train.csv \
+	training_matrix_output_path=$(ANALYSIS_MODELS)/instanovo_sbrodae/features_train.parquet \
+	+metadata_output_path=$(ANALYSIS_MODELS)/instanovo_sbrodae/metadata_train.parquet \
+	$(ANALYSIS_KOINA_OVERRIDES)
+	uv run winnow compute-features --config-dir configs/instanovo \
+	dataset.spectrum_path_or_directory=sbrodae_split_parquet/annotated_val.parquet \
+	dataset.predictions_path=sbrodae_split_parquet/annotated_val.csv \
+	training_matrix_output_path=$(ANALYSIS_MODELS)/instanovo_sbrodae/features_val.parquet \
+	+metadata_output_path=$(ANALYSIS_MODELS)/instanovo_sbrodae/metadata_val.parquet \
+	$(ANALYSIS_KOINA_OVERRIDES)
+	uv run winnow train --config-dir configs/instanovo \
+	features_path=$(ANALYSIS_MODELS)/instanovo_sbrodae/features_train.parquet \
+	val_features_path=$(ANALYSIS_MODELS)/instanovo_sbrodae/features_val.parquet \
+	model_output_dir=$(ANALYSIS_MODELS)/instanovo_sbrodae \
+	dataset_output_path=null \
+	irt_regressor_output_path=$(ANALYSIS_MODELS)/instanovo_sbrodae/irt_regressors.safetensors \
+	training_history_path=$(ANALYSIS_MODELS)/instanovo_sbrodae/training_history.json
+
+predict-instanovo-sbrodae-test: rekey-sbrodae-split-parquet-spectrum-ids
+	uv run winnow predict --config-dir configs/instanovo \
+	dataset.spectrum_path_or_directory=sbrodae_split_parquet/annotated_test.parquet \
+	dataset.predictions_path=sbrodae_split_parquet/annotated_test.csv \
+	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_sbrodae \
+	output_folder=$(ANALYSIS_RESULTS)/instanovo_sbrodae_predictions_test/ \
+	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+
+predict-instanovo-sbrodae-unlabelled: rekey-sbrodae-split-parquet-spectrum-ids
+	uv run winnow predict --config-dir configs/instanovo \
+	dataset.spectrum_path_or_directory=sbrodae_split_parquet/raw_unlabelled.parquet \
+	dataset.predictions_path=sbrodae_split_parquet/raw_unlabelled.csv \
+	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_sbrodae \
+	output_folder=$(ANALYSIS_RESULTS)/instanovo_sbrodae_predictions_unlabelled/ \
+	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+
+plot-instanovo-sbrodae:
+	uv run python scripts/plot_analysis.py \
+		--predictions-dir $(ANALYSIS_RESULTS)/instanovo_sbrodae_predictions_test \
+		--split test --label-mode labelled \
+		--fasta $(ANALYSIS_FASTA_sbrodae) \
+		--model-dir $(ANALYSIS_MODELS)/instanovo_sbrodae
+	uv run python scripts/plot_analysis.py \
+		--predictions-dir $(ANALYSIS_RESULTS)/instanovo_sbrodae_predictions_unlabelled \
+		--split unlabelled --label-mode unlabelled \
+		--fasta $(ANALYSIS_FASTA_sbrodae)
 
 # ═══════════════════════════════════════════════════════
 # Casanovo — data lives in external repo as MGF + mztab
@@ -1874,6 +2039,17 @@ analysis-pipeline: download-analysis-data download-analysis-models predict-all p
 # ═══════════════════════════════════════════════════════
 # Convenience targets
 # ═══════════════════════════════════════════════════════
+.PHONY: train-instanovo-split-parquets predict-instanovo-split-parquets plot-instanovo-split-parquets
+
+train-instanovo-split-parquets: train-instanovo-pxd019483 train-instanovo-sbrodae train-instanovo-celegans
+
+predict-instanovo-split-parquets: \
+	predict-instanovo-pxd019483-test predict-instanovo-pxd019483-unlabelled \
+	predict-instanovo-sbrodae-test predict-instanovo-sbrodae-unlabelled \
+	predict-instanovo-celegans-test predict-instanovo-celegans-unlabelled
+
+plot-instanovo-split-parquets: plot-instanovo-pxd019483 plot-instanovo-sbrodae plot-instanovo-celegans
+
 .PHONY: train-all predict-all plot-all
 
 train-all: train-instanovo-helaqc train-instanovo-celegans \
