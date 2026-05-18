@@ -9,15 +9,13 @@ Usage:
         [--model-dir models/instanovo_helaqc] \
         [--output-dir results/instanovo_helaqc_predictions_test/plots/]
 """
+
 from __future__ import annotations
 
 import argparse
 import sys
 import warnings
 from pathlib import Path
-
-import matplotlib
-matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -33,9 +31,9 @@ from sklearn.preprocessing import StandardScaler
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from winnow.calibration.calibrator import TrainingHistory
-from winnow.fdr.database_grounded import DatabaseGroundedFDRControl
-from scripts.annotate_preds_proteome_hits import (
+from winnow.calibration.calibrator import TrainingHistory  # noqa: E402
+from winnow.fdr.database_grounded import DatabaseGroundedFDRControl  # noqa: E402
+from scripts.annotate_preds_proteome_hits import (  # noqa: E402
     filter_and_annotate_preds,
     load_proteome_haystack,
 )
@@ -69,24 +67,74 @@ def _save(fig: plt.Figure, out_dir: Path, name: str) -> None:
 # ── Plot functions ────────────────────────────────────────────────────
 
 
+def _df_for_raw_confidence_plots(df: pl.DataFrame) -> pl.DataFrame:
+    """Drop PSMs with negative raw confidence (Casanovo mass-mismatch penalty scores)."""
+    if "confidence" not in df.columns:
+        return df
+    n_neg = int((df["confidence"] < 0).sum())
+    if n_neg == 0:
+        return df
+    print(
+        f"  excluding {n_neg} PSMs with negative raw confidence "
+        "from raw-confidence plots"
+    )
+    return df.filter(pl.col("confidence") >= 0)
+
+
 def plot_calibration_curves(
-    df: pl.DataFrame, label_col: str, title: str, bins: int = 10,
+    df: pl.DataFrame,
+    label_col: str,
+    title: str,
+    bins: int = 10,
+    df_raw: pl.DataFrame | None = None,
 ) -> plt.Figure:
+    """Plot reliability curves for calibrated and (optionally) raw confidence."""
     fig, ax = plt.subplots(figsize=(8, 6))
-    true_labels = df[label_col].to_numpy()
 
-    for conf_col, marker, colour, label in [
-        ("calibrated_confidence", "o", _MAIN_LINE_COLOUR, "Calibrated confidence"),
-        ("confidence", "D", _RAW_LINE_COLOUR, "Raw confidence"),
-    ]:
+    frac_pos, mean_pred = calibration_curve(
+        df[label_col].to_numpy(),
+        df["calibrated_confidence"].to_numpy(),
+        n_bins=bins,
+        strategy="uniform",
+    )
+    ax.plot(
+        mean_pred,
+        frac_pos,
+        marker="o",
+        color=_MAIN_LINE_COLOUR,
+        label="Calibrated confidence",
+        linewidth=1.5,
+        markersize=6,
+        zorder=3,
+    )
+
+    if df_raw is not None and len(df_raw) > 0 and "confidence" in df_raw.columns:
         frac_pos, mean_pred = calibration_curve(
-            true_labels, df[conf_col].to_numpy(), n_bins=bins, strategy="uniform",
+            df_raw[label_col].to_numpy(),
+            df_raw["confidence"].to_numpy(),
+            n_bins=bins,
+            strategy="uniform",
         )
-        ax.plot(mean_pred, frac_pos, marker=marker, color=colour, label=label,
-                linewidth=1.5, markersize=6, zorder=3)
+        ax.plot(
+            mean_pred,
+            frac_pos,
+            marker="D",
+            color=_RAW_LINE_COLOUR,
+            label="Raw confidence",
+            linewidth=1.5,
+            markersize=6,
+            zorder=3,
+        )
 
-    ax.plot([0, 1], [0, 1], "--", color=_IDEAL_LINE_COLOUR,
-            label="Perfectly calibrated", alpha=0.7, zorder=2)
+    ax.plot(
+        [0, 1],
+        [0, 1],
+        "--",
+        color=_IDEAL_LINE_COLOUR,
+        label="Perfectly calibrated",
+        alpha=0.7,
+        zorder=2,
+    )
     ax.set_xlabel("Mean predicted probability")
     ax.set_ylabel("Fraction of positives")
     ax.set_title(title)
@@ -99,19 +147,40 @@ def plot_calibration_curves(
 
 
 def plot_pr_curves(
-    df: pl.DataFrame, label_col: str, title: str,
+    df: pl.DataFrame,
+    label_col: str,
+    title: str,
+    df_raw: pl.DataFrame | None = None,
 ) -> plt.Figure:
+    """Plot precision–recall curves for calibrated and (optionally) raw confidence."""
     fig, ax = plt.subplots(figsize=(8, 6))
-    for conf_col, colour, label in [
-        ("calibrated_confidence", _MAIN_LINE_COLOUR, "Calibrated confidence"),
-        ("confidence", _RAW_LINE_COLOUR, "Raw confidence"),
-    ]:
-        sorted_df = df.sort(conf_col, descending=True)
-        labels = sorted_df[label_col].to_numpy()
+
+    sorted_cal = df.sort("calibrated_confidence", descending=True)
+    labels = sorted_cal[label_col].to_numpy()
+    cum = np.cumsum(labels)
+    precision = cum / np.arange(1, len(labels) + 1)
+    recall = cum / len(labels)
+    ax.plot(
+        recall,
+        precision,
+        color=_MAIN_LINE_COLOUR,
+        label="Calibrated confidence",
+        linewidth=1.5,
+    )
+
+    if df_raw is not None and len(df_raw) > 0 and "confidence" in df_raw.columns:
+        sorted_raw = df_raw.sort("confidence", descending=True)
+        labels = sorted_raw[label_col].to_numpy()
         cum = np.cumsum(labels)
         precision = cum / np.arange(1, len(labels) + 1)
         recall = cum / len(labels)
-        ax.plot(recall, precision, color=colour, label=label, linewidth=1.5)
+        ax.plot(
+            recall,
+            precision,
+            color=_RAW_LINE_COLOUR,
+            label="Raw confidence",
+            linewidth=1.5,
+        )
 
     ax.set_xlabel("Recall")
     ax.set_ylabel("Precision")
@@ -125,19 +194,38 @@ def plot_pr_curves(
 
 
 def plot_confidence_histogram(
-    df: pl.DataFrame, label_col: str, conf_col: str,
-    col_label: str, title: str, bins: int = 50,
+    df: pl.DataFrame,
+    label_col: str,
+    conf_col: str,
+    col_label: str,
+    title: str,
+    bins: int = 50,
 ) -> plt.Figure:
+    """Plot confidence histograms with KDE overlays for correct vs incorrect PSMs."""
     fig, ax = plt.subplots(1, 1, figsize=(7, 5))
     pos = df.filter(pl.col(label_col))
     neg = df.filter(~pl.col(label_col))
     n_data = neg[conf_col].to_numpy()
     p_data = pos[conf_col].to_numpy()
 
-    ax.hist(n_data, bins=bins, alpha=0.6, label="Incorrect",
-            density=False, edgecolor="black", color=_INCORRECT_COLOUR)
-    ax.hist(p_data, bins=bins, alpha=0.6, label="Correct",
-            density=False, edgecolor="black", color=_CORRECT_COLOUR)
+    ax.hist(
+        n_data,
+        bins=bins,
+        alpha=0.6,
+        label="Incorrect",
+        density=False,
+        edgecolor="black",
+        color=_INCORRECT_COLOUR,
+    )
+    ax.hist(
+        p_data,
+        bins=bins,
+        alpha=0.6,
+        label="Correct",
+        density=False,
+        edgecolor="black",
+        color=_CORRECT_COLOUR,
+    )
 
     x_min = min(n_data.min(), p_data.min())
     x_max = max(n_data.max(), p_data.max())
@@ -162,8 +250,11 @@ def plot_confidence_histogram(
 
 
 def _fit_db_fdr(
-    df: pl.DataFrame, correct_col: str, residue_masses: dict,
-    confidence_feature: str = "calibrated_confidence", drop: int = 10,
+    df: pl.DataFrame,
+    correct_col: str,
+    residue_masses: dict,
+    confidence_feature: str = "calibrated_confidence",
+    drop: int = 10,
     use_proteome_shortcut: bool = False,
 ) -> DatabaseGroundedFDRControl:
     """Fit a DatabaseGroundedFDRControl, using a proteome shortcut if labels lack sequences."""
@@ -185,16 +276,21 @@ def _fit_db_fdr(
 
 
 def plot_fdr_accuracy(
-    df: pl.DataFrame, correct_col: str, residue_masses: dict,
-    title: str, metric: str = "fdr",
+    df: pl.DataFrame,
+    correct_col: str,
+    residue_masses: dict,
+    title: str,
+    metric: str = "fdr",
     use_proteome_shortcut: bool = False,
 ) -> plt.Figure:
+    """Compare non-parametric vs database-grounded FDR or q-value vs confidence."""
     fig, ax = plt.subplots(figsize=(8, 6))
     col_name = "psm_fdr" if metric == "fdr" else "psm_q_value"
     winnow_col = col_name
 
-    ctrl = _fit_db_fdr(df, correct_col, residue_masses,
-                       use_proteome_shortcut=use_proteome_shortcut)
+    ctrl = _fit_db_fdr(
+        df, correct_col, residue_masses, use_proteome_shortcut=use_proteome_shortcut
+    )
 
     if metric == "fdr":
         db_pd = ctrl.add_psm_fdr(df.to_pandas(), "calibrated_confidence")
@@ -212,10 +308,20 @@ def plot_fdr_accuracy(
     )
 
     conf = merged["calibrated_confidence"].to_numpy()
-    ax.plot(conf, merged[winnow_col].to_numpy(),
-            color=_MAIN_LINE_COLOUR, label="Non-parametric", linewidth=1.5)
-    ax.plot(conf, merged[f"{col_name}_db"].to_numpy(),
-            color=_RAW_LINE_COLOUR, label="Database-grounded", linewidth=1.5)
+    ax.plot(
+        conf,
+        merged[winnow_col].to_numpy(),
+        color=_MAIN_LINE_COLOUR,
+        label="Non-parametric",
+        linewidth=1.5,
+    )
+    ax.plot(
+        conf,
+        merged[f"{col_name}_db"].to_numpy(),
+        color=_RAW_LINE_COLOUR,
+        label="Database-grounded",
+        linewidth=1.5,
+    )
 
     ax.set_xlabel("Calibrated confidence")
     ylabel = "FDR" if metric == "fdr" else "Q-value"
@@ -228,7 +334,10 @@ def plot_fdr_accuracy(
 
 
 def plot_ranked_qvalue(
-    df: pl.DataFrame, correct_col: str, residue_masses: dict, title: str,
+    df: pl.DataFrame,
+    correct_col: str,
+    residue_masses: dict,
+    title: str,
 ) -> plt.Figure:
     """Ranked predictions vs q-value (non-parametric & database-grounded)."""
     ctrl = _fit_db_fdr(df, correct_col, residue_masses)
@@ -236,15 +345,29 @@ def plot_ranked_qvalue(
     test_pd_no_q = test_pd.drop(columns=["psm_q_value"], errors="ignore")
     db_q = ctrl.add_psm_q_value(test_pd_no_q, "calibrated_confidence")
 
-    sorted_np = test_pd.sort_values("calibrated_confidence", ascending=False).reset_index(drop=True)
-    sorted_db = db_q.sort_values("calibrated_confidence", ascending=False).reset_index(drop=True)
+    sorted_np = test_pd.sort_values(
+        "calibrated_confidence", ascending=False
+    ).reset_index(drop=True)
+    sorted_db = db_q.sort_values("calibrated_confidence", ascending=False).reset_index(
+        drop=True
+    )
     ranks = np.arange(1, len(sorted_np) + 1)
 
     fig, ax = plt.subplots(figsize=(8, 6))
-    ax.plot(ranks, sorted_np["psm_q_value"].values,
-            color=_MAIN_LINE_COLOUR, label="Non-parametric", linewidth=1.5)
-    ax.plot(ranks, sorted_db["psm_q_value"].values,
-            color=_RAW_LINE_COLOUR, label="Database-grounded", linewidth=1.5)
+    ax.plot(
+        ranks,
+        sorted_np["psm_q_value"].values,
+        color=_MAIN_LINE_COLOUR,
+        label="Non-parametric",
+        linewidth=1.5,
+    )
+    ax.plot(
+        ranks,
+        sorted_db["psm_q_value"].values,
+        color=_RAW_LINE_COLOUR,
+        label="Database-grounded",
+        linewidth=1.5,
+    )
     ax.set_xlabel("Ranked predictions")
     ax.set_ylabel("Q-value")
     ax.set_title(title)
@@ -258,11 +381,21 @@ def plot_ranked_fdr_pep(df: pl.DataFrame, title: str) -> plt.Figure:
     sorted_df = df.sort("calibrated_confidence", descending=True)
     ranks = np.arange(1, len(sorted_df) + 1)
     fig, ax = plt.subplots(figsize=(8, 6))
-    ax.plot(ranks, sorted_df["psm_fdr"].to_numpy(),
-            color=_MAIN_LINE_COLOUR, label="FDR", linewidth=1.5)
+    ax.plot(
+        ranks,
+        sorted_df["psm_fdr"].to_numpy(),
+        color=_MAIN_LINE_COLOUR,
+        label="FDR",
+        linewidth=1.5,
+    )
     if "psm_pep" in sorted_df.columns:
-        ax.plot(ranks, sorted_df["psm_pep"].to_numpy(),
-                color=_PALETTE[3], label="PEP", linewidth=1.5)
+        ax.plot(
+            ranks,
+            sorted_df["psm_pep"].to_numpy(),
+            color=_PALETTE[3],
+            label="PEP",
+            linewidth=1.5,
+        )
     ax.set_xlabel("Ranked predictions")
     ax.set_ylabel("Error rate")
     ax.set_title(title)
@@ -272,17 +405,28 @@ def plot_ranked_fdr_pep(df: pl.DataFrame, title: str) -> plt.Figure:
 
 
 def plot_ranked_fdr_raw_vs_cal(
-    df: pl.DataFrame, correct_col: str, residue_masses: dict, title: str,
+    df: pl.DataFrame,
+    correct_col: str,
+    residue_masses: dict,
+    title: str,
     metric: str = "fdr",
+    df_raw: pl.DataFrame | None = None,
 ) -> plt.Figure:
     """Ranked predictions vs FDR/q-value for non-parametric and database-grounded on raw+calibrated."""
     test_pd = df.to_pandas()
     test_pd_no_q = test_pd.drop(columns=["psm_q_value", "psm_fdr"], errors="ignore")
 
-    np_cal = test_pd.sort_values("calibrated_confidence", ascending=False).reset_index(drop=True)
+    np_cal = test_pd.sort_values("calibrated_confidence", ascending=False).reset_index(
+        drop=True
+    )
 
-    db_cal_ctrl = _fit_db_fdr(df, correct_col, residue_masses, confidence_feature="calibrated_confidence")
-    db_raw_ctrl = _fit_db_fdr(df, correct_col, residue_masses, confidence_feature="confidence")
+    db_cal_ctrl = _fit_db_fdr(
+        df, correct_col, residue_masses, confidence_feature="calibrated_confidence"
+    )
+    raw_df = df_raw if df_raw is not None else df
+    db_raw_ctrl = _fit_db_fdr(
+        raw_df, correct_col, residue_masses, confidence_feature="confidence"
+    )
 
     col_name = "psm_fdr" if metric == "fdr" else "psm_q_value"
     add_fn = "add_psm_fdr" if metric == "fdr" else "add_psm_q_value"
@@ -292,7 +436,10 @@ def plot_ranked_fdr_raw_vs_cal(
     db_cal = getattr(db_cal_ctrl, add_fn)(test_pd_no_q.copy(), sort_col_cal)
     db_cal = db_cal.sort_values(sort_col_cal, ascending=False).reset_index(drop=True)
 
-    db_raw = getattr(db_raw_ctrl, add_fn)(test_pd_no_q.copy(), sort_col_raw)
+    raw_pd_no_q = raw_df.to_pandas().drop(
+        columns=["psm_q_value", "psm_fdr"], errors="ignore"
+    )
+    db_raw = getattr(db_raw_ctrl, add_fn)(raw_pd_no_q.copy(), sort_col_raw)
     db_raw = db_raw.sort_values(sort_col_raw, ascending=False).reset_index(drop=True)
 
     ranks = np.arange(1, len(np_cal) + 1)
@@ -300,12 +447,27 @@ def plot_ranked_fdr_raw_vs_cal(
     fig, ax = plt.subplots(figsize=(8, 6))
     ylabel = "FDR" if metric == "fdr" else "Q-value"
     np_col = "psm_fdr" if metric == "fdr" else "psm_q_value"
-    ax.plot(ranks, np_cal[np_col].values,
-            color=_MAIN_LINE_COLOUR, label="Non-parametric (calibrated)", linewidth=1.5)
-    ax.plot(ranks, db_cal[col_name].values,
-            color=_RAW_LINE_COLOUR, label="Database-grounded (calibrated)", linewidth=1.5)
-    ax.plot(ranks, db_raw[col_name].values,
-            color=_PALETTE[3], label="Database-grounded (raw)", linewidth=1.5)
+    ax.plot(
+        ranks,
+        np_cal[np_col].values,
+        color=_MAIN_LINE_COLOUR,
+        label="Non-parametric (calibrated)",
+        linewidth=1.5,
+    )
+    ax.plot(
+        ranks,
+        db_cal[col_name].values,
+        color=_RAW_LINE_COLOUR,
+        label="Database-grounded (calibrated)",
+        linewidth=1.5,
+    )
+    ax.plot(
+        ranks,
+        db_raw[col_name].values,
+        color=_PALETTE[3],
+        label="Database-grounded (raw)",
+        linewidth=1.5,
+    )
     ax.set_xlabel("Ranked predictions")
     ax.set_ylabel(ylabel)
     ax.set_title(title)
@@ -315,17 +477,29 @@ def plot_ranked_fdr_raw_vs_cal(
 
 
 def plot_bar_psms_fdr(
-    df: pl.DataFrame, correct_col: str, residue_masses: dict, title: str,
+    df: pl.DataFrame,
+    correct_col: str,
+    residue_masses: dict,
+    title: str,
+    df_raw: pl.DataFrame | None = None,
 ) -> plt.Figure:
     """Bar plot of PSMs at q-value thresholds (calibrated vs raw, database-grounded)."""
     test_pd = df.to_pandas()
     test_pd_no_q = test_pd.drop(columns=["psm_q_value", "psm_fdr"], errors="ignore")
 
-    db_cal_ctrl = _fit_db_fdr(df, correct_col, residue_masses, confidence_feature="calibrated_confidence")
-    db_raw_ctrl = _fit_db_fdr(df, correct_col, residue_masses, confidence_feature="confidence")
+    db_cal_ctrl = _fit_db_fdr(
+        df, correct_col, residue_masses, confidence_feature="calibrated_confidence"
+    )
+    raw_df = df_raw if df_raw is not None else df
+    db_raw_ctrl = _fit_db_fdr(
+        raw_df, correct_col, residue_masses, confidence_feature="confidence"
+    )
 
     db_cal = db_cal_ctrl.add_psm_q_value(test_pd_no_q.copy(), "calibrated_confidence")
-    db_raw = db_raw_ctrl.add_psm_q_value(test_pd_no_q.copy(), "confidence")
+    raw_pd_no_q = raw_df.to_pandas().drop(
+        columns=["psm_q_value", "psm_fdr"], errors="ignore"
+    )
+    db_raw = db_raw_ctrl.add_psm_q_value(raw_pd_no_q.copy(), "confidence")
 
     thresholds = [0.001, 0.01, 0.05, 0.1]
     counts_cal = [int((db_cal["psm_q_value"] <= t).sum()) for t in thresholds]
@@ -335,12 +509,24 @@ def plot_bar_psms_fdr(
     width, gap = 0.32, 0.04
 
     fig, ax = plt.subplots(figsize=(8, 6))
-    bars_cal = ax.bar(x - width / 2 - gap / 2, counts_cal, width,
-                      label="Calibrated confidence", color=_MAIN_LINE_COLOUR,
-                      edgecolor="black", linewidth=1)
-    bars_raw = ax.bar(x + width / 2 + gap / 2, counts_raw, width,
-                      label="Raw confidence", color=_RAW_LINE_COLOUR,
-                      edgecolor="black", linewidth=1)
+    bars_cal = ax.bar(
+        x - width / 2 - gap / 2,
+        counts_cal,
+        width,
+        label="Calibrated confidence",
+        color=_MAIN_LINE_COLOUR,
+        edgecolor="black",
+        linewidth=1,
+    )
+    bars_raw = ax.bar(
+        x + width / 2 + gap / 2,
+        counts_raw,
+        width,
+        label="Raw confidence",
+        color=_RAW_LINE_COLOUR,
+        edgecolor="black",
+        linewidth=1,
+    )
     ax.set_xlabel("FDR threshold")
     ax.set_ylabel("Peptide-spectrum matches")
     ax.set_title(title)
@@ -351,25 +537,54 @@ def plot_bar_psms_fdr(
     for bar_group in [bars_cal, bars_raw]:
         for bar in bar_group:
             h = bar.get_height()
-            ax.annotate(f"{h:,}", xy=(bar.get_x() + bar.get_width() / 2, h),
-                        xytext=(0, 3), textcoords="offset points",
-                        ha="center", va="bottom", fontsize=10)
+            ax.annotate(
+                f"{h:,}",
+                xy=(bar.get_x() + bar.get_width() / 2, h),
+                xytext=(0, 3),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                fontsize=10,
+            )
     _spine_fmt(ax)
     return fig
 
 
 def plot_raw_vs_cal_scatter(
-    df: pl.DataFrame, label_col: str, title: str,
+    df: pl.DataFrame,
+    label_col: str,
+    title: str,
 ) -> plt.Figure:
     """Raw confidence vs calibrated confidence coloured by correctness."""
     fig, ax = plt.subplots(figsize=(8, 7))
     inc = df.filter(~pl.col(label_col))
     cor = df.filter(pl.col(label_col))
-    ax.scatter(inc["confidence"].to_numpy(), inc["calibrated_confidence"].to_numpy(),
-               c=_INCORRECT_COLOUR, label="Incorrect", s=10, alpha=0.3, rasterized=True)
-    ax.scatter(cor["confidence"].to_numpy(), cor["calibrated_confidence"].to_numpy(),
-               c=_CORRECT_COLOUR, label="Correct", s=10, alpha=0.3, rasterized=True)
-    ax.plot([0, 1], [0, 1], color=_IDEAL_LINE_COLOUR, linestyle="--", linewidth=1, label="Identity")
+    ax.scatter(
+        inc["confidence"].to_numpy(),
+        inc["calibrated_confidence"].to_numpy(),
+        c=_INCORRECT_COLOUR,
+        label="Incorrect",
+        s=10,
+        alpha=0.3,
+        rasterized=True,
+    )
+    ax.scatter(
+        cor["confidence"].to_numpy(),
+        cor["calibrated_confidence"].to_numpy(),
+        c=_CORRECT_COLOUR,
+        label="Correct",
+        s=10,
+        alpha=0.3,
+        rasterized=True,
+    )
+    ax.plot(
+        [0, 1],
+        [0, 1],
+        color=_IDEAL_LINE_COLOUR,
+        linestyle="--",
+        linewidth=1,
+        label="Identity",
+    )
     ax.set_xlabel("Raw confidence")
     ax.set_ylabel("Calibrated confidence")
     ax.set_title(title)
@@ -379,32 +594,60 @@ def plot_raw_vs_cal_scatter(
 
 
 def plot_pca_features(
-    df: pl.DataFrame, label_col: str, title: str,
+    df: pl.DataFrame,
+    label_col: str,
+    title: str,
 ) -> tuple[plt.Figure, PCA, list[str]]:
     """PCA of calibrator features coloured by correctness."""
     feature_cols = [
-        "confidence", "mass_error_ppm", "ion_matches", "ion_match_intensity",
-        "complementary_ion_count", "max_ion_gap", "spectral_angle", "xcorr",
-        "irt_error", "margin", "median_margin", "entropy", "z-score",
-        "edit_distance", "min_token_probability", "std_token_probability",
+        "confidence",
+        "mass_error_ppm",
+        "ion_matches",
+        "ion_match_intensity",
+        "complementary_ion_count",
+        "max_ion_gap",
+        "spectral_angle",
+        "xcorr",
+        "irt_error",
+        "margin",
+        "median_margin",
+        "entropy",
+        "z-score",
+        "edit_distance",
+        "min_token_probability",
+        "std_token_probability",
     ]
     available = [c for c in feature_cols if c in df.columns]
     feat_df = df.select(available).to_pandas().dropna()
-    labels = df.filter(
-        pl.all_horizontal([pl.col(c).is_not_null() for c in available])
-    )[label_col].to_numpy()
+    labels = df.filter(pl.all_horizontal([pl.col(c).is_not_null() for c in available]))[
+        label_col
+    ].to_numpy()
 
     scaler = StandardScaler()
-    X = scaler.fit_transform(feat_df.values)
+    features_scaled = scaler.fit_transform(feat_df.values)
     pca = PCA(n_components=2)
-    Z = pca.fit_transform(X)
+    coords = pca.fit_transform(features_scaled)
 
     fig, ax = plt.subplots(figsize=(8, 7))
     mask_inc, mask_cor = ~labels, labels
-    ax.scatter(Z[mask_inc, 0], Z[mask_inc, 1], c=_INCORRECT_COLOUR,
-               label="Incorrect", s=10, alpha=0.3, rasterized=True)
-    ax.scatter(Z[mask_cor, 0], Z[mask_cor, 1], c=_CORRECT_COLOUR,
-               label="Correct", s=10, alpha=0.3, rasterized=True)
+    ax.scatter(
+        coords[mask_inc, 0],
+        coords[mask_inc, 1],
+        c=_INCORRECT_COLOUR,
+        label="Incorrect",
+        s=10,
+        alpha=0.3,
+        rasterized=True,
+    )
+    ax.scatter(
+        coords[mask_cor, 0],
+        coords[mask_cor, 1],
+        c=_CORRECT_COLOUR,
+        label="Correct",
+        s=10,
+        alpha=0.3,
+        rasterized=True,
+    )
     ax.set_xlabel(f"PC 1 ({pca.explained_variance_ratio_[0]:.1%} variance)")
     ax.set_ylabel(f"PC 2 ({pca.explained_variance_ratio_[1]:.1%} variance)")
     ax.set_title(title)
@@ -414,17 +657,27 @@ def plot_pca_features(
 
 
 def plot_pca_loadings(
-    pca: PCA, feature_names: list[str], title: str,
+    pca: PCA,
+    feature_names: list[str],
+    title: str,
 ) -> plt.Figure:
     """PCA loadings for PC1 and PC2, ordered by |PC1|."""
     pretty = {
-        "confidence": "Raw confidence", "mass_error_ppm": "Log absolute mass error (ppm)",
-        "ion_matches": "Ion matches", "ion_match_intensity": "Ion match intensity",
-        "complementary_ion_count": "Complementary ion count", "max_ion_gap": "Maximum ion gap",
-        "spectral_angle": "Spectral angle", "xcorr": "Cross-correlation",
-        "irt_error": "Retention time error", "margin": "Margin",
-        "median_margin": "Median margin", "entropy": "Entropy", "z-score": "Z-score",
-        "edit_distance": "Edit distance", "min_token_probability": "Minimum token probability",
+        "confidence": "Raw confidence",
+        "mass_error_ppm": "Log absolute mass error (ppm)",
+        "ion_matches": "Ion matches",
+        "ion_match_intensity": "Ion match intensity",
+        "complementary_ion_count": "Complementary ion count",
+        "max_ion_gap": "Maximum ion gap",
+        "spectral_angle": "Spectral angle",
+        "xcorr": "Cross-correlation",
+        "irt_error": "Retention time error",
+        "margin": "Margin",
+        "median_margin": "Median margin",
+        "entropy": "Entropy",
+        "z-score": "Z-score",
+        "edit_distance": "Edit distance",
+        "min_token_probability": "Minimum token probability",
         "std_token_probability": "Token probability std. dev.",
     }
     pc1 = pca.components_[0]
@@ -442,27 +695,48 @@ def plot_pca_loadings(
     ax.set_xlabel("Loading value")
     ax.set_title(title)
     ax.axvline(0, color="black", linewidth=0.5)
-    ax.legend(handles=[
-        Patch(facecolor=_MAIN_LINE_COLOUR, alpha=0.6, label="PC 1 loading"),
-        Patch(facecolor=_RAW_LINE_COLOUR, alpha=0.4, label="PC 2 loading"),
-    ], loc="lower right")
+    ax.legend(
+        handles=[
+            Patch(facecolor=_MAIN_LINE_COLOUR, alpha=0.6, label="PC 1 loading"),
+            Patch(facecolor=_RAW_LINE_COLOUR, alpha=0.4, label="PC 2 loading"),
+        ],
+        loc="lower right",
+    )
     _spine_fmt(ax)
     return fig
 
 
 def plot_scatter_feature_vs_conf(
-    df: pl.DataFrame, label_col: str,
-    x_col: str, y_col: str, title: str,
-    x_label: str | None = None, y_label: str | None = None,
+    df: pl.DataFrame,
+    label_col: str,
+    x_col: str,
+    y_col: str,
+    title: str,
+    x_label: str | None = None,
+    y_label: str | None = None,
 ) -> plt.Figure:
     """Scatter of x_col vs y_col coloured by correctness."""
     fig, ax = plt.subplots(figsize=(8, 7))
     inc = df.filter(~pl.col(label_col))
     cor = df.filter(pl.col(label_col))
-    ax.scatter(inc[x_col].to_numpy(), inc[y_col].to_numpy(),
-               c=_INCORRECT_COLOUR, label="Incorrect", s=10, alpha=0.3, rasterized=True)
-    ax.scatter(cor[x_col].to_numpy(), cor[y_col].to_numpy(),
-               c=_CORRECT_COLOUR, label="Correct", s=10, alpha=0.3, rasterized=True)
+    ax.scatter(
+        inc[x_col].to_numpy(),
+        inc[y_col].to_numpy(),
+        c=_INCORRECT_COLOUR,
+        label="Incorrect",
+        s=10,
+        alpha=0.3,
+        rasterized=True,
+    )
+    ax.scatter(
+        cor[x_col].to_numpy(),
+        cor[y_col].to_numpy(),
+        c=_CORRECT_COLOUR,
+        label="Correct",
+        s=10,
+        alpha=0.3,
+        rasterized=True,
+    )
     ax.set_xlabel(x_label or x_col.replace("_", " ").title())
     ax.set_ylabel(y_label or y_col.replace("_", " ").title())
     ax.set_title(title)
@@ -489,20 +763,245 @@ def _load_data(predictions_dir: Path) -> pl.DataFrame:
     return preds
 
 
+def _save_training_history_plot(model_dir: Path, out_dir: Path) -> None:
+    hist_path = model_dir / "training_history.json"
+    if not hist_path.exists():
+        return
+    print("Plotting training history")
+    th = TrainingHistory.load(str(hist_path))
+    th.plot(output_path=out_dir / "training_history.png", show=False)
+    print("  saved training_history")
+
+
+def _plot_calibration_and_pr(
+    df: pl.DataFrame,
+    df_raw_conf: pl.DataFrame,
+    split: str,
+    labelled: bool,
+    out_dir: Path,
+) -> None:
+    print("Plotting calibration curves")
+    if labelled:
+        fig = plot_calibration_curves(
+            df,
+            "correct",
+            f"Calibration curves for {split} using database search",
+            df_raw=df_raw_conf,
+        )
+        _save(fig, out_dir, f"calibration_{split}_db_search")
+
+    fig = plot_calibration_curves(
+        df,
+        "proteome_hit",
+        f"Calibration curves for {split} using proteome mapping",
+        df_raw=df_raw_conf,
+    )
+    _save(fig, out_dir, f"calibration_{split}_proteome")
+
+    print("Plotting PR curves")
+    if labelled:
+        fig = plot_pr_curves(
+            df,
+            "correct",
+            f"PR curves for {split} using database search",
+            df_raw=df_raw_conf,
+        )
+        _save(fig, out_dir, f"pr_{split}_db_search")
+
+    fig = plot_pr_curves(
+        df,
+        "proteome_hit",
+        f"PR curves for {split} using proteome mapping",
+        df_raw=df_raw_conf,
+    )
+    _save(fig, out_dir, f"pr_{split}_proteome")
+
+
+def _plot_confidence_histograms(
+    df: pl.DataFrame,
+    df_raw_conf: pl.DataFrame,
+    split: str,
+    labelled: bool,
+    out_dir: Path,
+) -> None:
+    print("Plotting confidence histograms")
+    for conf_col, conf_label, tag in [
+        ("confidence", "Raw confidence", "raw"),
+        ("calibrated_confidence", "Calibrated confidence", "cal"),
+    ]:
+        hist_df = df_raw_conf if conf_col == "confidence" else df
+        if labelled:
+            fig = plot_confidence_histogram(
+                hist_df,
+                "correct",
+                conf_col,
+                conf_label,
+                f"{conf_label} for {split} using database search",
+            )
+            _save(fig, out_dir, f"hist_{tag}_{split}_db_search")
+
+        fig = plot_confidence_histogram(
+            hist_df,
+            "proteome_hit",
+            conf_col,
+            conf_label,
+            f"{conf_label} for {split} using proteome mapping",
+        )
+        _save(fig, out_dir, f"hist_{tag}_{split}_proteome")
+
+
+def _plot_fdr_accuracy_plots(
+    df: pl.DataFrame,
+    split: str,
+    labelled: bool,
+    residue_masses: dict,
+    out_dir: Path,
+) -> None:
+    print("Plotting FDR accuracy")
+    use_shortcut = not labelled
+    for metric, tag in [("fdr", "fdr"), ("q_value", "qvalue")]:
+        metric_name = "FDR" if metric == "fdr" else "Q-value"
+        if labelled:
+            fig = plot_fdr_accuracy(
+                df,
+                "correct",
+                residue_masses,
+                f"{metric_name} accuracy for {split} using database search",
+                metric="fdr" if metric == "fdr" else "q_value",
+                use_proteome_shortcut=False,
+            )
+            _save(fig, out_dir, f"{tag}_{split}_db_search")
+
+        fig = plot_fdr_accuracy(
+            df,
+            "proteome_hit",
+            residue_masses,
+            f"{metric_name} accuracy for {split} using proteome mapping",
+            metric="fdr" if metric == "fdr" else "q_value",
+            use_proteome_shortcut=use_shortcut,
+        )
+        _save(fig, out_dir, f"{tag}_{split}_proteome")
+
+
+def _plot_labelled_diagnostics(
+    df: pl.DataFrame,
+    df_raw_conf: pl.DataFrame,
+    split: str,
+    residue_masses: dict,
+    out_dir: Path,
+) -> None:
+    label_col = "correct"
+    print("Plotting labelled-only diagnostics")
+
+    fig = plot_ranked_qvalue(
+        df,
+        label_col,
+        residue_masses,
+        f"Ranked predictions vs q-value for {split} using database search",
+    )
+    _save(fig, out_dir, f"ranked_qvalue_{split}_db_search")
+
+    fig = plot_ranked_fdr_pep(df, f"Ranked predictions vs FDR and PEP for {split}")
+    _save(fig, out_dir, f"ranked_fdr_pep_{split}_nonparametric")
+
+    for metric, tag in [("fdr", "fdr"), ("q_value", "qvalue")]:
+        fig = plot_ranked_fdr_raw_vs_cal(
+            df,
+            label_col,
+            residue_masses,
+            f"Ranked predictions vs {tag} for {split} using database search",
+            metric=metric,
+            df_raw=df_raw_conf,
+        )
+        _save(fig, out_dir, f"ranked_{tag}_raw_vs_cal_{split}_db_search")
+
+    fig = plot_bar_psms_fdr(
+        df,
+        label_col,
+        residue_masses,
+        f"PSMs at database-grounded FDR thresholds for {split}",
+        df_raw=df_raw_conf,
+    )
+    _save(fig, out_dir, f"bar_psms_fdr_thresholds_{split}_db_search")
+
+    if len(df_raw_conf) > 0:
+        fig = plot_raw_vs_cal_scatter(
+            df_raw_conf, label_col, f"Raw vs calibrated confidence for {split}"
+        )
+        _save(fig, out_dir, f"scatter_raw_vs_cal_confidence_{split}")
+
+    if "margin" in df.columns and len(df_raw_conf) > 0:
+        fig = plot_scatter_feature_vs_conf(
+            df_raw_conf,
+            label_col,
+            "margin",
+            "confidence",
+            f"Raw confidence vs margin for {split}",
+            x_label="Margin",
+            y_label="Raw confidence",
+        )
+        _save(fig, out_dir, f"scatter_raw_confidence_vs_margin_{split}")
+
+        fig = plot_scatter_feature_vs_conf(
+            df,
+            label_col,
+            "margin",
+            "calibrated_confidence",
+            f"Calibrated confidence vs margin for {split}",
+            x_label="Margin",
+            y_label="Calibrated confidence",
+        )
+        _save(fig, out_dir, f"scatter_cal_confidence_vs_margin_{split}")
+
+    fig, pca_model, feat_names = plot_pca_features(
+        df, label_col, f"PCA of calibrator features for {split}"
+    )
+    _save(fig, out_dir, f"pca_features_{split}")
+
+    fig = plot_pca_loadings(
+        pca_model, feat_names, "PCA loadings for first two principal components"
+    )
+    _save(fig, out_dir, f"pca_loadings_pc1_pc2_{split}")
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--predictions-dir", type=Path, required=True,
-                        help="Winnow predict output dir with preds_and_fdr_metrics.csv")
-    parser.add_argument("--split", type=str, required=True,
-                        help="Split name for plot titles (test / unlabelled / raw_less_train)")
-    parser.add_argument("--label-mode", choices=["labelled", "unlabelled"], required=True,
-                        help="labelled = has 'correct' column; unlabelled = proteome mapping only")
-    parser.add_argument("--fasta", type=Path, required=True,
-                        help="FASTA file for proteome annotation")
-    parser.add_argument("--output-dir", type=Path, default=None,
-                        help="Output directory for plots (defaults to predictions-dir/plots/)")
-    parser.add_argument("--model-dir", type=Path, default=None,
-                        help="Model directory for training history plot")
+    """Load predictions, annotate proteome hits, and write analysis plots."""
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--predictions-dir",
+        type=Path,
+        required=True,
+        help="Winnow predict output dir with preds_and_fdr_metrics.csv",
+    )
+    parser.add_argument(
+        "--split",
+        type=str,
+        required=True,
+        help="Split name for plot titles (test / unlabelled / raw_less_train)",
+    )
+    parser.add_argument(
+        "--label-mode",
+        choices=["labelled", "unlabelled"],
+        required=True,
+        help="labelled = has 'correct' column; unlabelled = proteome mapping only",
+    )
+    parser.add_argument(
+        "--fasta", type=Path, required=True, help="FASTA file for proteome annotation"
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Output directory for plots (defaults to predictions-dir/plots/)",
+    )
+    parser.add_argument(
+        "--model-dir",
+        type=Path,
+        default=None,
+        help="Model directory for training history plot",
+    )
     args = parser.parse_args()
 
     out_dir = args.output_dir or (args.predictions_dir / "plots")
@@ -517,130 +1016,26 @@ def main() -> None:
 
     from instanovo.utils.metrics import Metrics
     from instanovo.utils.residues import ResidueSet
-    metrics = Metrics(residue_set=ResidueSet(residue_masses=residue_masses), isotope_error_range=(0, 1))
+
+    metrics = Metrics(
+        residue_set=ResidueSet(residue_masses=residue_masses),
+        isotope_error_range=(0, 1),
+    )
 
     print(f"Annotating with proteome hits from {args.fasta}")
     haystack = load_proteome_haystack(str(args.fasta))
     df = filter_and_annotate_preds(df, haystack, metrics, min_residue_length=7)
+    df_raw_conf = _df_for_raw_confidence_plots(df)
 
-    # ── Training history ──────────────────────────────────────────────
     if args.model_dir is not None:
-        hist_path = args.model_dir / "training_history.json"
-        if hist_path.exists():
-            print("Plotting training history")
-            th = TrainingHistory.load(str(hist_path))
-            fig = th.plot(show=False)
-            if fig is not None:
-                _save(fig, out_dir, "training_history")
+        _save_training_history_plot(args.model_dir, out_dir)
 
-    # ── Calibration curves ────────────────────────────────────────────
-    print("Plotting calibration curves")
+    _plot_calibration_and_pr(df, df_raw_conf, split, labelled, out_dir)
+    _plot_confidence_histograms(df, df_raw_conf, split, labelled, out_dir)
+    _plot_fdr_accuracy_plots(df, split, labelled, residue_masses, out_dir)
+
     if labelled:
-        fig = plot_calibration_curves(
-            df, "correct", f"Calibration curves for {split} using database search")
-        _save(fig, out_dir, f"calibration_{split}_db_search")
-
-    fig = plot_calibration_curves(
-        df, "proteome_hit", f"Calibration curves for {split} using proteome mapping")
-    _save(fig, out_dir, f"calibration_{split}_proteome")
-
-    # ── PR curves ─────────────────────────────────────────────────────
-    print("Plotting PR curves")
-    if labelled:
-        fig = plot_pr_curves(df, "correct", f"PR curves for {split} using database search")
-        _save(fig, out_dir, f"pr_{split}_db_search")
-
-    fig = plot_pr_curves(df, "proteome_hit", f"PR curves for {split} using proteome mapping")
-    _save(fig, out_dir, f"pr_{split}_proteome")
-
-    # ── Confidence histograms ─────────────────────────────────────────
-    print("Plotting confidence histograms")
-    for conf_col, conf_label, tag in [
-        ("confidence", "Raw confidence", "raw"),
-        ("calibrated_confidence", "Calibrated confidence", "cal"),
-    ]:
-        if labelled:
-            fig = plot_confidence_histogram(
-                df, "correct", conf_col, conf_label,
-                f"{conf_label} for {split} using database search")
-            _save(fig, out_dir, f"hist_{tag}_{split}_db_search")
-
-        fig = plot_confidence_histogram(
-            df, "proteome_hit", conf_col, conf_label,
-            f"{conf_label} for {split} using proteome mapping")
-        _save(fig, out_dir, f"hist_{tag}_{split}_proteome")
-
-    # ── FDR/q-value accuracy ──────────────────────────────────────────
-    print("Plotting FDR accuracy")
-    use_shortcut = not labelled
-    for metric, tag in [("fdr", "fdr"), ("q_value", "qvalue")]:
-        metric_name = "FDR" if metric == "fdr" else "Q-value"
-        if labelled:
-            fig = plot_fdr_accuracy(
-                df, "correct", residue_masses,
-                f"{metric_name} accuracy for {split} using database search",
-                metric="fdr" if metric == "fdr" else "q_value",
-                use_proteome_shortcut=False)
-            _save(fig, out_dir, f"{tag}_{split}_db_search")
-
-        fig = plot_fdr_accuracy(
-            df, "proteome_hit", residue_masses,
-            f"{metric_name} accuracy for {split} using proteome mapping",
-            metric="fdr" if metric == "fdr" else "q_value",
-            use_proteome_shortcut=use_shortcut)
-        _save(fig, out_dir, f"{tag}_{split}_proteome")
-
-    # ── Labelled-only diagnostic plots ────────────────────────────────
-    if labelled:
-        label_col = "correct"
-        print("Plotting labelled-only diagnostics")
-
-        fig = plot_ranked_qvalue(
-            df, label_col, residue_masses,
-            f"Ranked predictions vs q-value for {split} using database search")
-        _save(fig, out_dir, f"ranked_qvalue_{split}_db_search")
-
-        fig = plot_ranked_fdr_pep(
-            df, f"Ranked predictions vs FDR and PEP for {split}")
-        _save(fig, out_dir, f"ranked_fdr_pep_{split}_nonparametric")
-
-        for metric, tag in [("fdr", "fdr"), ("q_value", "qvalue")]:
-            fig = plot_ranked_fdr_raw_vs_cal(
-                df, label_col, residue_masses,
-                f"Ranked predictions vs {tag} for {split} using database search",
-                metric=metric)
-            _save(fig, out_dir, f"ranked_{tag}_raw_vs_cal_{split}_db_search")
-
-        fig = plot_bar_psms_fdr(
-            df, label_col, residue_masses,
-            f"PSMs at database-grounded FDR thresholds for {split}")
-        _save(fig, out_dir, f"bar_psms_fdr_thresholds_{split}_db_search")
-
-        fig = plot_raw_vs_cal_scatter(
-            df, label_col, f"Raw vs calibrated confidence for {split}")
-        _save(fig, out_dir, f"scatter_raw_vs_cal_confidence_{split}")
-
-        if "margin" in df.columns:
-            fig = plot_scatter_feature_vs_conf(
-                df, label_col, "margin", "confidence",
-                f"Raw confidence vs margin for {split}",
-                x_label="Margin", y_label="Raw confidence")
-            _save(fig, out_dir, f"scatter_raw_confidence_vs_margin_{split}")
-
-            fig = plot_scatter_feature_vs_conf(
-                df, label_col, "margin", "calibrated_confidence",
-                f"Calibrated confidence vs margin for {split}",
-                x_label="Margin", y_label="Calibrated confidence")
-            _save(fig, out_dir, f"scatter_cal_confidence_vs_margin_{split}")
-
-        fig, pca_model, feat_names = plot_pca_features(
-            df, label_col, f"PCA of calibrator features for {split}")
-        _save(fig, out_dir, f"pca_features_{split}")
-
-        fig = plot_pca_loadings(
-            pca_model, feat_names,
-            "PCA loadings for first two principal components")
-        _save(fig, out_dir, f"pca_loadings_pc1_pc2_{split}")
+        _plot_labelled_diagnostics(df, df_raw_conf, split, residue_masses, out_dir)
 
     print(f"\nAll plots saved to {out_dir}")
 

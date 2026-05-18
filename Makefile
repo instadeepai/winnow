@@ -1359,6 +1359,27 @@ PRIMENOVO_ROOT ?= /home/j-daniel/repos/pi-PrimeNovo
 ANALYSIS_MODELS  := models
 ANALYSIS_RESULTS := results
 
+# Upload preds + metadata to $(ANALYSIS_S3)/results/<dataset>/ after each predict.
+define upload_analysis_predictions
+	@$(MAKE) --no-print-directory upload-analysis-predictions-dir \
+		OUTPUT_DIR=$(1)
+endef
+
+.PHONY: upload-analysis-predictions-dir
+upload-analysis-predictions-dir:
+	@out="$(OUTPUT_DIR)"; \
+	if [ ! -f "$$out/preds_and_fdr_metrics.csv" ]; then \
+		echo "WARN: no preds_and_fdr_metrics.csv in $$out, skipping upload"; \
+		exit 0; \
+	fi; \
+	name=$$(basename "$$out"); \
+	dest="$(ANALYSIS_S3)/results/$$name"; \
+	echo "Uploading predictions $$name -> $$dest"; \
+	$(S3_CP) "$$out/preds_and_fdr_metrics.csv" "$$dest/"; \
+	if [ -f "$$out/metadata.csv" ]; then \
+		$(S3_CP) "$$out/metadata.csv" "$$dest/"; \
+	fi
+
 # ── Common Hydra overrides for per-model analysis ──────
 # These datasets use constant CE/frag, not per-row columns.
 ANALYSIS_KOINA_OVERRIDES = $(KOINA_OVERRIDES) $(KOINA_FRAGMENT_MATCH_CONSTANTS)
@@ -1426,6 +1447,7 @@ predict-instanovo-helaqc-test:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_helaqc \
 	output_folder=$(ANALYSIS_RESULTS)/instanovo_helaqc_predictions_test/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/instanovo_helaqc_predictions_test)
 
 predict-instanovo-helaqc-unlabelled:
 	uv run winnow predict --config-dir configs/instanovo \
@@ -1434,6 +1456,7 @@ predict-instanovo-helaqc-unlabelled:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_helaqc \
 	output_folder=$(ANALYSIS_RESULTS)/instanovo_helaqc_predictions_unlabelled/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/instanovo_helaqc_predictions_unlabelled)
 
 predict-instanovo-helaqc-raw_less_train:
 	uv run winnow predict --config-dir configs/instanovo \
@@ -1442,6 +1465,7 @@ predict-instanovo-helaqc-raw_less_train:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_helaqc \
 	output_folder=$(ANALYSIS_RESULTS)/instanovo_helaqc_predictions_raw_less_train/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/instanovo_helaqc_predictions_raw_less_train)
 
 plot-instanovo-helaqc:
 	uv run python scripts/plot_analysis.py \
@@ -1489,6 +1513,7 @@ predict-instanovo-celegans-test: rekey-celegans-split-parquet-spectrum-ids
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_celegans \
 	output_folder=$(ANALYSIS_RESULTS)/instanovo_celegans_predictions_test/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/instanovo_celegans_predictions_test)
 
 predict-instanovo-celegans-unlabelled: rekey-celegans-split-parquet-spectrum-ids
 	uv run winnow predict --config-dir configs/instanovo \
@@ -1497,6 +1522,7 @@ predict-instanovo-celegans-unlabelled: rekey-celegans-split-parquet-spectrum-ids
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_celegans \
 	output_folder=$(ANALYSIS_RESULTS)/instanovo_celegans_predictions_unlabelled/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/instanovo_celegans_predictions_unlabelled)
 
 predict-instanovo-celegans-raw_less_train:
 	uv run winnow predict --config-dir configs/instanovo \
@@ -1505,6 +1531,7 @@ predict-instanovo-celegans-raw_less_train:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_celegans \
 	output_folder=$(ANALYSIS_RESULTS)/instanovo_celegans_predictions_raw_less_train/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/instanovo_celegans_predictions_raw_less_train)
 
 plot-instanovo-celegans:
 	uv run python scripts/plot_analysis.py \
@@ -1656,6 +1683,7 @@ predict-casanovo-helaqc-test:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/casanovo_helaqc \
 	output_folder=$(ANALYSIS_RESULTS)/casanovo_helaqc_predictions_test/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/casanovo_helaqc_predictions_test)
 
 predict-casanovo-helaqc-unlabelled:
 	uv run winnow predict --config-dir configs/casanovo \
@@ -1664,6 +1692,7 @@ predict-casanovo-helaqc-unlabelled:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/casanovo_helaqc \
 	output_folder=$(ANALYSIS_RESULTS)/casanovo_helaqc_predictions_unlabelled/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/casanovo_helaqc_predictions_unlabelled)
 
 predict-casanovo-helaqc-raw_less_train:
 	uv run winnow predict --config-dir configs/casanovo \
@@ -1672,6 +1701,7 @@ predict-casanovo-helaqc-raw_less_train:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/casanovo_helaqc \
 	output_folder=$(ANALYSIS_RESULTS)/casanovo_helaqc_predictions_raw_less_train/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/casanovo_helaqc_predictions_raw_less_train)
 
 plot-casanovo-helaqc:
 	uv run python scripts/plot_analysis.py \
@@ -1717,6 +1747,7 @@ predict-casanovo-celegans-test:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/casanovo_celegans \
 	output_folder=$(ANALYSIS_RESULTS)/casanovo_celegans_predictions_test/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/casanovo_celegans_predictions_test)
 
 predict-casanovo-celegans-unlabelled:
 	uv run winnow predict --config-dir configs/casanovo \
@@ -1725,6 +1756,7 @@ predict-casanovo-celegans-unlabelled:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/casanovo_celegans \
 	output_folder=$(ANALYSIS_RESULTS)/casanovo_celegans_predictions_unlabelled/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/casanovo_celegans_predictions_unlabelled)
 
 predict-casanovo-celegans-raw_less_train:
 	uv run winnow predict --config-dir configs/casanovo \
@@ -1733,6 +1765,7 @@ predict-casanovo-celegans-raw_less_train:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/casanovo_celegans \
 	output_folder=$(ANALYSIS_RESULTS)/casanovo_celegans_predictions_raw_less_train/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/casanovo_celegans_predictions_raw_less_train)
 
 plot-casanovo-celegans:
 	uv run python scripts/plot_analysis.py \
@@ -1782,6 +1815,7 @@ predict-primenovo-helaqc-test:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/primenovo_helaqc \
 	output_folder=$(ANALYSIS_RESULTS)/primenovo_helaqc_predictions_test/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/primenovo_helaqc_predictions_test)
 
 predict-primenovo-helaqc-unlabelled:
 	uv run winnow predict --config-dir configs/primenovo \
@@ -1790,6 +1824,7 @@ predict-primenovo-helaqc-unlabelled:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/primenovo_helaqc \
 	output_folder=$(ANALYSIS_RESULTS)/primenovo_helaqc_predictions_unlabelled/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/primenovo_helaqc_predictions_unlabelled)
 
 predict-primenovo-helaqc-raw_less_train:
 	uv run winnow predict --config-dir configs/primenovo \
@@ -1798,6 +1833,7 @@ predict-primenovo-helaqc-raw_less_train:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/primenovo_helaqc \
 	output_folder=$(ANALYSIS_RESULTS)/primenovo_helaqc_predictions_raw_less_train/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/primenovo_helaqc_predictions_raw_less_train)
 
 plot-primenovo-helaqc:
 	uv run python scripts/plot_analysis.py \
@@ -1843,6 +1879,7 @@ predict-primenovo-celegans-test:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/primenovo_celegans \
 	output_folder=$(ANALYSIS_RESULTS)/primenovo_celegans_predictions_test/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/primenovo_celegans_predictions_test)
 
 predict-primenovo-celegans-unlabelled:
 	uv run winnow predict --config-dir configs/primenovo \
@@ -1851,6 +1888,7 @@ predict-primenovo-celegans-unlabelled:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/primenovo_celegans \
 	output_folder=$(ANALYSIS_RESULTS)/primenovo_celegans_predictions_unlabelled/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/primenovo_celegans_predictions_unlabelled)
 
 predict-primenovo-celegans-raw_less_train:
 	uv run winnow predict --config-dir configs/primenovo \
@@ -1859,6 +1897,7 @@ predict-primenovo-celegans-raw_less_train:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/primenovo_celegans \
 	output_folder=$(ANALYSIS_RESULTS)/primenovo_celegans_predictions_raw_less_train/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
+	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/primenovo_celegans_predictions_raw_less_train)
 
 plot-primenovo-celegans:
 	uv run python scripts/plot_analysis.py \
@@ -1934,7 +1973,9 @@ create-raw-less-train: create-raw-less-train-parquet create-raw-less-train-casan
 
 ANALYSIS_S3 ?= $(S3_BASE)/analysis
 
-.PHONY: local-upload-analysis-data local-upload-analysis-models download-analysis-data download-analysis-models upload-analysis-results download-analysis-results analysis-pipeline
+.PHONY: local-upload-analysis-data local-upload-analysis-models download-analysis-data download-analysis-models \
+	upload-analysis-predictions-dir upload-analysis-plots upload-analysis-results download-analysis-results \
+	analysis-pipeline
 
 ## Upload all datasets needed by train-all / predict-all / plot-all to S3.
 ## Run this locally before launching a cluster job.
@@ -2006,17 +2047,23 @@ download-analysis-data:
 	$(S3_CP) --recursive $(ANALYSIS_S3)/primenovo/predictions/  analysis_data/primenovo/predictions/
 	@echo "=== download-analysis-data complete ==="
 
-## Upload trained models, predictions, and plots to S3 after a cluster run.
-upload-analysis-results:
-	@echo "=== Uploading models ==="
-	for m in instanovo_helaqc instanovo_celegans casanovo_helaqc casanovo_celegans primenovo_helaqc primenovo_celegans; do \
-		if [ -d $(ANALYSIS_MODELS)/$$m ]; then \
-			$(S3_CP) --recursive $(ANALYSIS_MODELS)/$$m/ $(ANALYSIS_S3)/models/$$m/; \
+## Upload analysis plots under results/*/plots/ to S3 (run after plot-all).
+.PHONY: upload-analysis-plots
+upload-analysis-plots:
+	@echo "=== Uploading analysis plots ==="
+	@for dir in $(ANALYSIS_RESULTS)/*_predictions_*/; do \
+		[ -d "$$dir" ] || continue; \
+		if [ -d "$$dir/plots" ]; then \
+			name=$$(basename "$$dir"); \
+			echo "Uploading plots $$name -> $(ANALYSIS_S3)/results/$$name/plots/"; \
+			$(S3_CP) --recursive "$$dir/plots/" "$(ANALYSIS_S3)/results/$$name/plots/"; \
 		fi; \
 	done
-	@echo "=== Uploading predictions + plots ==="
-	$(S3_CP) --recursive $(ANALYSIS_RESULTS)/ $(ANALYSIS_S3)/results/
-	@echo "=== upload-analysis-results complete ==="
+	@echo "=== upload-analysis-plots complete ==="
+
+## Upload models to S3 (predictions upload during predict-all; plots via upload-analysis-plots).
+upload-analysis-results: upload-analysis-plots
+	@echo "=== upload-analysis-results complete (predictions uploaded per predict) ==="
 
 ## Download trained models, predictions, and plots from S3 after a cluster run.
 download-analysis-results:
@@ -2030,11 +2077,12 @@ download-analysis-results:
 	$(S3_CP) --recursive $(ANALYSIS_S3)/results/ $(ANALYSIS_RESULTS)/
 	@echo "=== download-analysis-results complete ==="
 
-## Full cluster pipeline: download data + pre-trained models, predict, plot,
-## upload results. Intended to be the manifest.yaml entrypoint command.
+## Full cluster pipeline: download data + pre-trained models, predict (upload
+## preds to $(ANALYSIS_S3)/results/<dataset>/ after each), plot, upload plots.
+## Intended to be the manifest.yaml entrypoint command.
 ## Override CASANOVO_ROOT / PRIMENOVO_ROOT to analysis_data/ paths on the
 ## cluster since the external repos are not present there.
-analysis-pipeline: download-analysis-data download-analysis-models predict-all plot-all upload-analysis-results
+analysis-pipeline: download-analysis-data download-analysis-models predict-all plot-all upload-analysis-plots
 
 # ═══════════════════════════════════════════════════════
 # Convenience targets
@@ -2049,6 +2097,12 @@ predict-instanovo-split-parquets: \
 	predict-instanovo-celegans-test predict-instanovo-celegans-unlabelled
 
 plot-instanovo-split-parquets: plot-instanovo-pxd019483 plot-instanovo-sbrodae plot-instanovo-celegans
+
+.PHONY: plot-fdr-method-comparison
+
+plot-fdr-method-comparison:
+	uv run python scripts/plot_fdr_method_comparison.py \
+		--output-dir results/fdr_method_comparison/
 
 .PHONY: train-all predict-all plot-all
 
