@@ -315,7 +315,7 @@ def plot_fdr_run_with_bands(
         np.clip(fdr_vals + hw, None, 1),
         color=_BAND_COLOUR,
         alpha=0.2,
-        label="95% Hoeffding bound (sampling noise)",
+        label="95% Hoeffding bound",
     )
     ax.plot(
         conf_vals,
@@ -378,7 +378,7 @@ def plot_q_value_run_with_bands(
         np.clip(qvals + hw, None, 1),
         color=_BAND_COLOUR,
         alpha=0.2,
-        label="95% Hoeffding bound (sampling noise)",
+        label="95% Hoeffding bound",
     )
     ax.plot(
         conf_vals,
@@ -397,7 +397,7 @@ def plot_q_value_run_with_bands(
     ax.set_xlabel("Calibrated confidence")
     ax.set_ylabel("PSM q-value")
     ax.set_title(f"{display} q-value run with sampling error bounds {qualifier}")
-    ax.legend(loc="upper right")
+    ax.legend(loc="upper center")
     _style_ax(ax)
     fig.tight_layout()
     _save_fig(fig, output_dir / f"qvalue_run_bands_{project}")
@@ -452,10 +452,16 @@ def plot_true_vs_estimated_fdr(
         lw=1.5,
         label="Observed",
     )
+
+    # Only plot the ideal line up to the max extent of the observed line
+    max_x = float(fdr_data["estimated_fdr"].max())
+    max_y = float(fdr_data["true_fdr"].max())
     lim = 0.1 if zoomed else 1.0
+    ideal_end = min(lim, max(max_x, max_y))
+
     ax.plot(
-        [0, lim],
-        [0, lim],
+        [0, ideal_end],
+        [0, ideal_end],
         ls="--",
         color=_IDEAL_LINE_COLOUR,
         lw=1,
