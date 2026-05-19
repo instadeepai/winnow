@@ -404,13 +404,14 @@ train_general_model:
 ## Hyperparameter optimisation (HPO)
 #########################################################
 
-.PHONY: hpo hpo-download-data hpo-upload-model
+.PHONY: hpo hpo-download-data hpo-upload-model hpo-train-best hpo-eval hpo-train-and-eval
 
 HPO_TRAIN_FEATURES ?= small_train_shuffled/
 HPO_VAL_FEATURES   ?= new_val_feature_matrices/PXD010154/
 HPO_N_TRIALS       ?= 50
 HPO_TIMEOUT        ?= 43200
 HPO_CONFIG         ?= scripts/hpo_config.yaml
+HPO_BEST_CONFIG    ?= scripts/hpo_best_trial.yaml
 # RUN_TS is fixed for one make invocation; override on CLI to resume a run.
 ifndef RUN_TS
 RUN_TS := $(shell date -u +%Y%m%dT%H%M%SZ)
@@ -441,6 +442,23 @@ hpo: hpo-download-data
 		--timeout $(HPO_TIMEOUT) \
 		--output-dir $(HPO_OUTPUT_DIR) \
 		--pruning
+
+## Train calibrator from scripts/hpo_best_trial.yaml (no Optuna).
+## Requires feature matrices (run hpo-download-data first if missing).
+hpo-train-best:
+	mkdir -p $(HPO_OUTPUT_DIR)
+	uv run python scripts/train_hpo_model.py \
+		--train-features-path $(HPO_TRAIN_FEATURES) \
+		--val-features-path $(HPO_VAL_FEATURES) \
+		--config $(HPO_BEST_CONFIG) \
+		--output-dir $(HPO_OUTPUT_DIR)
+
+## Predict on all held-out eval datasets, plot, and upload (model in $(HPO_OUTPUT_DIR)).
+hpo-eval: download-eval-data \
+	eval-annotated eval-raw eval-external-labelled eval-external-unlabelled
+
+## Train best trial, upload model to S3, then run full eval + plotting pipeline.
+hpo-train-and-eval: hpo-train-best hpo-upload-model hpo-eval
 
 ## Upload the best HPO model to S3 under models/<timestamp>/
 hpo-upload-model:

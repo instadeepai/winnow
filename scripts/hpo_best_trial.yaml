@@ -1,0 +1,20 @@
+# Best Optuna trial (#8) from the HPO run that completed 2026-05-18.
+# Metrics on PXD010154 validation: brier=0.089798, pr_auc=0.9544, ece=0.0563.
+# Train with: make hpo-train-best RUN_TS=<your_run_id>
+# Then evaluate: make hpo-eval RUN_TS=<your_run_id>
+
+trial: 8
+
+hyperparameters:
+  learning_rate: 0.001
+  weight_decay: 0.001
+  dropout: 0.3
+  hidden_dims: [64, 32]
+
+training:
+  batch_size: 8192
+  max_epochs: 200
+  n_iter_no_change: 10
+  tol: 0.0001
+  seed: 42
+  val_early_stopping_max_psms: null

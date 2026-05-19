@@ -11,22 +11,21 @@ builder:
 spec:
   debug:
       vscode:
-        enabled: true
+        enabled: false
         path: "/aichor/code"
         provider: "github"
   operator: jobset
   image: winnow-koina
-  command: /usr/local/bin/entrypoint.koina.sh make download-analysis-data download-analysis-models predict-all plot-all upload-analysis-plots CASANOVO_ROOT=analysis_data/casanovo PRIMENOVO_ROOT=analysis_data/primenovo
-
+  command: /usr/local/bin/entrypoint.koina.sh make hpo-train-and-eval RUN_TS=20260519T105122Z
   types:
     worker:
       count: 1
       resources:
-        cpus: 6
+        cpus: 9
         ramRatio: 8 # >= 2
 
         accelerators:
           gpu:
-            count: 0
+            count: 1
             type: gpu
             product: NVIDIA-H100-80GB-HBM3-MIG-3g.40gb

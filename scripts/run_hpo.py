@@ -136,6 +136,22 @@ def _suggest_from_spec(trial: optuna.Trial, name: str, spec: Dict[str, Any]) -> 
     )
 
 
+def _resolve_batch_size(trial_params: Dict[str, Any], fixed: Dict[str, Any]) -> int:
+    """Return batch_size from trial params or fixed config.
+
+    Optuna only records searched parameters in ``trial.params``; when
+    ``batch_size`` is under ``fixed`` in hpo_config.yaml it must be read
+    from there during retrain.
+    """
+    if "batch_size" in trial_params:
+        return int(trial_params["batch_size"])
+    if "batch_size" in fixed:
+        return int(fixed["batch_size"])
+    raise KeyError(
+        "batch_size must appear under search_space or fixed in hpo_config.yaml"
+    )
+
+
 def suggest_hyperparameters(trial: optuna.Trial, cfg: Dict[str, Any]) -> Dict[str, Any]:
     """Sample hyperparameters from the config-driven search space."""
     ss = cfg["search_space"]
@@ -147,12 +163,8 @@ def suggest_hyperparameters(trial: optuna.Trial, cfg: Dict[str, Any]) -> Dict[st
 
     if "batch_size" in ss:
         batch_size = _suggest_from_spec(trial, "batch_size", ss["batch_size"])
-    elif "batch_size" in fixed:
-        batch_size = fixed["batch_size"]
     else:
-        raise KeyError(
-            "batch_size must appear under search_space or fixed in hpo_config.yaml"
-        )
+        batch_size = _resolve_batch_size(trial.params, fixed)
 
     n_layers = _suggest_from_spec(trial, "n_layers", ss["n_layers"])
     unit_choices = sorted(ss["n_units"]["choices"])
@@ -408,7 +420,7 @@ def _retrain_and_save_best(
         learning_rate=best.params["learning_rate"],
         weight_decay=best.params["weight_decay"],
         max_epochs=fixed["max_epochs"],
-        batch_size=best.params["batch_size"],
+        batch_size=_resolve_batch_size(best.params, fixed),
         n_iter_no_change=fixed["n_iter_no_change"],
         tol=fixed["tol"],
         seed=fixed["seed"],
