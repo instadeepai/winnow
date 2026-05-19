@@ -16,7 +16,7 @@ spec:
         provider: "github"
   operator: jobset
   image: winnow-koina
-  command: /usr/local/bin/entrypoint.koina.sh make hpo-train-and-eval RUN_TS=20260519T105122Z
+  command: /usr/local/bin/entrypoint.koina.sh make train-and-eval-extra-small-mass-error-da
   types:
     worker:
       count: 1
