@@ -659,6 +659,21 @@ class MZTabDatasetLoader(DatasetLoader):
         self.column_mapping = self._resolve_column_mapping(column_mapping)
 
     @staticmethod
+    def _casanovo_score_to_log_prob(score: float) -> float:
+        """Convert a Casanovo confidence score to a log-probability.
+
+        Casanovo scores range from -1 to 1. Negative scores indicate a
+        precursor-mass mismatch: the original probability (in [0, 1]) was
+        penalised by subtracting 1, so we reverse this by adding 1 back.
+        See: https://casanovo.readthedocs.io/en/latest/file_formats.html#output-understanding-the-mztab-format
+
+        After recovering the probability we clamp to a small epsilon to
+        avoid log(0) = -inf.
+        """
+        prob = score + 1.0 if score < 0 else score
+        return float(np.log(max(prob, 1e-10)))
+
+    @staticmethod
     def _load_dataset(predictions_path: Path | str) -> pl.DataFrame:
         """Load predictions from mzTab file.
 
@@ -943,21 +958,6 @@ class MZTabDatasetLoader(DatasetLoader):
             .alias(tokenised_column)
         )
 
-    @staticmethod
-    def _casanovo_score_to_log_prob(score: float) -> float:
-        """Convert a Casanovo confidence score to a log-probability.
-
-        Casanovo scores range from -1 to 1. Negative scores indicate a
-        precursor-mass mismatch: the original probability (in [0, 1]) was
-        penalised by subtracting 1, so we reverse this by adding 1 back.
-        See: https://casanovo.readthedocs.io/en/latest/file_formats.html#output-understanding-the-mztab-format
-
-        After recovering the probability we clamp to a small epsilon to
-        avoid log(0) = -inf.
-        """
-        prob = score + 1.0 if score < 0 else score
-        return float(np.log(max(prob, 1e-10)))
-
     def _create_beam_predictions(
         self, predictions: pl.DataFrame, valid_spectra_indices: List[int]
     ) -> List[Optional[List[ScoredSequence]]]:
@@ -1190,13 +1190,12 @@ class PrimeNovoDatasetLoader(DatasetLoader):
           plus a ``title`` column from matchms metadata for joining to TSV ``label``.
     """
 
-    _df_from_matchms = staticmethod(_df_from_matchms)
-    _add_index_cols = staticmethod(_add_index_cols)
-
     # N-terminal modifications that PrimeNovo sometimes incorrectly places in
     # the middle of a peptide sequence. These are physically impossible and are
     # an artefact of the model lacking better alternatives during beam search.
     _NT_MODS = ("[+43.006-17.027]", "[+42.011]", "[+43.006]", "[-17.027]")
+    _df_from_matchms = staticmethod(_df_from_matchms)
+    _add_index_cols = staticmethod(_add_index_cols)
 
     def __init__(
         self,
@@ -1223,6 +1222,21 @@ class PrimeNovoDatasetLoader(DatasetLoader):
             isotope_error_range=isotope_error_range,
         )
         self.add_index_cols = add_index_cols
+
+    @classmethod
+    def _has_nterm_mod_in_middle(cls, seq: object) -> bool:
+        """Return True if *seq* contains an N-terminal mod anywhere but position 0."""
+        if not isinstance(seq, str):
+            return False
+        for mod in cls._NT_MODS:
+            if mod not in seq:
+                continue
+            first = seq.find(mod)
+            if first != 0:
+                return True
+            if seq.find(mod, len(mod)) != -1:
+                return True
+        return False
 
     def load(
         self, *, data_path: Path, predictions_path: Optional[Path] = None, **kwargs: Any
@@ -1395,21 +1409,6 @@ class PrimeNovoDatasetLoader(DatasetLoader):
                 "corresponding spectrum TITLE in the MGF."
             )
         return merged
-
-    @classmethod
-    def _has_nterm_mod_in_middle(cls, seq: object) -> bool:
-        """Return True if *seq* contains an N-terminal mod anywhere but position 0."""
-        if not isinstance(seq, str):
-            return False
-        for mod in cls._NT_MODS:
-            if mod not in seq:
-                continue
-            first = seq.find(mod)
-            if first != 0:
-                return True
-            if seq.find(mod, len(mod)) != -1:
-                return True
-        return False
 
     def _process_predictions(self, merged: pd.DataFrame) -> pd.DataFrame:
         """Tokenise predictions, filter bad N-terminal mods, rename ``score`` -> ``confidence``."""
