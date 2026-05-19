@@ -444,8 +444,7 @@ hpo: hpo-download-data
 		--pruning
 
 ## Train calibrator from scripts/hpo_best_trial.yaml (no Optuna).
-## Requires feature matrices (run hpo-download-data first if missing).
-hpo-train-best:
+hpo-train-best: hpo-download-data
 	mkdir -p $(HPO_OUTPUT_DIR)
 	uv run python scripts/train_hpo_model.py \
 		--train-features-path $(HPO_TRAIN_FEATURES) \
