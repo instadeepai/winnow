@@ -18,12 +18,15 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sys
 from pathlib import Path
 from typing import Any, Dict, Sequence
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.run_hpo import _instantiate_reference_calibrator, _load_config
-from winnow.datasets.feature_dataset import FeatureDataset
+from scripts.run_hpo import _instantiate_reference_calibrator, _load_config  # noqa: E402
+from winnow.datasets.feature_dataset import FeatureDataset  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
