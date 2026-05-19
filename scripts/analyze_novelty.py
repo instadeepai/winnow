@@ -6,9 +6,10 @@ from the standard tryptic database-search training distribution:
 
 1. **GluC (``gluc`` subcommand)** -- The model was trained on tryptic data.
    GluC cleaves after D/E, producing peptides whose C-terminus is typically
-   *not* K or R.  We classify high-confidence proteome-hit predictions by
-   whether their C-terminal residue is tryptic (K/R) or non-tryptic, and show
-   the calibrator assigns comparable scores to both groups.
+   *not* K or R.  We classify predictions by whether their C-terminal residue
+   is tryptic (K/R) or non-tryptic, report terminus proportions before and
+   after FDR, compare raw InstaNovo versus Winnow calibrated scores, and
+   quantify calibration shifts (``calibrated_confidence - confidence``).
 
    *Non-tryptic* is defined solely by the C-terminal residue of the
    mod-stripped, I/L-normalised prediction.  N-terminal context is not
@@ -61,7 +62,7 @@ _PALETTE = [
 _CORRECT_COLOUR = _PALETTE[0]
 _INCORRECT_COLOUR = _PALETTE[1]
 _NOVEL_COLOUR = _PALETTE[2]
-_MAIN_LINE_COLOUR = _PALETTE[0]
+_MAIN_LINE_COLOUR = _PALETTE[3]
 _RAW_LINE_COLOUR = _PALETTE[5]
 _IDEAL_LINE_COLOUR = _PALETTE[6]
 
@@ -73,6 +74,9 @@ _MOD_UNIMOD = re.compile(r"\[UNIMOD:\d+\]-?")
 _PROTEOME_JOIN_SEP = "\x1f"
 
 FDR_THRESHOLDS = [0.01, 0.05, 0.10]
+
+_GLUC_CALIBRATION_SCATTER_MAX_POINTS = 10_000
+_GLUC_CALIBRATION_SCATTER_RANDOM_STATE = 42
 
 FEATURE_COLUMNS = [
     "spectral_angle",
@@ -112,36 +116,78 @@ def _save(fig: plt.Figure, out_dir: Path, name: str) -> None:
     print(f"  saved {name}")
 
 
+def _subsample_psms(
+    df: pd.DataFrame,
+    max_points: int,
+    random_state: int = _GLUC_CALIBRATION_SCATTER_RANDOM_STATE,
+) -> pd.DataFrame:
+    """Return up to ``max_points`` rows without replacement."""
+    if len(df) <= max_points:
+        return df
+    return df.sample(n=max_points, random_state=random_state)
+
+
+def _annotate_single_bar(ax: plt.Axes, bar, fontsize: int) -> None:
+    h = float(bar.get_height())
+    if h == 0 or not np.isfinite(h):
+        return
+    va, offset = ("bottom", 4) if h >= 0 else ("top", -4)
+    ax.annotate(
+        f"{h:.2f}",
+        xy=(bar.get_x() + bar.get_width() / 2, h),
+        xytext=(0, offset),
+        textcoords="offset points",
+        ha="center",
+        va=va,
+        fontsize=fontsize,
+    )
+
+
+def _set_grouped_bar_ylim(
+    ax: plt.Axes,
+    max_h: float,
+    min_h: float,
+    *,
+    y_headroom: float,
+    symmetric_around_zero: bool,
+) -> None:
+    if symmetric_around_zero:
+        limit = max(abs(max_h), abs(min_h), 0.08) * y_headroom
+        ax.set_ylim(-limit, limit)
+        return
+    if min_h < 0:
+        span = max_h - min_h
+        pad = span * (y_headroom - 1) / 2 if span > 0 else 0.08
+        ax.set_ylim(min_h - pad, max_h + pad)
+        return
+    if max_h > 0:
+        ax.set_ylim(0, max(max_h * y_headroom, 0.08))
+
+
 def _annotate_grouped_bars(
     ax: plt.Axes,
     bar_groups: list,
     *,
     y_headroom: float = 1.28,
     fontsize: int = 8,
+    symmetric_around_zero: bool = False,
 ) -> None:
-    """Label grouped bars and reserve vertical space above the tallest bar."""
-    max_h = 0.0
-    for bar_group in bar_groups:
-        for bar in bar_group:
-            max_h = max(max_h, float(bar.get_height()))
+    """Label grouped bars and set y-limits with room for annotations."""
+    heights = [float(bar.get_height()) for bar_group in bar_groups for bar in bar_group]
+    if not heights:
+        return
 
     for bar_group in bar_groups:
         for bar in bar_group:
-            h = float(bar.get_height())
-            if h <= 0:
-                continue
-            ax.annotate(
-                f"{h:.2f}",
-                xy=(bar.get_x() + bar.get_width() / 2, h),
-                xytext=(0, 4),
-                textcoords="offset points",
-                ha="center",
-                va="bottom",
-                fontsize=fontsize,
-            )
+            _annotate_single_bar(ax, bar, fontsize)
 
-    if max_h > 0:
-        ax.set_ylim(0, max(max_h * y_headroom, 0.08))
+    _set_grouped_bar_ylim(
+        ax,
+        max(heights),
+        min(heights),
+        y_headroom=y_headroom,
+        symmetric_around_zero=symmetric_around_zero,
+    )
 
 
 def _strip_mods(seq: str) -> str:
@@ -159,7 +205,11 @@ def _load_data(predictions_dir: Path) -> pl.DataFrame:
     meta_path = predictions_dir / "metadata.csv"
     if meta_path.exists():
         meta = pl.read_csv(meta_path)
-        preds = preds.join(meta, on="spectrum_id", how="inner")
+        join_cols = ["spectrum_id"] + [
+            c for c in meta.columns if c != "spectrum_id" and c not in preds.columns
+        ]
+        if len(join_cols) > 1:
+            preds = preds.join(meta.select(join_cols), on="spectrum_id", how="inner")
     return preds
 
 
@@ -266,6 +316,131 @@ def _gluc_annotate(
     )
 
 
+def _terminus_count_row(
+    sub: pd.DataFrame,
+    *,
+    cohort: str,
+    fdr_threshold: float | None,
+) -> dict:
+    """Return one row of tryptic / non-tryptic counts for *sub*."""
+    n = len(sub)
+    n_tryp = int(sub["tryptic_cterm"].sum()) if n > 0 else 0
+    n_non = n - n_tryp
+    return {
+        "cohort": cohort,
+        "fdr_threshold": fdr_threshold,
+        "n": n,
+        "n_tryptic": n_tryp,
+        "n_non_tryptic": n_non,
+        "pct_tryptic": round(n_tryp / n * 100, 2) if n > 0 else 0.0,
+        "pct_non_tryptic": round(n_non / n * 100, 2) if n > 0 else 0.0,
+    }
+
+
+def _gluc_terminus_proportions_table(df: pd.DataFrame) -> pd.DataFrame:
+    """Tryptic versus non-tryptic counts across cohorts and FDR cutoffs."""
+    df = _add_q_values(df)
+    rows: list[dict] = [
+        _terminus_count_row(df, cohort="all_predictions", fdr_threshold=None),
+        _terminus_count_row(
+            df[df["proteome_hit"]],
+            cohort="proteome_hit",
+            fdr_threshold=None,
+        ),
+    ]
+    for fdr_t in FDR_THRESHOLDS:
+        retained = df[df["psm_q_value"] <= fdr_t]
+        rows.append(
+            _terminus_count_row(
+                retained,
+                cohort="retained_at_fdr",
+                fdr_threshold=fdr_t,
+            )
+        )
+        rows.append(
+            _terminus_count_row(
+                retained[retained["proteome_hit"]],
+                cohort="proteome_hit_at_fdr",
+                fdr_threshold=fdr_t,
+            )
+        )
+    return pd.DataFrame(rows)
+
+
+def _gluc_calibration_delta_rows(
+    sub: pd.DataFrame,
+    *,
+    cohort: str,
+    fdr_threshold: float | None,
+) -> list[dict]:
+    """Build calibration-shift summary rows for tryptic and non-tryptic groups."""
+    out: list[dict] = []
+    for tryptic, label in ((True, "tryptic"), (False, "non_tryptic")):
+        grp = sub[sub["tryptic_cterm"] == tryptic]
+        n = len(grp)
+        out.append(
+            {
+                "cohort": cohort,
+                "fdr_threshold": fdr_threshold,
+                "terminus_group": label,
+                "n": n,
+                "mean_confidence": (
+                    round(float(grp["confidence"].mean()), 4) if n > 0 else float("nan")
+                ),
+                "mean_calibrated_confidence": (
+                    round(float(grp["calibrated_confidence"].mean()), 4)
+                    if n > 0
+                    else float("nan")
+                ),
+                "mean_delta_confidence": (
+                    round(float(grp["delta_confidence"].mean()), 4)
+                    if n > 0
+                    else float("nan")
+                ),
+                "median_delta_confidence": (
+                    round(float(grp["delta_confidence"].median()), 4)
+                    if n > 0
+                    else float("nan")
+                ),
+            }
+        )
+    return out
+
+
+def _gluc_calibration_delta_table(df: pd.DataFrame) -> pd.DataFrame:
+    """Mean calibration shift (calibrated - raw) by terminus and cohort."""
+    if "confidence" not in df.columns:
+        return pd.DataFrame()
+
+    work = _add_q_values(df.copy())
+    work["delta_confidence"] = work["calibrated_confidence"] - work["confidence"]
+    work = work.dropna(
+        subset=["confidence", "calibrated_confidence", "delta_confidence"]
+    )
+
+    rows: list[dict] = []
+    rows.extend(
+        _gluc_calibration_delta_rows(work, cohort="all_predictions", fdr_threshold=None)
+    )
+    rows.extend(
+        _gluc_calibration_delta_rows(
+            work[work["proteome_hit"]],
+            cohort="proteome_hit",
+            fdr_threshold=None,
+        )
+    )
+    for fdr_t in FDR_THRESHOLDS:
+        retained = work[(work["psm_q_value"] <= fdr_t) & work["proteome_hit"]]
+        rows.extend(
+            _gluc_calibration_delta_rows(
+                retained,
+                cohort="proteome_hit_at_fdr",
+                fdr_threshold=fdr_t,
+            )
+        )
+    return pd.DataFrame(rows)
+
+
 def _gluc_summary_table(df: pd.DataFrame) -> pd.DataFrame:
     """Build the tryptic-summary table at each FDR threshold."""
     df = _add_q_values(df)
@@ -304,11 +479,25 @@ def _gluc_summary_table(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _plot_gluc_conf_by_terminus(
+def _gluc_score_label(score_col: str) -> str:
+    if score_col == "confidence":
+        return "Raw InstaNovo confidence"
+    return "Calibrated confidence"
+
+
+def _plot_gluc_score_by_terminus(
     df: pd.DataFrame,
     out_dir: Path,
+    *,
+    score_col: str,
+    save_name: str,
+    suptitle: str,
 ) -> None:
-    """Violin plot of calibrated confidence split by C-terminal residue."""
+    """Violin plot of a score column split by C-terminal residue at each FDR."""
+    if score_col not in df.columns:
+        print(f"  skipping {save_name} (missing {score_col})")
+        return
+
     df = _add_q_values(df)
     n_cols = len(FDR_THRESHOLDS)
     fig, axes = plt.subplots(1, n_cols, figsize=(5 * n_cols, 5), sharey=True)
@@ -316,12 +505,14 @@ def _plot_gluc_conf_by_terminus(
         axes = [axes]
 
     palette = {"Tryptic (K/R)": _MAIN_LINE_COLOUR, "Non-tryptic": _NOVEL_COLOUR}
+    y_label = _gluc_score_label(score_col)
 
     for ax, fdr_t in zip(axes, FDR_THRESHOLDS):
         retained = df[(df["psm_q_value"] <= fdr_t) & df["proteome_hit"]]
+        retained = retained.dropna(subset=[score_col])
         if len(retained) < 5:
             ax.set_title(
-                f"Too few proteome-hit PSMs at {int(fdr_t * 100)}% FDR "
+                f"Too few proteome-hit PSMs at {int(fdr_t * 100)}% FDR\n"
                 f"(n={len(retained):,})"
             )
             ax.set_visible(False)
@@ -333,7 +524,7 @@ def _plot_gluc_conf_by_terminus(
         sns.violinplot(
             data=retained,
             x="C-terminus",
-            y="calibrated_confidence",
+            y=score_col,
             palette=palette,
             ax=ax,
             inner="quartile",
@@ -341,36 +532,60 @@ def _plot_gluc_conf_by_terminus(
             linewidth=0.8,
         )
         ax.set_xlabel("")
-        ax.set_ylabel("Calibrated confidence")
+        ax.set_ylabel(y_label)
         pct = int(fdr_t * 100)
         ax.set_title(
-            f"Proteome-hit identifications at {pct}% FDR (n={len(retained):,})"
+            f"Proteome-hit identifications at {pct}% FDR\n(n={len(retained):,})"
         )
         ax.grid(False)
         _spine_fmt(ax)
 
-    fig.suptitle(
-        "Calibrated confidence for HeLa degradome proteome-hit PSMs\n"
-        "by C-terminal residue",
-        fontsize=13,
-    )
+    fig.suptitle(suptitle, fontsize=13)
     fig.tight_layout()
-    _save(fig, out_dir, "gluc_conf_by_terminus")
+    _save(fig, out_dir, save_name)
 
 
-def _plot_gluc_score_histograms(
-    df: pd.DataFrame,
+def _plot_gluc_conf_by_terminus(df: pd.DataFrame, out_dir: Path) -> None:
+    """Violin plot of calibrated confidence split by C-terminal residue."""
+    _plot_gluc_score_by_terminus(
+        df,
+        out_dir,
+        score_col="calibrated_confidence",
+        save_name="gluc_conf_by_terminus",
+        suptitle=(
+            "Calibrated confidence for HeLa degradome proteome-hit PSMs\n"
+            "by C-terminal residue"
+        ),
+    )
+
+
+def _plot_gluc_raw_conf_by_terminus(df: pd.DataFrame, out_dir: Path) -> None:
+    """Violin plot of raw InstaNovo confidence split by C-terminal residue."""
+    _plot_gluc_score_by_terminus(
+        df,
+        out_dir,
+        score_col="confidence",
+        save_name="gluc_raw_conf_by_terminus",
+        suptitle=(
+            "Raw InstaNovo confidence for HeLa degradome proteome-hit PSMs\n"
+            "by C-terminal residue"
+        ),
+    )
+
+
+def _plot_gluc_overlapping_score_histogram(
+    tryp: np.ndarray,
+    non_tryp: np.ndarray,
+    *,
+    score_col: str,
+    title: str,
     out_dir: Path,
+    save_name: str,
 ) -> None:
-    """Overlapping histograms at 5% FDR: tryptic vs non-tryptic."""
-    df = _add_q_values(df)
-    retained = df[(df["psm_q_value"] <= 0.05) & df["proteome_hit"]]
-    if len(retained) < 10:
-        print("  skipping gluc_score_histograms (too few PSMs)")
+    """Overlapping tryptic / non-tryptic histogram with KDE overlays."""
+    if len(tryp) + len(non_tryp) < 2:
+        print(f"  skipping {save_name} (too few PSMs)")
         return
-
-    tryp = retained[retained["tryptic_cterm"]]["calibrated_confidence"].values
-    non_tryp = retained[~retained["tryptic_cterm"]]["calibrated_confidence"].values
 
     fig, ax = plt.subplots(figsize=(7, 5))
     bins = 50
@@ -379,7 +594,7 @@ def _plot_gluc_score_histograms(
         tryp,
         bins=bins,
         alpha=0.6,
-        label="Tryptic (K/R)",
+        label=f"Tryptic (K/R, n={len(tryp):,})",
         density=False,
         edgecolor="black",
         color=_MAIN_LINE_COLOUR,
@@ -388,14 +603,16 @@ def _plot_gluc_score_histograms(
         non_tryp,
         bins=bins,
         alpha=0.6,
-        label="Non-tryptic",
+        label=f"Non-tryptic (n={len(non_tryp):,})",
         density=False,
         edgecolor="black",
         color=_NOVEL_COLOUR,
     )
 
-    all_vals = np.concatenate([tryp, non_tryp])
-    x_min, x_max = all_vals.min(), all_vals.max()
+    all_vals = np.concatenate([tryp, non_tryp]) if len(non_tryp) else tryp
+    x_min, x_max = float(all_vals.min()), float(all_vals.max())
+    if x_max <= x_min:
+        x_max = x_min + 1e-6
     x_grid = np.linspace(x_min, x_max, 300)
     bin_width = (x_max - x_min) / bins if bins > 1 else 1.0
 
@@ -406,14 +623,326 @@ def _plot_gluc_score_histograms(
         y_non = gaussian_kde(non_tryp)(x_grid) * len(non_tryp) * bin_width
         ax.plot(x_grid, y_non, color=_NOVEL_COLOUR, lw=1.5)
 
-    ax.set_xlabel("Calibrated confidence")
+    ax.set_xlabel(_gluc_score_label(score_col))
     ax.set_ylabel("Frequency")
-    ax.set_title("Calibrated confidence for HeLa degradome proteome hits at 5% FDR")
+    ax.set_title(title)
     ax.legend(loc="upper center")
     ax.grid(False)
     _spine_fmt(ax)
     fig.tight_layout()
-    _save(fig, out_dir, "gluc_score_histograms")
+    _save(fig, out_dir, save_name)
+
+
+def _plot_gluc_score_histograms(
+    df: pd.DataFrame,
+    out_dir: Path,
+    *,
+    score_col: str,
+    save_name: str,
+    title: str,
+    subset: pd.DataFrame | None = None,
+    min_psms: int = 10,
+) -> None:
+    """Overlapping tryptic / non-tryptic histograms for a score column."""
+    if score_col not in df.columns:
+        print(f"  skipping {save_name} (missing {score_col})")
+        return
+
+    retained = df if subset is None else subset
+    retained = retained.dropna(subset=[score_col])
+    if len(retained) < min_psms:
+        print(f"  skipping {save_name} (too few PSMs)")
+        return
+
+    tryp = retained.loc[retained["tryptic_cterm"], score_col].to_numpy()
+    non_tryp = retained.loc[~retained["tryptic_cterm"], score_col].to_numpy()
+    _plot_gluc_overlapping_score_histogram(
+        tryp,
+        non_tryp,
+        score_col=score_col,
+        title=title,
+        out_dir=out_dir,
+        save_name=save_name,
+    )
+
+
+def _plot_gluc_score_histograms_at_fdr(df: pd.DataFrame, out_dir: Path) -> None:
+    """Calibrated confidence histogram at 5% FDR for proteome hits."""
+    df = _add_q_values(df)
+    retained = df[(df["psm_q_value"] <= 0.05) & df["proteome_hit"]]
+    _plot_gluc_score_histograms(
+        df,
+        out_dir,
+        score_col="calibrated_confidence",
+        save_name="gluc_score_histograms",
+        title="Calibrated confidence for HeLa degradome proteome hits at 5% FDR",
+        subset=retained,
+    )
+
+
+def _plot_gluc_raw_score_histograms_at_fdr(df: pd.DataFrame, out_dir: Path) -> None:
+    """Raw InstaNovo confidence histogram at 5% FDR for proteome hits."""
+    df = _add_q_values(df)
+    retained = df[(df["psm_q_value"] <= 0.05) & df["proteome_hit"]]
+    _plot_gluc_score_histograms(
+        df,
+        out_dir,
+        score_col="confidence",
+        save_name="gluc_raw_score_histograms",
+        title="Raw InstaNovo confidence for HeLa degradome proteome hits at 5% FDR",
+        subset=retained,
+    )
+
+
+def _plot_gluc_full_score_histograms(df: pd.DataFrame, out_dir: Path) -> None:
+    """Full-dataset raw and calibrated histograms by C-terminal residue."""
+    all_preds = df.dropna(subset=["calibrated_confidence"])
+    _plot_gluc_score_histograms(
+        df,
+        out_dir,
+        score_col="calibrated_confidence",
+        save_name="gluc_calibrated_score_histogram_full",
+        title=(
+            "Calibrated confidence for all HeLa degradome predictions\n"
+            "by C-terminal residue"
+        ),
+        subset=all_preds,
+        min_psms=2,
+    )
+    if "confidence" not in df.columns:
+        print("  skipping gluc_raw_score_histogram_full (missing confidence)")
+        return
+    raw_preds = df.dropna(subset=["confidence"])
+    _plot_gluc_score_histograms(
+        df,
+        out_dir,
+        score_col="confidence",
+        save_name="gluc_raw_score_histogram_full",
+        title=(
+            "Raw InstaNovo confidence for all HeLa degradome predictions\n"
+            "by C-terminal residue"
+        ),
+        subset=raw_preds,
+        min_psms=2,
+    )
+
+    has_raw = "confidence" in df.columns
+    panels: list[tuple[str, str, pd.DataFrame]] = [
+        (
+            "calibrated_confidence",
+            "Calibrated confidence",
+            all_preds,
+        ),
+    ]
+    if has_raw:
+        panels.append(("confidence", "Raw InstaNovo confidence", raw_preds))
+
+    n_cols = len(panels)
+    fig, axes = plt.subplots(1, n_cols, figsize=(7 * n_cols, 5), sharey=True)
+    if n_cols == 1:
+        axes = [axes]
+
+    bins = 50
+    for ax, (score_col, y_label, subset) in zip(axes, panels):
+        tryp = subset.loc[subset["tryptic_cterm"], score_col].to_numpy()
+        non_tryp = subset.loc[~subset["tryptic_cterm"], score_col].to_numpy()
+        ax.hist(
+            tryp,
+            bins=bins,
+            alpha=0.6,
+            label=f"Tryptic (K/R, n={len(tryp):,})",
+            density=False,
+            edgecolor="black",
+            color=_MAIN_LINE_COLOUR,
+        )
+        ax.hist(
+            non_tryp,
+            bins=bins,
+            alpha=0.6,
+            label=f"Non-tryptic (n={len(non_tryp):,})",
+            density=False,
+            edgecolor="black",
+            color=_NOVEL_COLOUR,
+        )
+        ax.set_xlabel(y_label)
+        ax.set_ylabel("Frequency")
+        ax.set_title(f"All predictions (n={len(subset):,})")
+        ax.legend(loc="upper center", fontsize=9)
+        ax.grid(False)
+        _spine_fmt(ax)
+
+    fig.suptitle(
+        "Score distributions for all HeLa degradome predictions by C-terminal residue",
+        fontsize=13,
+    )
+    fig.tight_layout()
+    _save(fig, out_dir, "gluc_score_histogram_full_panel")
+
+
+def _plot_gluc_calibration_scatter(df: pd.DataFrame, out_dir: Path) -> None:
+    """Subsampled scatter of raw versus calibrated confidence by C-terminus."""
+    if "confidence" not in df.columns:
+        print("  skipping gluc_calibration_scatter (missing confidence)")
+        return
+
+    work = df.dropna(subset=["confidence", "calibrated_confidence"])
+    n_total = len(work)
+    if n_total < 10:
+        print("  skipping gluc_calibration_scatter (too few PSMs)")
+        return
+
+    plot_df = _subsample_psms(work, _GLUC_CALIBRATION_SCATTER_MAX_POINTS)
+    n_show = len(plot_df)
+    fig, ax = plt.subplots(figsize=(7.5, 7))
+    panels = [
+        ("Tryptic (K/R)", _MAIN_LINE_COLOUR, True),
+        ("Non-tryptic", _NOVEL_COLOUR, False),
+    ]
+    for label, colour, tryptic in panels:
+        sub = plot_df.loc[plot_df["tryptic_cterm"] == tryptic]
+        if len(sub) == 0:
+            continue
+        ax.scatter(
+            sub["confidence"],
+            sub["calibrated_confidence"],
+            c=colour,
+            s=12,
+            alpha=0.3,
+            rasterized=True,
+            label=f"{label}",
+        )
+
+    ax.plot(
+        [-0.01, 1.01],
+        [-0.01, 1.01],
+        ls="--",
+        color="black",
+        lw=1,
+        label="No recalibration",
+        zorder=5,
+    )
+    ax.set_xlim(-0.01, 1.01)
+    ax.set_ylim(-0.01, 1.01)
+    ax.set_xlabel("Raw InstaNovo confidence")
+    ax.set_ylabel("Calibrated confidence")
+    if n_show < n_total:
+        ax.set_title("Raw vs calibrated confidence for all HeLa degradome predictions")
+    else:
+        ax.set_title("All HeLa degradome predictions")
+    ax.legend(loc="lower right", fontsize=9)
+    ax.grid(False)
+    _spine_fmt(ax)
+    fig.tight_layout()
+    _save(fig, out_dir, "gluc_calibration_scatter")
+
+
+def _plot_gluc_delta_by_terminus(df: pd.DataFrame, out_dir: Path) -> None:
+    """Calibration shift (calibrated - raw) by C-terminal residue."""
+    if "confidence" not in df.columns:
+        print("  skipping gluc_delta_by_terminus (missing confidence)")
+        return
+
+    df = _add_q_values(df)
+    n_cols = len(FDR_THRESHOLDS)
+    fig, axes = plt.subplots(1, n_cols, figsize=(5 * n_cols, 5), sharey=True)
+    if n_cols == 1:
+        axes = [axes]
+
+    palette = {"Tryptic (K/R)": _MAIN_LINE_COLOUR, "Non-tryptic": _NOVEL_COLOUR}
+    work = df.copy()
+    work["delta_confidence"] = work["calibrated_confidence"] - work["confidence"]
+
+    for ax, fdr_t in zip(axes, FDR_THRESHOLDS):
+        retained = work[(work["psm_q_value"] <= fdr_t) & work["proteome_hit"]]
+        retained = retained.dropna(subset=["delta_confidence"])
+        if len(retained) < 5:
+            ax.set_title(
+                f"Too few proteome-hit PSMs at {int(fdr_t * 100)}% FDR\n"
+                f"(n={len(retained):,})"
+            )
+            ax.set_visible(False)
+            continue
+        retained = retained.copy()
+        retained["C-terminus"] = retained["tryptic_cterm"].map(
+            {True: "Tryptic (K/R)", False: "Non-tryptic"},
+        )
+        sns.violinplot(
+            data=retained,
+            x="C-terminus",
+            y="delta_confidence",
+            palette=palette,
+            ax=ax,
+            inner="quartile",
+            cut=0,
+            linewidth=0.8,
+        )
+        ax.axhline(0.0, ls="--", color=_IDEAL_LINE_COLOUR, lw=1)
+        ax.set_xlabel("")
+        ax.set_ylabel("Calibration shift (calibrated − raw)")
+        pct = int(fdr_t * 100)
+        ax.set_title(
+            f"Proteome-hit identifications at {pct}% FDR\n(n={len(retained):,})"
+        )
+        ax.grid(False)
+        _spine_fmt(ax)
+
+    fig.suptitle(
+        "Winnow calibration shift for HeLa degradome proteome-hit PSMs\n"
+        "by C-terminal residue",
+        fontsize=13,
+    )
+    fig.tight_layout()
+    _save(fig, out_dir, "gluc_delta_by_terminus")
+
+
+def _pooled_feature_mean_std(retained: pd.DataFrame, col: str) -> tuple[float, float]:
+    vals = retained[col].dropna()
+    if len(vals) == 0:
+        return float("nan"), float("nan")
+    if len(vals) == 1:
+        return float(vals.iloc[0]), float("nan")
+    return float(vals.mean()), float(vals.std())
+
+
+def _feature_group_median_z_row(
+    sub: pd.DataFrame,
+    available: list[str],
+    pooled: dict[str, tuple[float, float]],
+) -> dict[str, float]:
+    row: dict[str, float] = {}
+    for col in available:
+        vals = sub[col].dropna()
+        if len(vals) == 0:
+            row[f"median_{col}"] = float("nan")
+            row[f"z_median_{col}"] = float("nan")
+            continue
+        med = float(vals.median())
+        row[f"median_{col}"] = round(med, 4)
+        mu, std = pooled[col]
+        if np.isnan(std) or std == 0:
+            row[f"z_median_{col}"] = float("nan")
+        else:
+            row[f"z_median_{col}"] = round((med - mu) / std, 4)
+    return row
+
+
+def _feature_median_z_score_table(
+    retained: pd.DataFrame,
+    available: list[str],
+    groups: list[tuple[str, str, pd.Series]],
+    *,
+    group_col: str,
+) -> pd.DataFrame:
+    """Per-group feature medians and z-scores relative to *retained* PSMs."""
+    pooled = {col: _pooled_feature_mean_std(retained, col) for col in available}
+
+    rows: list[dict] = []
+    for group_key, _label, mask in groups:
+        sub = retained[mask]
+        row: dict = {group_col: group_key, "n": len(sub)}
+        row.update(_feature_group_median_z_row(sub, available, pooled))
+        rows.append(row)
+    return pd.DataFrame(rows)
 
 
 def _gluc_feature_table(df: pd.DataFrame) -> pd.DataFrame:
@@ -424,20 +953,82 @@ def _gluc_feature_table(df: pd.DataFrame) -> pd.DataFrame:
     if not available:
         return pd.DataFrame()
 
-    rows: list[dict] = []
-    for group_name, mask in [
-        ("tryptic", retained["tryptic_cterm"]),
-        ("non_tryptic", ~retained["tryptic_cterm"]),
-    ]:
-        sub = retained[mask]
-        row: dict = {"group": group_name, "n": len(sub)}
-        for col in available:
-            vals = sub[col].dropna()
-            row[f"median_{col}"] = (
-                round(float(vals.median()), 4) if len(vals) > 0 else float("nan")
-            )
-        rows.append(row)
-    return pd.DataFrame(rows)
+    return _feature_median_z_score_table(
+        retained,
+        available,
+        [
+            ("tryptic", "Tryptic (K/R)", retained["tryptic_cterm"]),
+            ("non_tryptic", "Non-tryptic", ~retained["tryptic_cterm"]),
+        ],
+        group_col="group",
+    )
+
+
+def _plot_grouped_feature_z_scores(
+    feat_df: pd.DataFrame,
+    *,
+    group_col: str,
+    out_dir: Path,
+    save_name: str,
+    title: str,
+    group_style: list[tuple[str, str, str]],
+) -> None:
+    """Grouped bar chart of pooled z-scored feature medians."""
+    if feat_df.empty:
+        print(f"  skipping {save_name} (no feature data)")
+        return
+
+    z_cols = [c for c in feat_df.columns if c.startswith("z_median_")]
+    if not z_cols:
+        print(f"  skipping {save_name} (no z-scored feature columns)")
+        return
+
+    plot_df = feat_df.set_index(group_col)
+    feature_labels = [_nice_feature_label(c.replace("z_median_", "")) for c in z_cols]
+    x = np.arange(len(z_cols))
+
+    present = [
+        (key, label, colour)
+        for key, label, colour in group_style
+        if key in plot_df.index
+    ]
+    n_groups = len(present)
+    total_width = 0.7
+    bar_w = total_width / max(n_groups, 1)
+
+    fig, ax = plt.subplots(figsize=(9, 6.5))
+    ax.axhline(0.0, color=_IDEAL_LINE_COLOUR, lw=0.8, zorder=0)
+    bar_groups = []
+    for plot_i, (group_key, label, colour) in enumerate(present):
+        offset = (plot_i - (n_groups - 1) / 2) * bar_w
+        vals = plot_df.loc[group_key, z_cols].to_numpy(dtype=float)
+        bars = ax.bar(
+            x + offset,
+            vals,
+            bar_w,
+            label=label,
+            color=colour,
+            edgecolor="black",
+            linewidth=1,
+        )
+        bar_groups.append(bars)
+
+    if not bar_groups:
+        print(f"  skipping {save_name} (no groups to plot)")
+        plt.close(fig)
+        return
+
+    _annotate_grouped_bars(ax, bar_groups, symmetric_around_zero=True)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(feature_labels, rotation=30, ha="right")
+    ax.set_ylabel("Median z-score (vs pooled PSMs at 5% FDR)")
+    ax.set_title(title)
+    ax.legend(loc="upper left")
+    ax.grid(False)
+    _spine_fmt(ax)
+    fig.tight_layout()
+    _save(fig, out_dir, save_name)
 
 
 def _plot_gluc_feature_comparison(
@@ -445,70 +1036,20 @@ def _plot_gluc_feature_comparison(
     out_dir: Path,
 ) -> None:
     """Grouped bar chart of median features, tryptic vs non-tryptic."""
-    if feat_df.empty:
-        print("  skipping gluc_feature_comparison (no feature data)")
-        return
-
-    med_cols = [c for c in feat_df.columns if c.startswith("median_")]
-    if not med_cols:
-        return
-
-    raw = feat_df[["group"] + med_cols].set_index("group")
-    col_min = raw.min()
-    col_max = raw.max()
-    denom = col_max - col_min
-    denom[denom == 0] = 1.0
-    normed = (raw - col_min) / denom
-
-    feature_labels = [_nice_feature_label(c.replace("median_", "")) for c in med_cols]
-    x = np.arange(len(med_cols))
-    width, gap = 0.38, 0.08
-
-    fig, ax = plt.subplots(figsize=(9, 6.5))
-    tryp_vals = (
-        normed.loc["tryptic"].values
-        if "tryptic" in normed.index
-        else np.zeros(len(med_cols))
+    _plot_grouped_feature_z_scores(
+        feat_df,
+        group_col="group",
+        out_dir=out_dir,
+        save_name="gluc_feature_comparison",
+        title=(
+            "Median feature values for HeLa degradome tryptic versus "
+            "non-tryptic proteome hits at 5% FDR"
+        ),
+        group_style=[
+            ("tryptic", "Tryptic (K/R)", _MAIN_LINE_COLOUR),
+            ("non_tryptic", "Non-tryptic", _NOVEL_COLOUR),
+        ],
     )
-    non_vals = (
-        normed.loc["non_tryptic"].values
-        if "non_tryptic" in normed.index
-        else np.zeros(len(med_cols))
-    )
-
-    bars_t = ax.bar(
-        x - width / 2 - gap / 2,
-        tryp_vals,
-        width,
-        label="Tryptic (K/R)",
-        color=_MAIN_LINE_COLOUR,
-        edgecolor="black",
-        linewidth=1,
-    )
-    bars_n = ax.bar(
-        x + width / 2 + gap / 2,
-        non_vals,
-        width,
-        label="Non-tryptic",
-        color=_NOVEL_COLOUR,
-        edgecolor="black",
-        linewidth=1,
-    )
-
-    _annotate_grouped_bars(ax, [bars_t, bars_n])
-
-    ax.set_xticks(x)
-    ax.set_xticklabels(feature_labels, rotation=30, ha="right")
-    ax.set_ylabel("Normalised median value")
-    ax.set_title(
-        "Median feature values for HeLa degradome tryptic versus "
-        "non-tryptic proteome hits at 5% FDR"
-    )
-    ax.legend(loc="upper left")
-    ax.grid(False)
-    _spine_fmt(ax)
-    fig.tight_layout()
-    _save(fig, out_dir, "gluc_feature_comparison")
 
 
 @app.command()
@@ -547,6 +1088,19 @@ def gluc(
     summary.to_csv(output_dir / "gluc_tryptic_summary.csv", index=False)
     print(summary.to_string(index=False))
 
+    print("Building terminus proportion table")
+    prop_df = _gluc_terminus_proportions_table(df)
+    prop_df.to_csv(output_dir / "gluc_terminus_proportions.csv", index=False)
+    print(prop_df.to_string(index=False))
+
+    if "confidence" in df.columns:
+        print("Building calibration shift table")
+        delta_df = _gluc_calibration_delta_table(df)
+        delta_df.to_csv(output_dir / "gluc_calibration_delta_summary.csv", index=False)
+        print(delta_df.to_string(index=False))
+    else:
+        print("  skipping calibration shift table (missing raw confidence)")
+
     print("Building feature comparison table")
     feat_df = _gluc_feature_table(df)
     if not feat_df.empty:
@@ -554,7 +1108,12 @@ def gluc(
 
     print("Plotting")
     _plot_gluc_conf_by_terminus(df, output_dir)
-    _plot_gluc_score_histograms(df, output_dir)
+    _plot_gluc_raw_conf_by_terminus(df, output_dir)
+    _plot_gluc_score_histograms_at_fdr(df, output_dir)
+    _plot_gluc_raw_score_histograms_at_fdr(df, output_dir)
+    _plot_gluc_full_score_histograms(df, output_dir)
+    _plot_gluc_calibration_scatter(df, output_dir)
+    _plot_gluc_delta_by_terminus(df, output_dir)
     _plot_gluc_feature_comparison(feat_df, output_dir)
 
     print(f"\nGluC analysis complete. Output in {output_dir}")
@@ -674,7 +1233,7 @@ def _plot_proteometools_conf_by_category(
         retained = df[df["psm_q_value"] <= fdr_t].copy()
         if len(retained) < 5:
             ax.set_title(
-                f"Too few retained predictions at {int(fdr_t * 100)}% FDR "
+                f"Too few retained predictions at {int(fdr_t * 100)}% FDR\n"
                 f"(n={len(retained):,})"
             )
             ax.set_visible(False)
@@ -702,7 +1261,7 @@ def _plot_proteometools_conf_by_category(
         ax.set_ylabel("Calibrated confidence")
         pct = int(fdr_t * 100)
         ax.set_title(
-            f"Retained ProteomeTools predictions at {pct}% FDR (n={len(retained):,})"
+            f"Retained ProteomeTools predictions at\n{pct}% FDR (n={len(retained):,})"
         )
         ax.tick_params(axis="x", rotation=20)
         ax.grid(False)
@@ -777,17 +1336,24 @@ def _proteometools_feature_table(df: pd.DataFrame) -> pd.DataFrame:
     if not available:
         return pd.DataFrame()
 
-    rows: list[dict] = []
-    for cat in ["exact_match", "subsequence", "neither"]:
-        sub = retained[retained["novelty_category"] == cat]
-        row: dict = {"category": cat, "n": len(sub)}
-        for col in available:
-            vals = sub[col].dropna()
-            row[f"median_{col}"] = (
-                round(float(vals.median()), 4) if len(vals) > 0 else float("nan")
-            )
-        rows.append(row)
-    return pd.DataFrame(rows)
+    return _feature_median_z_score_table(
+        retained,
+        available,
+        [
+            (
+                "exact_match",
+                "Exact match",
+                retained["novelty_category"] == "exact_match",
+            ),
+            (
+                "subsequence",
+                "Novel (subsequence)",
+                retained["novelty_category"] == "subsequence",
+            ),
+            ("neither", "Neither", retained["novelty_category"] == "neither"),
+        ],
+        group_col="category",
+    )
 
 
 def _plot_proteometools_feature_comparison(
@@ -795,68 +1361,21 @@ def _plot_proteometools_feature_comparison(
     out_dir: Path,
 ) -> None:
     """Grouped bar chart of median features by category."""
-    if feat_df.empty:
-        print("  skipping proteometools_feature_comparison (no feature data)")
-        return
-
-    med_cols = [c for c in feat_df.columns if c.startswith("median_")]
-    if not med_cols:
-        return
-
-    raw = feat_df[["category"] + med_cols].set_index("category")
-    col_min = raw.min()
-    col_max = raw.max()
-    denom = col_max - col_min
-    denom[denom == 0] = 1.0
-    normed = (raw - col_min) / denom
-
-    feature_labels = [_nice_feature_label(c.replace("median_", "")) for c in med_cols]
-    x = np.arange(len(med_cols))
-    n_groups = len(normed)
-    total_width = 0.7
-    bar_w = total_width / n_groups
-
-    colours = {
-        "exact_match": _MAIN_LINE_COLOUR,
-        "subsequence": _NOVEL_COLOUR,
-        "neither": _INCORRECT_COLOUR,
-    }
-    labels = {
-        "exact_match": "Exact match",
-        "subsequence": "Novel (subsequence)",
-        "neither": "Neither",
-    }
-
-    fig, ax = plt.subplots(figsize=(9, 6.5))
-    all_bars = []
-    for i, cat in enumerate(normed.index):
-        offset = (i - (n_groups - 1) / 2) * bar_w
-        vals = normed.loc[cat].values
-        bars = ax.bar(
-            x + offset,
-            vals,
-            bar_w,
-            label=labels.get(cat, cat),
-            color=colours.get(cat, _PALETTE[i % len(_PALETTE)]),
-            edgecolor="black",
-            linewidth=1,
-        )
-        all_bars.append(bars)
-
-    _annotate_grouped_bars(ax, all_bars)
-
-    ax.set_xticks(x)
-    ax.set_xticklabels(feature_labels, rotation=30, ha="right")
-    ax.set_ylabel("Normalised median value")
-    ax.set_title(
-        "Median feature values for ProteomeTools predictions by novelty "
-        "category at 5% FDR"
+    _plot_grouped_feature_z_scores(
+        feat_df,
+        group_col="category",
+        out_dir=out_dir,
+        save_name="proteometools_feature_comparison",
+        title=(
+            "Median feature values for ProteomeTools predictions by novelty "
+            "category at 5% FDR"
+        ),
+        group_style=[
+            ("exact_match", "Exact match", _MAIN_LINE_COLOUR),
+            ("subsequence", "Novel (subsequence)", _NOVEL_COLOUR),
+            ("neither", "Neither", _INCORRECT_COLOUR),
+        ],
     )
-    ax.legend(loc="upper left")
-    ax.grid(False)
-    _spine_fmt(ax)
-    fig.tight_layout()
-    _save(fig, out_dir, "proteometools_feature_comparison")
 
 
 @app.command()
@@ -946,6 +1465,84 @@ def proteometools(
 # ── Summary figure ────────────────────────────────────────────────────
 
 
+def _summary_count(row: pd.DataFrame, column: str) -> int:
+    if len(row) == 0:
+        return 0
+    return int(row[column].iloc[0])
+
+
+def _novelty_summary_counts(
+    gluc_df: pd.DataFrame, pt_df: pd.DataFrame
+) -> tuple[list[int], list[int], list[int], list[int]]:
+    gluc_total, gluc_novel, pt_total, pt_novel = [], [], [], []
+    for fdr_t in FDR_THRESHOLDS:
+        g_row = gluc_df[gluc_df["fdr_threshold"] == fdr_t]
+        gluc_total.append(_summary_count(g_row, "n_proteome_hit"))
+        gluc_novel.append(_summary_count(g_row, "n_non_tryptic_hit"))
+
+        p_row = pt_df[pt_df["fdr_threshold"] == fdr_t]
+        pt_total.append(_summary_count(p_row, "n_retained"))
+        pt_novel.append(_summary_count(p_row, "n_subsequence"))
+    return gluc_total, gluc_novel, pt_total, pt_novel
+
+
+def _annotate_positive_bars(ax: plt.Axes, bars) -> None:
+    for bar in bars:
+        h = bar.get_height()
+        if h <= 0:
+            continue
+        ax.annotate(
+            f"{h:,}",
+            xy=(bar.get_x() + bar.get_width() / 2, h),
+            xytext=(0, 3),
+            textcoords="offset points",
+            ha="center",
+            va="bottom",
+            fontsize=10,
+        )
+
+
+def _plot_novelty_summary_bars(
+    ax: plt.Axes,
+    gluc_total: list[int],
+    gluc_novel: list[int],
+    pt_total: list[int],
+    pt_novel: list[int],
+) -> None:
+    fdr_labels = [f"{int(t * 100)}%" for t in FDR_THRESHOLDS]
+    x = np.arange(len(FDR_THRESHOLDS))
+    width = 0.18
+    offsets = [-1.5, -0.5, 0.5, 1.5]
+
+    bar_sets = [
+        (offsets[0], gluc_total, "HeLa degradome total hits", _MAIN_LINE_COLOUR),
+        (offsets[1], gluc_novel, "HeLa degradome non-tryptic hits", _NOVEL_COLOUR),
+        (offsets[2], pt_total, "ProteomeTools total retained", _PALETTE[4]),
+        (offsets[3], pt_novel, "ProteomeTools novel (subsequence)", _PALETTE[3]),
+    ]
+
+    for off, vals, label, colour in bar_sets:
+        bars = ax.bar(
+            x + off * width,
+            vals,
+            width,
+            label=label,
+            color=colour,
+            edgecolor="black",
+            linewidth=1,
+        )
+        _annotate_positive_bars(ax, bars)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(fdr_labels)
+    ax.set_xlabel("FDR threshold")
+    ax.set_ylabel("Peptide-spectrum matches")
+    ax.set_title("Novel identifications retained across FDR thresholds")
+    ax.legend(loc="upper left", fontsize=9)
+    ax.grid(False)
+    _spine_fmt(ax)
+
+
 @app.command()
 def summary(
     gluc_dir: Annotated[
@@ -974,69 +1571,10 @@ def summary(
     if not pt_csv.is_file():
         raise typer.BadParameter(f"Missing {pt_csv}")
 
-    gluc_df = pd.read_csv(gluc_csv)
-    pt_df = pd.read_csv(pt_csv)
-
-    fdr_labels = [f"{int(t * 100)}%" for t in FDR_THRESHOLDS]
-    x = np.arange(len(FDR_THRESHOLDS))
-    width = 0.18
-    offsets = [-1.5, -0.5, 0.5, 1.5]
+    counts = _novelty_summary_counts(pd.read_csv(gluc_csv), pd.read_csv(pt_csv))
 
     fig, ax = plt.subplots(figsize=(10, 6))
-
-    gluc_total = []
-    gluc_novel = []
-    pt_total = []
-    pt_novel = []
-    for fdr_t in FDR_THRESHOLDS:
-        g_row = gluc_df[gluc_df["fdr_threshold"] == fdr_t]
-        gluc_total.append(int(g_row["n_proteome_hit"].iloc[0]) if len(g_row) > 0 else 0)
-        gluc_novel.append(
-            int(g_row["n_non_tryptic_hit"].iloc[0]) if len(g_row) > 0 else 0
-        )
-
-        p_row = pt_df[pt_df["fdr_threshold"] == fdr_t]
-        pt_total.append(int(p_row["n_retained"].iloc[0]) if len(p_row) > 0 else 0)
-        pt_novel.append(int(p_row["n_subsequence"].iloc[0]) if len(p_row) > 0 else 0)
-
-    bar_sets = [
-        (offsets[0], gluc_total, "HeLa degradome total hits", _MAIN_LINE_COLOUR),
-        (offsets[1], gluc_novel, "HeLa degradome non-tryptic hits", _NOVEL_COLOUR),
-        (offsets[2], pt_total, "ProteomeTools total retained", _PALETTE[4]),
-        (offsets[3], pt_novel, "ProteomeTools novel (subsequence)", _PALETTE[3]),
-    ]
-
-    for off, vals, label, colour in bar_sets:
-        bars = ax.bar(
-            x + off * width,
-            vals,
-            width,
-            label=label,
-            color=colour,
-            edgecolor="black",
-            linewidth=1,
-        )
-        for bar in bars:
-            h = bar.get_height()
-            if h > 0:
-                ax.annotate(
-                    f"{h:,}",
-                    xy=(bar.get_x() + bar.get_width() / 2, h),
-                    xytext=(0, 3),
-                    textcoords="offset points",
-                    ha="center",
-                    va="bottom",
-                    fontsize=10,
-                )
-
-    ax.set_xticks(x)
-    ax.set_xticklabels(fdr_labels)
-    ax.set_xlabel("FDR threshold")
-    ax.set_ylabel("Peptide-spectrum matches")
-    ax.set_title("Novel identifications retained across FDR thresholds")
-    ax.legend(loc="upper left", fontsize=9)
-    ax.grid(False)
-    _spine_fmt(ax)
+    _plot_novelty_summary_bars(ax, *counts)
     fig.tight_layout()
     _save(fig, output_dir, "novelty_summary_bar")
 

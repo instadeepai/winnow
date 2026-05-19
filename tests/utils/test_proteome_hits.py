@@ -41,11 +41,20 @@ def metrics() -> Metrics:
 
 
 def test_processed_peptide_for_match_strips_mods() -> None:
-    s = "PEP(+123.45)TIDE[UNIMOD:1]-K"
-    out = ph.processed_peptide_for_match(s)
-    assert "(" not in out
-    assert "[" not in out
-    assert out == "PEPTLDEK"
+    cases = [
+        ("PEP(+123.45)TIDE[UNIMOD:35]K", "PEPTLDEK"),
+        ("[UNIMOD:1]-PEP(+123.45)TIDE[UNIMOD:35]K", "PEPTLDEK"),
+        ("PEP(foo)TAGDE", "PEPTAGDE"),
+        ("(+47.01)-PEPTAGDE", "PEPTAGDE"),
+        ("PEPTAGDE[Carboxyl]", "PEPTAGDE"),
+        ("[Acetyl]-PEPTAGDE", "PEPTAGDE"),
+        ("(N-term)PEPTAGDE", "PEPTAGDE"),
+    ]
+    for raw, expected in cases:
+        out = ph.processed_peptide_for_match(raw)
+        assert "(" not in out, raw
+        assert "[" not in out, raw
+        assert out == expected, raw
 
 
 def test_filter_and_annotate_preds_short_removed(metrics: Metrics) -> None:

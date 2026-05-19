@@ -22,7 +22,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from matplotlib.colors import LinearSegmentedColormap
 import typer
 import yaml
 from instanovo.utils.metrics import Metrics
@@ -64,6 +63,10 @@ _MOD_PLUS = re.compile(r"\(\+\d+\.?\d*\)-?")
 _MOD_UNIMOD = re.compile(r"\[UNIMOD:\d+\]-?")
 
 FDR_THRESHOLDS = [0.01, 0.05, 0.10]
+
+# Max PSMs per correctness panel in the raw-vs-calibrated confidence scatter.
+_CONFIDENCE_SCATTER_MAX_POINTS = 10_000
+_CONFIDENCE_SCATTER_RANDOM_STATE = 42
 
 DATASET_DISPLAY_NAMES: dict[str, str] = {
     "gluc": "HeLa degradome",
@@ -154,13 +157,15 @@ def _folder_display_name(folder_name: str) -> str:
     return DATASET_DISPLAY_NAMES.get(key, key)
 
 
-def _density_cmap(base_colour: str) -> LinearSegmentedColormap:
-    """Light-to-saturated colormap anchored on a Paul Tol palette colour."""
-    return LinearSegmentedColormap.from_list(
-        "density",
-        ["#F5F5F5", base_colour],
-        N=256,
-    )
+def _subsample_psms(
+    df: pd.DataFrame,
+    max_points: int,
+    random_state: int = _CONFIDENCE_SCATTER_RANDOM_STATE,
+) -> pd.DataFrame:
+    """Return up to ``max_points`` rows without replacement."""
+    if len(df) <= max_points:
+        return df
+    return df.sample(n=max_points, random_state=random_state)
 
 
 def _strip_mods(seq: str) -> str:
@@ -263,51 +268,51 @@ def _plot_confidence_scatter(
     output_dir: Path,
     plot_format: str,
 ) -> None:
-    """2D density of raw vs calibrated confidence, split by correctness."""
+    """Subsampled scatter of raw vs calibrated confidence, colored by correctness."""
     display = _folder_display_name(dataset_name)
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5.5), sharex=True, sharey=True)
+    fig, ax = plt.subplots(figsize=(8, 6))
 
+    # Define panels as before
     panels = [
         ("Correct", TP_COLOR, df["correct"].astype(bool)),
         ("Incorrect", FP_COLOR, ~df["correct"].astype(bool)),
     ]
 
-    for ax, (label, colour, mask) in zip(axes, panels):
+    handles = []
+    for label, colour, mask in panels:
         sub = df.loc[mask, ["confidence", "calibrated_confidence"]].dropna()
-        if len(sub) < 2:
-            ax.set_title(f"{label} (n={len(sub):,})")
-            _style_ax(ax)
+        n_total = len(sub)
+        if n_total < 2:
+            # Only skip plotting, no data for this class
             continue
 
-        x = sub["confidence"].to_numpy()
-        y = sub["calibrated_confidence"].to_numpy()
-        cmap = _density_cmap(colour)
-        _, _, _, im = ax.hist2d(
-            x,
-            y,
-            bins=55,
-            range=[[0, 1], [0, 1]],
-            cmap=cmap,
-            cmin=1,
+        plot_df = _subsample_psms(sub, _CONFIDENCE_SCATTER_MAX_POINTS)
+        handle = ax.scatter(
+            plot_df["confidence"],
+            plot_df["calibrated_confidence"],
+            c=colour,
+            s=10,
+            alpha=0.3,
+            rasterized=True,
+            label=f"{label}",
         )
-        cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-        cbar.set_label("PSM count", rotation=270, labelpad=14)
-        ax.plot(
-            [0, 1],
-            [0, 1],
-            ls="--",
-            color=_PALETTE[6],
-            lw=1,
-            label="No recalibration",
-            zorder=5,
-        )
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
-        ax.set_xlabel("Raw confidence")
-        ax.set_ylabel("Calibrated confidence")
-        ax.set_title(f"{label} (n={len(sub):,})")
-        ax.legend(loc="lower right", fontsize=9)
-        _style_ax(ax)
+        handles.append(handle)
+
+    ax.plot(
+        [-0.01, 1.01],
+        [-0.01, 1.01],
+        ls="--",
+        color="black",
+        lw=1,
+        label="No recalibration",
+        zorder=5,
+    )
+    ax.set_xlim(-0.01, 1.01)
+    ax.set_ylim(-0.01, 1.01)
+    ax.set_xlabel("Raw confidence")
+    ax.set_ylabel("Calibrated confidence")
+    ax.legend(loc="lower right", fontsize=9)
+    _style_ax(ax)
 
     fig.suptitle(
         f"Raw versus calibrated confidence for {display}",

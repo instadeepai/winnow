@@ -442,27 +442,28 @@ def plot_ranked_fdr_raw_vs_cal(
     db_raw = getattr(db_raw_ctrl, add_fn)(raw_pd_no_q.copy(), sort_col_raw)
     db_raw = db_raw.sort_values(sort_col_raw, ascending=False).reset_index(drop=True)
 
-    ranks = np.arange(1, len(np_cal) + 1)
+    ranks_cal = np.arange(1, len(np_cal) + 1)
+    ranks_raw = np.arange(1, len(db_raw) + 1)
 
     fig, ax = plt.subplots(figsize=(8, 6))
     ylabel = "FDR" if metric == "fdr" else "Q-value"
     np_col = "psm_fdr" if metric == "fdr" else "psm_q_value"
     ax.plot(
-        ranks,
+        ranks_cal,
         np_cal[np_col].values,
         color=_MAIN_LINE_COLOUR,
         label="Non-parametric (calibrated)",
         linewidth=1.5,
     )
     ax.plot(
-        ranks,
+        ranks_cal,
         db_cal[col_name].values,
         color=_RAW_LINE_COLOUR,
         label="Database-grounded (calibrated)",
         linewidth=1.5,
     )
     ax.plot(
-        ranks,
+        ranks_raw,
         db_raw[col_name].values,
         color=_PALETTE[3],
         label="Database-grounded (raw)",

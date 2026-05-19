@@ -31,8 +31,8 @@ _PRESET_OUTPUT_SUFFIX: dict[str, str] = {
 }
 
 _PROTEOME_JOIN_SEP = "\x1f"
-_MOD_PLUS = re.compile(r"\(\+\d+\.?\d*\)")
-_MOD_UNIMOD = re.compile(r"\[UNIMOD:\d+\]-?")
+_MOD_ROUND = re.compile(r"\([^)]*\)-?")
+_MOD_SQUARE = re.compile(r"\[[^\]]*\]-?")
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
@@ -74,8 +74,8 @@ def processed_peptide_for_match(prediction: str) -> str:
     """
     if not prediction or not isinstance(prediction, str):
         return ""
-    s = _MOD_PLUS.sub("", prediction)
-    s = _MOD_UNIMOD.sub("", s)
+    s = _MOD_ROUND.sub("", prediction)
+    s = _MOD_SQUARE.sub("", s)
     return s.replace("I", "L")
 
 

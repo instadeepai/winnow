@@ -4,6 +4,7 @@ This module tests the ProForma-compliant tokenization and detokenization
 of peptide sequences, including N-terminal and C-terminal modifications.
 """
 
+import numpy as np
 import pytest
 
 from winnow.utils.peptide import tokens_to_proforma, _is_standalone_modification
@@ -60,6 +61,12 @@ class TestTokensToProforma:
         """Test empty token list returns empty string."""
         assert tokens_to_proforma([]) == ""
         assert tokens_to_proforma(None) == ""
+
+    def test_numpy_array_tokens(self):
+        """Test numpy token arrays from pandas apply do not raise."""
+        tokens = np.array(["P", "E", "P", "T", "I", "D", "E"])
+        assert tokens_to_proforma(tokens) == "PEPTIDE"
+        assert tokens_to_proforma(np.array([])) == ""
 
     def test_single_amino_acid(self):
         """Test single amino acid."""
