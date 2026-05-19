@@ -38,6 +38,7 @@ class FragmentMatchFeatures(CalibrationFeatures):
         model_input_columns: Optional[Dict[str, str]] = None,
         koina_server_url: Optional[str] = None,
         koina_ssl: bool = True,
+        excluded_columns: Optional[List[str]] = None,
     ) -> None:
         """Initialize FragmentMatchFeatures.
 
@@ -97,6 +98,7 @@ class FragmentMatchFeatures(CalibrationFeatures):
         self.model_input_columns = model_input_columns
         self.koina_server_url = koina_server_url
         self.koina_ssl = koina_ssl
+        self.excluded_columns = set(excluded_columns or ())
 
     @property
     def dependencies(self) -> List[FeatureDependency]:
@@ -151,7 +153,7 @@ class FragmentMatchFeatures(CalibrationFeatures):
         ]
         if self.learn_from_missing:
             columns.append("is_missing_fragment_match_features")
-        return columns
+        return [c for c in columns if c not in self.excluded_columns]
 
     def check_valid_prediction(self, dataset: CalibrationDataset) -> pd.Series:
         """Check which predictions are valid for intensity prediction.

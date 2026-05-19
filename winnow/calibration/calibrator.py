@@ -264,6 +264,7 @@ class ProbabilityCalibrator:
         self.network: Optional[CalibratorNetwork] = None
         self.feature_mean: Optional[torch.Tensor] = None
         self.feature_std: Optional[torch.Tensor] = None
+        self._active_feature_columns: Optional[List[str]] = None
 
         if features is not None:
             if isinstance(features, (dict, DictConfig)):
@@ -278,6 +279,8 @@ class ProbabilityCalibrator:
     @property
     def columns(self) -> List[str]:
         """Column names corresponding to the features added to the calibrator."""
+        if self._active_feature_columns is not None:
+            return list(self._active_feature_columns)
         return [
             column
             for feature in self.feature_dict.values()
@@ -417,6 +420,9 @@ class ProbabilityCalibrator:
         )
 
         _load_saved_features_section(calibrator, config.get("features", {}))
+        saved_columns = config.get("feature_columns")
+        if saved_columns:
+            calibrator._active_feature_columns = list(saved_columns)
 
         tensors = load_file(dir_path / "model.safetensors")
 

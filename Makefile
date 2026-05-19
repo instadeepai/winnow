@@ -687,6 +687,256 @@ eval-external-unlabelled:
 	done
 	$(S3_CP) --recursive $(EVAL_PLOTS_DIR)/external_unlabelled/ $(RUN_S3)/$(RUN_TS)/eval_external_unlabelled/plots/
 
+#########################################################
+## Local external eval (held_out_projects/lcfm + acfm only)
+#########################################################
+
+.PHONY: eval-local-external-labelled eval-local-external-unlabelled eval-local-external \
+        replot-local-external-labelled replot-local-external-unlabelled replot-local-external
+
+# Directory with config.json + model.safetensors from ``winnow train``.
+LOCAL_MODEL_DIR ?= train_extra_small
+LOCAL_PREDS_DIR ?= predictions/$(LOCAL_MODEL_DIR)_external_eval
+LOCAL_EVAL_PLOTS_DIR ?= analysis/$(LOCAL_MODEL_DIR)_external_eval
+EXTERNAL_HELD_OUT_PROJECTS := $(EXTERNAL_FULL_PROJECTS) PXD023064
+CELEGANS_HELD_OUT_PROJECT := PXD014877
+# Override to restrict which external projects are evaluated (e.g. PXD014877 only).
+LOCAL_EXTERNAL_PROJECTS ?= $(EXTERNAL_HELD_OUT_PROJECTS)
+LOCAL_EXTERNAL_FULL_PROJECTS := $(filter $(EXTERNAL_FULL_PROJECTS),$(LOCAL_EXTERNAL_PROJECTS))
+
+define _check_local_model_dir
+	@if [ ! -f "$(LOCAL_MODEL_DIR)/model.safetensors" ]; then \
+		echo "Error: $(LOCAL_MODEL_DIR)/model.safetensors not found. Set LOCAL_MODEL_DIR."; \
+		exit 1; \
+	fi
+endef
+
+## Predict + plot on lcfm (labelled external) — local data only, no S3 upload
+eval-local-external-labelled:
+	$(_check_local_model_dir)
+	mkdir -p $(LOCAL_PREDS_DIR) $(LOCAL_EVAL_PLOTS_DIR)/external_labelled
+	for project in $(LOCAL_EXTERNAL_FULL_PROJECTS); do \
+		uv run winnow predict \
+		dataset.spectrum_path_or_directory=held_out_projects/lcfm/$$project/ \
+		dataset.predictions_path=held_out_projects/lcfm/$${project}_predictions/$$project.csv \
+		calibrator.pretrained_model_name_or_path=$(LOCAL_MODEL_DIR) \
+		output_folder=$(LOCAL_PREDS_DIR)/$${project}_labelled/ \
+		$(PREDICT_EVAL_OVERRIDES) \
+		$(KOINA_FRAGMENT_MATCH_COLUMNS) \
+		fdr_control.fdr_threshold=1.0 \
+		fdr_control.confidence_column=calibrated_confidence \
+		$(KOINA_OVERRIDES); \
+	done
+ifneq ($(filter PXD023064,$(LOCAL_EXTERNAL_PROJECTS)),)
+	uv run winnow predict \
+		dataset.spectrum_path_or_directory=held_out_projects/lcfm/PXD023064/ \
+		dataset.predictions_path=held_out_projects/lcfm/PXD023064_predictions/PXD023064.csv \
+		calibrator.pretrained_model_name_or_path=$(LOCAL_MODEL_DIR) \
+		output_folder=$(LOCAL_PREDS_DIR)/PXD023064_labelled/ \
+		$(PREDICT_EVAL_OVERRIDES) \
+		$(KOINA_FRAGMENT_MATCH_COLUMNS) \
+		fdr_control.fdr_threshold=1.0 \
+		fdr_control.confidence_column=calibrated_confidence \
+		$(KOINA_OVERRIDES)
+endif
+	uv run python scripts/plot_eval_results.py \
+		--predictions-root $(LOCAL_PREDS_DIR) \
+		--projects "$(LOCAL_EXTERNAL_PROJECTS)" \
+		--eval-type labelled \
+		--output-dir $(LOCAL_EVAL_PLOTS_DIR)/external_labelled
+
+## Predict + proteome annotation + plot on acfm (unlabelled external) — local only
+eval-local-external-unlabelled:
+	$(_check_local_model_dir)
+	mkdir -p $(LOCAL_PREDS_DIR) $(LOCAL_EVAL_PLOTS_DIR)/external_unlabelled
+	for project in $(LOCAL_EXTERNAL_FULL_PROJECTS); do \
+		uv run winnow predict \
+		dataset.spectrum_path_or_directory=held_out_projects/acfm/$$project/ \
+		dataset.predictions_path=held_out_projects/acfm/$${project}_predictions/$$project.csv \
+		calibrator.pretrained_model_name_or_path=$(LOCAL_MODEL_DIR) \
+		output_folder=$(LOCAL_PREDS_DIR)/$${project}_unlabelled/ \
+		$(PREDICT_EVAL_OVERRIDES) \
+		$(KOINA_FRAGMENT_MATCH_COLUMNS) \
+		fdr_control.fdr_threshold=1.0 \
+		fdr_control.confidence_column=calibrated_confidence \
+		$(KOINA_OVERRIDES); \
+	done
+ifneq ($(filter PXD023064,$(LOCAL_EXTERNAL_PROJECTS)),)
+	uv run winnow predict \
+		dataset.spectrum_path_or_directory=held_out_projects/acfm/PXD023064/ \
+		dataset.predictions_path=held_out_projects/acfm/PXD023064_predictions/PXD023064.csv \
+		calibrator.pretrained_model_name_or_path=$(LOCAL_MODEL_DIR) \
+		output_folder=$(LOCAL_PREDS_DIR)/PXD023064_unlabelled/ \
+		$(PREDICT_EVAL_OVERRIDES) \
+		$(KOINA_FRAGMENT_MATCH_COLUMNS) \
+		fdr_control.fdr_threshold=1.0 \
+		fdr_control.confidence_column=calibrated_confidence \
+		$(KOINA_OVERRIDES)
+endif
+	uv run python scripts/annotate_preds_proteome_hits.py unlabelled_external \
+		--predictions-root $(LOCAL_PREDS_DIR) \
+		$(foreach p,$(LOCAL_EXTERNAL_PROJECTS),$(if $(strip $(FASTA_UNLABELLED_$(p))),--map $(p)=$(FASTA_UNLABELLED_$(p)),))
+	uv run python scripts/plot_eval_results.py \
+		--predictions-root $(LOCAL_PREDS_DIR) \
+		--projects "$(LOCAL_EXTERNAL_PROJECTS)" \
+		--eval-type unlabelled \
+		--output-dir $(LOCAL_EVAL_PLOTS_DIR)/external_unlabelled
+
+## Full local external eval (lcfm + acfm)
+eval-local-external: eval-local-external-labelled eval-local-external-unlabelled
+
+## Replot local external eval from saved predictions (no predict)
+replot-local-external-labelled:
+	mkdir -p $(LOCAL_EVAL_PLOTS_DIR)/external_labelled
+	uv run python scripts/plot_eval_results.py \
+		--predictions-root $(LOCAL_PREDS_DIR) \
+		--projects "$(LOCAL_EXTERNAL_PROJECTS)" \
+		--eval-type labelled \
+		--output-dir $(LOCAL_EVAL_PLOTS_DIR)/external_labelled
+
+replot-local-external-unlabelled:
+	mkdir -p $(LOCAL_EVAL_PLOTS_DIR)/external_unlabelled
+	uv run python scripts/plot_eval_results.py \
+		--predictions-root $(LOCAL_PREDS_DIR) \
+		--projects "$(LOCAL_EXTERNAL_PROJECTS)" \
+		--eval-type unlabelled \
+		--output-dir $(LOCAL_EVAL_PLOTS_DIR)/external_unlabelled
+
+replot-local-external: replot-local-external-labelled replot-local-external-unlabelled
+
+#########################################################
+## train_extra_small feature-subset models
+#########################################################
+
+.PHONY: train-extra-small-no-xcorr-spectral train-extra-small-no-fragment-similarity \
+        train-extra-small-mass-error-da \
+        download-extra-small-train-data download-extra-small-celegans-eval \
+        download-extra-small-mass-error-da-model \
+        eval-extra-small-no-xcorr-spectral eval-extra-small-no-fragment-similarity \
+        eval-extra-small-mass-error-da \
+        train-and-eval-extra-small-no-xcorr-spectral \
+        train-and-eval-extra-small-no-fragment-similarity \
+        train-and-eval-extra-small-mass-error-da
+
+EXTRA_SMALL_TRAIN_S3 ?= $(S3_BASE)/train_extra_small
+EXTRA_SMALL_MASS_ERROR_DA_S3 ?= $(S3_BASE)/train_extra_small_mass_error_da
+# In-cluster Koina (override on laptop: KOINA_SERVER_URL=koina.wilhelmlab.org:443 KOINA_SSL=true)
+EXTRA_SMALL_CLUSTER_KOINA = koina.server_url=localhost:8500 koina.ssl=false
+
+EXTRA_SMALL_TRAIN_FEATURES ?= train_extra_small/train_extra_small_matrix.parquet
+# Spectra with per-row collision_energy and frag_type (not new_helaqc_splits, which lacks them).
+EXTRA_SMALL_TRAIN_SPECTRA  ?= train_extra_small/train.parquet
+EXTRA_SMALL_TRAIN_PREDS    ?= train_extra_small/train_preds.csv
+EXTRA_SMALL_IRT_REGRESSORS ?= models/helaqc_model_with_new_splits/irt_regressors.safetensors
+EXTRA_SMALL_REFERENCE_MODEL ?= train_extra_small
+
+EXTRA_SMALL_TRAIN_HP = calibrator.hidden_dims=[50,50] \
+	calibrator.dropout=0.3 \
+	calibrator.learning_rate=0.0001 \
+	calibrator.weight_decay=0.001 \
+	calibrator.max_epochs=1000 \
+	calibrator.batch_size=1024 \
+	calibrator.n_iter_no_change=10 \
+	calibrator.tol=0.0001 \
+	calibrator.seed=42 \
+	validation_fraction=0.1
+
+# Fragment/beam columns dropped for the "no similarity" variants (+ adds keys not in calibrator.yaml).
+EXTRA_SMALL_FRAGMENT_EXCLUDE_SIMILARITY = \
+	+calibrator.features.fragment_match_features.excluded_columns=[spectral_angle,xcorr,complementary_ion_count,max_ion_gap]
+EXTRA_SMALL_BEAM_EXCLUDE_EDIT_DISTANCE = \
+	+calibrator.features.beam_features.excluded_columns=[edit_distance]
+
+## Train from pre-computed matrix: drop xcorr and spectral_angle only
+train-extra-small-no-xcorr-spectral:
+	uv run python scripts/train_feature_subset.py \
+		--subset no_xcorr_spectral \
+		--train-features-path $(EXTRA_SMALL_TRAIN_FEATURES) \
+		--output-dir train_extra_small_no_xcorr_spectral \
+		--hyperparams-from-model $(EXTRA_SMALL_REFERENCE_MODEL)
+
+## Train from matrix: also drop complementary_ion_count, max_ion_gap, edit_distance
+train-extra-small-no-fragment-similarity:
+	uv run python scripts/train_feature_subset.py \
+		--subset no_fragment_similarity \
+		--train-features-path $(EXTRA_SMALL_TRAIN_FEATURES) \
+		--output-dir train_extra_small_no_fragment_similarity \
+		--hyperparams-from-model $(EXTRA_SMALL_REFERENCE_MODEL)
+
+## Download training parquet + preds from S3 (collision_energy, frag_type in spectra)
+download-extra-small-train-data:
+	mkdir -p train_extra_small
+	$(S3_CP) $(EXTRA_SMALL_TRAIN_S3)/train.parquet train_extra_small/train.parquet
+	$(S3_CP) $(EXTRA_SMALL_TRAIN_S3)/train_preds.csv train_extra_small/train_preds.csv
+
+## Download PXD014877 lcfm/acfm + preds + Celegans FASTA (paths match eval-local-external)
+download-extra-small-celegans-eval:
+	mkdir -p held_out_projects/lcfm/PXD014877 held_out_projects/acfm/PXD014877 \
+		held_out_projects/lcfm/PXD014877_predictions held_out_projects/acfm/PXD014877_predictions \
+		fasta
+	$(S3_CP) --recursive $(HELD_OUT_S3)/lcfm/PXD014877/ held_out_projects/lcfm/PXD014877/
+	$(S3_CP) --recursive $(HELD_OUT_S3)/acfm/PXD014877/ held_out_projects/acfm/PXD014877/
+	$(S3_CP) --recursive $(HELD_OUT_S3)/lcfm/PXD014877_predictions/ held_out_projects/lcfm/PXD014877_predictions/
+	$(S3_CP) --recursive $(HELD_OUT_S3)/acfm/PXD014877_predictions/ held_out_projects/acfm/PXD014877_predictions/
+	$(S3_CP) $(FASTA_S3)/Celegans.fasta fasta/Celegans.fasta
+
+## Download trained mass_error_da model from S3 (after train-extra-small-mass-error-da upload)
+download-extra-small-mass-error-da-model:
+	mkdir -p train_extra_small_mass_error_da
+	$(S3_CP) --recursive $(EXTRA_SMALL_MASS_ERROR_DA_S3)/ train_extra_small_mass_error_da/
+
+## Full train from raw spectra: mass_error_da (Daltons) instead of ppm; no similarity features
+train-extra-small-mass-error-da: download-extra-small-train-data
+	uv run winnow train \
+		features_path=null \
+		dataset.spectrum_path_or_directory=train_extra_small/train.parquet \
+		dataset.predictions_path=train_extra_small/train_preds.csv \
+		model_output_dir=train_extra_small_mass_error_da \
+		dataset_output_path=train_extra_small_mass_error_da/train_calibrated.parquet \
+		training_history_path=train_extra_small_mass_error_da/training_history.json \
+		$(EXTRA_SMALL_TRAIN_HP) \
+		$(KOINA_FRAGMENT_MATCH_COLUMNS) \
+		~calibrator.features.mass_error \
+		+calibrator.features.mass_error_da._target_=winnow.calibration.calibration_features.MassErrorDaFeature \
+		+calibrator.features.mass_error_da.residue_masses='$${residue_masses}' \
+		$(EXTRA_SMALL_FRAGMENT_EXCLUDE_SIMILARITY) \
+		$(EXTRA_SMALL_BEAM_EXCLUDE_EDIT_DISTANCE) \
+		$(EXTRA_SMALL_CLUSTER_KOINA)
+	$(S3_CP) --recursive train_extra_small_mass_error_da/ $(EXTRA_SMALL_MASS_ERROR_DA_S3)/
+
+eval-extra-small-no-xcorr-spectral:
+	$(MAKE) eval-local-external \
+		LOCAL_MODEL_DIR=train_extra_small_no_xcorr_spectral \
+		LOCAL_PREDS_DIR=predictions/train_extra_small_no_xcorr_spectral_external_eval \
+		LOCAL_EVAL_PLOTS_DIR=analysis/train_extra_small_no_xcorr_spectral_external_eval \
+		LOCAL_EXTERNAL_PROJECTS=$(CELEGANS_HELD_OUT_PROJECT)
+
+eval-extra-small-no-fragment-similarity:
+	$(MAKE) eval-local-external \
+		LOCAL_MODEL_DIR=train_extra_small_no_fragment_similarity \
+		LOCAL_PREDS_DIR=predictions/train_extra_small_no_fragment_similarity_external_eval \
+		LOCAL_EVAL_PLOTS_DIR=analysis/train_extra_small_no_fragment_similarity_external_eval \
+		LOCAL_EXTERNAL_PROJECTS=$(CELEGANS_HELD_OUT_PROJECT)
+
+eval-extra-small-mass-error-da: download-extra-small-mass-error-da-model download-extra-small-celegans-eval
+	$(MAKE) eval-local-external \
+		LOCAL_MODEL_DIR=train_extra_small_mass_error_da \
+		LOCAL_PREDS_DIR=predictions/train_extra_small_mass_error_da_external_eval \
+		LOCAL_EVAL_PLOTS_DIR=analysis/train_extra_small_mass_error_da_external_eval \
+		LOCAL_EXTERNAL_PROJECTS=$(CELEGANS_HELD_OUT_PROJECT) \
+		KOINA_SERVER_URL=localhost:8500 KOINA_SSL=false
+
+train-and-eval-extra-small-no-xcorr-spectral: train-extra-small-no-xcorr-spectral eval-extra-small-no-xcorr-spectral
+train-and-eval-extra-small-no-fragment-similarity: train-extra-small-no-fragment-similarity eval-extra-small-no-fragment-similarity
+train-and-eval-extra-small-mass-error-da: train-extra-small-mass-error-da eval-extra-small-mass-error-da
+
+## Refit FDR on acfm spectra not in lcfm (by spectrum_id) and plot
+eval-local-external-acfm-minus-lcfm:
+	uv run python scripts/plot_acfm_minus_lcfm_fdr.py \
+		--predictions-root $(LOCAL_PREDS_DIR) \
+		--projects "$(EXTERNAL_HELD_OUT_PROJECTS)" \
+		--output-dir $(LOCAL_EVAL_PLOTS_DIR)/acfm_minus_lcfm
+
 .PHONY: replot-eval-plots-annotated replot-eval-plots-raw \
         replot-eval-plots-external-labelled replot-eval-plots-external-unlabelled \
         replot-eval-plots upload-eval-plots-annotated upload-eval-plots-raw \

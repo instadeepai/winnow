@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Optional
 import warnings
 import numpy as np
 from math import exp
@@ -64,6 +64,10 @@ def _normalised_levenshtein_ints(a: List[int], b: List[int]) -> float:
 class BeamFeatures(CalibrationFeatures):
     """Calculates the margin, median margin and entropy of beam runners-up."""
 
+    def __init__(self, excluded_columns: Optional[List[str]] = None) -> None:
+        super().__init__()
+        self.excluded_columns = set(excluded_columns or ())
+
     @property
     def dependencies(self) -> List[FeatureDependency]:
         """Returns a list of dependencies required before computing the feature.
@@ -93,7 +97,14 @@ class BeamFeatures(CalibrationFeatures):
         Returns:
             List[str]: A list of column names: ["margin", "median_margin", "entropy", "z-score", "edit_distance"].
         """
-        return ["margin", "median_margin", "entropy", "z-score", "edit_distance"]
+        columns = [
+            "margin",
+            "median_margin",
+            "entropy",
+            "z-score",
+            "edit_distance",
+        ]
+        return [c for c in columns if c not in self.excluded_columns]
 
     def prepare(self, dataset: CalibrationDataset) -> None:
         """Prepares the dataset before feature computation.
