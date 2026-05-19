@@ -672,3 +672,13 @@ class TestProbabilityCalibrator:
         assert isinstance(config["columns"], list)
         assert not type(config["columns"]).__module__.startswith("omegaconf")
         json.dumps(config)
+
+    def test_get_config_converts_set_to_list(self):
+        """Sets (e.g. excluded_columns) must be JSON-serialisable in saved config."""
+        from winnow.calibration.features.beam import BeamFeatures
+
+        feature = BeamFeatures(excluded_columns=["edit_distance"])
+        config = feature.get_config()
+
+        assert config["excluded_columns"] == ["edit_distance"]
+        json.dumps(config)
