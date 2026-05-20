@@ -804,22 +804,70 @@ replot-local-external-unlabelled:
 
 replot-local-external: replot-local-external-labelled replot-local-external-unlabelled
 
+## Feature-shift plots: woundfluids lcfm (labelled) vs acfm (unlabelled)
+.PHONY: predict-feature-shift-woundfluids plot-feature-shift-woundfluids feature-shift-woundfluids
+
+FEATURE_SHIFT_WOUNDFLUIDS_PREDS ?= $(LOCAL_PREDS_DIR)
+FEATURE_SHIFT_WOUNDFLUIDS_OUT   ?= analysis/woundfluids_feature_shift
+
+predict-feature-shift-woundfluids:
+	$(_check_local_model_dir)
+	mkdir -p $(FEATURE_SHIFT_WOUNDFLUIDS_PREDS)
+	uv run winnow predict \
+		dataset.spectrum_path_or_directory=held_out_projects/lcfm/woundfluids/ \
+		dataset.predictions_path=held_out_projects/lcfm/woundfluids_predictions/woundfluids.csv \
+		calibrator.pretrained_model_name_or_path=$(LOCAL_MODEL_DIR) \
+		output_folder=$(FEATURE_SHIFT_WOUNDFLUIDS_PREDS)/woundfluids_labelled/ \
+		$(PREDICT_EVAL_OVERRIDES) \
+		$(KOINA_FRAGMENT_MATCH_COLUMNS) \
+		fdr_control.fdr_threshold=1.0 \
+		fdr_control.confidence_column=calibrated_confidence \
+		$(KOINA_OVERRIDES)
+	uv run winnow predict \
+		dataset.spectrum_path_or_directory=held_out_projects/acfm/woundfluids/ \
+		dataset.predictions_path=held_out_projects/acfm/woundfluids_predictions/woundfluids.csv \
+		calibrator.pretrained_model_name_or_path=$(LOCAL_MODEL_DIR) \
+		output_folder=$(FEATURE_SHIFT_WOUNDFLUIDS_PREDS)/woundfluids_unlabelled/ \
+		$(PREDICT_EVAL_OVERRIDES) \
+		$(KOINA_FRAGMENT_MATCH_COLUMNS) \
+		fdr_control.fdr_threshold=1.0 \
+		fdr_control.confidence_column=calibrated_confidence \
+		$(KOINA_OVERRIDES)
+	uv run python scripts/annotate_preds_proteome_hits.py unlabelled_external \
+		--predictions-root $(FEATURE_SHIFT_WOUNDFLUIDS_PREDS) \
+		--map woundfluids=$(FASTA_RAW_woundfluids)
+
+plot-feature-shift-woundfluids:
+	uv run python scripts/plot_feature_shift.py \
+		--project woundfluids \
+		--predictions-root $(FEATURE_SHIFT_WOUNDFLUIDS_PREDS) \
+		--output-dir $(FEATURE_SHIFT_WOUNDFLUIDS_OUT)
+
+feature-shift-woundfluids: predict-feature-shift-woundfluids plot-feature-shift-woundfluids
+
 #########################################################
 ## train_extra_small feature-subset models
 #########################################################
 
 .PHONY: train-extra-small-no-xcorr-spectral train-extra-small-no-fragment-similarity \
-        train-extra-small-mass-error-da \
+        train-extra-small-mass-error-da train-extra-small-mass-error-da-no-token \
         download-extra-small-train-data download-extra-small-celegans-eval \
+        download-extra-small-external-eval \
         download-extra-small-mass-error-da-model \
+        download-extra-small-mass-error-da-no-token-model \
         eval-extra-small-no-xcorr-spectral eval-extra-small-no-fragment-similarity \
         eval-extra-small-mass-error-da \
+        eval-extra-small-mass-error-da-no-token-celegans \
+        eval-extra-small-mass-error-da-no-token-external \
         train-and-eval-extra-small-no-xcorr-spectral \
         train-and-eval-extra-small-no-fragment-similarity \
-        train-and-eval-extra-small-mass-error-da
+        train-and-eval-extra-small-mass-error-da \
+        train-and-eval-extra-small-mass-error-da-no-token-celegans \
+        train-and-eval-extra-small-mass-error-da-no-token
 
 EXTRA_SMALL_TRAIN_S3 ?= $(S3_BASE)/train_extra_small
 EXTRA_SMALL_MASS_ERROR_DA_S3 ?= $(S3_BASE)/train_extra_small_mass_error_da
+EXTRA_SMALL_MASS_ERROR_DA_NO_TOKEN_S3 ?= $(S3_BASE)/train_extra_small_mass_error_da_no_token
 # In-cluster Koina (override on laptop: KOINA_SERVER_URL=koina.wilhelmlab.org:443 KOINA_SSL=true)
 EXTRA_SMALL_CLUSTER_KOINA = koina.server_url=localhost:8500 koina.ssl=false
 
@@ -846,6 +894,7 @@ EXTRA_SMALL_FRAGMENT_EXCLUDE_SIMILARITY = \
 	+calibrator.features.fragment_match_features.excluded_columns=[spectral_angle,xcorr,complementary_ion_count,max_ion_gap]
 EXTRA_SMALL_BEAM_EXCLUDE_EDIT_DISTANCE = \
 	+calibrator.features.beam_features.excluded_columns=[edit_distance]
+EXTRA_SMALL_EXCLUDE_TOKEN_SCORES = ~calibrator.features.token_score_features
 
 ## Train from pre-computed matrix: drop xcorr and spectral_angle only
 train-extra-small-no-xcorr-spectral:
@@ -880,10 +929,35 @@ download-extra-small-celegans-eval:
 	$(S3_CP) --recursive $(HELD_OUT_S3)/acfm/PXD014877_predictions/ held_out_projects/acfm/PXD014877_predictions/
 	$(S3_CP) $(FASTA_S3)/Celegans.fasta fasta/Celegans.fasta
 
+## Download all external held-out eval data (PXD009935, PXD014877, PXD023064)
+download-extra-small-external-eval:
+	mkdir -p held_out_projects/lcfm held_out_projects/acfm fasta
+	$(S3_CP) --recursive $(FASTA_S3)/ fasta/
+	for project in $(EXTERNAL_FULL_PROJECTS); do \
+		mkdir -p held_out_projects/lcfm/$$project held_out_projects/acfm/$$project \
+			held_out_projects/lcfm/$${project}_predictions held_out_projects/acfm/$${project}_predictions; \
+		$(S3_CP) --recursive $(HELD_OUT_S3)/lcfm/$$project/ held_out_projects/lcfm/$$project/; \
+		$(S3_CP) --recursive $(HELD_OUT_S3)/lcfm/$${project}_predictions/ held_out_projects/lcfm/$${project}_predictions/; \
+		$(S3_CP) --recursive $(HELD_OUT_S3)/acfm/$$project/ held_out_projects/acfm/$$project/; \
+		$(S3_CP) --recursive $(HELD_OUT_S3)/acfm/$${project}_predictions/ held_out_projects/acfm/$${project}_predictions/; \
+	done
+	mkdir -p held_out_projects/lcfm/PXD023064 held_out_projects/acfm/PXD023064
+	for file in $(PXD023064_FILES); do \
+		$(S3_CP) $(HELD_OUT_S3)/lcfm/PXD023064/$$file.parquet held_out_projects/lcfm/PXD023064/$$file.parquet; \
+		$(S3_CP) $(HELD_OUT_S3)/acfm/PXD023064/$$file.parquet held_out_projects/acfm/PXD023064/$$file.parquet; \
+	done
+	$(S3_CP) --recursive $(HELD_OUT_S3)/lcfm/PXD023064_predictions/ held_out_projects/lcfm/PXD023064_predictions/
+	$(S3_CP) --recursive $(HELD_OUT_S3)/acfm/PXD023064_predictions/ held_out_projects/acfm/PXD023064_predictions/
+
 ## Download trained mass_error_da model from S3 (after train-extra-small-mass-error-da upload)
 download-extra-small-mass-error-da-model:
 	mkdir -p train_extra_small_mass_error_da
 	$(S3_CP) --recursive $(EXTRA_SMALL_MASS_ERROR_DA_S3)/ train_extra_small_mass_error_da/
+
+## Download trained mass_error_da (no token scores) model from S3
+download-extra-small-mass-error-da-no-token-model:
+	mkdir -p train_extra_small_mass_error_da_no_token
+	$(S3_CP) --recursive $(EXTRA_SMALL_MASS_ERROR_DA_NO_TOKEN_S3)/ train_extra_small_mass_error_da_no_token/
 
 ## Full train from raw spectra: mass_error_da (Daltons) instead of ppm; no similarity features
 train-extra-small-mass-error-da: download-extra-small-train-data
@@ -903,6 +977,26 @@ train-extra-small-mass-error-da: download-extra-small-train-data
 		$(EXTRA_SMALL_BEAM_EXCLUDE_EDIT_DISTANCE) \
 		$(EXTRA_SMALL_CLUSTER_KOINA)
 	$(S3_CP) --recursive train_extra_small_mass_error_da/ $(EXTRA_SMALL_MASS_ERROR_DA_S3)/
+
+## mass_error_da + no similarity + no token-level probabilities (min/std token prob)
+train-extra-small-mass-error-da-no-token: download-extra-small-train-data
+	uv run winnow train \
+		features_path=null \
+		dataset.spectrum_path_or_directory=train_extra_small/train.parquet \
+		dataset.predictions_path=train_extra_small/train_preds.csv \
+		model_output_dir=train_extra_small_mass_error_da_no_token \
+		dataset_output_path=train_extra_small_mass_error_da_no_token/train_calibrated.parquet \
+		training_history_path=train_extra_small_mass_error_da_no_token/training_history.json \
+		$(EXTRA_SMALL_TRAIN_HP) \
+		$(KOINA_FRAGMENT_MATCH_COLUMNS) \
+		~calibrator.features.mass_error \
+		+calibrator.features.mass_error_da._target_=winnow.calibration.calibration_features.MassErrorDaFeature \
+		+calibrator.features.mass_error_da.residue_masses='$${residue_masses}' \
+		$(EXTRA_SMALL_FRAGMENT_EXCLUDE_SIMILARITY) \
+		$(EXTRA_SMALL_BEAM_EXCLUDE_EDIT_DISTANCE) \
+		$(EXTRA_SMALL_EXCLUDE_TOKEN_SCORES) \
+		$(EXTRA_SMALL_CLUSTER_KOINA)
+	$(S3_CP) --recursive train_extra_small_mass_error_da_no_token/ $(EXTRA_SMALL_MASS_ERROR_DA_NO_TOKEN_S3)/
 
 eval-extra-small-no-xcorr-spectral:
 	$(MAKE) eval-local-external \
@@ -924,11 +1018,31 @@ eval-extra-small-mass-error-da: download-extra-small-mass-error-da-model downloa
 		LOCAL_PREDS_DIR=predictions/train_extra_small_mass_error_da_external_eval \
 		LOCAL_EVAL_PLOTS_DIR=analysis/train_extra_small_mass_error_da_external_eval \
 		LOCAL_EXTERNAL_PROJECTS=$(CELEGANS_HELD_OUT_PROJECT) \
-		KOINA_SERVER_URL=localhost:8500 KOINA_SSL=false
+		KOINA_OVERRIDES=koina.server_url=koina.wilhelmlab.org:443 koina.ssl=true
+
+## Celegans (PXD014877) only — run this first
+eval-extra-small-mass-error-da-no-token-celegans: download-extra-small-mass-error-da-no-token-model download-extra-small-celegans-eval
+	$(MAKE) eval-local-external \
+		LOCAL_MODEL_DIR=train_extra_small_mass_error_da_no_token \
+		LOCAL_PREDS_DIR=predictions/train_extra_small_mass_error_da_no_token_external_eval \
+		LOCAL_EVAL_PLOTS_DIR=analysis/train_extra_small_mass_error_da_no_token_external_eval \
+		LOCAL_EXTERNAL_PROJECTS=$(CELEGANS_HELD_OUT_PROJECT) \
+		KOINA_OVERRIDES=koina.server_url=koina.wilhelmlab.org:443 koina.ssl=true
+
+## All external held-out projects (PXD009935, PXD014877, PXD023064)
+eval-extra-small-mass-error-da-no-token-external: download-extra-small-mass-error-da-no-token-model download-extra-small-external-eval
+	$(MAKE) eval-local-external \
+		LOCAL_MODEL_DIR=train_extra_small_mass_error_da_no_token \
+		LOCAL_PREDS_DIR=predictions/train_extra_small_mass_error_da_no_token_external_eval \
+		LOCAL_EVAL_PLOTS_DIR=analysis/train_extra_small_mass_error_da_no_token_external_eval \
+		LOCAL_EXTERNAL_PROJECTS=$(EXTERNAL_HELD_OUT_PROJECTS) \
+		KOINA_OVERRIDES=koina.server_url=koina.wilhelmlab.org:443 koina.ssl=true
 
 train-and-eval-extra-small-no-xcorr-spectral: train-extra-small-no-xcorr-spectral eval-extra-small-no-xcorr-spectral
 train-and-eval-extra-small-no-fragment-similarity: train-extra-small-no-fragment-similarity eval-extra-small-no-fragment-similarity
 train-and-eval-extra-small-mass-error-da: train-extra-small-mass-error-da eval-extra-small-mass-error-da
+train-and-eval-extra-small-mass-error-da-no-token-celegans: train-extra-small-mass-error-da-no-token eval-extra-small-mass-error-da-no-token-celegans
+train-and-eval-extra-small-mass-error-da-no-token: train-extra-small-mass-error-da-no-token eval-extra-small-mass-error-da-no-token-celegans eval-extra-small-mass-error-da-no-token-external
 
 ## Refit FDR on acfm spectra not in lcfm (by spectrum_id) and plot
 eval-local-external-acfm-minus-lcfm:
