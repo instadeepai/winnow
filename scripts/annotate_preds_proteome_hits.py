@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Post-process ``winnow predict`` outputs: min residue length + proteome substring hit.
 
-Mapping ``project -> FASTA`` is passed on the command line (typically from the Makefile).
+Each project is a subfolder of ``--predictions-root`` containing ``preds_and_fdr_metrics.csv``
+and ``metadata.csv``.
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ import logging
 import math
 import re
 from pathlib import Path
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any
 
 import ahocorasick
 import polars as pl
@@ -24,11 +25,6 @@ logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_RESIDUES = _REPO_ROOT / "winnow" / "configs" / "residues.yaml"
-
-_PRESET_OUTPUT_SUFFIX: dict[str, str] = {
-    "biological_validation_raw": "{project}_raw",
-    "unlabelled_external": "{project}_unlabelled",
-}
 
 _PROTEOME_JOIN_SEP = "\x1f"
 _MOD_ROUND = re.compile(r"\([^)]*\)-?")
@@ -230,29 +226,26 @@ def _resolve_fasta_path(raw: str) -> Path:
 
 @app.command()
 def main(
-    preset: Annotated[
-        str,
-        typer.Argument(
-            help=(
-                "biological_validation_raw (*_raw/) or unlabelled_external (*_unlabelled/)"
-            ),
-        ),
+    projects: Annotated[
+        list[str],
+        typer.Argument(help="Project folder names under --predictions-root."),
     ],
-    map_entry: Annotated[
-        Optional[list[str]],
-        typer.Option(
-            "--map",
-            help="project=path to FASTA (repeat); omit or leave path empty to skip a project.",
-        ),
-    ] = None,
     predictions_root: Annotated[
         Path,
         typer.Option(
             "--predictions-root",
             "-p",
-            help="Root containing ``<project>_<suffix>/`` output folders.",
+            help="Root directory containing per-project prediction folders.",
         ),
-    ] = _REPO_ROOT / "predictions" / "general_model",
+    ],
+    fasta: Annotated[
+        Path,
+        typer.Option(
+            "--fasta",
+            "-f",
+            help="FASTA file for proteome substring matching.",
+        ),
+    ],
     residues_config: Annotated[
         Path,
         typer.Option(
@@ -276,54 +269,22 @@ def main(
         ),
     ] = False,
 ) -> None:
-    """Annotate Winnow predictions with proteome substring hits.
-
-    Args:
-        preset: One of "biological_validation_raw" or "unlabelled_external".
-        map_entry: List of project=path pairs (repeat for multiple projects).
-        predictions_root: Root containing <project>_<suffix>/ output folders.
-        residues_config: ``residues.yaml`` for InstaNovo ``Metrics`` / ``_split_peptide``.
-        min_residue_length: Drop PSMs with fewer than this many tokenizer residues.
-        dry_run: Log only; do not write CSVs.
-    """
+    """Annotate Winnow predictions with proteome substring hits."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    if preset not in _PRESET_OUTPUT_SUFFIX:
-        raise typer.BadParameter(
-            f"Unknown preset {preset!r}. Expected one of: "
-            f"{', '.join(sorted(_PRESET_OUTPUT_SUFFIX))}"
-        )
+    project_list = [p.strip() for p in projects if p.strip()]
+    if not project_list:
+        raise typer.BadParameter("No projects specified.")
 
-    pairs: list[tuple[str, Path]] = []
-    for entry in map_entry or []:
-        if "=" not in entry:
-            raise typer.BadParameter(
-                f"Invalid --map (expected project=path): {entry!r}"
-            )
-        project, path = entry.split("=", 1)
-        project = project.strip()
-        path = path.strip()
-        if not project:
-            raise typer.BadParameter(f"Invalid --map (empty project): {entry!r}")
-        if not path:
-            logger.info("skip %s (empty path in --map)", project)
-            continue
-        pairs.append((project, _resolve_fasta_path(path)))
-
-    if not pairs:
-        logger.info("No --map entries; nothing to do.")
-        raise typer.Exit(code=0)
-
+    fasta_path = _resolve_fasta_path(str(fasta))
     metrics = _metrics_from_residues_yaml(residues_config)
-    suffix_tpl = _PRESET_OUTPUT_SUFFIX[preset]
 
-    for project, fasta_path in pairs:
-        folder_name = suffix_tpl.format(project=project)
-        out_dir = predictions_root / folder_name
+    for project in project_list:
+        out_dir = predictions_root / project
         logger.info(
             "project=%s folder=%s fasta=%s min_residues=%s dry_run=%s",
             project,
