@@ -16,7 +16,7 @@ from the standard tryptic database-search training distribution:
    checked because positional information is lost in the substring proteome
    match.
 
-2. **ProteomeTools PXD004732 (``proteometools`` subcommand)** -- Synthetic
+2. **ProteomeTools-1 PXD004732 (``proteometools`` subcommand)** -- Synthetic
    peptide library.  The *lcfm* set contains database-search-confirmed
    peptides; the *acfm* set contains all candidates.  For each acfm
    prediction we check whether it exactly matches, is a subsequence of, or
@@ -31,12 +31,12 @@ from __future__ import annotations
 
 import re
 import warnings
-from collections import Counter
 from pathlib import Path
 from typing import Annotated
 
 import ahocorasick
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
 import polars as pl
@@ -89,7 +89,7 @@ FEATURE_COLUMNS = [
 
 DATASET_DISPLAY_NAMES: dict[str, str] = {
     "gluc": "HeLa degradome",
-    "PXD004732": "ProteomeTools",
+    "PXD004732": "ProteomeTools-1",
 }
 
 app = typer.Typer(
@@ -125,69 +125,6 @@ def _subsample_psms(
     if len(df) <= max_points:
         return df
     return df.sample(n=max_points, random_state=random_state)
-
-
-def _annotate_single_bar(ax: plt.Axes, bar, fontsize: int) -> None:
-    h = float(bar.get_height())
-    if h == 0 or not np.isfinite(h):
-        return
-    va, offset = ("bottom", 4) if h >= 0 else ("top", -4)
-    ax.annotate(
-        f"{h:.2f}",
-        xy=(bar.get_x() + bar.get_width() / 2, h),
-        xytext=(0, offset),
-        textcoords="offset points",
-        ha="center",
-        va=va,
-        fontsize=fontsize,
-    )
-
-
-def _set_grouped_bar_ylim(
-    ax: plt.Axes,
-    max_h: float,
-    min_h: float,
-    *,
-    y_headroom: float,
-    symmetric_around_zero: bool,
-) -> None:
-    if symmetric_around_zero:
-        limit = max(abs(max_h), abs(min_h), 0.08) * y_headroom
-        ax.set_ylim(-limit, limit)
-        return
-    if min_h < 0:
-        span = max_h - min_h
-        pad = span * (y_headroom - 1) / 2 if span > 0 else 0.08
-        ax.set_ylim(min_h - pad, max_h + pad)
-        return
-    if max_h > 0:
-        ax.set_ylim(0, max(max_h * y_headroom, 0.08))
-
-
-def _annotate_grouped_bars(
-    ax: plt.Axes,
-    bar_groups: list,
-    *,
-    y_headroom: float = 1.28,
-    fontsize: int = 8,
-    symmetric_around_zero: bool = False,
-) -> None:
-    """Label grouped bars and set y-limits with room for annotations."""
-    heights = [float(bar.get_height()) for bar_group in bar_groups for bar in bar_group]
-    if not heights:
-        return
-
-    for bar_group in bar_groups:
-        for bar in bar_group:
-            _annotate_single_bar(ax, bar, fontsize)
-
-    _set_grouped_bar_ylim(
-        ax,
-        max(heights),
-        min(heights),
-        y_headroom=y_headroom,
-        symmetric_around_zero=symmetric_around_zero,
-    )
 
 
 def _strip_mods(seq: str) -> str:
@@ -932,9 +869,11 @@ def _feature_median_z_score_table(
     groups: list[tuple[str, str, pd.Series]],
     *,
     group_col: str,
+    reference: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """Per-group feature medians and z-scores relative to *retained* PSMs."""
-    pooled = {col: _pooled_feature_mean_std(retained, col) for col in available}
+    """Per-group feature medians and z-scores relative to *reference* or *retained* PSMs."""
+    pool_from = reference if reference is not None else retained
+    pooled = {col: _pooled_feature_mean_std(pool_from, col) for col in available}
 
     rows: list[dict] = []
     for group_key, _label, mask in groups:
@@ -972,6 +911,7 @@ def _plot_grouped_feature_z_scores(
     save_name: str,
     title: str,
     group_style: list[tuple[str, str, str]],
+    z_score_ylabel: str = "Median z-score (vs pooled PSMs at 5% FDR)",
 ) -> None:
     """Grouped bar chart of pooled z-scored feature medians."""
     if feat_df.empty:
@@ -1018,13 +958,11 @@ def _plot_grouped_feature_z_scores(
         plt.close(fig)
         return
 
-    _annotate_grouped_bars(ax, bar_groups, symmetric_around_zero=True)
-
     ax.set_xticks(x)
     ax.set_xticklabels(feature_labels, rotation=30, ha="right")
-    ax.set_ylabel("Median z-score (vs pooled PSMs at 5% FDR)")
+    ax.set_ylabel(z_score_ylabel)
     ax.set_title(title)
-    ax.legend(loc="upper left")
+    ax.legend(loc="upper right", fontsize=9)
     ax.grid(False)
     _spine_fmt(ax)
     fig.tight_layout()
@@ -1119,35 +1057,50 @@ def gluc(
     print(f"\nGluC analysis complete. Output in {output_dir}")
 
 
-# ── ProteomeTools analysis ────────────────────────────────────────────
+# ── ProteomeTools-1 analysis ────────────────────────────────────────────
 
 
 def _classify_predictions(
     predictions: list[str],
+    fits_precursor: list[bool],
     lcfm_peptide_set: set[str],
     lcfm_haystack: str,
 ) -> list[str]:
-    """Classify each prediction as exact_match / subsequence / neither.
+    """Classify each prediction by lcfm overlap and precursor mass fit (<20 ppm).
 
     Uses Aho-Corasick to find which predictions are substrings of at least
     one lcfm peptide (the haystack is built by joining all lcfm peptides
-    with a separator).
+    with a separator). Unmatched predictions are split by precursor fit.
     """
     n = len(predictions)
     categories = ["neither"] * n
 
-    for i, p in enumerate(predictions):
+    for i, (p, fit) in enumerate(zip(predictions, fits_precursor)):
         if p in lcfm_peptide_set:
-            categories[i] = "exact_match"
+            if fit:
+                categories[i] = "exact_match_and_fits_precursor"
+            else:
+                categories[i] = "exact_match_and_no_precursor_fit"
 
     remaining_indices = [i for i in range(n) if categories[i] == "neither"]
     remaining_peps = [predictions[i] for i in remaining_indices]
+    remaining_fits = [fits_precursor[i] for i in remaining_indices]
 
     if remaining_peps:
         hits = _batch_substring_hits(remaining_peps, lcfm_haystack)
-        for j, idx in enumerate(remaining_indices):
+        for j, (idx, fit) in enumerate(zip(remaining_indices, remaining_fits)):
             if hits[j]:
-                categories[idx] = "subsequence"
+                if fit:
+                    categories[idx] = "subsequence_and_fits_precursor"
+                else:
+                    categories[idx] = "subsequence_and_no_precursor_fit"
+
+    for i in range(n):
+        if categories[i] == "neither":
+            if fits_precursor[i]:
+                categories[i] = "neither_and_fits_precursor"
+            else:
+                categories[i] = "neither_and_no_precursor_fit"
 
     return categories
 
@@ -1164,113 +1117,141 @@ def _proteometools_summary_table(df: pd.DataFrame) -> pd.DataFrame:
                 {
                     "fdr_threshold": fdr_t,
                     "n_retained": 0,
-                    "n_exact_match": 0,
-                    "n_subsequence": 0,
-                    "n_neither": 0,
-                    "pct_novel_among_retained": 0.0,
-                    "mean_cal_conf_exact": float("nan"),
-                    "mean_cal_conf_novel": float("nan"),
-                    "mean_cal_conf_neither": float("nan"),
+                    "n_exact_match_and_no_precursor_fit": 0,
+                    "n_exact_match_and_fits_precursor": 0,
+                    "n_subsequence_and_no_precursor_fit": 0,
+                    "n_subsequence_and_fits_precursor": 0,
+                    "n_neither_and_no_precursor_fit": 0,
+                    "n_neither_and_fits_precursor": 0,
+                    "pct_exact_or_sub_and_fit_among_retained": 0.0,
                 }
             )
             continue
 
         cats = retained["novelty_category"]
-        n_exact = int((cats == "exact_match").sum())
-        n_sub = int((cats == "subsequence").sum())
-        n_neither = int((cats == "neither").sum())
-
-        exact_conf = retained.loc[cats == "exact_match", "calibrated_confidence"]
-        sub_conf = retained.loc[cats == "subsequence", "calibrated_confidence"]
-        neither_conf = retained.loc[cats == "neither", "calibrated_confidence"]
+        n_exact_and_no_fit = int((cats == "exact_match_and_no_precursor_fit").sum())
+        n_exact_and_fits_precursor = int(
+            (cats == "exact_match_and_fits_precursor").sum()
+        )
+        n_sub_and_no_fit = int((cats == "subsequence_and_no_precursor_fit").sum())
+        n_sub_and_fits_precursor = int((cats == "subsequence_and_fits_precursor").sum())
+        n_neither_and_no_fit = int((cats == "neither_and_no_precursor_fit").sum())
+        n_neither_and_fits_precursor = int((cats == "neither_and_fits_precursor").sum())
 
         rows.append(
             {
                 "fdr_threshold": fdr_t,
                 "n_retained": n,
-                "n_exact_match": n_exact,
-                "n_subsequence": n_sub,
-                "n_neither": n_neither,
-                "pct_novel_among_retained": round(n_sub / n * 100, 2) if n > 0 else 0.0,
-                "mean_cal_conf_exact": round(float(exact_conf.mean()), 4)
-                if len(exact_conf) > 0
-                else float("nan"),
-                "mean_cal_conf_novel": round(float(sub_conf.mean()), 4)
-                if len(sub_conf) > 0
-                else float("nan"),
-                "mean_cal_conf_neither": round(float(neither_conf.mean()), 4)
-                if len(neither_conf) > 0
-                else float("nan"),
+                "n_exact_match_and_no_precursor_fit": n_exact_and_no_fit,
+                "n_exact_match_and_fits_precursor": n_exact_and_fits_precursor,
+                "n_subsequence_and_no_precursor_fit": n_sub_and_no_fit,
+                "n_subsequence_and_fits_precursor": n_sub_and_fits_precursor,
+                "n_neither_and_no_precursor_fit": n_neither_and_no_fit,
+                "n_neither_and_fits_precursor": n_neither_and_fits_precursor,
+                "pct_exact_or_sub_and_fit_among_retained": round(
+                    (n_exact_and_fits_precursor + n_sub_and_fits_precursor) / n * 100, 2
+                )
+                if n > 0
+                else 0.0,
             }
         )
     return pd.DataFrame(rows)
+
+
+_PROTEOMETOOLS_CONF_PLOT_LABELS: dict[str, str] = {
+    "exact_match_and_no_precursor_fit": "ID-",
+    "exact_match_and_fits_precursor": "ID+",
+    "subsequence_and_no_precursor_fit": "Sub-",
+    "subsequence_and_fits_precursor": "Sub+",
+    "neither_and_no_precursor_fit": "Novel-",
+    "neither_and_fits_precursor": "Novel+",
+}
+
+_PROTEOMETOOLS_CONF_CATEGORY_ORDER = list(_PROTEOMETOOLS_CONF_PLOT_LABELS.keys())
+
+
+def _proteometools_conf_category_legend(ax: plt.Axes) -> None:
+    handles = [
+        Line2D([], [], color="none", label="ID: Exact sequence match to labelled set."),
+        Line2D([], [], color="none", label="Sub: Subsequence of labelled set peptide."),
+        Line2D([], [], color="none", label="Novel: No sequence match to labelled set."),
+        Line2D(
+            [],
+            [],
+            color="none",
+            label="+: Matches precursor mass within 20 ppm.",
+        ),
+    ]
+    (
+        Line2D(
+            [],
+            [],
+            color="none",
+            label="-: Does not match precursor mass within 20 ppm.",
+        ),
+    )
+    ax.legend(
+        handles=handles,
+        loc="upper left",
+        bbox_to_anchor=(1.02, 1.0),
+        borderaxespad=0,
+        frameon=True,
+        fontsize=9,
+    )
 
 
 def _plot_proteometools_conf_by_category(
     df: pd.DataFrame,
     out_dir: Path,
 ) -> None:
-    """Violin plot of calibrated confidence by novelty category."""
-    df = _add_q_values(df)
-    n_cols = len(FDR_THRESHOLDS)
-    fig, axes = plt.subplots(1, n_cols, figsize=(5 * n_cols, 5), sharey=True)
-    if n_cols == 1:
-        axes = [axes]
+    """Violin plot of calibrated confidence by novelty category (all unlabelled PSMs)."""
+    plot_df = df.dropna(subset=["calibrated_confidence"]).copy()
+    if len(plot_df) < 5:
+        print("  skipping proteometools_conf_by_category (too few PSMs)")
+        return
 
-    cat_order = ["exact_match", "subsequence", "neither"]
-    cat_labels = {
-        "exact_match": "Exact match",
-        "subsequence": "Novel (subsequence)",
-        "neither": "Neither",
-    }
     palette = {
-        "Exact match": _MAIN_LINE_COLOUR,
-        "Novel (subsequence)": _NOVEL_COLOUR,
-        "Neither": _INCORRECT_COLOUR,
+        _PROTEOMETOOLS_CONF_PLOT_LABELS[k]: _PALETTE[i]
+        for i, k in enumerate(_PROTEOMETOOLS_CONF_CATEGORY_ORDER)
     }
 
-    for ax, fdr_t in zip(axes, FDR_THRESHOLDS):
-        retained = df[df["psm_q_value"] <= fdr_t].copy()
-        if len(retained) < 5:
-            ax.set_title(
-                f"Too few retained predictions at {int(fdr_t * 100)}% FDR\n"
-                f"(n={len(retained):,})"
-            )
-            ax.set_visible(False)
-            continue
-
-        retained["Category"] = retained["novelty_category"].map(cat_labels)
-        present_cats = [
-            cat_labels[c]
-            for c in cat_order
-            if cat_labels[c] in retained["Category"].values
-        ]
-
-        sns.violinplot(
-            data=retained,
-            x="Category",
-            y="calibrated_confidence",
-            order=present_cats,
-            palette=palette,
-            ax=ax,
-            inner="quartile",
-            cut=0,
-            linewidth=0.8,
-        )
-        ax.set_xlabel("")
-        ax.set_ylabel("Calibrated confidence")
-        pct = int(fdr_t * 100)
-        ax.set_title(
-            f"Retained ProteomeTools predictions at\n{pct}% FDR (n={len(retained):,})"
-        )
-        ax.tick_params(axis="x", rotation=20)
-        ax.grid(False)
-        _spine_fmt(ax)
-
-    fig.suptitle(
-        "Calibrated confidence for ProteomeTools predictions\nby novelty category",
-        fontsize=13,
+    plot_df["Category"] = plot_df["novelty_category"].map(
+        _PROTEOMETOOLS_CONF_PLOT_LABELS
     )
+    present_cats = [
+        _PROTEOMETOOLS_CONF_PLOT_LABELS[c]
+        for c in _PROTEOMETOOLS_CONF_CATEGORY_ORDER
+        if _PROTEOMETOOLS_CONF_PLOT_LABELS[c] in plot_df["Category"].values
+    ]
+    if not present_cats:
+        print("  skipping proteometools_conf_by_category (no categories present)")
+        return
+
+    conf = plot_df["calibrated_confidence"]
+    y_min, y_max = float(conf.min()), float(conf.max())
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    sns.violinplot(
+        data=plot_df,
+        x="Category",
+        y="calibrated_confidence",
+        order=present_cats,
+        palette=palette,
+        ax=ax,
+        inner="quartile",
+        cut=0,
+        linewidth=0.8,
+    )
+    ax.set_ylim(y_min, y_max)
+    ax.set_xlabel("")
+    ax.set_ylabel("Calibrated confidence")
+    ax.set_title(
+        "Calibrated confidence for ProteomeTools-1 predictions\nby novelty category"
+    )
+    ax.grid(False)
+    _spine_fmt(ax)
+    _proteometools_conf_category_legend(ax)
+
     fig.tight_layout()
     _save(fig, out_dir, "proteometools_conf_by_category")
 
@@ -1279,13 +1260,15 @@ def _plot_proteometools_hit_rate(
     df: pd.DataFrame,
     out_dir: Path,
 ) -> None:
-    """Line plot: validated hit rate by calibrated confidence decile."""
+    """Line plot: validated hit rate (exact or subsequence match and fits precursor mass within 20ppm) by calibrated confidence decile."""
     if len(df) < 20:
         print("  skipping proteometools_hit_rate_vs_conf (too few PSMs)")
         return
 
     df = df.copy()
-    df["is_validated"] = df["novelty_category"].isin(["exact_match", "subsequence"])
+    df["is_validated"] = df["novelty_category"].isin(
+        ["exact_match_and_fits_precursor", "subsequence_and_fits_precursor"]
+    )
     df["conf_decile"] = pd.qcut(
         df["calibrated_confidence"],
         q=10,
@@ -1319,8 +1302,12 @@ def _plot_proteometools_hit_rate(
         label=f"Overall mean ({overall:.2%})",
     )
     ax.set_xlabel("Mean calibrated confidence per decile")
-    ax.set_ylabel("Fraction validated (exact or subsequence)")
-    ax.set_title("Validated hit rate by calibrated confidence decile for ProteomeTools")
+    ax.set_ylabel(
+        "Fraction validated\n(exact match or subsequence fitting precursor mass)"
+    )
+    ax.set_title(
+        "Validated hit rate by calibrated confidence decile for ProteomeTools-1"
+    )
     ax.legend(loc="lower right")
     ax.grid(False)
     _spine_fmt(ax)
@@ -1328,10 +1315,15 @@ def _plot_proteometools_hit_rate(
     _save(fig, out_dir, "proteometools_hit_rate_vs_conf")
 
 
-def _proteometools_feature_table(df: pd.DataFrame) -> pd.DataFrame:
+def _proteometools_feature_table(
+    df: pd.DataFrame,
+    labelled_df: pd.DataFrame,
+) -> pd.DataFrame:
     """Median features for exact / novel / neither at 5% FDR."""
     df = _add_q_values(df)
+    labelled_df = _add_q_values(labelled_df)
     retained = df[df["psm_q_value"] <= 0.05]
+    labelled_ref = labelled_df[labelled_df["psm_q_value"] <= 0.05]
     available = [c for c in FEATURE_COLUMNS if c in retained.columns]
     if not available:
         return pd.DataFrame()
@@ -1341,18 +1333,38 @@ def _proteometools_feature_table(df: pd.DataFrame) -> pd.DataFrame:
         available,
         [
             (
-                "exact_match",
-                "Exact match",
-                retained["novelty_category"] == "exact_match",
+                "exact_match_and_fits_precursor",
+                "Exact match, fits precursor mass",
+                retained["novelty_category"] == "exact_match_and_fits_precursor",
             ),
             (
-                "subsequence",
-                "Novel (subsequence)",
-                retained["novelty_category"] == "subsequence",
+                "exact_match_and_no_precursor_fit",
+                "Exact match, no precursor mass fit",
+                retained["novelty_category"] == "exact_match_and_no_precursor_fit",
             ),
-            ("neither", "Neither", retained["novelty_category"] == "neither"),
+            (
+                "subsequence_and_fits_precursor",
+                "Subsequence, precursor mass fit",
+                retained["novelty_category"] == "subsequence_and_fits_precursor",
+            ),
+            (
+                "subsequence_and_no_precursor_fit",
+                "Subsequence, no precursor mass fit",
+                retained["novelty_category"] == "subsequence_and_no_precursor_fit",
+            ),
+            (
+                "neither_and_fits_precursor",
+                "Novel, precursor mass fit",
+                retained["novelty_category"] == "neither_and_fits_precursor",
+            ),
+            (
+                "neither_and_no_precursor_fit",
+                "Novel, no precursor mass fit",
+                retained["novelty_category"] == "neither_and_no_precursor_fit",
+            ),
         ],
         group_col="category",
+        reference=labelled_ref,
     )
 
 
@@ -1367,14 +1379,38 @@ def _plot_proteometools_feature_comparison(
         out_dir=out_dir,
         save_name="proteometools_feature_comparison",
         title=(
-            "Median feature values for ProteomeTools predictions by novelty "
+            "Median feature values for ProteomeTools-1 predictions by novelty "
             "category at 5% FDR"
         ),
         group_style=[
-            ("exact_match", "Exact match", _MAIN_LINE_COLOUR),
-            ("subsequence", "Novel (subsequence)", _NOVEL_COLOUR),
-            ("neither", "Neither", _INCORRECT_COLOUR),
+            (
+                "exact_match_and_fits_precursor",
+                "Exact match, precursor mass fit",
+                _PALETTE[1],
+            ),
+            (
+                "exact_match_and_no_precursor_fit",
+                "Exact match, no precursor mass fit",
+                _PALETTE[0],
+            ),
+            (
+                "subsequence_and_fits_precursor",
+                "Subsequence, precursor mass fit",
+                _PALETTE[3],
+            ),
+            (
+                "subsequence_and_no_precursor_fit",
+                "Subsequence, no precursor mass fit",
+                _PALETTE[2],
+            ),
+            ("neither_and_fits_precursor", "Novel, precursor mass fit", _PALETTE[5]),
+            (
+                "neither_and_no_precursor_fit",
+                "Novel, no precursor mass fit",
+                _PALETTE[4],
+            ),
         ],
+        z_score_ylabel="Median z-score (vs labelled PSMs at 5% FDR)",
     )
 
 
@@ -1399,7 +1435,7 @@ def proteometools(
         typer.Option("--output-dir", help="Directory for output tables and plots."),
     ],
 ) -> None:
-    """Analyse calibrator behaviour on ProteomeTools novel identifications."""
+    """Analyse calibrator behaviour on ProteomeTools-1 novel identifications."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Loading lcfm predictions from {lcfm_predictions_dir}")
@@ -1421,28 +1457,30 @@ def proteometools(
 
     lcfm_haystack = _PROTEOME_JOIN_SEP.join(sorted(lcfm_peptide_set))
 
-    print("Classifying acfm predictions")
-    acfm_preds_raw = acfm_pl["prediction"].to_list()
-    acfm_preds_stripped = [
-        _strip_mods(p) if isinstance(p, str) else "" for p in acfm_preds_raw
+    print("Classifying unlabelled predictions")
+    unlabelled_pl = acfm_pl.join(
+        lcfm_pl.select("spectrum_id"), on="spectrum_id", how="anti"
+    )
+    unlabelled_pl = unlabelled_pl.with_columns(
+        (pl.col("delta_mass_ppm").abs() < 20).alias("fits_precursor")
+    )
+    unlabelled_preds_raw = unlabelled_pl["prediction"].to_list()
+    unlabelled_preds_stripped = [
+        _strip_mods(p) if isinstance(p, str) else "" for p in unlabelled_preds_raw
     ]
+    fits_precursor = unlabelled_pl["fits_precursor"].to_list()
 
     categories = _classify_predictions(
-        acfm_preds_stripped,
+        unlabelled_preds_stripped,
+        fits_precursor,
         lcfm_peptide_set,
         lcfm_haystack,
     )
-    acfm_pl = acfm_pl.with_columns(
+    unlabelled_pl = unlabelled_pl.with_columns(
         pl.Series("novelty_category", categories, dtype=pl.Utf8),
     )
-    cat_counts = Counter(categories)
-    print(
-        f"  exact_match={cat_counts.get('exact_match', 0):,}  "
-        f"subsequence={cat_counts.get('subsequence', 0):,}  "
-        f"neither={cat_counts.get('neither', 0):,}"
-    )
-
-    df = acfm_pl.to_pandas()
+    df = unlabelled_pl.to_pandas()
+    labelled_df = lcfm_pl.to_pandas()
 
     print("Building novelty summary table")
     summary = _proteometools_summary_table(df)
@@ -1450,7 +1488,7 @@ def proteometools(
     print(summary.to_string(index=False))
 
     print("Building feature comparison table")
-    feat_df = _proteometools_feature_table(df)
+    feat_df = _proteometools_feature_table(df, labelled_df)
     if not feat_df.empty:
         feat_df.to_csv(output_dir / "proteometools_feature_comparison.csv", index=False)
 
@@ -1459,88 +1497,10 @@ def proteometools(
     _plot_proteometools_hit_rate(df, output_dir)
     _plot_proteometools_feature_comparison(feat_df, output_dir)
 
-    print(f"\nProteomeTools analysis complete. Output in {output_dir}")
+    print(f"\nProteomeTools-1 analysis complete. Output in {output_dir}")
 
 
 # ── Summary figure ────────────────────────────────────────────────────
-
-
-def _summary_count(row: pd.DataFrame, column: str) -> int:
-    if len(row) == 0:
-        return 0
-    return int(row[column].iloc[0])
-
-
-def _novelty_summary_counts(
-    gluc_df: pd.DataFrame, pt_df: pd.DataFrame
-) -> tuple[list[int], list[int], list[int], list[int]]:
-    gluc_total, gluc_novel, pt_total, pt_novel = [], [], [], []
-    for fdr_t in FDR_THRESHOLDS:
-        g_row = gluc_df[gluc_df["fdr_threshold"] == fdr_t]
-        gluc_total.append(_summary_count(g_row, "n_proteome_hit"))
-        gluc_novel.append(_summary_count(g_row, "n_non_tryptic_hit"))
-
-        p_row = pt_df[pt_df["fdr_threshold"] == fdr_t]
-        pt_total.append(_summary_count(p_row, "n_retained"))
-        pt_novel.append(_summary_count(p_row, "n_subsequence"))
-    return gluc_total, gluc_novel, pt_total, pt_novel
-
-
-def _annotate_positive_bars(ax: plt.Axes, bars) -> None:
-    for bar in bars:
-        h = bar.get_height()
-        if h <= 0:
-            continue
-        ax.annotate(
-            f"{h:,}",
-            xy=(bar.get_x() + bar.get_width() / 2, h),
-            xytext=(0, 3),
-            textcoords="offset points",
-            ha="center",
-            va="bottom",
-            fontsize=10,
-        )
-
-
-def _plot_novelty_summary_bars(
-    ax: plt.Axes,
-    gluc_total: list[int],
-    gluc_novel: list[int],
-    pt_total: list[int],
-    pt_novel: list[int],
-) -> None:
-    fdr_labels = [f"{int(t * 100)}%" for t in FDR_THRESHOLDS]
-    x = np.arange(len(FDR_THRESHOLDS))
-    width = 0.18
-    offsets = [-1.5, -0.5, 0.5, 1.5]
-
-    bar_sets = [
-        (offsets[0], gluc_total, "HeLa degradome total hits", _MAIN_LINE_COLOUR),
-        (offsets[1], gluc_novel, "HeLa degradome non-tryptic hits", _NOVEL_COLOUR),
-        (offsets[2], pt_total, "ProteomeTools total retained", _PALETTE[4]),
-        (offsets[3], pt_novel, "ProteomeTools novel (subsequence)", _PALETTE[3]),
-    ]
-
-    for off, vals, label, colour in bar_sets:
-        bars = ax.bar(
-            x + off * width,
-            vals,
-            width,
-            label=label,
-            color=colour,
-            edgecolor="black",
-            linewidth=1,
-        )
-        _annotate_positive_bars(ax, bars)
-
-    ax.set_xticks(x)
-    ax.set_xticklabels(fdr_labels)
-    ax.set_xlabel("FDR threshold")
-    ax.set_ylabel("Peptide-spectrum matches")
-    ax.set_title("Novel identifications retained across FDR thresholds")
-    ax.legend(loc="upper left", fontsize=9)
-    ax.grid(False)
-    _spine_fmt(ax)
 
 
 @app.command()
@@ -1570,15 +1530,6 @@ def summary(
         raise typer.BadParameter(f"Missing {gluc_csv}")
     if not pt_csv.is_file():
         raise typer.BadParameter(f"Missing {pt_csv}")
-
-    counts = _novelty_summary_counts(pd.read_csv(gluc_csv), pd.read_csv(pt_csv))
-
-    fig, ax = plt.subplots(figsize=(10, 6))
-    _plot_novelty_summary_bars(ax, *counts)
-    fig.tight_layout()
-    _save(fig, output_dir, "novelty_summary_bar")
-
-    print(f"\nSummary figure saved to {output_dir}")
 
 
 if __name__ == "__main__":
