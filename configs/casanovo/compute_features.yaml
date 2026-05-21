@@ -14,3 +14,4 @@ dataset:
 training_matrix_output_path: null
 filter_empty_predictions: true
 labelled: true
+metadata_output_path: null
