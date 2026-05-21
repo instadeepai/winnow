@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import Annotated
+import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -29,6 +30,10 @@ if not logger.handlers:
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
+# Filter by the specific message or category
+warnings.filterwarnings("ignore", message=".*range of fitted confidence scores.*")
+warnings.filterwarnings("ignore", message=".*range of fitted FDR thresholds.*")
+
 # ---------------------------------------------------------------------------
 # Dataset display names
 # ---------------------------------------------------------------------------
@@ -45,8 +50,13 @@ DATASET_DISPLAY_NAMES: dict[str, str] = {
     "woundfluids": "Wound exudates",
     "PXD014877": "$\\it{C.\\;elegans}$",
     "PXD023064": "Immunopeptidomics-2",
-    "PXD009935": "Immunopeptidomics-3",
-    "Astral": "Astral $\\it{E.\\;coli}$",
+    "astral": "Astral $\\it{E.\\;coli}$",
+    "PXD013868": "$\\it{Arabidopsis\\;thaliana}$",
+    "20150708_QE3_UPLC8_DBJ_QC_HELA_39frac_Chymotrypsin": "HeLa chymotrypsin",
+    "20151020_QE3_UPLC8_DBJ_SA_A549_Rep2_46": "Human lung",
+    "20151020_QE3_UPLC8_DBJ_SA_HCT116_Rep2_46": "Human colon",
+    "20170303_QEh1_LC2_FaMa_ChCh_SA_HLApI_JY_R1_exp2": "HLA Class I (JY cells)",
+    "20170609_QEh1_LC1_ChCh_FAMA_SA_HLAIIp_JY_all_R1": "HLA Class II (JY cells)",
 }
 
 # Paul Tol "bright" palette (colour-blind safe)
@@ -165,10 +175,7 @@ def plot_fdr_run(
     display = _display_name(project)
     qualifier = _ground_truth_qualifier(eval_type)
 
-    fdr_ctrl = NonParametricFDRControl()
-    fdr_ctrl.fit(dataset=df["calibrated_confidence"])
-    fdr_df = fdr_ctrl.add_psm_fdr(df.copy(), confidence_col="calibrated_confidence")
-    fdr_df = fdr_df.sort_values("calibrated_confidence")
+    df = df.sort_values("calibrated_confidence")
 
     true_fdr_ctrl = _fit_database_grounded_fdr(df)
     true_fdr_df = true_fdr_ctrl.add_psm_fdr(
@@ -178,8 +185,8 @@ def plot_fdr_run(
 
     fig, ax = plt.subplots(figsize=(6, 4))
     ax.plot(
-        fdr_df["calibrated_confidence"].values,
-        fdr_df["psm_fdr"].values,
+        df["calibrated_confidence"].values,
+        df["psm_fdr"].values,
         color=_MAIN_LINE_COLOUR,
         lw=1.5,
         label="Non-parametric",
@@ -294,10 +301,7 @@ def plot_fdr_run_with_bands(
     display = _display_name(project)
     qualifier = _ground_truth_qualifier(eval_type)
 
-    fdr_ctrl = NonParametricFDRControl()
-    fdr_ctrl.fit(dataset=df["calibrated_confidence"])
-    fdr_df = fdr_ctrl.add_psm_fdr(df.copy(), confidence_col="calibrated_confidence")
-    fdr_df = fdr_df.sort_values("calibrated_confidence")
+    df = df.sort_values("calibrated_confidence")
 
     true_fdr_ctrl = _fit_database_grounded_fdr(df)
     true_fdr_df = true_fdr_ctrl.add_psm_fdr(
@@ -305,8 +309,8 @@ def plot_fdr_run_with_bands(
     )
     true_fdr_df = true_fdr_df.sort_values("calibrated_confidence")
 
-    fdr_vals = fdr_df["psm_fdr"].values
-    conf_vals = fdr_df["calibrated_confidence"].values
+    fdr_vals = df["psm_fdr"].values
+    conf_vals = df["calibrated_confidence"].values
     n = len(fdr_vals)
     hw = _hoeffding_band_arrays(n)[::-1]
 
@@ -414,12 +418,6 @@ def _compute_true_vs_estimated_fdr(df: pd.DataFrame) -> pd.DataFrame:
         drop=True
     )
 
-    fdr_ctrl = NonParametricFDRControl()
-    fdr_ctrl.fit(dataset=sorted_df["calibrated_confidence"])
-    with_est_fdr = fdr_ctrl.add_psm_fdr(
-        sorted_df, confidence_col="calibrated_confidence"
-    )
-
     true_fdr_ctrl = _fit_database_grounded_fdr(sorted_df)
     with_true_fdr = true_fdr_ctrl.add_psm_fdr(
         sorted_df, confidence_col="calibrated_confidence"
@@ -427,7 +425,7 @@ def _compute_true_vs_estimated_fdr(df: pd.DataFrame) -> pd.DataFrame:
 
     return pd.DataFrame(
         {
-            "estimated_fdr": with_est_fdr["psm_fdr"].values,
+            "estimated_fdr": sorted_df["psm_fdr"].values,
             "true_fdr": with_true_fdr["psm_fdr"].values,
         }
     )
@@ -480,6 +478,85 @@ def plot_true_vs_estimated_fdr(
     _style_ax(ax)
     fig.tight_layout()
     tag = "fdr_true_vs_est_zoom" if zoomed else "fdr_true_vs_est"
+    _save_fig(fig, output_dir / f"{tag}_{project}")
+
+
+# ---------------------------------------------------------------------------
+# True q-values vs estimated q-values
+# ---------------------------------------------------------------------------
+def _compute_true_vs_estimated_q_values(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute true and estimated q-value arrays, sorted by confidence descending."""
+    sorted_df = df.sort_values("calibrated_confidence", ascending=False).reset_index(
+        drop=True
+    )
+
+    true_q_val_ctrl = _fit_database_grounded_fdr(sorted_df)
+    qval_input = sorted_df[["calibrated_confidence"]].copy()
+    with_true_q_df = true_q_val_ctrl.add_psm_q_value(
+        qval_input, confidence_col="calibrated_confidence"
+    )
+    return pd.DataFrame(
+        {
+            "estimated_q_value": sorted_df["psm_q_value"].values,
+            "true_q_value": with_true_q_df["psm_q_value"].values,
+        }
+    )
+
+
+def plot_true_vs_estimated_q_values(
+    df: pd.DataFrame,
+    project: str,
+    eval_type: str,
+    output_dir: Path,
+    *,
+    zoomed: bool = False,
+) -> None:
+    """Plot true q-values vs estimated q-values."""
+    if "psm_q_value" not in df.columns:
+        logger.warning(
+            "Skipping true vs estimated q-value plot for %s: psm_q_value column missing",
+            project,
+        )
+        return
+
+    display = _display_name(project)
+    qualifier = _ground_truth_qualifier(eval_type)
+    q_value_data = _compute_true_vs_estimated_q_values(df)
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.plot(
+        q_value_data["estimated_q_value"],
+        q_value_data["true_q_value"],
+        color=_MAIN_LINE_COLOUR,
+        lw=1.5,
+        label="Observed",
+    )
+
+    # Only plot the ideal line up to the max extent of the observed line
+    max_x = float(q_value_data["estimated_q_value"].max())
+    max_y = float(q_value_data["true_q_value"].max())
+    lim = 0.1 if zoomed else 1.0
+    ideal_end = min(lim, max(max_x, max_y))
+
+    ax.plot(
+        [0, ideal_end],
+        [0, ideal_end],
+        ls="--",
+        color=_IDEAL_LINE_COLOUR,
+        lw=1,
+        label="Perfectly calibrated",
+    )
+    ax.set_xlabel("Non-parametric estimated q-values")
+    ax.set_ylabel("Database-grounded q-values")
+    zoom_suffix = " (0 to 0.1)" if zoomed else ""
+    ax.set_title(f"{display} true vs estimated q-values{zoom_suffix} {qualifier}")
+    if zoomed:
+        ax.set_xlim(0, 0.1)
+        ax.set_ylim(0, 0.1)
+    ax.legend(loc="upper left")
+    _style_ax(ax)
+    fig.tight_layout()
+    tag = "qvalue_true_vs_est_zoom" if zoomed else "qvalue_true_vs_est"
     _save_fig(fig, output_dir / f"{tag}_{project}")
 
 
@@ -740,7 +817,8 @@ def _load_project_data(
     eval_type: str,
 ) -> pd.DataFrame:
     """Load and merge metadata.csv and preds_and_fdr_metrics.csv for a project."""
-    folder = predictions_root / f"{project}_{suffix}"
+    # folder = predictions_root / f"{project}_{suffix}"
+    folder = predictions_root / f"{project}"
     preds_path = folder / "preds_and_fdr_metrics.csv"
     meta_path = folder / "metadata.csv"
     if not preds_path.is_file():
@@ -791,6 +869,8 @@ def generate_all_plots(
     plot_q_value_run_with_bands(df, project, eval_type, output_dir)
     plot_true_vs_estimated_fdr(df, project, eval_type, output_dir, zoomed=False)
     plot_true_vs_estimated_fdr(df, project, eval_type, output_dir, zoomed=True)
+    plot_true_vs_estimated_q_values(df, project, eval_type, output_dir, zoomed=False)
+    plot_true_vs_estimated_q_values(df, project, eval_type, output_dir, zoomed=True)
     plot_calibration(df, project, eval_type, output_dir)
     plot_score_histograms(df, project, eval_type, output_dir)
 
