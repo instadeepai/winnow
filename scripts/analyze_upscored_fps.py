@@ -79,6 +79,7 @@ DATASET_DISPLAY_NAMES: dict[str, str] = {
     "snakevenoms": "Snake venomics",
     "tplantibodies": "Therapeutic nanobodies",
     "woundfluids": "Wound exudates",
+    "PXD004732": "ProteomeTools-1",
     "PXD014877": "$\\it{C.\\;elegans}$",
     "PXD023064": "Immunopeptidomics-2",
     "astral": "Astral $\\it{E.\\;coli}$",

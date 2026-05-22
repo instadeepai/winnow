@@ -4,9 +4,10 @@
 Two analyses demonstrate that the calibrator does not penalise peptides absent
 from the standard tryptic database-search training distribution:
 
-1. **GluC (``gluc`` subcommand)** -- The model was trained on tryptic data.
-   GluC cleaves after D/E, producing peptides whose C-terminus is typically
-   *not* K or R.  We classify predictions by whether their C-terminal residue
+1. **Non-tryptic enzyme digest (``nontryptic_digest`` subcommand)** -- The model
+   was trained on tryptic data.  Enzymes such as GluC, AspN, LysC or chymotrypsin cleave at
+   non-K/R sites, so retained peptides often have a C-terminus that is *not*
+   K or R.  We classify predictions by whether their C-terminal residue
    is tryptic (K/R) or non-tryptic, report terminus proportions before and
    after FDR, compare raw InstaNovo versus Winnow calibrated scores, and
    quantify calibration shifts (``calibrated_confidence - confidence``).
@@ -75,8 +76,8 @@ _PROTEOME_JOIN_SEP = "\x1f"
 
 FDR_THRESHOLDS = [0.01, 0.05, 0.10]
 
-_GLUC_CALIBRATION_SCATTER_MAX_POINTS = 10_000
-_GLUC_CALIBRATION_SCATTER_RANDOM_STATE = 42
+_NONTRYPTIC_CALIBRATION_SCATTER_MAX_POINTS = 10_000
+_NONTRYPTIC_CALIBRATION_SCATTER_RANDOM_STATE = 42
 
 FEATURE_COLUMNS = [
     "spectral_angle",
@@ -88,7 +89,6 @@ FEATURE_COLUMNS = [
 ]
 
 DATASET_DISPLAY_NAMES: dict[str, str] = {
-    "gluc": "HeLa degradome",
     "PXD004732": "ProteomeTools-1",
 }
 
@@ -119,7 +119,7 @@ def _save(fig: plt.Figure, out_dir: Path, name: str) -> None:
 def _subsample_psms(
     df: pd.DataFrame,
     max_points: int,
-    random_state: int = _GLUC_CALIBRATION_SCATTER_RANDOM_STATE,
+    random_state: int = _NONTRYPTIC_CALIBRATION_SCATTER_RANDOM_STATE,
 ) -> pd.DataFrame:
     """Return up to ``max_points`` rows without replacement."""
     if len(df) <= max_points:
@@ -220,7 +220,7 @@ def _nice_feature_label(col: str) -> str:
     return labels.get(col, col.replace("_", " ").capitalize())
 
 
-# ── GluC analysis ─────────────────────────────────────────────────────
+# ── Non-tryptic digest analysis ─────────────────────────────────────────
 
 
 def _is_tryptic_cterm(seq: str) -> bool:
@@ -231,7 +231,7 @@ def _is_tryptic_cterm(seq: str) -> bool:
     return stripped[-1] in ("K", "R")
 
 
-def _gluc_annotate(
+def _nontryptic_annotate(
     df: pl.DataFrame,
     fasta_path: Path,
 ) -> pl.DataFrame:
@@ -274,7 +274,7 @@ def _terminus_count_row(
     }
 
 
-def _gluc_terminus_proportions_table(df: pd.DataFrame) -> pd.DataFrame:
+def _nontryptic_terminus_proportions_table(df: pd.DataFrame) -> pd.DataFrame:
     """Tryptic versus non-tryptic counts across cohorts and FDR cutoffs."""
     df = _add_q_values(df)
     rows: list[dict] = [
@@ -304,7 +304,7 @@ def _gluc_terminus_proportions_table(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _gluc_calibration_delta_rows(
+def _nontryptic_calibration_delta_rows(
     sub: pd.DataFrame,
     *,
     cohort: str,
@@ -344,7 +344,7 @@ def _gluc_calibration_delta_rows(
     return out
 
 
-def _gluc_calibration_delta_table(df: pd.DataFrame) -> pd.DataFrame:
+def _nontryptic_calibration_delta_table(df: pd.DataFrame) -> pd.DataFrame:
     """Mean calibration shift (calibrated - raw) by terminus and cohort."""
     if "confidence" not in df.columns:
         return pd.DataFrame()
@@ -357,10 +357,12 @@ def _gluc_calibration_delta_table(df: pd.DataFrame) -> pd.DataFrame:
 
     rows: list[dict] = []
     rows.extend(
-        _gluc_calibration_delta_rows(work, cohort="all_predictions", fdr_threshold=None)
+        _nontryptic_calibration_delta_rows(
+            work, cohort="all_predictions", fdr_threshold=None
+        )
     )
     rows.extend(
-        _gluc_calibration_delta_rows(
+        _nontryptic_calibration_delta_rows(
             work[work["proteome_hit"]],
             cohort="proteome_hit",
             fdr_threshold=None,
@@ -369,7 +371,7 @@ def _gluc_calibration_delta_table(df: pd.DataFrame) -> pd.DataFrame:
     for fdr_t in FDR_THRESHOLDS:
         retained = work[(work["psm_q_value"] <= fdr_t) & work["proteome_hit"]]
         rows.extend(
-            _gluc_calibration_delta_rows(
+            _nontryptic_calibration_delta_rows(
                 retained,
                 cohort="proteome_hit_at_fdr",
                 fdr_threshold=fdr_t,
@@ -378,7 +380,7 @@ def _gluc_calibration_delta_table(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _gluc_summary_table(df: pd.DataFrame) -> pd.DataFrame:
+def _nontryptic_summary_table(df: pd.DataFrame) -> pd.DataFrame:
     """Build the tryptic-summary table at each FDR threshold."""
     df = _add_q_values(df)
     rows: list[dict] = []
@@ -416,13 +418,13 @@ def _gluc_summary_table(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _gluc_score_label(score_col: str) -> str:
+def _nontryptic_score_label(score_col: str) -> str:
     if score_col == "confidence":
         return "Raw InstaNovo confidence"
     return "Calibrated confidence"
 
 
-def _plot_gluc_score_by_terminus(
+def _plot_nontryptic_score_by_terminus(
     df: pd.DataFrame,
     out_dir: Path,
     *,
@@ -442,7 +444,7 @@ def _plot_gluc_score_by_terminus(
         axes = [axes]
 
     palette = {"Tryptic (K/R)": _MAIN_LINE_COLOUR, "Non-tryptic": _NOVEL_COLOUR}
-    y_label = _gluc_score_label(score_col)
+    y_label = _nontryptic_score_label(score_col)
 
     for ax, fdr_t in zip(axes, FDR_THRESHOLDS):
         retained = df[(df["psm_q_value"] <= fdr_t) & df["proteome_hit"]]
@@ -482,35 +484,47 @@ def _plot_gluc_score_by_terminus(
     _save(fig, out_dir, save_name)
 
 
-def _plot_gluc_conf_by_terminus(df: pd.DataFrame, out_dir: Path) -> None:
+def _plot_nontryptic_conf_by_terminus(
+    df: pd.DataFrame,
+    out_dir: Path,
+    *,
+    prefix: str = "nontryptic_digest",
+    dataset_label: str = "Non-tryptic digest",
+) -> None:
     """Violin plot of calibrated confidence split by C-terminal residue."""
-    _plot_gluc_score_by_terminus(
+    _plot_nontryptic_score_by_terminus(
         df,
         out_dir,
         score_col="calibrated_confidence",
-        save_name="gluc_conf_by_terminus",
+        save_name=f"{prefix}_conf_by_terminus",
         suptitle=(
-            "Calibrated confidence for HeLa degradome proteome-hit PSMs\n"
+            f"Calibrated confidence for {dataset_label} proteome-hit PSMs\n"
             "by C-terminal residue"
         ),
     )
 
 
-def _plot_gluc_raw_conf_by_terminus(df: pd.DataFrame, out_dir: Path) -> None:
+def _plot_nontryptic_raw_conf_by_terminus(
+    df: pd.DataFrame,
+    out_dir: Path,
+    *,
+    prefix: str = "nontryptic_digest",
+    dataset_label: str = "Non-tryptic digest",
+) -> None:
     """Violin plot of raw InstaNovo confidence split by C-terminal residue."""
-    _plot_gluc_score_by_terminus(
+    _plot_nontryptic_score_by_terminus(
         df,
         out_dir,
         score_col="confidence",
-        save_name="gluc_raw_conf_by_terminus",
+        save_name=f"{prefix}_raw_conf_by_terminus",
         suptitle=(
-            "Raw InstaNovo confidence for HeLa degradome proteome-hit PSMs\n"
+            f"Raw InstaNovo confidence for {dataset_label} proteome-hit PSMs\n"
             "by C-terminal residue"
         ),
     )
 
 
-def _plot_gluc_overlapping_score_histogram(
+def _plot_nontryptic_overlapping_score_histogram(
     tryp: np.ndarray,
     non_tryp: np.ndarray,
     *,
@@ -560,7 +574,7 @@ def _plot_gluc_overlapping_score_histogram(
         y_non = gaussian_kde(non_tryp)(x_grid) * len(non_tryp) * bin_width
         ax.plot(x_grid, y_non, color=_NOVEL_COLOUR, lw=1.5)
 
-    ax.set_xlabel(_gluc_score_label(score_col))
+    ax.set_xlabel(_nontryptic_score_label(score_col))
     ax.set_ylabel("Frequency")
     ax.set_title(title)
     ax.legend(loc="upper center")
@@ -570,7 +584,7 @@ def _plot_gluc_overlapping_score_histogram(
     _save(fig, out_dir, save_name)
 
 
-def _plot_gluc_score_histograms(
+def _plot_nontryptic_score_histograms(
     df: pd.DataFrame,
     out_dir: Path,
     *,
@@ -593,7 +607,7 @@ def _plot_gluc_score_histograms(
 
     tryp = retained.loc[retained["tryptic_cterm"], score_col].to_numpy()
     non_tryp = retained.loc[~retained["tryptic_cterm"], score_col].to_numpy()
-    _plot_gluc_overlapping_score_histogram(
+    _plot_nontryptic_overlapping_score_histogram(
         tryp,
         non_tryp,
         score_col=score_col,
@@ -603,60 +617,78 @@ def _plot_gluc_score_histograms(
     )
 
 
-def _plot_gluc_score_histograms_at_fdr(df: pd.DataFrame, out_dir: Path) -> None:
+def _plot_nontryptic_score_histograms_at_fdr(
+    df: pd.DataFrame,
+    out_dir: Path,
+    *,
+    prefix: str = "nontryptic_digest",
+    dataset_label: str = "Non-tryptic digest",
+) -> None:
     """Calibrated confidence histogram at 5% FDR for proteome hits."""
     df = _add_q_values(df)
     retained = df[(df["psm_q_value"] <= 0.05) & df["proteome_hit"]]
-    _plot_gluc_score_histograms(
+    _plot_nontryptic_score_histograms(
         df,
         out_dir,
         score_col="calibrated_confidence",
-        save_name="gluc_score_histograms",
-        title="Calibrated confidence for HeLa degradome proteome hits at 5% FDR",
+        save_name=f"{prefix}_score_histograms",
+        title=f"Calibrated confidence for {dataset_label} proteome hits at 5% FDR",
         subset=retained,
     )
 
 
-def _plot_gluc_raw_score_histograms_at_fdr(df: pd.DataFrame, out_dir: Path) -> None:
+def _plot_nontryptic_raw_score_histograms_at_fdr(
+    df: pd.DataFrame,
+    out_dir: Path,
+    *,
+    prefix: str = "nontryptic_digest",
+    dataset_label: str = "Non-tryptic digest",
+) -> None:
     """Raw InstaNovo confidence histogram at 5% FDR for proteome hits."""
     df = _add_q_values(df)
     retained = df[(df["psm_q_value"] <= 0.05) & df["proteome_hit"]]
-    _plot_gluc_score_histograms(
+    _plot_nontryptic_score_histograms(
         df,
         out_dir,
         score_col="confidence",
-        save_name="gluc_raw_score_histograms",
-        title="Raw InstaNovo confidence for HeLa degradome proteome hits at 5% FDR",
+        save_name=f"{prefix}_raw_score_histograms",
+        title=f"Raw InstaNovo confidence for {dataset_label} proteome hits at 5% FDR",
         subset=retained,
     )
 
 
-def _plot_gluc_full_score_histograms(df: pd.DataFrame, out_dir: Path) -> None:
+def _plot_nontryptic_full_score_histograms(
+    df: pd.DataFrame,
+    out_dir: Path,
+    *,
+    prefix: str = "nontryptic_digest",
+    dataset_label: str = "Non-tryptic digest",
+) -> None:
     """Full-dataset raw and calibrated histograms by C-terminal residue."""
     all_preds = df.dropna(subset=["calibrated_confidence"])
-    _plot_gluc_score_histograms(
+    _plot_nontryptic_score_histograms(
         df,
         out_dir,
         score_col="calibrated_confidence",
-        save_name="gluc_calibrated_score_histogram_full",
+        save_name=f"{prefix}_calibrated_score_histogram_full",
         title=(
-            "Calibrated confidence for all HeLa degradome predictions\n"
+            f"Calibrated confidence for all {dataset_label} predictions\n"
             "by C-terminal residue"
         ),
         subset=all_preds,
         min_psms=2,
     )
     if "confidence" not in df.columns:
-        print("  skipping gluc_raw_score_histogram_full (missing confidence)")
+        print(f"  skipping {prefix}_raw_score_histogram_full (missing confidence)")
         return
     raw_preds = df.dropna(subset=["confidence"])
-    _plot_gluc_score_histograms(
+    _plot_nontryptic_score_histograms(
         df,
         out_dir,
         score_col="confidence",
-        save_name="gluc_raw_score_histogram_full",
+        save_name=f"{prefix}_raw_score_histogram_full",
         title=(
-            "Raw InstaNovo confidence for all HeLa degradome predictions\n"
+            f"Raw InstaNovo confidence for all {dataset_label} predictions\n"
             "by C-terminal residue"
         ),
         subset=raw_preds,
@@ -709,26 +741,32 @@ def _plot_gluc_full_score_histograms(df: pd.DataFrame, out_dir: Path) -> None:
         _spine_fmt(ax)
 
     fig.suptitle(
-        "Score distributions for all HeLa degradome predictions by C-terminal residue",
+        f"Score distributions for all {dataset_label} predictions by C-terminal residue",
         fontsize=13,
     )
     fig.tight_layout()
-    _save(fig, out_dir, "gluc_score_histogram_full_panel")
+    _save(fig, out_dir, f"{prefix}_score_histogram_full_panel")
 
 
-def _plot_gluc_calibration_scatter(df: pd.DataFrame, out_dir: Path) -> None:
+def _plot_nontryptic_calibration_scatter(
+    df: pd.DataFrame,
+    out_dir: Path,
+    *,
+    prefix: str = "nontryptic_digest",
+    dataset_label: str = "Non-tryptic digest",
+) -> None:
     """Subsampled scatter of raw versus calibrated confidence by C-terminus."""
     if "confidence" not in df.columns:
-        print("  skipping gluc_calibration_scatter (missing confidence)")
+        print(f"  skipping {prefix}_calibration_scatter (missing confidence)")
         return
 
     work = df.dropna(subset=["confidence", "calibrated_confidence"])
     n_total = len(work)
     if n_total < 10:
-        print("  skipping gluc_calibration_scatter (too few PSMs)")
+        print(f"  skipping {prefix}_calibration_scatter (too few PSMs)")
         return
 
-    plot_df = _subsample_psms(work, _GLUC_CALIBRATION_SCATTER_MAX_POINTS)
+    plot_df = _subsample_psms(work, _NONTRYPTIC_CALIBRATION_SCATTER_MAX_POINTS)
     n_show = len(plot_df)
     fig, ax = plt.subplots(figsize=(7.5, 7))
     panels = [
@@ -763,20 +801,28 @@ def _plot_gluc_calibration_scatter(df: pd.DataFrame, out_dir: Path) -> None:
     ax.set_xlabel("Raw InstaNovo confidence")
     ax.set_ylabel("Calibrated confidence")
     if n_show < n_total:
-        ax.set_title("Raw vs calibrated confidence for all HeLa degradome predictions")
+        ax.set_title(
+            f"Raw vs calibrated confidence for all {dataset_label} predictions"
+        )
     else:
-        ax.set_title("All HeLa degradome predictions")
+        ax.set_title(f"All {dataset_label} predictions")
     ax.legend(loc="lower right", fontsize=9)
     ax.grid(False)
     _spine_fmt(ax)
     fig.tight_layout()
-    _save(fig, out_dir, "gluc_calibration_scatter")
+    _save(fig, out_dir, f"{prefix}_calibration_scatter")
 
 
-def _plot_gluc_delta_by_terminus(df: pd.DataFrame, out_dir: Path) -> None:
+def _plot_nontryptic_delta_by_terminus(
+    df: pd.DataFrame,
+    out_dir: Path,
+    *,
+    prefix: str = "nontryptic_digest",
+    dataset_label: str = "Non-tryptic digest",
+) -> None:
     """Calibration shift (calibrated - raw) by C-terminal residue."""
     if "confidence" not in df.columns:
-        print("  skipping gluc_delta_by_terminus (missing confidence)")
+        print(f"  skipping {prefix}_delta_by_terminus (missing confidence)")
         return
 
     df = _add_q_values(df)
@@ -824,12 +870,12 @@ def _plot_gluc_delta_by_terminus(df: pd.DataFrame, out_dir: Path) -> None:
         _spine_fmt(ax)
 
     fig.suptitle(
-        "Winnow calibration shift for HeLa degradome proteome-hit PSMs\n"
+        f"Winnow calibration shift for {dataset_label} proteome-hit PSMs\n"
         "by C-terminal residue",
         fontsize=13,
     )
     fig.tight_layout()
-    _save(fig, out_dir, "gluc_delta_by_terminus")
+    _save(fig, out_dir, f"{prefix}_delta_by_terminus")
 
 
 def _pooled_feature_mean_std(retained: pd.DataFrame, col: str) -> tuple[float, float]:
@@ -884,7 +930,7 @@ def _feature_median_z_score_table(
     return pd.DataFrame(rows)
 
 
-def _gluc_feature_table(df: pd.DataFrame) -> pd.DataFrame:
+def _nontryptic_feature_table(df: pd.DataFrame) -> pd.DataFrame:
     """Median feature values for tryptic vs non-tryptic proteome hits at 5% FDR."""
     df = _add_q_values(df)
     retained = df[(df["psm_q_value"] <= 0.05) & df["proteome_hit"]]
@@ -969,18 +1015,21 @@ def _plot_grouped_feature_z_scores(
     _save(fig, out_dir, save_name)
 
 
-def _plot_gluc_feature_comparison(
+def _plot_nontryptic_feature_comparison(
     feat_df: pd.DataFrame,
     out_dir: Path,
+    *,
+    prefix: str = "nontryptic_digest",
+    dataset_label: str = "Non-tryptic digest",
 ) -> None:
     """Grouped bar chart of median features, tryptic vs non-tryptic."""
     _plot_grouped_feature_z_scores(
         feat_df,
         group_col="group",
         out_dir=out_dir,
-        save_name="gluc_feature_comparison",
+        save_name=f"{prefix}_feature_comparison",
         title=(
-            "Median feature values for HeLa degradome tryptic versus "
+            f"Median feature values for {dataset_label} tryptic versus "
             "non-tryptic proteome hits at 5% FDR"
         ),
         group_style=[
@@ -990,12 +1039,118 @@ def _plot_gluc_feature_comparison(
     )
 
 
+def _nontryptic_digest_analysis(
+    predictions_dir: Path,
+    fasta: Path,
+    output_dir: Path,
+    *,
+    file_prefix: str,
+    dataset_label: str,
+) -> None:
+    """Shared tryptic vs non-tryptic digest analysis (any non-tryptic enzyme dataset)."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"Loading predictions from {predictions_dir}")
+    df_pl = _load_data(predictions_dir)
+    print(f"  {df_pl.height:,} rows loaded")
+
+    print(f"Annotating with proteome hits from {fasta}")
+    df_pl = _nontryptic_annotate(df_pl, fasta)
+    n_hits = df_pl.filter(pl.col("proteome_hit")).height
+    print(f"  {n_hits:,} proteome hits")
+
+    df = df_pl.to_pandas()
+
+    print("Building tryptic summary table")
+    summary = _nontryptic_summary_table(df)
+    summary.to_csv(output_dir / f"{file_prefix}_tryptic_summary.csv", index=False)
+    print(summary.to_string(index=False))
+
+    print("Building terminus proportion table")
+    prop_df = _nontryptic_terminus_proportions_table(df)
+    prop_df.to_csv(output_dir / f"{file_prefix}_terminus_proportions.csv", index=False)
+    print(prop_df.to_string(index=False))
+
+    if "confidence" in df.columns:
+        print("Building calibration shift table")
+        delta_df = _nontryptic_calibration_delta_table(df)
+        delta_df.to_csv(
+            output_dir / f"{file_prefix}_calibration_delta_summary.csv", index=False
+        )
+        print(delta_df.to_string(index=False))
+    else:
+        print("  skipping calibration shift table (missing raw confidence)")
+
+    print("Building feature comparison table")
+    feat_df = _nontryptic_feature_table(df)
+    if not feat_df.empty:
+        feat_df.to_csv(
+            output_dir / f"{file_prefix}_feature_comparison.csv", index=False
+        )
+
+    plot_kw = {"prefix": file_prefix, "dataset_label": dataset_label}
+    print("Plotting")
+    _plot_nontryptic_conf_by_terminus(df, output_dir, **plot_kw)
+    _plot_nontryptic_raw_conf_by_terminus(df, output_dir, **plot_kw)
+    _plot_nontryptic_score_histograms_at_fdr(df, output_dir, **plot_kw)
+    _plot_nontryptic_raw_score_histograms_at_fdr(df, output_dir, **plot_kw)
+    _plot_nontryptic_full_score_histograms(df, output_dir, **plot_kw)
+    _plot_nontryptic_calibration_scatter(df, output_dir, **plot_kw)
+    _plot_nontryptic_delta_by_terminus(df, output_dir, **plot_kw)
+    _plot_nontryptic_feature_comparison(feat_df, output_dir, **plot_kw)
+
+    print(f"\n{dataset_label} analysis complete. Output in {output_dir}")
+
+
 @app.command()
-def gluc(
+def nontryptic_digest(
     predictions_dir: Annotated[
         Path,
         typer.Option(
-            "--predictions-dir", help="winnow predict output folder for GluC raw."
+            "--predictions-dir",
+            help="winnow predict output folder for the non-tryptic enzyme digest.",
+        ),
+    ],
+    fasta: Annotated[
+        Path,
+        typer.Option("--fasta", help="Proteome FASTA for substring matching."),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir", help="Directory for output tables and plots."),
+    ],
+    file_prefix: Annotated[
+        str,
+        typer.Option(
+            "--file-prefix",
+            help="Prefix for output CSV and plot filenames (e.g. chymotrypsin).",
+        ),
+    ] = "nontryptic_digest",
+    dataset_label: Annotated[
+        str,
+        typer.Option(
+            "--dataset-label",
+            help="Human-readable dataset name used in plot titles.",
+        ),
+    ] = "Non-tryptic digest",
+) -> None:
+    """Analyse calibrator behaviour on non-tryptic enzyme digest peptides."""
+    _nontryptic_digest_analysis(
+        predictions_dir,
+        fasta,
+        output_dir,
+        file_prefix=file_prefix,
+        dataset_label=dataset_label,
+    )
+
+
+@app.command()
+def chymotrypsin(
+    predictions_dir: Annotated[
+        Path,
+        typer.Option(
+            "--predictions-dir",
+            help="winnow predict output folder for HeLa chymotrypsin (acfm).",
         ),
     ],
     fasta: Annotated[
@@ -1007,57 +1162,108 @@ def gluc(
         typer.Option("--output-dir", help="Directory for output tables and plots."),
     ],
 ) -> None:
-    """Analyse calibrator behaviour on GluC (non-tryptic) peptides."""
-    output_dir.mkdir(parents=True, exist_ok=True)
+    """Convenience wrapper for ``nontryptic_digest`` on HeLa chymotrypsin data."""
+    _nontryptic_digest_analysis(
+        predictions_dir,
+        fasta,
+        output_dir,
+        file_prefix="chymotrypsin",
+        dataset_label="HeLa chymotrypsin",
+    )
 
-    print(f"Loading predictions from {predictions_dir}")
-    df_pl = _load_data(predictions_dir)
-    print(f"  {df_pl.height:,} rows loaded")
 
-    print(f"Annotating with proteome hits from {fasta}")
-    df_pl = _gluc_annotate(df_pl, fasta)
-    n_hits = df_pl.filter(pl.col("proteome_hit")).height
-    print(f"  {n_hits:,} proteome hits")
-
-    df = df_pl.to_pandas()
-
-    print("Building tryptic summary table")
-    summary = _gluc_summary_table(df)
-    summary.to_csv(output_dir / "gluc_tryptic_summary.csv", index=False)
-    print(summary.to_string(index=False))
-
-    print("Building terminus proportion table")
-    prop_df = _gluc_terminus_proportions_table(df)
-    prop_df.to_csv(output_dir / "gluc_terminus_proportions.csv", index=False)
-    print(prop_df.to_string(index=False))
-
-    if "confidence" in df.columns:
-        print("Building calibration shift table")
-        delta_df = _gluc_calibration_delta_table(df)
-        delta_df.to_csv(output_dir / "gluc_calibration_delta_summary.csv", index=False)
-        print(delta_df.to_string(index=False))
-    else:
-        print("  skipping calibration shift table (missing raw confidence)")
-
-    print("Building feature comparison table")
-    feat_df = _gluc_feature_table(df)
-    if not feat_df.empty:
-        feat_df.to_csv(output_dir / "gluc_feature_comparison.csv", index=False)
-
-    print("Plotting")
-    _plot_gluc_conf_by_terminus(df, output_dir)
-    _plot_gluc_raw_conf_by_terminus(df, output_dir)
-    _plot_gluc_score_histograms_at_fdr(df, output_dir)
-    _plot_gluc_raw_score_histograms_at_fdr(df, output_dir)
-    _plot_gluc_full_score_histograms(df, output_dir)
-    _plot_gluc_calibration_scatter(df, output_dir)
-    _plot_gluc_delta_by_terminus(df, output_dir)
-    _plot_gluc_feature_comparison(feat_df, output_dir)
-
-    print(f"\nGluC analysis complete. Output in {output_dir}")
+@app.command()
+def gluc(
+    predictions_dir: Annotated[
+        Path,
+        typer.Option(
+            "--predictions-dir",
+            help="[Deprecated] winnow predict output folder for GluC raw.",
+        ),
+    ],
+    fasta: Annotated[
+        Path,
+        typer.Option("--fasta", help="Human proteome FASTA for substring matching."),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir", help="Directory for output tables and plots."),
+    ],
+) -> None:
+    """[Deprecated] Use ``nontryptic_digest`` with ``--file-prefix gluc``."""
+    typer.secho(
+        "Warning: gluc is deprecated; use nontryptic_digest --file-prefix gluc",
+        fg=typer.colors.YELLOW,
+        err=True,
+    )
+    _nontryptic_digest_analysis(
+        predictions_dir,
+        fasta,
+        output_dir,
+        file_prefix="gluc",
+        dataset_label="HeLa degradome",
+    )
 
 
 # ── ProteomeTools-1 analysis ────────────────────────────────────────────
+
+
+def _exact_match_category(fits_precursor: bool) -> str:
+    if fits_precursor:
+        return "exact_match_and_fits_precursor"
+    return "exact_match_and_no_precursor_fit"
+
+
+def _subsequence_category(fits_precursor: bool) -> str:
+    if fits_precursor:
+        return "subsequence_and_fits_precursor"
+    return "subsequence_and_no_precursor_fit"
+
+
+def _neither_category(fits_precursor: bool) -> str:
+    if fits_precursor:
+        return "neither_and_fits_precursor"
+    return "neither_and_no_precursor_fit"
+
+
+def _classify_exact_matches(
+    categories: list[str],
+    predictions: list[str],
+    fits_precursor: list[bool],
+    lcfm_peptide_set: set[str],
+) -> None:
+    for i, (peptide, fit) in enumerate(zip(predictions, fits_precursor)):
+        if peptide in lcfm_peptide_set:
+            categories[i] = _exact_match_category(fit)
+
+
+def _classify_subsequence_matches(
+    categories: list[str],
+    predictions: list[str],
+    fits_precursor: list[bool],
+    lcfm_haystack: str,
+) -> None:
+    remaining_indices = [
+        i for i, category in enumerate(categories) if category == "neither"
+    ]
+    remaining_peps = [predictions[i] for i in remaining_indices]
+    remaining_fits = [fits_precursor[i] for i in remaining_indices]
+    if not remaining_peps:
+        return
+
+    hits = _batch_substring_hits(remaining_peps, lcfm_haystack)
+    for idx, fit, hit in zip(remaining_indices, remaining_fits, hits):
+        if hit:
+            categories[idx] = _subsequence_category(fit)
+
+
+def _classify_remaining_neither(
+    categories: list[str],
+    fits_precursor: list[bool],
+) -> None:
+    for i, fit in enumerate(fits_precursor):
+        if categories[i] == "neither":
+            categories[i] = _neither_category(fit)
 
 
 def _classify_predictions(
@@ -1072,36 +1278,12 @@ def _classify_predictions(
     one lcfm peptide (the haystack is built by joining all lcfm peptides
     with a separator). Unmatched predictions are split by precursor fit.
     """
-    n = len(predictions)
-    categories = ["neither"] * n
-
-    for i, (p, fit) in enumerate(zip(predictions, fits_precursor)):
-        if p in lcfm_peptide_set:
-            if fit:
-                categories[i] = "exact_match_and_fits_precursor"
-            else:
-                categories[i] = "exact_match_and_no_precursor_fit"
-
-    remaining_indices = [i for i in range(n) if categories[i] == "neither"]
-    remaining_peps = [predictions[i] for i in remaining_indices]
-    remaining_fits = [fits_precursor[i] for i in remaining_indices]
-
-    if remaining_peps:
-        hits = _batch_substring_hits(remaining_peps, lcfm_haystack)
-        for j, (idx, fit) in enumerate(zip(remaining_indices, remaining_fits)):
-            if hits[j]:
-                if fit:
-                    categories[idx] = "subsequence_and_fits_precursor"
-                else:
-                    categories[idx] = "subsequence_and_no_precursor_fit"
-
-    for i in range(n):
-        if categories[i] == "neither":
-            if fits_precursor[i]:
-                categories[i] = "neither_and_fits_precursor"
-            else:
-                categories[i] = "neither_and_no_precursor_fit"
-
+    categories = ["neither"] * len(predictions)
+    _classify_exact_matches(categories, predictions, fits_precursor, lcfm_peptide_set)
+    _classify_subsequence_matches(
+        categories, predictions, fits_precursor, lcfm_haystack
+    )
+    _classify_remaining_neither(categories, fits_precursor)
     return categories
 
 
@@ -1505,10 +1687,6 @@ def proteometools(
 
 @app.command()
 def summary(
-    gluc_dir: Annotated[
-        Path,
-        typer.Option("--gluc-dir", help="Output directory from the gluc subcommand."),
-    ],
     proteometools_dir: Annotated[
         Path,
         typer.Option(
@@ -1520,14 +1698,47 @@ def summary(
         Path,
         typer.Option("--output-dir", help="Directory for the combined summary figure."),
     ],
+    nontryptic_digest_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--nontryptic-digest-dir",
+            help="Output directory from the nontryptic_digest subcommand.",
+        ),
+    ] = None,
+    chymotrypsin_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--chymotrypsin-dir",
+            help="Legacy alias for --nontryptic-digest-dir (chymotrypsin outputs).",
+        ),
+    ] = None,
+    gluc_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--gluc-dir",
+            help="Legacy alias for --nontryptic-digest-dir (gluc outputs).",
+        ),
+    ] = None,
 ) -> None:
     """Produce a combined summary bar chart from both analyses."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    gluc_csv = gluc_dir / "gluc_tryptic_summary.csv"
+    digest_dir = nontryptic_digest_dir or chymotrypsin_dir or gluc_dir
+    if digest_dir is None:
+        raise typer.BadParameter(
+            "Provide --nontryptic-digest-dir (or --chymotrypsin-dir / --gluc-dir)."
+        )
+
+    digest_csvs = sorted(digest_dir.glob("*_tryptic_summary.csv"))
+    if len(digest_csvs) != 1:
+        raise typer.BadParameter(
+            f"Expected exactly one *_tryptic_summary.csv under {digest_dir}, "
+            f"found {len(digest_csvs)}"
+        )
+    digest_csv = digest_csvs[0]
     pt_csv = proteometools_dir / "proteometools_novelty_summary.csv"
-    if not gluc_csv.is_file():
-        raise typer.BadParameter(f"Missing {gluc_csv}")
+    if not digest_csv.is_file():
+        raise typer.BadParameter(f"Missing tryptic summary under {digest_dir}")
     if not pt_csv.is_file():
         raise typer.BadParameter(f"Missing {pt_csv}")
 

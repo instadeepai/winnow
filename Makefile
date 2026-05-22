@@ -484,7 +484,7 @@ RUN_S3          ?= $(S3_BASE)/hpo_runs
 PREDS_DIR       ?= predictions/hpo_$(RUN_TS)
 EVAL_PLOTS_DIR  ?= analysis/hpo_eval_plots/$(RUN_TS)
 
-EXTERNAL_FULL_PROJECTS := PXD009935 PXD014877
+EXTERNAL_FULL_PROJECTS := PXD014877
 PXD023064_FILES := MSB33410B MSB33411A MSB33659A MSB33663B MSB37876A MSB37878A MSB37880A MSB37884A
 
 # FASTA assignments for raw bio-val proteome annotation (HPO model)
@@ -498,7 +498,6 @@ FASTA_RAW_tplantibodies := fasta/nanobody_library.fasta
 FASTA_RAW_woundfluids := fasta/human.fasta
 
 # FASTA assignments for unlabelled external proteome annotation
-FASTA_UNLABELLED_PXD009935 := fasta/human.fasta
 FASTA_UNLABELLED_PXD014877 := fasta/Celegans.fasta
 FASTA_UNLABELLED_PXD023064 := fasta/human.fasta
 FASTA_UNLABELLED_Astral := fasta/UP000000625_83333.fasta
@@ -804,6 +803,452 @@ replot-local-external-unlabelled:
 
 replot-local-external: replot-local-external-labelled replot-local-external-unlabelled
 
+#########################################################
+## New eval sets (train_extra_small_mass_error_da, S3 replot)
+#########################################################
+
+.PHONY: download-new-eval-fasta download-new-eval-results \
+        annotate-new-eval-unlabelled annotate-new-eval-unlabelled-human \
+        annotate-new-eval-unlabelled-arabidopsis annotate-new-eval-unlabelled-legacy \
+        annotate-new-eval-unlabelled-astral \
+        replot-new-eval-labelled replot-new-eval-unlabelled replot-new-eval \
+        eval-extra-small-mass-error-da-replot eval-extra-small-acfm-minus-lcfm \
+        eval-extra-small-acfm-minus-lcfm-pxd452-939 \
+        analyze-upscored-fps-new-eval analyze-fdr-overlap-new-eval \
+        upload-new-eval-plots upload-new-eval-plots-all upload-reviewer-analyses-new-eval \
+        upload-new-eval-plots-fdr-overlap upload-new-eval-plots-unlabelled \
+        upload-new-eval-plots-novelty upload-new-eval-plots-upscored-fps \
+        upload-new-eval-plots-feature-importance upload-new-eval-plots-ablations \
+        reviewer-analyses-new-eval \
+        feature-analysis-model feature-analysis-extra-small-mass-error-da \
+        feature-analysis-extra-small-cluster \
+        download-new-eval-ablation-data download-astral-for-ablation \
+        download-cluster-new-eval-cpu-inputs download-cluster-ablation-inputs \
+        download-cluster-feature-importance-inputs \
+        ablation-extra-small ablation-extra-small-cluster \
+        replot-novelty-plots-new-eval novelty-replot-new-eval new-eval-plots \
+        cluster-new-eval-fdr-overlap cluster-new-eval-acfm-minus-lcfm-pxd452-939 \
+        cluster-new-eval-novelty cluster-new-eval-upscored-fps \
+        cluster-new-eval-feature-importance cluster-new-eval-ablations
+
+NEW_EVAL_SETS_S3        ?= $(S3_BASE)/new_eval_sets
+NEW_EVAL_RESULTS_S3     ?= $(S3_BASE)/new_eval_sets_results
+NEW_EVAL_PLOTS_S3       ?= $(S3_BASE)/new_eval_sets_plots
+
+NEW_EVAL_RUN_PXD004452 := 20150708_QE3_UPLC8_DBJ_QC_HELA_39frac_Chymotrypsin \
+	20151020_QE3_UPLC8_DBJ_SA_A549_Rep2_46 \
+	20151020_QE3_UPLC8_DBJ_SA_HCT116_Rep2_46
+NEW_EVAL_RUN_PXD006939 := 20170303_QEh1_LC2_FaMa_ChCh_SA_HLApI_JY_R1_exp2 \
+	20170609_QEh1_LC1_ChCh_FAMA_SA_HLAIIp_JY_all_R1
+NEW_EVAL_RUN_PXD013868 := 01747_C01_P018218_S00_I00_N03_R1
+NEW_EVAL_RUNS := $(NEW_EVAL_RUN_PXD004452) $(NEW_EVAL_RUN_PXD006939) $(NEW_EVAL_RUN_PXD013868)
+
+CHYMOTRYPSIN_RUN := 20150708_QE3_UPLC8_DBJ_QC_HELA_39frac_Chymotrypsin
+HCT116_RUN       := 20151020_QE3_UPLC8_DBJ_SA_HCT116_Rep2_46
+
+LEGACY_FLAT_PROJECTS := PXD004732 PXD014877 PXD023064 astral
+NEW_EVAL_PROJECTS      := $(NEW_EVAL_RUNS) $(LEGACY_FLAT_PROJECTS)
+
+NEW_EVAL_MODEL_DIR ?= train_extra_small_mass_error_da
+NEW_EVAL_PREDS_DIR ?= predictions/$(NEW_EVAL_MODEL_DIR)_new_eval
+## Local mirror of s3://…/new_eval_sets_plots/{lcfm,acfm,unlabelled,…}
+NEW_EVAL_PLOTS_DIR ?= analysis/new_eval_sets_plots
+NEW_EVAL_PLOTS_LCFM_DIR              ?= $(NEW_EVAL_PLOTS_DIR)/lcfm
+NEW_EVAL_PLOTS_ACFM_DIR              ?= $(NEW_EVAL_PLOTS_DIR)/acfm
+NEW_EVAL_PLOTS_UNLABELLED_DIR        ?= $(NEW_EVAL_PLOTS_DIR)/unlabelled
+NEW_EVAL_PLOTS_FDR_OVERLAP_DIR       ?= $(NEW_EVAL_PLOTS_DIR)/fdr_overlap
+NEW_EVAL_PLOTS_NOVELTY_DIR           ?= $(NEW_EVAL_PLOTS_DIR)/novelty
+NEW_EVAL_PLOTS_UPSCORED_FPS_DIR      ?= $(NEW_EVAL_PLOTS_DIR)/upscored_fps
+NEW_EVAL_PLOTS_ABLATIONS_DIR         ?= $(NEW_EVAL_PLOTS_DIR)/ablations
+NEW_EVAL_PLOTS_FEATURE_IMPORTANCE_DIR ?= $(NEW_EVAL_PLOTS_DIR)/feature_importance
+NEW_EVAL_PREDS_LABELLED_DIR   ?= $(NEW_EVAL_PREDS_DIR)/labelled
+NEW_EVAL_PREDS_UNLABELLED_DIR ?= $(NEW_EVAL_PREDS_DIR)/unlabelled
+
+FASTA_HUMAN        := fasta/human.fasta
+FASTA_ARABIDOPSIS  := fasta/UP000006548_3702.fasta
+FASTA_CELEGANS     := fasta/Celegans.fasta
+FASTA_ECOLI_ASTRAL := fasta/UP000000625_83333.fasta
+
+NEW_EVAL_HUMAN_UNLABELLED_RUNS := $(NEW_EVAL_RUN_PXD004452) $(NEW_EVAL_RUN_PXD006939)
+
+NEW_EVAL_DATA_DIR ?= new_eval_data
+
+## PXD004452 + PXD006939 per-run keys (acfm minus lcfm subset)
+NEW_EVAL_RUN_PXD452_939 := $(NEW_EVAL_RUN_PXD004452) $(NEW_EVAL_RUN_PXD006939)
+
+## Self-hosted Koina on cluster (winnow-koina image: run `make koina-up` first)
+NEW_EVAL_CLUSTER_KOINA_URL ?= localhost:8500
+NEW_EVAL_CLUSTER_KOINA_SSL ?= false
+NEW_EVAL_CLUSTER_KOINA_MAKE = KOINA_SERVER_URL=$(NEW_EVAL_CLUSTER_KOINA_URL) \
+	KOINA_SSL=$(NEW_EVAL_CLUSTER_KOINA_SSL)
+
+## FASTA files for new-eval proteome annotation
+download-new-eval-fasta:
+	mkdir -p fasta
+	$(S3_CP) $(FASTA_S3)/human.fasta $(FASTA_HUMAN)
+	$(S3_CP) $(FASTA_S3)/UP000006548_3702.fasta $(FASTA_ARABIDOPSIS)
+	$(S3_CP) $(FASTA_S3)/Celegans.fasta $(FASTA_CELEGANS)
+	$(S3_CP) $(FASTA_S3)/UP000000625_83333.fasta $(FASTA_ECOLI_ASTRAL)
+
+## Download predict outputs from new_eval_sets_results (flattened per-run / flat project keys)
+download-new-eval-results:
+	@echo "=== Downloading new eval results to $(NEW_EVAL_PREDS_DIR) ==="
+	mkdir -p $(NEW_EVAL_PREDS_LABELLED_DIR) $(NEW_EVAL_PREDS_UNLABELLED_DIR)
+	@# PXD004452 — per-run subfolders
+	for run in $(NEW_EVAL_RUN_PXD004452); do \
+		mkdir -p $(NEW_EVAL_PREDS_LABELLED_DIR)/$$run $(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run; \
+		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/PXD004452/$$run/preds_and_fdr_metrics.csv \
+			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$run/; \
+		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/PXD004452/$$run/metadata.csv \
+			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$run/; \
+		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/PXD004452/$$run/preds_and_fdr_metrics.csv \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run/; \
+		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/PXD004452/$$run/metadata.csv \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run/; \
+	done
+	@# PXD006939 — per-run subfolders
+	for run in $(NEW_EVAL_RUN_PXD006939); do \
+		mkdir -p $(NEW_EVAL_PREDS_LABELLED_DIR)/$$run $(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run; \
+		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/PXD006939/$$run/preds_and_fdr_metrics.csv \
+			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$run/; \
+		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/PXD006939/$$run/metadata.csv \
+			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$run/; \
+		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/PXD006939/$$run/preds_and_fdr_metrics.csv \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run/; \
+		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/PXD006939/$$run/metadata.csv \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run/; \
+	done
+	@# PXD013868 — single run
+	for run in $(NEW_EVAL_RUN_PXD013868); do \
+		mkdir -p $(NEW_EVAL_PREDS_LABELLED_DIR)/$$run $(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run; \
+		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/PXD013868/$$run/preds_and_fdr_metrics.csv \
+			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$run/; \
+		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/PXD013868/$$run/metadata.csv \
+			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$run/; \
+		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/PXD013868/$$run/preds_and_fdr_metrics.csv \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run/; \
+		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/PXD013868/$$run/metadata.csv \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run/; \
+	done
+	@# Flat legacy projects (PXD004732, PXD014877, PXD023064, astral labelled)
+	for project in $(LEGACY_FLAT_PROJECTS); do \
+		mkdir -p $(NEW_EVAL_PREDS_LABELLED_DIR)/$$project; \
+		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/$$project/preds_and_fdr_metrics.csv \
+			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$project/; \
+		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/$$project/metadata.csv \
+			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$project/; \
+	done
+	@# acfm unlabelled for flat projects (astral may be absent on S3)
+	for project in PXD004732 PXD014877 PXD023064 astral; do \
+		mkdir -p $(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$project; \
+		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/$$project/preds_and_fdr_metrics.csv \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$project/; \
+		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/$$project/metadata.csv \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$project/; \
+	done
+	@echo "=== download-new-eval-results complete ==="
+
+annotate-new-eval-unlabelled-human: download-new-eval-fasta
+	uv run python scripts/annotate_preds_proteome_hits.py \
+		$(NEW_EVAL_HUMAN_UNLABELLED_RUNS) PXD023064 PXD004732 \
+		--predictions-root $(NEW_EVAL_PREDS_UNLABELLED_DIR) \
+		--fasta $(FASTA_HUMAN)
+
+annotate-new-eval-unlabelled-arabidopsis: download-new-eval-fasta
+	uv run python scripts/annotate_preds_proteome_hits.py \
+		$(NEW_EVAL_RUN_PXD013868) \
+		--predictions-root $(NEW_EVAL_PREDS_UNLABELLED_DIR) \
+		--fasta $(FASTA_ARABIDOPSIS)
+
+annotate-new-eval-unlabelled-legacy: download-new-eval-fasta
+	uv run python scripts/annotate_preds_proteome_hits.py \
+		PXD014877 \
+		--predictions-root $(NEW_EVAL_PREDS_UNLABELLED_DIR) \
+		--fasta $(FASTA_CELEGANS)
+
+annotate-new-eval-unlabelled-astral:
+	@if [ -f "$(NEW_EVAL_PREDS_UNLABELLED_DIR)/astral/preds_and_fdr_metrics.csv" ]; then \
+		uv run python scripts/annotate_preds_proteome_hits.py astral \
+			--predictions-root $(NEW_EVAL_PREDS_UNLABELLED_DIR) \
+			--fasta $(FASTA_ECOLI_ASTRAL); \
+	else \
+		echo "Skipping astral annotation (no acfm preds at $(NEW_EVAL_PREDS_UNLABELLED_DIR)/astral)"; \
+	fi
+
+annotate-new-eval-unlabelled: annotate-new-eval-unlabelled-human \
+	annotate-new-eval-unlabelled-arabidopsis annotate-new-eval-unlabelled-legacy \
+	annotate-new-eval-unlabelled-astral
+
+replot-new-eval-labelled:
+	mkdir -p $(NEW_EVAL_PLOTS_LCFM_DIR)
+	@for run in $(NEW_EVAL_RUN_PXD004452); do \
+		uv run python scripts/plot_eval_results.py \
+			--predictions-root $(NEW_EVAL_PREDS_LABELLED_DIR) \
+			--projects "$$run" \
+			--eval-type labelled \
+			--output-dir $(NEW_EVAL_PLOTS_LCFM_DIR)/PXD004452; \
+	done
+	@for run in $(NEW_EVAL_RUN_PXD006939); do \
+		uv run python scripts/plot_eval_results.py \
+			--predictions-root $(NEW_EVAL_PREDS_LABELLED_DIR) \
+			--projects "$$run" \
+			--eval-type labelled \
+			--output-dir $(NEW_EVAL_PLOTS_LCFM_DIR)/PXD006939; \
+	done
+	@for run in $(NEW_EVAL_RUN_PXD013868); do \
+		uv run python scripts/plot_eval_results.py \
+			--predictions-root $(NEW_EVAL_PREDS_LABELLED_DIR) \
+			--projects "$$run" \
+			--eval-type labelled \
+			--output-dir $(NEW_EVAL_PLOTS_LCFM_DIR)/PXD013868; \
+	done
+	@for project in $(LEGACY_FLAT_PROJECTS); do \
+		uv run python scripts/plot_eval_results.py \
+			--predictions-root $(NEW_EVAL_PREDS_LABELLED_DIR) \
+			--projects "$$project" \
+			--eval-type labelled \
+			--output-dir $(NEW_EVAL_PLOTS_LCFM_DIR)/$$project; \
+	done
+
+replot-new-eval-unlabelled:
+	mkdir -p $(NEW_EVAL_PLOTS_ACFM_DIR)
+	@for run in $(NEW_EVAL_RUN_PXD004452); do \
+		uv run python scripts/plot_eval_results.py \
+			--predictions-root $(NEW_EVAL_PREDS_UNLABELLED_DIR) \
+			--projects "$$run" \
+			--eval-type unlabelled \
+			--output-dir $(NEW_EVAL_PLOTS_ACFM_DIR)/PXD004452; \
+	done
+	@for run in $(NEW_EVAL_RUN_PXD006939); do \
+		uv run python scripts/plot_eval_results.py \
+			--predictions-root $(NEW_EVAL_PREDS_UNLABELLED_DIR) \
+			--projects "$$run" \
+			--eval-type unlabelled \
+			--output-dir $(NEW_EVAL_PLOTS_ACFM_DIR)/PXD006939; \
+	done
+	@for run in $(NEW_EVAL_RUN_PXD013868); do \
+		uv run python scripts/plot_eval_results.py \
+			--predictions-root $(NEW_EVAL_PREDS_UNLABELLED_DIR) \
+			--projects "$$run" \
+			--eval-type unlabelled \
+			--output-dir $(NEW_EVAL_PLOTS_ACFM_DIR)/PXD013868; \
+	done
+	@for project in $(LEGACY_FLAT_PROJECTS); do \
+		uv run python scripts/plot_eval_results.py \
+			--predictions-root $(NEW_EVAL_PREDS_UNLABELLED_DIR) \
+			--projects "$$project" \
+			--eval-type unlabelled \
+			--output-dir $(NEW_EVAL_PLOTS_ACFM_DIR)/$$project; \
+	done
+
+replot-new-eval: replot-new-eval-labelled replot-new-eval-unlabelled
+
+eval-extra-small-acfm-minus-lcfm:
+	mkdir -p $(NEW_EVAL_PLOTS_UNLABELLED_DIR)
+	uv run python scripts/plot_acfm_minus_lcfm_fdr.py \
+		--labelled-dir $(NEW_EVAL_PREDS_LABELLED_DIR) \
+		--unlabelled-dir $(NEW_EVAL_PREDS_UNLABELLED_DIR) \
+		--projects "$(NEW_EVAL_PROJECTS)" \
+		--output-dir $(NEW_EVAL_PLOTS_UNLABELLED_DIR)
+
+eval-extra-small-acfm-minus-lcfm-pxd452-939:
+	mkdir -p $(NEW_EVAL_PLOTS_UNLABELLED_DIR)
+	uv run python scripts/plot_acfm_minus_lcfm_fdr.py \
+		--labelled-dir $(NEW_EVAL_PREDS_LABELLED_DIR) \
+		--unlabelled-dir $(NEW_EVAL_PREDS_UNLABELLED_DIR) \
+		--projects "$(NEW_EVAL_RUN_PXD452_939)" \
+		--output-dir $(NEW_EVAL_PLOTS_UNLABELLED_DIR)
+
+analyze-upscored-fps-new-eval: download-new-eval-results
+	mkdir -p $(NEW_EVAL_PLOTS_UPSCORED_FPS_DIR)
+	uv run python scripts/analyze_upscored_fps.py \
+		--predictions-root $(NEW_EVAL_PREDS_LABELLED_DIR) \
+		--output-dir $(NEW_EVAL_PLOTS_UPSCORED_FPS_DIR)
+
+analyze-fdr-overlap-new-eval: download-new-eval-results annotate-new-eval-unlabelled
+	mkdir -p $(NEW_EVAL_PLOTS_FDR_OVERLAP_DIR)
+	uv run python scripts/analyze_fdr_overlap.py \
+		--labelled-dir $(NEW_EVAL_PREDS_LABELLED_DIR) \
+		--unlabelled-dir $(NEW_EVAL_PREDS_UNLABELLED_DIR) \
+		--projects "$(NEW_EVAL_PROJECTS)" \
+		--output-dir $(NEW_EVAL_PLOTS_FDR_OVERLAP_DIR)
+
+upload-new-eval-plots-fdr-overlap:
+	$(S3_CP) --recursive $(NEW_EVAL_PLOTS_FDR_OVERLAP_DIR)/ $(NEW_EVAL_PLOTS_S3)/fdr_overlap/
+
+upload-new-eval-plots-unlabelled:
+	$(S3_CP) --recursive $(NEW_EVAL_PLOTS_UNLABELLED_DIR)/ $(NEW_EVAL_PLOTS_S3)/unlabelled/
+
+upload-new-eval-plots-novelty:
+	$(S3_CP) --recursive $(NEW_EVAL_PLOTS_NOVELTY_DIR)/ $(NEW_EVAL_PLOTS_S3)/novelty/
+
+upload-new-eval-plots-upscored-fps:
+	$(S3_CP) --recursive $(NEW_EVAL_PLOTS_UPSCORED_FPS_DIR)/ $(NEW_EVAL_PLOTS_S3)/upscored_fps/
+
+upload-new-eval-plots-feature-importance:
+	$(S3_CP) --recursive $(NEW_EVAL_PLOTS_FEATURE_IMPORTANCE_DIR)/ \
+		$(NEW_EVAL_PLOTS_S3)/feature_importance/
+
+upload-new-eval-plots-ablations:
+	$(S3_CP) --recursive $(NEW_EVAL_PLOTS_ABLATIONS_DIR)/ $(NEW_EVAL_PLOTS_S3)/ablations/
+
+upload-new-eval-plots:
+	@echo "=== Uploading $(NEW_EVAL_PLOTS_DIR) -> $(NEW_EVAL_PLOTS_S3) ==="
+	@for subdir in lcfm acfm unlabelled fdr_overlap novelty upscored_fps ablations feature_importance; do \
+		if [ -d "$(NEW_EVAL_PLOTS_DIR)/$$subdir" ]; then \
+			$(S3_CP) --recursive "$(NEW_EVAL_PLOTS_DIR)/$$subdir/" \
+				"$(NEW_EVAL_PLOTS_S3)/$$subdir/"; \
+		else \
+			echo "Skipping upload (missing): $(NEW_EVAL_PLOTS_DIR)/$$subdir"; \
+		fi; \
+	done
+	@echo "=== upload-new-eval-plots complete ==="
+
+upload-reviewer-analyses-new-eval: upload-new-eval-plots-fdr-overlap upload-new-eval-plots-upscored-fps
+
+reviewer-analyses-new-eval: analyze-upscored-fps-new-eval analyze-fdr-overlap-new-eval \
+	upload-reviewer-analyses-new-eval
+
+## Feature importance (model columns come from the saved calibrator config)
+FEATURE_IMPORTANCE_MODEL   ?= $(NEW_EVAL_MODEL_DIR)
+FEATURE_IMPORTANCE_DATASET ?= PXD014877
+FEATURE_IMPORTANCE_SPECTRA ?= held_out_projects/lcfm/$(FEATURE_IMPORTANCE_DATASET)
+FEATURE_IMPORTANCE_PREDS   ?= held_out_projects/lcfm/$(FEATURE_IMPORTANCE_DATASET)_predictions/$(FEATURE_IMPORTANCE_DATASET).csv
+
+feature-analysis-model:
+	@test -f "$(FEATURE_IMPORTANCE_MODEL)/config.json" || \
+		(echo "Missing model at $(FEATURE_IMPORTANCE_MODEL); download or train first." && exit 1)
+	mkdir -p $(NEW_EVAL_PLOTS_FEATURE_IMPORTANCE_DIR)/$(FEATURE_IMPORTANCE_DATASET)
+	uv run python scripts/analyze_features.py \
+		--model-path $(FEATURE_IMPORTANCE_MODEL) \
+		--data-dir . \
+		--output-dir $(NEW_EVAL_PLOTS_FEATURE_IMPORTANCE_DIR)/$(FEATURE_IMPORTANCE_DATASET) \
+		--train-spectra $(FEATURE_IMPORTANCE_SPECTRA) \
+		--train-preds $(FEATURE_IMPORTANCE_PREDS) \
+		--test-spectra $(FEATURE_IMPORTANCE_SPECTRA) \
+		--test-preds $(FEATURE_IMPORTANCE_PREDS) \
+		--koina-input-constant collision_energies=27 \
+		--koina-input-constant fragmentation_types=HCD \
+		--n-background-samples 200 --n-test-samples 500
+
+feature-analysis-extra-small-mass-error-da: download-extra-small-mass-error-da-model
+	$(MAKE) feature-analysis-model FEATURE_IMPORTANCE_MODEL=train_extra_small_mass_error_da
+
+feature-analysis-extra-small-cluster: download-cluster-feature-importance-inputs koina-up
+	@test -f "$(FEATURE_IMPORTANCE_MODEL)/config.json"
+	mkdir -p $(NEW_EVAL_PLOTS_FEATURE_IMPORTANCE_DIR)/$(FEATURE_IMPORTANCE_DATASET)
+	uv run python scripts/analyze_features.py \
+		--model-path $(FEATURE_IMPORTANCE_MODEL) \
+		--data-dir . \
+		--output-dir $(NEW_EVAL_PLOTS_FEATURE_IMPORTANCE_DIR)/$(FEATURE_IMPORTANCE_DATASET) \
+		--train-spectra $(FEATURE_IMPORTANCE_SPECTRA) \
+		--train-preds $(FEATURE_IMPORTANCE_PREDS) \
+		--test-spectra $(FEATURE_IMPORTANCE_SPECTRA) \
+		--test-preds $(FEATURE_IMPORTANCE_PREDS) \
+		--koina-url $(NEW_EVAL_CLUSTER_KOINA_URL) --no-koina-ssl \
+		--koina-input-constant collision_energies=27 \
+		--koina-input-constant fragmentation_types=HCD \
+		--n-background-samples 200 --n-test-samples 500
+
+feature-analysis-extra-small: feature-analysis-extra-small-mass-error-da
+
+## Inputs for cluster jobs (empty workspace → pull from $(S3_BASE))
+download-cluster-new-eval-cpu-inputs: download-new-eval-results download-new-eval-fasta
+
+download-astral-for-ablation:
+	mkdir -p astral/labelled astral/predictions
+	$(S3_CP) --recursive --exclude "*.ipc" $(S3_BASE)/astral/labelled/ astral/labelled/
+	$(S3_CP) --recursive $(S3_BASE)/astral/predictions/ astral/predictions/
+
+download-cluster-ablation-inputs: download-extra-small-mass-error-da-model \
+	download-new-eval-ablation-data download-astral-for-ablation
+	@mkdir -p train_extra_small
+	$(S3_CP) $(EXTRA_SMALL_TRAIN_S3)/train_extra_small_matrix.parquet $(EXTRA_SMALL_TRAIN_FEATURES)
+
+download-cluster-feature-importance-inputs: download-extra-small-mass-error-da-model \
+	download-extra-small-celegans-eval
+
+download-new-eval-ablation-data:
+	mkdir -p $(NEW_EVAL_DATA_DIR)/lcfm/PXD004452 $(NEW_EVAL_DATA_DIR)/lcfm/PXD013868
+	$(S3_CP) $(NEW_EVAL_SETS_S3)/lcfm/PXD004452/$(HCT116_RUN).parquet \
+		$(NEW_EVAL_DATA_DIR)/lcfm/PXD004452/$(HCT116_RUN).parquet
+	$(S3_CP) $(NEW_EVAL_SETS_S3)/lcfm/PXD004452/$(HCT116_RUN).csv \
+		$(NEW_EVAL_DATA_DIR)/lcfm/PXD004452/$(HCT116_RUN).csv
+	$(S3_CP) $(NEW_EVAL_SETS_S3)/lcfm/PXD013868/$(NEW_EVAL_RUN_PXD013868).parquet \
+		$(NEW_EVAL_DATA_DIR)/lcfm/PXD013868/$(NEW_EVAL_RUN_PXD013868).parquet
+	$(S3_CP) $(NEW_EVAL_SETS_S3)/lcfm/PXD013868/$(NEW_EVAL_RUN_PXD013868).csv \
+		$(NEW_EVAL_DATA_DIR)/lcfm/PXD013868/$(NEW_EVAL_RUN_PXD013868).csv
+	$(MAKE) download-extra-small-external-eval
+
+ablation-extra-small-run:
+	mkdir -p $(NEW_EVAL_PLOTS_ABLATIONS_DIR)
+	uv run python scripts/run_feature_ablations.py \
+		--train-features $(EXTRA_SMALL_TRAIN_FEATURES) \
+		--validation-fraction 0.1 \
+		--hyperparams-from-model $(NEW_EVAL_MODEL_DIR) \
+		--output-dir $(NEW_EVAL_PLOTS_ABLATIONS_DIR) \
+		--astral-spectra astral/labelled \
+		--astral-predictions astral/predictions/astral_labelled.csv \
+		--plot-format both \
+		$(if $(KOINA_SERVER_URL),--koina-url $(KOINA_SERVER_URL)) \
+		$(if $(filter false,$(KOINA_SSL)),--no-koina-ssl)
+
+ablation-extra-small: download-extra-small-train-data download-extra-small-mass-error-da-model \
+	download-new-eval-ablation-data download-astral-for-ablation
+	-$(S3_CP) $(EXTRA_SMALL_TRAIN_S3)/train_extra_small_matrix.parquet $(EXTRA_SMALL_TRAIN_FEATURES)
+	$(MAKE) ablation-extra-small-run
+
+ablation-extra-small-cluster: download-cluster-ablation-inputs koina-up
+	$(MAKE) ablation-extra-small-run $(NEW_EVAL_CLUSTER_KOINA_MAKE)
+
+replot-novelty-plots-new-eval:
+	mkdir -p $(NEW_EVAL_PLOTS_NOVELTY_DIR)/chymotrypsin \
+		$(NEW_EVAL_PLOTS_NOVELTY_DIR)/proteometools
+	uv run python scripts/analyze_novelty.py chymotrypsin \
+		--predictions-dir $(NEW_EVAL_PREDS_UNLABELLED_DIR)/$(CHYMOTRYPSIN_RUN) \
+		--fasta $(FASTA_HUMAN) \
+		--output-dir $(NEW_EVAL_PLOTS_NOVELTY_DIR)/chymotrypsin
+	uv run python scripts/analyze_novelty.py proteometools \
+		--lcfm-predictions-dir $(NEW_EVAL_PREDS_LABELLED_DIR)/PXD004732 \
+		--acfm-predictions-dir $(NEW_EVAL_PREDS_UNLABELLED_DIR)/PXD004732 \
+		--output-dir $(NEW_EVAL_PLOTS_NOVELTY_DIR)/proteometools
+	uv run python scripts/analyze_novelty.py summary \
+		--nontryptic-digest-dir $(NEW_EVAL_PLOTS_NOVELTY_DIR)/chymotrypsin \
+		--proteometools-dir $(NEW_EVAL_PLOTS_NOVELTY_DIR)/proteometools \
+		--output-dir $(NEW_EVAL_PLOTS_NOVELTY_DIR)
+
+novelty-replot-new-eval: download-new-eval-results replot-novelty-plots-new-eval
+
+## Replot-style new-eval plots (excludes ablation retrain and feature-importance SHAP)
+new-eval-plots: download-extra-small-mass-error-da-model download-new-eval-results \
+	annotate-new-eval-unlabelled replot-new-eval eval-extra-small-acfm-minus-lcfm \
+	analyze-upscored-fps-new-eval analyze-fdr-overlap-new-eval replot-novelty-plots-new-eval
+
+upload-new-eval-plots-all: new-eval-plots upload-new-eval-plots
+
+#########################################################
+## Cluster pipelines (download S3 → run → upload one subdir)
+## CPU-only: fdr_overlap, acfm_minus_lcfm, novelty, upscored_fps
+## GPU + koina-up: feature_importance, ablations
+#########################################################
+
+cluster-new-eval-fdr-overlap: download-cluster-new-eval-cpu-inputs \
+	annotate-new-eval-unlabelled analyze-fdr-overlap-new-eval upload-new-eval-plots-fdr-overlap
+
+cluster-new-eval-acfm-minus-lcfm-pxd452-939: download-new-eval-results \
+	eval-extra-small-acfm-minus-lcfm-pxd452-939 upload-new-eval-plots-unlabelled
+
+cluster-new-eval-novelty: download-cluster-new-eval-cpu-inputs replot-novelty-plots-new-eval \
+	upload-new-eval-plots-novelty
+
+cluster-new-eval-upscored-fps: download-new-eval-results analyze-upscored-fps-new-eval \
+	upload-new-eval-plots-upscored-fps
+
+cluster-new-eval-feature-importance: feature-analysis-extra-small-cluster \
+	upload-new-eval-plots-feature-importance
+
+cluster-new-eval-ablations: ablation-extra-small-cluster upload-new-eval-plots-ablations
+
 ## Feature-shift plots: woundfluids lcfm (labelled) vs acfm (unlabelled)
 .PHONY: predict-feature-shift-woundfluids plot-feature-shift-woundfluids feature-shift-woundfluids
 
@@ -1012,13 +1457,11 @@ eval-extra-small-no-fragment-similarity:
 		LOCAL_EVAL_PLOTS_DIR=analysis/train_extra_small_no_fragment_similarity_external_eval \
 		LOCAL_EXTERNAL_PROJECTS=$(CELEGANS_HELD_OUT_PROJECT)
 
-eval-extra-small-mass-error-da: download-extra-small-mass-error-da-model download-extra-small-celegans-eval
-	$(MAKE) eval-local-external \
-		LOCAL_MODEL_DIR=train_extra_small_mass_error_da \
-		LOCAL_PREDS_DIR=predictions/train_extra_small_mass_error_da_external_eval \
-		LOCAL_EVAL_PLOTS_DIR=analysis/train_extra_small_mass_error_da_external_eval \
-		LOCAL_EXTERNAL_PROJECTS=$(CELEGANS_HELD_OUT_PROJECT) \
-		KOINA_OVERRIDES=koina.server_url=koina.wilhelmlab.org:443 koina.ssl=true
+eval-extra-small-mass-error-da: eval-extra-small-mass-error-da-replot
+
+eval-extra-small-mass-error-da-replot: download-extra-small-mass-error-da-model \
+	download-new-eval-results annotate-new-eval-unlabelled replot-new-eval \
+	eval-extra-small-acfm-minus-lcfm
 
 ## Celegans (PXD014877) only — run this first
 eval-extra-small-mass-error-da-no-token-celegans:
@@ -1318,9 +1761,8 @@ evaluate_general_model_raw_biological_validation:
 	uv run python scripts/annotate_preds_proteome_hits.py biological_validation_raw \
 		$(foreach p,$(BIOLOGICAL_VALIDATION_PROJECTS),$(if $(strip $(PROTEOME_FASTA_raw_$(p))),--map $(p)=$(PROTEOME_FASTA_raw_$(p)),))
 
-EXTERNAL_DATASETS := PXD009935 PXD014877 PXD023064
+EXTERNAL_DATASETS := PXD014877 PXD023064
 
-PROTEOME_FASTA_unlabelled_PXD009935 := fasta/human.fasta
 PROTEOME_FASTA_unlabelled_PXD014877 := fasta/Celegans.fasta
 PROTEOME_FASTA_unlabelled_PXD023064 := fasta/human.fasta
 

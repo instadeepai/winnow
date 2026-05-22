@@ -22,6 +22,8 @@ import torch
 import typer
 from rich.logging import RichHandler
 
+from scripts.feature_subsets import FEATURE_SUBSETS
+
 from winnow.calibration.calibrator import ProbabilityCalibrator
 from winnow.datasets.feature_dataset import FeatureDataset
 from winnow.fdr.database_grounded import DatabaseGroundedFDRControl
@@ -47,19 +49,38 @@ DATASET_DISPLAY_NAMES: dict[str, str] = {
     "helaqc": "HeLa single shot",
     "herceptin": "Herceptin",
     "immuno": "Immunopeptidomics-1",
-    "sbrodae": "Scalindua brodae",
+    "celegans": "$\\it{C.\\;elegans}$",
+    "sbrodae": "$\\it{Scalindua\\;brodae}$",
+    "PXD019483": "HepG2",
     "snakevenoms": "Snake venomics",
     "tplantibodies": "Therapeutic nanobodies",
     "woundfluids": "Wound exudates",
-    "PXD014877": "C. elegans",
+    "PXD004732": "ProteomeTools-1",
+    "PXD014877": "$\\it{C.\\;elegans}$",
     "PXD023064": "Immunopeptidomics-2",
-    "PXD009935": "Immunopeptidomics-3",
-    "Astral": "Astral E. coli",
+    "astral": "Astral $\\it{E.\\;coli}$",
+    "01747_C01_P018218_S00_I00_N03_R1": "$\\it{Arabidopsis\\;thaliana}$",
+    "Arabidopsis": "$\\it{Arabidopsis\\;thaliana}$",
+    "20150708_QE3_UPLC8_DBJ_QC_HELA_39frac_Chymotrypsin": "HeLa chymotrypsin",
+    "20151020_QE3_UPLC8_DBJ_SA_A549_Rep2_46": "Human lung",
+    "20151020_QE3_UPLC8_DBJ_SA_HCT116_Rep2_46": "Human colon",
+    "20170303_QEh1_LC2_FaMa_ChCh_SA_HLApI_JY_R1_exp2": "HLA Class I (JY cells)",
+    "20170609_QEh1_LC1_ChCh_FAMA_SA_HLAIIp_JY_all_R1": "HLA Class II (JY cells)",
 }
 
 # ---------------------------------------------------------------------------
-# Feature group definitions
+# Feature group definitions (reduced set: no xcorr, spectral_angle, gap/similarity, edit_distance)
 # ---------------------------------------------------------------------------
+_EXCLUDED_REDUCED = frozenset(
+    {
+        "xcorr",
+        "spectral_angle",
+        "complementary_ion_count",
+        "max_ion_gap",
+        "edit_distance",
+    }
+)
+
 BEAM_COLUMNS = ["margin", "median_margin", "entropy", "z-score", "edit_distance"]
 TOKEN_COLUMNS = ["min_token_probability", "std_token_probability"]
 FRAGMENT_MATCH_COLUMNS = [
@@ -71,33 +92,113 @@ FRAGMENT_MATCH_COLUMNS = [
     "xcorr",
 ]
 RETENTION_TIME_COLUMNS = ["irt_error"]
-MASS_ERROR_COLUMNS = ["mass_error_ppm"]
+MASS_ERROR_PPM = "mass_error_ppm"
+MASS_ERROR_DA = "mass_error_da"
 
-ALL_FEATURE_COLUMNS = (
-    ["confidence"]
-    + MASS_ERROR_COLUMNS
-    + FRAGMENT_MATCH_COLUMNS
-    + RETENTION_TIME_COLUMNS
-    + BEAM_COLUMNS
-    + TOKEN_COLUMNS
-)
+REDUCED_BEAM_COLUMNS = [c for c in BEAM_COLUMNS if c not in _EXCLUDED_REDUCED]
+REDUCED_FRAGMENT_COLUMNS = [
+    c for c in FRAGMENT_MATCH_COLUMNS if c not in _EXCLUDED_REDUCED
+]
 
-ABLATION_CONFIGS: dict[str, list[str]] = {
-    "Confidence only": ["confidence"],
-    "Confidence + beam search": ["confidence"] + BEAM_COLUMNS + TOKEN_COLUMNS,
-    "Confidence + fragment matching": (
-        ["confidence"]
-        + FRAGMENT_MATCH_COLUMNS
-        + RETENTION_TIME_COLUMNS
-        + MASS_ERROR_COLUMNS
-    ),
-    "All features": ALL_FEATURE_COLUMNS,
-}
+# Default training matrix columns (train_extra_small_matrix.parquet).
+REDUCED_TRAIN_COLUMNS: list[str] = FEATURE_SUBSETS["no_fragment_similarity"]["columns"]
 
-ABLATION_COLORS: dict[str, str] = {
-    name: _PALETTE[i] for i, name in enumerate(ABLATION_CONFIGS)
-}
-ORIGINAL_COLOR = _PALETTE[len(ABLATION_CONFIGS)]
+# Hydra overrides aligned with Makefile ANALYSIS_REDUCED_FEATURE_OVERRIDES (mass_error_da model).
+REDUCED_FEATURE_COMPUTE_OVERRIDES: list[str] = [
+    "~calibrator.features.mass_error",
+    "+calibrator.features.mass_error_da._target_=winnow.calibration.calibration_features.MassErrorDaFeature",
+    "+calibrator.features.mass_error_da.residue_masses=${residue_masses}",
+    "+calibrator.features.fragment_match_features.excluded_columns=[spectral_angle,xcorr,complementary_ion_count,max_ion_gap]",
+    "+calibrator.features.beam_features.excluded_columns=[edit_distance]",
+]
+
+
+def _reference_model_columns(model_dir: Path | None) -> list[str] | None:
+    """Return ``feature_columns`` from a saved calibrator, if present."""
+    if model_dir is None:
+        return None
+    config_path = model_dir / "config.json"
+    if not config_path.is_file():
+        return None
+    with open(config_path) as f:
+        config = json.load(f)
+    cols = config.get("feature_columns")
+    return list(cols) if cols else None
+
+
+def _resolve_mass_error_column(
+    df: pl.DataFrame,
+    reference_model_dir: Path | None,
+) -> str:
+    """Pick mass-error column present in *df*, preferring the reference model."""
+    ref_cols = _reference_model_columns(reference_model_dir)
+    if MASS_ERROR_DA in df.columns:
+        return MASS_ERROR_DA
+    if MASS_ERROR_PPM in df.columns:
+        if ref_cols and MASS_ERROR_DA in ref_cols:
+            logger.warning(
+                "Reference model uses %s but data has %s; using %s for ablations.",
+                MASS_ERROR_DA,
+                MASS_ERROR_PPM,
+                MASS_ERROR_PPM,
+            )
+        return MASS_ERROR_PPM
+    raise ValueError(
+        f"No mass error column in data (tried {MASS_ERROR_DA}, {MASS_ERROR_PPM})"
+    )
+
+
+def _columns_available(df: pl.DataFrame, columns: list[str]) -> list[str]:
+    missing = [c for c in columns if c not in df.columns]
+    if missing:
+        raise ValueError(f"Missing columns: {missing}. Available: {df.columns}")
+    return columns
+
+
+def resolve_all_feature_columns(
+    df: pl.DataFrame,
+    reference_model_dir: Path | None,
+) -> list[str]:
+    """Full reduced feature set for the 'All features' ablation config."""
+    ref_cols = _reference_model_columns(reference_model_dir)
+    if ref_cols:
+        cols = ["confidence"]
+        for col in ref_cols:
+            if (
+                col == MASS_ERROR_DA
+                and col not in df.columns
+                and MASS_ERROR_PPM in df.columns
+            ):
+                cols.append(MASS_ERROR_PPM)
+            elif col in df.columns:
+                cols.append(col)
+    else:
+        cols = [c for c in REDUCED_TRAIN_COLUMNS if c in df.columns]
+    return _columns_available(df, cols)
+
+
+def build_ablation_configs(
+    df: pl.DataFrame,
+    reference_model_dir: Path | None,
+) -> dict[str, list[str]]:
+    """Build ablation configs using columns available in *df*."""
+    mass_col = _resolve_mass_error_column(df, reference_model_dir)
+    all_features = resolve_all_feature_columns(df, reference_model_dir)
+    return {
+        "Confidence only": ["confidence"],
+        "Confidence + mass error": ["confidence", mass_col],
+        "Confidence + iRT error": ["confidence", *RETENTION_TIME_COLUMNS],
+        "Confidence + token-level": ["confidence", *TOKEN_COLUMNS],
+        "Confidence + beam search": ["confidence", *REDUCED_BEAM_COLUMNS],
+        "Confidence + fragment matching": ["confidence", *REDUCED_FRAGMENT_COLUMNS],
+        "All features": all_features,
+    }
+
+
+ABLATION_CONFIGS: dict[str, list[str]] = {}
+
+ABLATION_COLORS: dict[str, str] = {}
+ORIGINAL_COLOR = _PALETTE[6]
 
 # Default training hyperparameters (overridden by --hyperparams-from-model).
 TRAIN_HYPERPARAMS = {
@@ -131,10 +232,16 @@ def train_hyperparams_from_model(model_dir: Path) -> dict[str, object]:
 
 
 EVAL_DATASETS = {
-    "PXD014877": {
-        "label": "C. elegans",
-        "spectra": "held_out_projects/lcfm/PXD014877/",
-        "predictions": "held_out_projects/lcfm/PXD014877_predictions/PXD014877.csv",
+    "HCT116": {
+        "label": "Human colon",
+        "spectra": "new_eval_data/lcfm/PXD004452/20151020_QE3_UPLC8_DBJ_SA_HCT116_Rep2_46.parquet",
+        "predictions": "new_eval_data/lcfm/PXD004452/20151020_QE3_UPLC8_DBJ_SA_HCT116_Rep2_46.csv",
+        "koina_mode": "columns",
+    },
+    "Arabidopsis": {
+        "label": "Arabidopsis",
+        "spectra": "new_eval_data/lcfm/PXD013868/01747_C01_P018218_S00_I00_N03_R1.parquet",
+        "predictions": "new_eval_data/lcfm/PXD013868/01747_C01_P018218_S00_I00_N03_R1.csv",
         "koina_mode": "columns",
     },
     "PXD023064": {
@@ -142,12 +249,6 @@ EVAL_DATASETS = {
         "spectra": "held_out_projects/lcfm/PXD023064/",
         "predictions": "held_out_projects/lcfm/PXD023064_predictions/PXD023064.csv",
         "koina_mode": "columns",
-    },
-    "helaqc": {
-        "label": "HeLa single shot",
-        "spectra": "held_out_projects/biological_validation/annotated/dataset-helaqc-annotated-0000-0001.parquet",
-        "predictions": "held_out_projects/biological_validation/annotated_predictions/dataset-helaqc-annotated-0000-0001.csv",
-        "koina_mode": "constants",
     },
 }
 
@@ -176,6 +277,17 @@ def _get_residue_masses() -> dict[str, float]:
 # ---------------------------------------------------------------------------
 # Eval feature computation
 # ---------------------------------------------------------------------------
+def _feature_compute_overrides(reference_model_dir: Path | None) -> list[str]:
+    """Hydra overrides so eval features match a mass_error_da / reduced-feature model."""
+    ref_cols = _reference_model_columns(reference_model_dir)
+    if ref_cols and MASS_ERROR_DA in ref_cols:
+        return list(REDUCED_FEATURE_COMPUTE_OVERRIDES)
+    return [
+        "+calibrator.features.fragment_match_features.excluded_columns=[spectral_angle,xcorr,complementary_ion_count,max_ion_gap]",
+        "+calibrator.features.beam_features.excluded_columns=[edit_distance]",
+    ]
+
+
 def _compute_eval_features_for_dataset(
     name: str,
     spectra_path: str,
@@ -184,6 +296,7 @@ def _compute_eval_features_for_dataset(
     koina_url: str,
     koina_ssl: bool,
     koina_mode: str = "columns",
+    feature_overrides: list[str] | None = None,
 ) -> Path:
     """Compute the full feature matrix for an eval dataset and cache as Parquet.
 
@@ -234,6 +347,7 @@ def _compute_eval_features_for_dataset(
                 f"koina.server_url={koina_url}",
                 f"koina.ssl={koina_ssl}",
                 *koina_overrides,
+                *(feature_overrides or []),
                 "labelled=true",
                 "filter_empty_predictions=true",
             ],
@@ -304,10 +418,12 @@ def compute_all_eval_features(
     astral_spectra: str | None,
     astral_predictions: str | None,
     skip_feature_compute: bool,
+    reference_model_dir: Path | None = None,
 ) -> dict[str, Path]:
     """Compute (or locate cached) eval feature Parquets for all datasets."""
     cache_dir = output_dir / "eval_feature_cache"
     result: dict[str, Path] = {}
+    feature_overrides = _feature_compute_overrides(reference_model_dir)
 
     for name, info in EVAL_DATASETS.items():
         if skip_feature_compute:
@@ -326,6 +442,7 @@ def compute_all_eval_features(
                 koina_url,
                 koina_ssl,
                 koina_mode=info.get("koina_mode", "columns"),
+                feature_overrides=feature_overrides,
             )
 
     if astral_spectra and astral_predictions:
@@ -345,6 +462,7 @@ def compute_all_eval_features(
                 cache_dir,
                 koina_url,
                 koina_ssl,
+                feature_overrides=feature_overrides,
             )
 
     return result
@@ -362,6 +480,40 @@ def _load_parquet_as_polars(path: str | Path) -> pl.DataFrame:
             raise FileNotFoundError(f"No .parquet files in {path}")
         return pl.concat([pl.read_parquet(f) for f in parquet_files])
     return pl.read_parquet(path)
+
+
+def split_train_val_frames(
+    df: pl.DataFrame,
+    validation_fraction: float,
+    seed: int,
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Random train/validation split with a fixed index permutation.
+
+    Uses the same scheme as ``winnow.scripts.main._maybe_split_calibration_dataset``:
+    shuffle all row indices with *seed*, then assign the last ``validation_fraction``
+    fraction to validation. The same split is reused for every ablation config.
+    """
+    if "correct" not in df.columns:
+        raise ValueError("Training Parquet must contain a 'correct' column")
+    if not 0 < validation_fraction < 1:
+        raise ValueError(
+            f"validation_fraction must be in (0, 1), got {validation_fraction}"
+        )
+
+    n = len(df)
+    n_val = max(1, int(n * validation_fraction))
+    rng = np.random.default_rng(seed)
+    perm = rng.permutation(n)
+    train_df = df[perm[: n - n_val].tolist()]
+    val_df = df[perm[n - n_val :].tolist()]
+    logger.info(
+        "Train/val split: %d train, %d val (fraction=%.2f, seed=%d)",
+        len(train_df),
+        len(val_df),
+        validation_fraction,
+        seed,
+    )
+    return train_df, val_df
 
 
 def _column_slice_to_feature_dataset(
@@ -387,6 +539,21 @@ def _config_dir_name(config_name: str) -> str:
 
 _LEGACY_DIR_NAMES: dict[str, list[str]] = {
     "Confidence only": ["confidence_only"],
+    "Confidence + mass error": [
+        "confidence_and_mass_error",
+        "confidence_and_mass_error_and_rt",
+    ],
+    "Confidence + iRT error": [
+        "confidence_and_irt_error",
+        "confidence_and_mass_error_and_rt",
+        "confidence_and_fragment_matching",
+        "prosit",
+    ],
+    "Confidence + token-level": [
+        "confidence_and_token_level",
+        "confidence_and_beam_search",
+        "beam_and_token",
+    ],
     "Confidence + beam search": ["confidence_and_beam_search", "beam_and_token"],
     "Confidence + fragment matching": [
         "confidence_and_fragment_matching",
@@ -693,21 +860,28 @@ def plot_precision_recall(
     output_dir: Path,
     plot_format: str,
 ) -> None:
-    """PR curve: one line per ablation + raw confidence baseline."""
+    """PR curve: one line per ablation + raw InstaNovo confidence baseline."""
     fig, ax = plt.subplots(figsize=(6, 4))
 
-    # Raw confidence baseline (shared across all ablations -- use first result)
-    raw_pr = compute_precision_recall_curve(
-        results[0].eval_df, "confidence", "correct", "Raw confidence"
-    )
-    sns.lineplot(
-        data=raw_pr,
-        x="recall",
-        y="precision",
-        label="Raw confidence",
-        color=ORIGINAL_COLOR,
-        ax=ax,
-    )
+    if "confidence" not in results[0].eval_df.columns:
+        logger.warning(
+            "Skipping raw confidence PR baseline for %s (no confidence column)",
+            dataset_name,
+        )
+    else:
+        raw_pr = compute_precision_recall_curve(
+            results[0].eval_df, "confidence", "correct", "Raw confidence"
+        )
+        sns.lineplot(
+            data=raw_pr,
+            x="recall",
+            y="precision",
+            label="Raw confidence",
+            color=ORIGINAL_COLOR,
+            linestyle="--",
+            linewidth=2.0,
+            ax=ax,
+        )
 
     for r in results:
         sns.lineplot(
@@ -949,6 +1123,141 @@ def build_summary_table(all_results: list[EvalResult]) -> pd.DataFrame:
 _DEFAULT_OUTPUT_DIR = Path("analysis/hpo_ablation")
 
 
+def _validate_training_inputs(
+    *,
+    skip_training: bool,
+    train_features: Path | None,
+    val_features: Path | None,
+    validation_fraction: float | None,
+) -> None:
+    if skip_training:
+        return
+    if train_features is None:
+        raise typer.BadParameter(
+            "--train-features is required unless --skip-training is set."
+        )
+    if val_features is None and validation_fraction is None:
+        raise typer.BadParameter(
+            "Provide --val-features or --validation-fraction when training."
+        )
+    if val_features is not None and validation_fraction is not None:
+        logger.warning(
+            "Both --val-features and --validation-fraction set; using --val-features."
+        )
+
+
+def _configure_ablation_configs(
+    *,
+    skip_training: bool,
+    train_features: Path | None,
+    eval_dfs: dict[str, pl.DataFrame],
+    hyperparams_from_model: Path | None,
+) -> None:
+    global ABLATION_CONFIGS, ABLATION_COLORS
+
+    if not skip_training:
+        assert train_features is not None
+        train_schema_df = _load_parquet_as_polars(train_features)
+        ABLATION_CONFIGS = build_ablation_configs(
+            train_schema_df, hyperparams_from_model
+        )
+    else:
+        first_eval = next(iter(eval_dfs.values()))
+        ABLATION_CONFIGS = build_ablation_configs(first_eval, hyperparams_from_model)
+    ABLATION_COLORS = {
+        name: _PALETTE[i % len(_PALETTE)] for i, name in enumerate(ABLATION_CONFIGS)
+    }
+    logger.info("Ablation configs: %s", list(ABLATION_CONFIGS.keys()))
+
+
+def _train_or_load_ablation_models(
+    *,
+    skip_training: bool,
+    train_features: Path | None,
+    val_features: Path | None,
+    validation_fraction: float | None,
+    output_dir: Path,
+    seed: int,
+    hyperparams_from_model: Path | None,
+) -> dict[str, ProbabilityCalibrator]:
+    if skip_training:
+        logger.info("Step 3: Loading pre-trained ablation models...")
+        return load_ablation_models(output_dir)
+
+    logger.info("Step 3: Training ablation models...")
+    assert train_features is not None
+    full_train_df = _load_parquet_as_polars(train_features)
+    if val_features is not None:
+        train_df = full_train_df
+        val_df = _load_parquet_as_polars(val_features)
+    else:
+        assert validation_fraction is not None
+        train_df, val_df = split_train_val_frames(
+            full_train_df, validation_fraction, seed
+        )
+    train_hp = None
+    if hyperparams_from_model is not None:
+        train_hp = train_hyperparams_from_model(hyperparams_from_model)
+        logger.info(
+            "Using training hyperparameters from %s: %s",
+            hyperparams_from_model,
+            train_hp,
+        )
+    return train_ablation_models(
+        train_df, val_df, output_dir, seed, train_hyperparams=train_hp
+    )
+
+
+def _evaluate_ablations(
+    *,
+    eval_dfs: dict[str, pl.DataFrame],
+    models: dict[str, ProbabilityCalibrator],
+    plots_dir: Path,
+    plot_format: str,
+) -> list[EvalResult]:
+    logger.info("Step 4: Evaluating ablation models...")
+    all_results: list[EvalResult] = []
+
+    for ds_name, ds_df in eval_dfs.items():
+        ds_results: list[EvalResult] = []
+        for config_name, columns in ABLATION_CONFIGS.items():
+            result = evaluate_single(
+                config_name, models[config_name], columns, ds_df, ds_name
+            )
+            ds_results.append(result)
+            all_results.append(result)
+            logger.info(
+                "  %s / %s: ECE=%.4f, Brier=%.4f, IDs@1%%=%d, IDs@5%%=%d, IDs@10%%=%d",
+                ds_name,
+                config_name,
+                result.ece,
+                result.brier,
+                result.ids_at_1pct,
+                result.ids_at_5pct,
+                result.ids_at_10pct,
+            )
+
+        logger.info("Step 5: Generating plots for %s...", ds_name)
+        plot_precision_recall(ds_results, ds_name, plots_dir, plot_format)
+        plot_calibration(ds_results, ds_name, plots_dir, plot_format)
+        plot_fdr_vs_confidence(ds_results, ds_name, plots_dir, plot_format)
+        plot_fdr_accepted_psms(ds_results, ds_name, plots_dir, plot_format)
+
+    return all_results
+
+
+def _write_ablation_summary(output_dir: Path, all_results: list[EvalResult]) -> None:
+    logger.info("Step 7: Writing summary...")
+    summary = build_summary_table(all_results)
+    summary.to_csv(output_dir / "ablation_summary.csv", index=False)
+
+    summary_json = summary.to_dict(orient="records")
+    with open(output_dir / "ablation_summary.json", "w") as f:
+        json.dump(summary_json, f, indent=2)
+
+    logger.info("Summary table:\n%s", summary.to_string(index=False))
+
+
 # ---------------------------------------------------------------------------
 # Main CLI
 # ---------------------------------------------------------------------------
@@ -964,8 +1273,19 @@ def main(
     val_features: Annotated[
         Optional[Path],
         typer.Option(
-            help="Path to pre-computed validation Parquet. "
-            "Required unless --skip-training is set.",
+            help="Pre-computed validation Parquet. Omit if using --validation-fraction.",
+        ),
+    ] = None,
+    validation_fraction: Annotated[
+        Optional[float],
+        typer.Option(
+            "--validation-fraction",
+            min=0.0,
+            max=1.0,
+            help=(
+                "Hold out this fraction of --train-features for validation "
+                "(same row split for every ablation model). Alternative to --val-features."
+            ),
         ),
     ] = None,
     output_dir: Annotated[
@@ -1020,16 +1340,17 @@ def main(
     ] = None,
 ) -> None:
     """Run feature ablation study for the Winnow calibrator."""
-    if not skip_training and (train_features is None or val_features is None):
-        raise typer.BadParameter(
-            "--train-features and --val-features are required unless --skip-training is set."
-        )
+    _validate_training_inputs(
+        skip_training=skip_training,
+        train_features=train_features,
+        val_features=val_features,
+        validation_fraction=validation_fraction,
+    )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     plots_dir = output_dir / "plots"
     plots_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Compute eval features
     logger.info("Step 1: Computing eval features...")
     eval_parquets = compute_all_eval_features(
         output_dir,
@@ -1038,81 +1359,40 @@ def main(
         astral_spectra,
         astral_predictions,
         skip_feature_compute,
+        reference_model_dir=hyperparams_from_model,
     )
 
-    # 2. Load eval Parquets (training data only needed when training)
     logger.info("Step 2: Loading Parquets...")
     eval_dfs: dict[str, pl.DataFrame] = {}
     for name, path in eval_parquets.items():
         eval_dfs[name] = _load_parquet_as_polars(path)
         logger.info("  Loaded eval %s: %d rows", name, len(eval_dfs[name]))
 
-    # 3. Train or load ablation models
-    if skip_training:
-        logger.info("Step 3: Loading pre-trained ablation models...")
-        models = load_ablation_models(output_dir)
-    else:
-        logger.info("Step 3: Training ablation models...")
-        assert train_features is not None
-        assert val_features is not None
-        train_df = _load_parquet_as_polars(train_features)
-        val_df = _load_parquet_as_polars(val_features)
-        train_hp = None
-        if hyperparams_from_model is not None:
-            train_hp = train_hyperparams_from_model(hyperparams_from_model)
-            logger.info(
-                "Using training hyperparameters from %s: %s",
-                hyperparams_from_model,
-                train_hp,
-            )
-        models = train_ablation_models(
-            train_df, val_df, output_dir, seed, train_hyperparams=train_hp
-        )
+    _configure_ablation_configs(
+        skip_training=skip_training,
+        train_features=train_features,
+        eval_dfs=eval_dfs,
+        hyperparams_from_model=hyperparams_from_model,
+    )
+    models = _train_or_load_ablation_models(
+        skip_training=skip_training,
+        train_features=train_features,
+        val_features=val_features,
+        validation_fraction=validation_fraction,
+        output_dir=output_dir,
+        seed=seed,
+        hyperparams_from_model=hyperparams_from_model,
+    )
+    all_results = _evaluate_ablations(
+        eval_dfs=eval_dfs,
+        models=models,
+        plots_dir=plots_dir,
+        plot_format=plot_format,
+    )
 
-    # 4. Evaluate
-    logger.info("Step 4: Evaluating ablation models...")
-    all_results: list[EvalResult] = []
-
-    for ds_name, ds_df in eval_dfs.items():
-        ds_results: list[EvalResult] = []
-        for config_name, columns in ABLATION_CONFIGS.items():
-            result = evaluate_single(
-                config_name, models[config_name], columns, ds_df, ds_name
-            )
-            ds_results.append(result)
-            all_results.append(result)
-            logger.info(
-                "  %s / %s: ECE=%.4f, Brier=%.4f, IDs@1%%=%d, IDs@5%%=%d, IDs@10%%=%d",
-                ds_name,
-                config_name,
-                result.ece,
-                result.brier,
-                result.ids_at_1pct,
-                result.ids_at_5pct,
-                result.ids_at_10pct,
-            )
-
-        # 5. Generate plots per dataset
-        logger.info("Step 5: Generating plots for %s...", ds_name)
-        plot_precision_recall(ds_results, ds_name, plots_dir, plot_format)
-        plot_calibration(ds_results, ds_name, plots_dir, plot_format)
-        plot_fdr_vs_confidence(ds_results, ds_name, plots_dir, plot_format)
-        plot_fdr_accepted_psms(ds_results, ds_name, plots_dir, plot_format)
-
-    # 6. Save per-PSM eval results for later replotting
     logger.info("Step 6: Saving eval results...")
     save_eval_results(all_results, output_dir)
-
-    # 7. Summary table
-    logger.info("Step 7: Writing summary...")
-    summary = build_summary_table(all_results)
-    summary.to_csv(output_dir / "ablation_summary.csv", index=False)
-
-    summary_json = summary.to_dict(orient="records")
-    with open(output_dir / "ablation_summary.json", "w") as f:
-        json.dump(summary_json, f, indent=2)
-
-    logger.info("Summary table:\n%s", summary.to_string(index=False))
+    _write_ablation_summary(output_dir, all_results)
     logger.info("Results saved to %s", output_dir)
     logger.info("Feature ablation study complete.")
 

@@ -47,6 +47,7 @@ def _resolve_preds_csv(root: Path, project: str, *, role: str) -> Path:
     """Resolve ``preds_and_fdr_metrics.csv`` for lcfm (labelled) or acfm (unlabelled)."""
     if role == "labelled":
         candidates = [
+            root / project / "preds_and_fdr_metrics.csv",
             root / f"{project}_labelled" / "preds_and_fdr_metrics.csv",
         ]
     elif role == "unlabelled":

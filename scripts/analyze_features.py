@@ -94,6 +94,9 @@ with open(_CONFIGS_DIR / "data_loader" / "instanovo.yaml") as _f:
 COLUMN_DISPLAY_NAMES = {
     "confidence": "Raw confidence",
     "mass_error": "Mass error",
+    "mass_error_ppm": "Mass error (ppm)",
+    "mass_error_da": "Mass error (Da)",
+    "spectral_angle": "Spectral angle",
     "ion_matches": "Ion matches",
     "ion_match_intensity": "Ion match intensity",
     "chimeric_ion_matches": "Chimeric ion matches",
@@ -125,6 +128,13 @@ error_theme = Theme({"error": "red bold", "error_highlight": "red bold underline
 console = Console(theme=error_theme)
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
+
+
+def feature_display_name(column: str) -> str:
+    """Human-readable label for a feature column."""
+    if column in COLUMN_DISPLAY_NAMES:
+        return COLUMN_DISPLAY_NAMES[column]
+    return column.replace("_", " ").replace("-", " ").strip().title()
 
 
 def to_sentence_case(name: str) -> str:
@@ -559,6 +569,20 @@ def main(
     test_preds: Annotated[
         str, typer.Option(help="Filename of test predictions CSV inside data-dir.")
     ] = "general_test_beams.csv",
+    koina_url: Annotated[
+        Optional[str],
+        typer.Option(
+            "--koina-url",
+            help="Override Koina server URL on loaded features (e.g. localhost:8500).",
+        ),
+    ] = None,
+    koina_ssl: Annotated[
+        bool,
+        typer.Option(
+            "--koina-ssl/--no-koina-ssl",
+            help="Use SSL for Koina (disable for in-pod Triton).",
+        ),
+    ] = True,
     koina_input_constant: Annotated[
         Optional[List[str]],
         typer.Option(
@@ -593,6 +617,12 @@ def main(
     # Load calibrator
     logger.info("Loading pretrained calibrator from %s", model_path)
     calibrator = ProbabilityCalibrator.load(model_path)
+
+    if koina_url is not None or not koina_ssl:
+        calibrator.apply_koina_server_overrides(
+            server_url=koina_url,
+            ssl=koina_ssl,
+        )
 
     koina_constants = _parse_koina_constants(koina_input_constant)
     if koina_constants:
@@ -664,9 +694,7 @@ def main(
 
         feature_names = [train_dataset.confidence_column] + calibrator.columns
 
-    display_feature_names = [
-        COLUMN_DISPLAY_NAMES.get(name, name) for name in feature_names
-    ]
+    display_feature_names = [feature_display_name(name) for name in feature_names]
 
     assert calibrator.feature_mean is not None
     assert calibrator.feature_std is not None
