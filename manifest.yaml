@@ -16,12 +16,12 @@ spec:
         provider: "github"
   operator: jobset
   image: winnow-koina
-  command: make cluster-new-eval-acfm-minus-lcfm-pxd452-939
+  command: make cluster-new-eval-fdr-overlap
   types:
     worker:
       count: 1
       resources:
-        cpus: 5
+        cpus: 9
         ramRatio: 8 # >= 2
 
         accelerators:
