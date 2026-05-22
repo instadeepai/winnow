@@ -44,18 +44,39 @@ def _safe_basename(project: str) -> str:
 
 
 def _preds_csv_candidates(root: Path, project: str, *, role: str) -> list[Path]:
-    """Paths to try for ``preds_and_fdr_metrics.csv`` under *root*."""
-    if role == "labelled":
-        return [
-            root / project / "preds_and_fdr_metrics.csv",
-            root / f"{project}_labelled" / "preds_and_fdr_metrics.csv",
-        ]
-    if role == "unlabelled":
-        return [
-            root / project / "preds_and_fdr_metrics.csv",
-            root / f"{project}_unlabelled" / "preds_and_fdr_metrics.csv",
-        ]
-    raise ValueError(f"Unknown role {role!r}")
+    """Paths to try for ``preds_and_fdr_metrics.csv`` under *root*.
+
+    Supports flat layouts (``{root}/{run}/``), S3-style nesting
+    (``{root}/PXD006939/{run}/``), and explicit ``PXD006939/run`` project keys.
+    """
+    if role not in ("labelled", "unlabelled"):
+        raise ValueError(f"Unknown role {role!r}")
+
+    role_suffix = "_labelled" if role == "labelled" else "_unlabelled"
+    fname = "preds_and_fdr_metrics.csv"
+    seen: set[Path] = set()
+    candidates: list[Path] = []
+
+    def add(*relative: str) -> None:
+        path = root.joinpath(*relative, fname)
+        if path not in seen:
+            seen.add(path)
+            candidates.append(path)
+
+    add(project)
+    base = project.split("/")[-1]
+    add(f"{base}{role_suffix}")
+    if "/" in project:
+        add(*project.split("/"))
+
+    # Makefile download flattens to {root}/{run}/; S3 keeps {root}/PXD*/{run}/.
+    if "/" not in project and root.is_dir():
+        for child in sorted(root.iterdir()):
+            if child.is_dir() and child.name.startswith("PXD"):
+                add(child.name, project)
+                add(child.name, f"{project}{role_suffix}")
+
+    return candidates
 
 
 def _resolve_preds_csv(
