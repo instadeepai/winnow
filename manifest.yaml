@@ -11,12 +11,12 @@ builder:
 spec:
   debug:
       vscode:
-        enabled: true
+        enabled: false
         path: "/aichor/code"
         provider: "github"
   operator: jobset
   image: winnow-koina
-  command: /usr/local/bin/entrypoint.koina.sh make train-and-eval-extra-small-mass-error-da
+  command: /usr/local/bin/entrypoint.koina.sh make cluster-new-eval-feature-importance cluster-new-eval-ablations
   types:
     worker:
       count: 1
