@@ -897,54 +897,54 @@ download-new-eval-results:
 	@# PXD004452 — per-run subfolders
 	for run in $(NEW_EVAL_RUN_PXD004452); do \
 		mkdir -p $(NEW_EVAL_PREDS_LABELLED_DIR)/$$run $(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run; \
-		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/PXD004452/$$run/preds_and_fdr_metrics.csv \
-			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$run/; \
-		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/PXD004452/$$run/metadata.csv \
-			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$run/; \
-		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/PXD004452/$$run/preds_and_fdr_metrics.csv \
-			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run/; \
-		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/PXD004452/$$run/metadata.csv \
-			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run/; \
+		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/PXD004452/$$run/preds_and_fdr_metrics.csv \
+			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$run/ || true; \
+		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/PXD004452/$$run/metadata.csv \
+			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$run/ || true; \
+		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/PXD004452/$$run/preds_and_fdr_metrics.csv \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run/ || true; \
+		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/PXD004452/$$run/metadata.csv \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run/ || true; \
 	done
 	@# PXD006939 — per-run subfolders
 	for run in $(NEW_EVAL_RUN_PXD006939); do \
 		mkdir -p $(NEW_EVAL_PREDS_LABELLED_DIR)/$$run $(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run; \
-		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/PXD006939/$$run/preds_and_fdr_metrics.csv \
-			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$run/; \
-		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/PXD006939/$$run/metadata.csv \
-			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$run/; \
-		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/PXD006939/$$run/preds_and_fdr_metrics.csv \
-			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run/; \
-		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/PXD006939/$$run/metadata.csv \
-			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run/; \
+		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/PXD006939/$$run/preds_and_fdr_metrics.csv \
+			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$run/ || true; \
+		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/PXD006939/$$run/metadata.csv \
+			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$run/ || true; \
+		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/PXD006939/$$run/preds_and_fdr_metrics.csv \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run/ || true; \
+		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/PXD006939/$$run/metadata.csv \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run/ || true; \
 	done
 	@# PXD013868 — single run
 	for run in $(NEW_EVAL_RUN_PXD013868); do \
 		mkdir -p $(NEW_EVAL_PREDS_LABELLED_DIR)/$$run $(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run; \
-		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/PXD013868/$$run/preds_and_fdr_metrics.csv \
-			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$run/; \
-		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/PXD013868/$$run/metadata.csv \
-			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$run/; \
-		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/PXD013868/$$run/preds_and_fdr_metrics.csv \
-			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run/; \
-		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/PXD013868/$$run/metadata.csv \
-			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run/; \
+		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/PXD013868/$$run/preds_and_fdr_metrics.csv \
+			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$run/ || true; \
+		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/PXD013868/$$run/metadata.csv \
+			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$run/ || true; \
+		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/PXD013868/$$run/preds_and_fdr_metrics.csv \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run/ || true; \
+		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/PXD013868/$$run/metadata.csv \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run/ || true; \
 	done
 	@# Flat legacy projects (PXD004732, PXD014877, PXD023064, astral labelled)
 	for project in $(LEGACY_FLAT_PROJECTS); do \
 		mkdir -p $(NEW_EVAL_PREDS_LABELLED_DIR)/$$project; \
-		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/$$project/preds_and_fdr_metrics.csv \
-			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$project/; \
-		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/$$project/metadata.csv \
-			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$project/; \
+		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/$$project/preds_and_fdr_metrics.csv \
+			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$project/ || true; \
+		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/$$project/metadata.csv \
+			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$project/ || true; \
 	done
 	@# acfm unlabelled for flat projects (astral may be absent on S3)
 	for project in PXD004732 PXD014877 PXD023064 astral; do \
 		mkdir -p $(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$project; \
-		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/$$project/preds_and_fdr_metrics.csv \
-			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$project/; \
-		-$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/$$project/metadata.csv \
-			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$project/; \
+		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/$$project/preds_and_fdr_metrics.csv \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$project/ || true; \
+		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/$$project/metadata.csv \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$project/ || true; \
 	done
 	@echo "=== download-new-eval-results complete ==="
 
@@ -1195,7 +1195,7 @@ ablation-extra-small-run:
 
 ablation-extra-small: download-extra-small-train-data download-extra-small-mass-error-da-model \
 	download-new-eval-ablation-data download-astral-for-ablation
-	-$(S3_CP) $(EXTRA_SMALL_TRAIN_S3)/train_extra_small_matrix.parquet $(EXTRA_SMALL_TRAIN_FEATURES)
+	$(S3_CP) $(EXTRA_SMALL_TRAIN_S3)/train_extra_small_matrix.parquet $(EXTRA_SMALL_TRAIN_FEATURES) || true
 	$(MAKE) ablation-extra-small-run
 
 ablation-extra-small-cluster: download-cluster-ablation-inputs koina-up
