@@ -16,7 +16,7 @@ spec:
         provider: "github"
   operator: jobset
   image: winnow-koina
-  command: make cluster-new-eval-novelty
+  command: make cluster-new-eval-acfm-minus-lcfm-pxd452-939
   types:
     worker:
       count: 1
