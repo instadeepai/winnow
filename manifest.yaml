@@ -3,7 +3,7 @@ kind: AIchorManifest
 apiVersion: 0.2.1
 builder:
   image: winnow-koina
-  dockerfile: ./Dockerfile.koina
+  dockerfile: ./Dockerfile
   context: .
   buildArgs:
     USE_CUDA: "true"
@@ -16,16 +16,16 @@ spec:
         provider: "github"
   operator: jobset
   image: winnow-koina
-  command: /usr/local/bin/entrypoint.koina.sh make cluster-new-eval-ablations
+  command: make eval-extra-small-acfm-minus-lcfm-pxd452-939
   types:
     worker:
       count: 1
       resources:
-        cpus: 9
+        cpus: 6
         ramRatio: 8 # >= 2
 
         accelerators:
           gpu:
-            count: 1
+            count: 0
             type: gpu
             product: NVIDIA-H100-80GB-HBM3-MIG-3g.40gb

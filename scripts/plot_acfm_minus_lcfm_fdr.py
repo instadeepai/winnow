@@ -96,34 +96,57 @@ def _resolve_preds_csv(
     )
 
 
+def _infer_predictions_root(
+    labelled_dir: Path | None,
+    unlabelled_dir: Path | None,
+) -> Path:
+    """Infer a common parent when only per-tree dirs are passed."""
+    if labelled_dir is not None and unlabelled_dir is not None:
+        if labelled_dir.parent == unlabelled_dir.parent:
+            return labelled_dir.parent
+    if labelled_dir is not None:
+        return labelled_dir.parent
+    if unlabelled_dir is not None:
+        return unlabelled_dir.parent
+    raise typer.BadParameter(
+        "Provide --predictions-root or at least one of --labelled-dir / --unlabelled-dir."
+    )
+
+
 def _resolve_tree_root(
-    predictions_root: Path,
+    predictions_root: Path | None,
     explicit: Path | None,
     *,
     role: str,
 ) -> tuple[Path, list[Path]]:
     """Pick labelled (lcfm) or unlabelled (acfm) root; return alternates to try."""
     sub = "lcfm" if role == "labelled" else "acfm"
-    nested = predictions_root / sub
+    legacy = "labelled" if role == "labelled" else "unlabelled"
     alt_roots: list[Path] = []
 
-    if explicit is None:
-        root = nested if nested.is_dir() else predictions_root
-        return root, alt_roots
+    if explicit is not None:
+        if predictions_root is not None and len(explicit.parts) == 1:
+            under_predictions = predictions_root / explicit
+            if under_predictions.is_dir():
+                root = under_predictions
+                if explicit.is_dir() and explicit.resolve() != root.resolve():
+                    alt_roots.append(explicit)
+                nested = predictions_root / sub
+                if nested.is_dir() and nested.resolve() != root.resolve():
+                    alt_roots.append(nested)
+                return root, alt_roots
+        return explicit, alt_roots
 
-    under_predictions = (
-        predictions_root / explicit if not explicit.is_absolute() else None
-    )
-    if under_predictions is not None and under_predictions.is_dir():
-        root = under_predictions
-        if explicit.is_dir() and explicit.resolve() != root.resolve():
-            alt_roots.append(explicit)
-    else:
-        root = explicit
-        if nested.is_dir() and nested.resolve() != root.resolve():
-            alt_roots.append(nested)
+    if predictions_root is None:
+        raise typer.BadParameter(
+            f"Missing --predictions-root and --{legacy}-dir for {role} tree."
+        )
 
-    return root, alt_roots
+    for name in (sub, legacy):
+        candidate = predictions_root / name
+        if candidate.is_dir():
+            return candidate, alt_roots
+    return predictions_root, alt_roots
 
 
 def _lcfm_spectrum_ids(
@@ -288,16 +311,6 @@ def process_project(
 
 @app.command()
 def main(
-    predictions_root: Annotated[
-        Path,
-        typer.Option(
-            "--predictions-root",
-            help=(
-                "Default root for both trees when --labelled-dir / --unlabelled-dir "
-                "are omitted."
-            ),
-        ),
-    ],
     projects: Annotated[
         str,
         typer.Option(
@@ -312,6 +325,16 @@ def main(
             help="Directory for per-project plots and refitted prediction tables.",
         ),
     ],
+    predictions_root: Annotated[
+        Path | None,
+        typer.Option(
+            "--predictions-root",
+            help=(
+                "Parent of labelled/unlabelled (or lcfm/acfm) trees. Optional when "
+                "both --labelled-dir and --unlabelled-dir are set (parent is inferred)."
+            ),
+        ),
+    ] = None,
     labelled_dir: Annotated[
         Path | None,
         typer.Option(
@@ -340,11 +363,15 @@ def main(
     if not project_list:
         raise typer.BadParameter("No projects specified.")
 
+    preds_root = predictions_root
+    if preds_root is None:
+        preds_root = _infer_predictions_root(labelled_dir, unlabelled_dir)
+
     labelled_root, labelled_alt = _resolve_tree_root(
-        predictions_root, labelled_dir, role="labelled"
+        preds_root, labelled_dir, role="labelled"
     )
     unlabelled_root, unlabelled_alt = _resolve_tree_root(
-        predictions_root, unlabelled_dir, role="unlabelled"
+        preds_root, unlabelled_dir, role="unlabelled"
     )
     logger.info("Labelled (lcfm) root: %s", labelled_root.resolve())
     logger.info("Unlabelled (acfm) root: %s", unlabelled_root.resolve())
