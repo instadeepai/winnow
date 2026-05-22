@@ -51,7 +51,7 @@ DATASET_DISPLAY_NAMES: dict[str, str] = {
     "PXD014877": "$\\it{C.\\;elegans}$",
     "PXD023064": "Immunopeptidomics-2",
     "astral": "Astral $\\it{E.\\;coli}$",
-    "PXD013868": "$\\it{Arabidopsis\\;thaliana}$",
+    "01747_C01_P018218_S00_I00_N03_R1": "$\\it{Arabidopsis\\;thaliana}$",
     "20150708_QE3_UPLC8_DBJ_QC_HELA_39frac_Chymotrypsin": "HeLa chymotrypsin",
     "20151020_QE3_UPLC8_DBJ_SA_A549_Rep2_46": "Human lung",
     "20151020_QE3_UPLC8_DBJ_SA_HCT116_Rep2_46": "Human colon",
