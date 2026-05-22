@@ -38,21 +38,67 @@ if not logger.handlers:
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
 
-def _lcfm_spectrum_ids(predictions_root: Path, project: str) -> set[str]:
-    labelled_path = (
-        predictions_root / f"{project}_labelled" / "preds_and_fdr_metrics.csv"
+def _safe_basename(project: str) -> str:
+    """Flat basename for outputs; project keys may contain path separators."""
+    return project.replace("/", "_")
+
+
+def _resolve_preds_csv(root: Path, project: str, *, role: str) -> Path:
+    """Resolve ``preds_and_fdr_metrics.csv`` for lcfm (labelled) or acfm (unlabelled)."""
+    if role == "labelled":
+        candidates = [
+            root / f"{project}_labelled" / "preds_and_fdr_metrics.csv",
+        ]
+    elif role == "unlabelled":
+        candidates = [
+            root / project / "preds_and_fdr_metrics.csv",
+            root / f"{project}_unlabelled" / "preds_and_fdr_metrics.csv",
+        ]
+    else:
+        raise ValueError(f"Unknown role {role!r}")
+
+    for path in candidates:
+        if path.is_file():
+            return path
+    tried = ", ".join(str(p) for p in candidates)
+    raise FileNotFoundError(
+        f"Missing {role} predictions for {project!r} under {root} (tried: {tried})"
     )
-    if not labelled_path.is_file():
-        raise FileNotFoundError(f"Missing labelled predictions: {labelled_path}")
+
+
+def _lcfm_spectrum_ids(labelled_root: Path, project: str) -> set[str]:
+    labelled_path = _resolve_preds_csv(labelled_root, project, role="labelled")
     ids = pd.read_csv(labelled_path, usecols=["spectrum_id"])["spectrum_id"]
     return set(ids.astype(str))
 
 
-def _load_acfm_unlabelled(predictions_root: Path, project: str) -> pd.DataFrame:
+def _load_acfm_unlabelled(unlabelled_root: Path, project: str) -> pd.DataFrame:
     """Load acfm predict outputs with metadata merged (same as plot_eval_results)."""
-    from scripts.plot_eval_results import _load_project_data  # noqa: E402
+    preds_path = _resolve_preds_csv(unlabelled_root, project, role="unlabelled")
+    folder = preds_path.parent
+    preds_df = pd.read_csv(preds_path)
+    meta_path = folder / "metadata.csv"
+    if meta_path.is_file():
+        meta_df = pd.read_csv(meta_path)
+        overlap = [
+            c for c in meta_df.columns if c in preds_df.columns and c != "spectrum_id"
+        ]
+        if overlap:
+            meta_df = meta_df.drop(columns=overlap)
+        df = preds_df.merge(meta_df, on="spectrum_id", how="left")
+    else:
+        df = preds_df
 
-    return _load_project_data(predictions_root, project, "unlabelled", "unlabelled")
+    if "proteome_hit" not in df.columns:
+        raise ValueError(
+            f"Expected 'proteome_hit' column for unlabelled acfm in {preds_path}"
+        )
+    df["correct"] = df["proteome_hit"].astype(float)
+    required = ["confidence", "calibrated_confidence", "correct"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(f"Missing columns {missing} in {preds_path}")
+    return df
 
 
 def filter_acfm_minus_lcfm(acfm_df: pd.DataFrame, lcfm_ids: set[str]) -> pd.DataFrame:
@@ -79,13 +125,14 @@ def refit_fdr_on_confidence(
 
 
 def process_project(
-    predictions_root: Path,
+    labelled_root: Path,
+    unlabelled_root: Path,
     project: str,
     output_dir: Path,
 ) -> dict[str, int]:
     """Filter acfm less lcfm, refit FDR, plot, and write tables for one project."""
-    lcfm_ids = _lcfm_spectrum_ids(predictions_root, project)
-    acfm_df = _load_acfm_unlabelled(predictions_root, project)
+    lcfm_ids = _lcfm_spectrum_ids(labelled_root, project)
+    acfm_df = _load_acfm_unlabelled(unlabelled_root, project)
     subset_df = filter_acfm_minus_lcfm(acfm_df, lcfm_ids)
 
     counts = {
@@ -110,6 +157,7 @@ def process_project(
 
     project_dir = output_dir / project
     project_dir.mkdir(parents=True, exist_ok=True)
+    safe = _safe_basename(project)
     subset_df.to_csv(project_dir / "preds_and_fdr_metrics.csv", index=False)
 
     true_fdr_ctrl = _fit_database_grounded_fdr(subset_df)
@@ -140,14 +188,14 @@ def process_project(
         ]
         if c in subset_df.columns
     ]
-    subset_df[summary_cols].to_csv(project_dir / f"{project}_summary.csv", index=False)
+    subset_df[summary_cols].to_csv(project_dir / f"{safe}_summary.csv", index=False)
 
     diag = _compute_diagnostics(subset_df, "unlabelled")
-    diag.to_csv(project_dir / f"{project}_diagnostics.csv", index=False)
+    diag.to_csv(project_dir / f"{safe}_diagnostics.csv", index=False)
 
-    pd.DataFrame([counts]).to_csv(project_dir / f"{project}_counts.csv", index=False)
+    pd.DataFrame([counts]).to_csv(project_dir / f"{safe}_counts.csv", index=False)
 
-    generate_all_plots(subset_df, project, "unlabelled", project_dir)
+    generate_all_plots(subset_df, safe, "unlabelled", project_dir)
     return counts
 
 
@@ -157,7 +205,10 @@ def main(
         Path,
         typer.Option(
             "--predictions-root",
-            help="Root with {project}_labelled/ and {project}_unlabelled/ predict folders.",
+            help=(
+                "Default root for both trees when --labelled-dir / --unlabelled-dir "
+                "are omitted."
+            ),
         ),
     ],
     projects: Annotated[
@@ -174,11 +225,34 @@ def main(
             help="Directory for per-project plots and refitted prediction tables.",
         ),
     ],
+    labelled_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--labelled-dir",
+            help=(
+                "Root with per-project lcfm folders ({project}_labelled/ or nested "
+                "{project}/). Defaults to --predictions-root."
+            ),
+        ),
+    ] = None,
+    unlabelled_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--unlabelled-dir",
+            help=(
+                "Root with per-project acfm folders ({project}/ or "
+                "{project}_unlabelled/). Defaults to --predictions-root."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Refit FDR on acfm less lcfm spectra and generate evaluation plots."""
     project_list = [p.strip() for p in projects.replace(",", " ").split() if p.strip()]
     if not project_list:
         raise typer.BadParameter("No projects specified.")
+
+    labelled_root = labelled_dir if labelled_dir is not None else predictions_root
+    unlabelled_root = unlabelled_dir if unlabelled_dir is not None else predictions_root
 
     output_dir.mkdir(parents=True, exist_ok=True)
     all_counts: list[dict[str, int | str]] = []
@@ -187,7 +261,9 @@ def main(
         display = _display_name(project)
         logger.info("Processing %s (%s)...", project, display)
         try:
-            counts = process_project(predictions_root, project, output_dir)
+            counts = process_project(
+                labelled_root, unlabelled_root, project, output_dir
+            )
         except FileNotFoundError as exc:
             logger.warning("Skipping %s: %s", project, exc)
             continue
