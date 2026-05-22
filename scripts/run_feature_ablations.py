@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Optional
@@ -22,12 +23,16 @@ import torch
 import typer
 from rich.logging import RichHandler
 
-from scripts.feature_subsets import FEATURE_SUBSETS
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-from winnow.calibration.calibrator import ProbabilityCalibrator
-from winnow.datasets.feature_dataset import FeatureDataset
-from winnow.fdr.database_grounded import DatabaseGroundedFDRControl
-from winnow.fdr.nonparametric import NonParametricFDRControl
+from scripts.feature_subsets import FEATURE_SUBSETS  # noqa: E402
+
+from winnow.calibration.calibrator import ProbabilityCalibrator  # noqa: E402
+from winnow.datasets.feature_dataset import FeatureDataset  # noqa: E402
+from winnow.fdr.database_grounded import DatabaseGroundedFDRControl  # noqa: E402
+from winnow.fdr.nonparametric import NonParametricFDRControl  # noqa: E402
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
