@@ -43,39 +43,118 @@ def _safe_basename(project: str) -> str:
     return project.replace("/", "_")
 
 
-def _resolve_preds_csv(root: Path, project: str, *, role: str) -> Path:
-    """Resolve ``preds_and_fdr_metrics.csv`` for lcfm (labelled) or acfm (unlabelled)."""
+def _preds_csv_candidates(root: Path, project: str, *, role: str) -> list[Path]:
+    """Paths to try for ``preds_and_fdr_metrics.csv`` under *root*."""
     if role == "labelled":
-        candidates = [
+        return [
             root / project / "preds_and_fdr_metrics.csv",
             root / f"{project}_labelled" / "preds_and_fdr_metrics.csv",
         ]
-    elif role == "unlabelled":
-        candidates = [
+    if role == "unlabelled":
+        return [
             root / project / "preds_and_fdr_metrics.csv",
             root / f"{project}_unlabelled" / "preds_and_fdr_metrics.csv",
         ]
-    else:
-        raise ValueError(f"Unknown role {role!r}")
+    raise ValueError(f"Unknown role {role!r}")
 
-    for path in candidates:
-        if path.is_file():
-            return path
-    tried = ", ".join(str(p) for p in candidates)
+
+def _resolve_preds_csv(
+    root: Path,
+    project: str,
+    *,
+    role: str,
+    alt_roots: list[Path] | None = None,
+) -> Path:
+    """Resolve ``preds_and_fdr_metrics.csv`` for lcfm (labelled) or acfm (unlabelled)."""
+    roots_to_try: list[Path] = [root]
+    if alt_roots:
+        for alt in alt_roots:
+            if alt.resolve() != root.resolve() and alt not in roots_to_try:
+                roots_to_try.append(alt)
+
+    tried: list[Path] = []
+    for base in roots_to_try:
+        for path in _preds_csv_candidates(base, project, role=role):
+            tried.append(path)
+            if path.is_file():
+                if base.resolve() != root.resolve():
+                    logger.info(
+                        "Using %s predictions at %s (not under %s)",
+                        role,
+                        path,
+                        root,
+                    )
+                return path
+
+    hint = ""
+    if root.is_dir():
+        children = sorted(p.name for p in root.iterdir())[:12]
+        hint = f" Children of {root}: {children}"
     raise FileNotFoundError(
-        f"Missing {role} predictions for {project!r} under {root} (tried: {tried})"
+        f"Missing {role} predictions for {project!r} under {root} "
+        f"(tried: {', '.join(str(p) for p in tried)}){hint}"
     )
 
 
-def _lcfm_spectrum_ids(labelled_root: Path, project: str) -> set[str]:
-    labelled_path = _resolve_preds_csv(labelled_root, project, role="labelled")
+def _resolve_tree_root(
+    predictions_root: Path,
+    explicit: Path | None,
+    *,
+    role: str,
+) -> tuple[Path, list[Path]]:
+    """Pick labelled (lcfm) or unlabelled (acfm) root; return alternates to try."""
+    sub = "lcfm" if role == "labelled" else "acfm"
+    nested = predictions_root / sub
+    alt_roots: list[Path] = []
+
+    if explicit is None:
+        root = nested if nested.is_dir() else predictions_root
+        return root, alt_roots
+
+    under_predictions = (
+        predictions_root / explicit if not explicit.is_absolute() else None
+    )
+    if under_predictions is not None and under_predictions.is_dir():
+        root = under_predictions
+        if explicit.is_dir() and explicit.resolve() != root.resolve():
+            alt_roots.append(explicit)
+    else:
+        root = explicit
+        if nested.is_dir() and nested.resolve() != root.resolve():
+            alt_roots.append(nested)
+
+    return root, alt_roots
+
+
+def _lcfm_spectrum_ids(
+    labelled_root: Path,
+    project: str,
+    *,
+    labelled_alt_roots: list[Path] | None = None,
+) -> set[str]:
+    labelled_path = _resolve_preds_csv(
+        labelled_root,
+        project,
+        role="labelled",
+        alt_roots=labelled_alt_roots,
+    )
     ids = pd.read_csv(labelled_path, usecols=["spectrum_id"])["spectrum_id"]
     return set(ids.astype(str))
 
 
-def _load_acfm_unlabelled(unlabelled_root: Path, project: str) -> pd.DataFrame:
+def _load_acfm_unlabelled(
+    unlabelled_root: Path,
+    project: str,
+    *,
+    unlabelled_alt_roots: list[Path] | None = None,
+) -> pd.DataFrame:
     """Load acfm predict outputs with metadata merged (same as plot_eval_results)."""
-    preds_path = _resolve_preds_csv(unlabelled_root, project, role="unlabelled")
+    preds_path = _resolve_preds_csv(
+        unlabelled_root,
+        project,
+        role="unlabelled",
+        alt_roots=unlabelled_alt_roots,
+    )
     folder = preds_path.parent
     preds_df = pd.read_csv(preds_path)
     meta_path = folder / "metadata.csv"
@@ -130,10 +209,17 @@ def process_project(
     unlabelled_root: Path,
     project: str,
     output_dir: Path,
+    *,
+    labelled_alt_roots: list[Path] | None = None,
+    unlabelled_alt_roots: list[Path] | None = None,
 ) -> dict[str, int]:
     """Filter acfm less lcfm, refit FDR, plot, and write tables for one project."""
-    lcfm_ids = _lcfm_spectrum_ids(labelled_root, project)
-    acfm_df = _load_acfm_unlabelled(unlabelled_root, project)
+    lcfm_ids = _lcfm_spectrum_ids(
+        labelled_root, project, labelled_alt_roots=labelled_alt_roots
+    )
+    acfm_df = _load_acfm_unlabelled(
+        unlabelled_root, project, unlabelled_alt_roots=unlabelled_alt_roots
+    )
     subset_df = filter_acfm_minus_lcfm(acfm_df, lcfm_ids)
 
     counts = {
@@ -231,8 +317,9 @@ def main(
         typer.Option(
             "--labelled-dir",
             help=(
-                "Root with per-project lcfm folders ({project}_labelled/ or nested "
-                "{project}/). Defaults to --predictions-root."
+                "Root with per-project lcfm folders ({project}/ or {project}_labelled/). "
+                "Use e.g. new_eval_sets_results/lcfm when mirroring S3. "
+                "If omitted, uses --predictions-root/lcfm when present."
             ),
         ),
     ] = None,
@@ -241,8 +328,9 @@ def main(
         typer.Option(
             "--unlabelled-dir",
             help=(
-                "Root with per-project acfm folders ({project}/ or "
-                "{project}_unlabelled/). Defaults to --predictions-root."
+                "Root with per-project acfm folders ({project}/ or {project}_unlabelled/). "
+                "Use e.g. new_eval_sets_results/acfm when mirroring S3. "
+                "If omitted, uses --predictions-root/acfm when present."
             ),
         ),
     ] = None,
@@ -252,8 +340,14 @@ def main(
     if not project_list:
         raise typer.BadParameter("No projects specified.")
 
-    labelled_root = labelled_dir if labelled_dir is not None else predictions_root
-    unlabelled_root = unlabelled_dir if unlabelled_dir is not None else predictions_root
+    labelled_root, labelled_alt = _resolve_tree_root(
+        predictions_root, labelled_dir, role="labelled"
+    )
+    unlabelled_root, unlabelled_alt = _resolve_tree_root(
+        predictions_root, unlabelled_dir, role="unlabelled"
+    )
+    logger.info("Labelled (lcfm) root: %s", labelled_root.resolve())
+    logger.info("Unlabelled (acfm) root: %s", unlabelled_root.resolve())
 
     output_dir.mkdir(parents=True, exist_ok=True)
     all_counts: list[dict[str, int | str]] = []
@@ -263,7 +357,12 @@ def main(
         logger.info("Processing %s (%s)...", project, display)
         try:
             counts = process_project(
-                labelled_root, unlabelled_root, project, output_dir
+                labelled_root,
+                unlabelled_root,
+                project,
+                output_dir,
+                labelled_alt_roots=labelled_alt,
+                unlabelled_alt_roots=unlabelled_alt,
             )
         except FileNotFoundError as exc:
             logger.warning("Skipping %s: %s", project, exc)
