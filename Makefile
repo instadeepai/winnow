@@ -979,7 +979,7 @@ train-extra-small-mass-error-da: download-extra-small-train-data
 	$(S3_CP) --recursive train_extra_small_mass_error_da/ $(EXTRA_SMALL_MASS_ERROR_DA_S3)/
 
 ## mass_error_da + no similarity + no token-level probabilities (min/std token prob)
-train-extra-small-mass-error-da-no-token: download-extra-small-train-data
+train-extra-small-mass-error-da-no-token:
 	uv run winnow train \
 		features_path=null \
 		dataset.spectrum_path_or_directory=train_extra_small/train.parquet \
@@ -1021,7 +1021,7 @@ eval-extra-small-mass-error-da: download-extra-small-mass-error-da-model downloa
 		KOINA_OVERRIDES=koina.server_url=koina.wilhelmlab.org:443 koina.ssl=true
 
 ## Celegans (PXD014877) only — run this first
-eval-extra-small-mass-error-da-no-token-celegans: download-extra-small-mass-error-da-no-token-model download-extra-small-celegans-eval
+eval-extra-small-mass-error-da-no-token-celegans:
 	$(MAKE) eval-local-external \
 		LOCAL_MODEL_DIR=train_extra_small_mass_error_da_no_token \
 		LOCAL_PREDS_DIR=predictions/train_extra_small_mass_error_da_no_token_external_eval \
@@ -1030,7 +1030,7 @@ eval-extra-small-mass-error-da-no-token-celegans: download-extra-small-mass-erro
 		KOINA_OVERRIDES=koina.server_url=koina.wilhelmlab.org:443 koina.ssl=true
 
 ## All external held-out projects (PXD009935, PXD014877, PXD023064)
-eval-extra-small-mass-error-da-no-token-external: download-extra-small-mass-error-da-no-token-model download-extra-small-external-eval
+eval-extra-small-mass-error-da-no-token-external:
 	$(MAKE) eval-local-external \
 		LOCAL_MODEL_DIR=train_extra_small_mass_error_da_no_token \
 		LOCAL_PREDS_DIR=predictions/train_extra_small_mass_error_da_no_token_external_eval \
@@ -1365,6 +1365,11 @@ evaluate_general_model_unlabelled_external_datasets:
 ## Calibrator generalisation analysis
 #########################################################
 
+# Leave-one-out training uses the same feature set as train-extra-small-mass-error-da:
+# mass_error_da; fragment match without spectral_angle/xcorr/complementary_ion_count/max_ion_gap;
+# beam without edit_distance; token scores retained; Koina CE/frag constants (no per-row columns).
+# Implemented in scripts/evaluate_calibrator_generalisation.py (EXTRA_SMALL_TRAIN_HP hyperparams).
+
 ## Train per-dataset calibrators and cross-evaluate on biological validation datasets
 generalisation_analysis:
 	uv run python scripts/evaluate_calibrator_generalisation.py \
@@ -1372,8 +1377,8 @@ generalisation_analysis:
 		--predictions-dir held_out_projects/biological_validation/annotated_predictions \
 		--model-output-dir analysis/generalisation \
 		--results-output-dir analysis/generalisation \
-		$(if $(KOINA_SERVER_URL),--koina-server-url $(KOINA_SERVER_URL)) \
-		$(if $(filter false,$(KOINA_SSL)),--no-koina-ssl)
+		$(if $(KOINA_SERVER_URL),--koina-server-url $(KOINA_SERVER_URL),) \
+		$(if $(filter false,$(KOINA_SSL)),--no-koina-ssl,)
 
 ## Plot PR-AUC heatmaps from generalisation results (runs generalisation_analysis first)
 generalisation_heatmaps: generalisation_analysis
@@ -1458,12 +1463,12 @@ analyze-upscored-fps: download-eval-preds
 		--predictions-root $(ANALYSIS_PREDS_DIR) \
 		--output-dir analysis/upscored_fps
 
-## Post-FDR overlap from downloaded eval predictions (labelled + unlabelled)
+## Post-FDR overlap from downloaded eval predictions (full search vs DB reference)
 analyze-fdr-overlap: download-eval-preds
 	uv run python scripts/analyze_fdr_overlap.py \
-		--predictions-root $(ANALYSIS_PREDS_DIR) \
-		--output-dir analysis/fdr_overlap \
-		--include-unlabelled
+		--unlabelled-dir $(ANALYSIS_PREDS_DIR) \
+		--labelled-dir $(ANALYSIS_PREDS_DIR) \
+		--output-dir analysis/fdr_overlap
 
 ## Upload reviewer analysis results to S3
 upload-reviewer-analyses:
@@ -1482,9 +1487,9 @@ analyze_upscored_fps:
 ## Post-FDR overlap: Winnow-filtered identifications vs database-search ground truth
 analyze_fdr_overlap:
 	uv run python scripts/analyze_fdr_overlap.py \
-		--predictions-root predictions/general_model \
-		--output-dir analysis/fdr_overlap \
-		--include-unlabelled
+		--unlabelled-dir predictions/general_model \
+		--labelled-dir predictions/general_model \
+		--output-dir analysis/fdr_overlap
 
 #########################################################
 ## Novelty analysis (reviewer response)
@@ -1765,6 +1770,19 @@ upload-analysis-predictions-dir:
 # These datasets use constant CE/frag, not per-row columns.
 ANALYSIS_KOINA_OVERRIDES = $(KOINA_OVERRIDES) $(KOINA_FRAGMENT_MATCH_CONSTANTS)
 ANALYSIS_PREDICT_OVERRIDES = $(PREDICT_EVAL_OVERRIDES)
+# mass_error_da + no fragment similarity / edit_distance (compute-features + train)
+ANALYSIS_REDUCED_FEATURE_OVERRIDES = \
+	~calibrator.features.mass_error \
+	+calibrator.features.mass_error_da._target_=winnow.calibration.calibration_features.MassErrorDaFeature \
+	+calibrator.features.mass_error_da.residue_masses='$${residue_masses}' \
+	$(EXTRA_SMALL_FRAGMENT_EXCLUDE_SIMILARITY) \
+	$(EXTRA_SMALL_BEAM_EXCLUDE_EDIT_DISTANCE)
+# configs/primenovo/calibrator.yaml has no beam_features; +beam_features.excluded_columns would add a broken node.
+ANALYSIS_REDUCED_FEATURE_OVERRIDES_NO_BEAM = \
+	~calibrator.features.mass_error \
+	+calibrator.features.mass_error_da._target_=winnow.calibration.calibration_features.MassErrorDaFeature \
+	+calibrator.features.mass_error_da.residue_masses='$${residue_masses}' \
+	$(EXTRA_SMALL_FRAGMENT_EXCLUDE_SIMILARITY)
 
 # Split parquets predicted from MGF exports use spectrum_id = {mgf_stem}:{index}.
 # Re-key parquet spectrum_id to match before train/predict (see scripts/rekey_split_parquet_spectrum_ids.py).
@@ -1800,12 +1818,14 @@ train-instanovo-helaqc:
 	dataset.predictions_path=held_out_projects/biological_validation/annotated_predictions/dataset-helaqc-annotated-0000-0001.csv \
 	training_matrix_output_path=$(ANALYSIS_MODELS)/instanovo_helaqc/features_train.parquet \
 	metadata_output_path=$(ANALYSIS_MODELS)/instanovo_helaqc/metadata_train.parquet \
+	$(ANALYSIS_REDUCED_FEATURE_OVERRIDES) \
 	$(ANALYSIS_KOINA_OVERRIDES)
 	uv run winnow compute-features --config-dir configs/instanovo \
 	dataset.spectrum_path_or_directory=helaqc_split_parquet/annotated_val.parquet \
 	dataset.predictions_path=held_out_projects/biological_validation/annotated_predictions/dataset-helaqc-annotated-0000-0001.csv \
 	training_matrix_output_path=$(ANALYSIS_MODELS)/instanovo_helaqc/features_val.parquet \
 	metadata_output_path=$(ANALYSIS_MODELS)/instanovo_helaqc/metadata_val.parquet \
+	$(ANALYSIS_REDUCED_FEATURE_OVERRIDES) \
 	$(ANALYSIS_KOINA_OVERRIDES)
 	uv run winnow train --config-dir configs/instanovo \
 	features_path=$(ANALYSIS_MODELS)/instanovo_helaqc/features_train.parquet \
@@ -1813,12 +1833,15 @@ train-instanovo-helaqc:
 	model_output_dir=$(ANALYSIS_MODELS)/instanovo_helaqc \
 	dataset_output_path=null \
 	irt_regressor_output_path=$(ANALYSIS_MODELS)/instanovo_helaqc/irt_regressors.safetensors \
-	training_history_path=$(ANALYSIS_MODELS)/instanovo_helaqc/training_history.json
+	training_history_path=$(ANALYSIS_MODELS)/instanovo_helaqc/training_history.json \
+	$(ANALYSIS_REDUCED_FEATURE_OVERRIDES)
 
 plot-feature-investigation-instanovo-helaqc:
 	uv run python scripts/plot_feature_investigation.py \
 		--features-train $(ANALYSIS_MODELS)/instanovo_helaqc/features_train.parquet \
 		--features-val $(ANALYSIS_MODELS)/instanovo_helaqc/features_val.parquet \
+		--metadata-train $(ANALYSIS_MODELS)/instanovo_helaqc/metadata_train.parquet \
+		--metadata-val $(ANALYSIS_MODELS)/instanovo_helaqc/metadata_val.parquet \
 		--output-dir $(ANALYSIS_MODELS)/instanovo_helaqc/feature_investigation_plots
 
 predict-instanovo-helaqc-test:
@@ -1828,7 +1851,7 @@ predict-instanovo-helaqc-test:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_helaqc \
 	output_folder=$(ANALYSIS_RESULTS)/instanovo_helaqc_predictions_test/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
-	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/instanovo_helaqc_predictions_test)
+	# $(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/instanovo_helaqc_predictions_test)
 
 predict-instanovo-helaqc-unlabelled:
 	uv run winnow predict --config-dir configs/instanovo \
@@ -1837,7 +1860,7 @@ predict-instanovo-helaqc-unlabelled:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_helaqc \
 	output_folder=$(ANALYSIS_RESULTS)/instanovo_helaqc_predictions_unlabelled/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
-	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/instanovo_helaqc_predictions_unlabelled)
+	# $(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/instanovo_helaqc_predictions_unlabelled)
 
 predict-instanovo-helaqc-raw_less_train:
 	uv run winnow predict --config-dir configs/instanovo \
@@ -1846,7 +1869,7 @@ predict-instanovo-helaqc-raw_less_train:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_helaqc \
 	output_folder=$(ANALYSIS_RESULTS)/instanovo_helaqc_predictions_raw_less_train/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
-	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/instanovo_helaqc_predictions_raw_less_train)
+	# $(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/instanovo_helaqc_predictions_raw_less_train)
 
 plot-instanovo-helaqc:
 	uv run python scripts/plot_analysis.py \
@@ -1869,28 +1892,29 @@ plot-instanovo-helaqc:
 train-instanovo-celegans:
 	uv run winnow compute-features --config-dir configs/instanovo \
 	dataset.spectrum_path_or_directory=celegans_split_parquet/annotated_train.parquet \
-	dataset.predictions_path=held_out_projects/lcfm/PXD014877_predictions/PXD014877.csv \
+	dataset.predictions_path=celegans_split_parquet/annotated_train.csv \
 	training_matrix_output_path=$(ANALYSIS_MODELS)/instanovo_celegans/features_train.parquet \
 	+metadata_output_path=$(ANALYSIS_MODELS)/instanovo_celegans/metadata_train.parquet \
-	$(ANALYSIS_KOINA_OVERRIDES)
+	$(ANALYSIS_REDUCED_FEATURE_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
 	uv run winnow compute-features --config-dir configs/instanovo \
 	dataset.spectrum_path_or_directory=celegans_split_parquet/annotated_val.parquet \
-	dataset.predictions_path=held_out_projects/lcfm/PXD014877_predictions/PXD014877.csv \
+	dataset.predictions_path=celegans_split_parquet/annotated_val.csv \
 	training_matrix_output_path=$(ANALYSIS_MODELS)/instanovo_celegans/features_val.parquet \
 	+metadata_output_path=$(ANALYSIS_MODELS)/instanovo_celegans/metadata_val.parquet \
-	$(ANALYSIS_KOINA_OVERRIDES)
+	$(ANALYSIS_REDUCED_FEATURE_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
 	uv run winnow train --config-dir configs/instanovo \
 	features_path=$(ANALYSIS_MODELS)/instanovo_celegans/features_train.parquet \
 	val_features_path=$(ANALYSIS_MODELS)/instanovo_celegans/features_val.parquet \
 	model_output_dir=$(ANALYSIS_MODELS)/instanovo_celegans \
 	dataset_output_path=null \
 	irt_regressor_output_path=$(ANALYSIS_MODELS)/instanovo_celegans/irt_regressors.safetensors \
-	training_history_path=$(ANALYSIS_MODELS)/instanovo_celegans/training_history.json
+	training_history_path=$(ANALYSIS_MODELS)/instanovo_celegans/training_history.json \
+	$(ANALYSIS_REDUCED_FEATURE_OVERRIDES)
 
 predict-instanovo-celegans-test:
 	uv run winnow predict --config-dir configs/instanovo \
 	dataset.spectrum_path_or_directory=celegans_split_parquet/annotated_test.parquet \
-	dataset.predictions_path=held_out_projects/lcfm/PXD014877_predictions/PXD014877.csv \
+	dataset.predictions_path=celegans_split_parquet/annotated_test.csv \
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_celegans \
 	output_folder=$(ANALYSIS_RESULTS)/instanovo_celegans_predictions_test/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
@@ -1899,7 +1923,7 @@ predict-instanovo-celegans-test:
 predict-instanovo-celegans-unlabelled:
 	uv run winnow predict --config-dir configs/instanovo \
 	dataset.spectrum_path_or_directory=celegans_split_parquet/raw_unlabelled.parquet \
-	dataset.predictions_path=held_out_projects/acfm/PXD014877_predictions/PXD014877.csv \
+	dataset.predictions_path=celegans_split_parquet/raw_unlabelled.csv \
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_celegans \
 	output_folder=$(ANALYSIS_RESULTS)/instanovo_celegans_predictions_unlabelled/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
@@ -1908,7 +1932,7 @@ predict-instanovo-celegans-unlabelled:
 predict-instanovo-celegans-raw_less_train:
 	uv run winnow predict --config-dir configs/instanovo \
 	dataset.spectrum_path_or_directory=celegans_split_parquet/raw_less_train.parquet \
-	dataset.predictions_path=held_out_projects/acfm/PXD014877_predictions/PXD014877.csv \
+	dataset.predictions_path=celegans_split_parquet/raw_less_train.csv \
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/instanovo_celegans \
 	output_folder=$(ANALYSIS_RESULTS)/instanovo_celegans_predictions_raw_less_train/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
@@ -1938,20 +1962,21 @@ train-instanovo-pxd019483: rekey-pxd019483-split-parquet-spectrum-ids
 	dataset.predictions_path=PXD019483_split_parquet/annotated_train.csv \
 	training_matrix_output_path=$(ANALYSIS_MODELS)/instanovo_pxd019483/features_train.parquet \
 	+metadata_output_path=$(ANALYSIS_MODELS)/instanovo_pxd019483/metadata_train.parquet \
-	$(ANALYSIS_KOINA_OVERRIDES)
+	$(ANALYSIS_REDUCED_FEATURE_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
 	uv run winnow compute-features --config-dir configs/instanovo \
 	dataset.spectrum_path_or_directory=PXD019483_split_parquet/annotated_val.parquet \
 	dataset.predictions_path=PXD019483_split_parquet/annotated_val.csv \
 	training_matrix_output_path=$(ANALYSIS_MODELS)/instanovo_pxd019483/features_val.parquet \
 	+metadata_output_path=$(ANALYSIS_MODELS)/instanovo_pxd019483/metadata_val.parquet \
-	$(ANALYSIS_KOINA_OVERRIDES)
+	$(ANALYSIS_REDUCED_FEATURE_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
 	uv run winnow train --config-dir configs/instanovo \
 	features_path=$(ANALYSIS_MODELS)/instanovo_pxd019483/features_train.parquet \
 	val_features_path=$(ANALYSIS_MODELS)/instanovo_pxd019483/features_val.parquet \
 	model_output_dir=$(ANALYSIS_MODELS)/instanovo_pxd019483 \
 	dataset_output_path=null \
 	irt_regressor_output_path=$(ANALYSIS_MODELS)/instanovo_pxd019483/irt_regressors.safetensors \
-	training_history_path=$(ANALYSIS_MODELS)/instanovo_pxd019483/training_history.json
+	training_history_path=$(ANALYSIS_MODELS)/instanovo_pxd019483/training_history.json \
+	$(ANALYSIS_REDUCED_FEATURE_OVERRIDES)
 
 predict-instanovo-pxd019483-test: rekey-pxd019483-split-parquet-spectrum-ids
 	uv run winnow predict --config-dir configs/instanovo \
@@ -1989,20 +2014,21 @@ train-instanovo-sbrodae: rekey-sbrodae-split-parquet-spectrum-ids
 	dataset.predictions_path=sbrodae_split_parquet/annotated_train.csv \
 	training_matrix_output_path=$(ANALYSIS_MODELS)/instanovo_sbrodae/features_train.parquet \
 	+metadata_output_path=$(ANALYSIS_MODELS)/instanovo_sbrodae/metadata_train.parquet \
-	$(ANALYSIS_KOINA_OVERRIDES)
+	$(ANALYSIS_REDUCED_FEATURE_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
 	uv run winnow compute-features --config-dir configs/instanovo \
 	dataset.spectrum_path_or_directory=sbrodae_split_parquet/annotated_val.parquet \
 	dataset.predictions_path=sbrodae_split_parquet/annotated_val.csv \
 	training_matrix_output_path=$(ANALYSIS_MODELS)/instanovo_sbrodae/features_val.parquet \
 	+metadata_output_path=$(ANALYSIS_MODELS)/instanovo_sbrodae/metadata_val.parquet \
-	$(ANALYSIS_KOINA_OVERRIDES)
+	$(ANALYSIS_REDUCED_FEATURE_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
 	uv run winnow train --config-dir configs/instanovo \
 	features_path=$(ANALYSIS_MODELS)/instanovo_sbrodae/features_train.parquet \
 	val_features_path=$(ANALYSIS_MODELS)/instanovo_sbrodae/features_val.parquet \
 	model_output_dir=$(ANALYSIS_MODELS)/instanovo_sbrodae \
 	dataset_output_path=null \
 	irt_regressor_output_path=$(ANALYSIS_MODELS)/instanovo_sbrodae/irt_regressors.safetensors \
-	training_history_path=$(ANALYSIS_MODELS)/instanovo_sbrodae/training_history.json
+	training_history_path=$(ANALYSIS_MODELS)/instanovo_sbrodae/training_history.json \
+	$(ANALYSIS_REDUCED_FEATURE_OVERRIDES)
 
 predict-instanovo-sbrodae-test: rekey-sbrodae-split-parquet-spectrum-ids
 	uv run winnow predict --config-dir configs/instanovo \
@@ -2043,19 +2069,20 @@ train-casanovo-helaqc:
 	dataset.spectrum_path_or_directory=$(CASANOVO_ROOT)/helaqc_mgf/helaqc_annotated_train.mgf \
 	dataset.predictions_path=$(CASANOVO_ROOT)/predictions/helaqc/helaqc_annotated_train.mztab \
 	training_matrix_output_path=$(ANALYSIS_MODELS)/casanovo_helaqc/features_train.parquet \
-	$(ANALYSIS_KOINA_OVERRIDES)
+	$(ANALYSIS_REDUCED_FEATURE_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
 	uv run winnow compute-features --config-dir configs/casanovo \
 	dataset.spectrum_path_or_directory=$(CASANOVO_ROOT)/helaqc_mgf/helaqc_annotated_val.mgf \
 	dataset.predictions_path=$(CASANOVO_ROOT)/predictions/helaqc/helaqc_annotated_val.mztab \
 	training_matrix_output_path=$(ANALYSIS_MODELS)/casanovo_helaqc/features_val.parquet \
-	$(ANALYSIS_KOINA_OVERRIDES)
+	$(ANALYSIS_REDUCED_FEATURE_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
 	uv run winnow train --config-dir configs/casanovo \
 	features_path=$(ANALYSIS_MODELS)/casanovo_helaqc/features_train.parquet \
 	val_features_path=$(ANALYSIS_MODELS)/casanovo_helaqc/features_val.parquet \
 	model_output_dir=$(ANALYSIS_MODELS)/casanovo_helaqc \
 	dataset_output_path=null \
 	irt_regressor_output_path=$(ANALYSIS_MODELS)/casanovo_helaqc/irt_regressors.safetensors \
-	training_history_path=$(ANALYSIS_MODELS)/casanovo_helaqc/training_history.json
+	training_history_path=$(ANALYSIS_MODELS)/casanovo_helaqc/training_history.json \
+	$(ANALYSIS_REDUCED_FEATURE_OVERRIDES)
 
 predict-casanovo-helaqc-test:
 	uv run winnow predict --config-dir configs/casanovo \
@@ -2064,7 +2091,6 @@ predict-casanovo-helaqc-test:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/casanovo_helaqc \
 	output_folder=$(ANALYSIS_RESULTS)/casanovo_helaqc_predictions_test/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
-	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/casanovo_helaqc_predictions_test)
 
 predict-casanovo-helaqc-unlabelled:
 	uv run winnow predict --config-dir configs/casanovo \
@@ -2073,7 +2099,6 @@ predict-casanovo-helaqc-unlabelled:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/casanovo_helaqc \
 	output_folder=$(ANALYSIS_RESULTS)/casanovo_helaqc_predictions_unlabelled/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
-	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/casanovo_helaqc_predictions_unlabelled)
 
 predict-casanovo-helaqc-raw_less_train:
 	uv run winnow predict --config-dir configs/casanovo \
@@ -2082,7 +2107,6 @@ predict-casanovo-helaqc-raw_less_train:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/casanovo_helaqc \
 	output_folder=$(ANALYSIS_RESULTS)/casanovo_helaqc_predictions_raw_less_train/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
-	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/casanovo_helaqc_predictions_raw_less_train)
 
 plot-casanovo-helaqc:
 	uv run python scripts/plot_analysis.py \
@@ -2107,19 +2131,20 @@ train-casanovo-celegans:
 	dataset.spectrum_path_or_directory=$(CASANOVO_ROOT)/celegans_mgf/celegans_annotated_train.mgf \
 	dataset.predictions_path=$(CASANOVO_ROOT)/predictions/celegans/celegans_annotated_train.mztab \
 	training_matrix_output_path=$(ANALYSIS_MODELS)/casanovo_celegans/features_train.parquet \
-	$(ANALYSIS_KOINA_OVERRIDES)
+	$(ANALYSIS_REDUCED_FEATURE_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
 	uv run winnow compute-features --config-dir configs/casanovo \
 	dataset.spectrum_path_or_directory=$(CASANOVO_ROOT)/celegans_mgf/celegans_annotated_val.mgf \
 	dataset.predictions_path=$(CASANOVO_ROOT)/predictions/celegans/celegans_annotated_val.mztab \
 	training_matrix_output_path=$(ANALYSIS_MODELS)/casanovo_celegans/features_val.parquet \
-	$(ANALYSIS_KOINA_OVERRIDES)
+	$(ANALYSIS_REDUCED_FEATURE_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
 	uv run winnow train --config-dir configs/casanovo \
 	features_path=$(ANALYSIS_MODELS)/casanovo_celegans/features_train.parquet \
 	val_features_path=$(ANALYSIS_MODELS)/casanovo_celegans/features_val.parquet \
 	model_output_dir=$(ANALYSIS_MODELS)/casanovo_celegans \
 	dataset_output_path=null \
 	irt_regressor_output_path=$(ANALYSIS_MODELS)/casanovo_celegans/irt_regressors.safetensors \
-	training_history_path=$(ANALYSIS_MODELS)/casanovo_celegans/training_history.json
+	training_history_path=$(ANALYSIS_MODELS)/casanovo_celegans/training_history.json \
+	$(ANALYSIS_REDUCED_FEATURE_OVERRIDES)
 
 predict-casanovo-celegans-test:
 	uv run winnow predict --config-dir configs/casanovo \
@@ -2128,7 +2153,6 @@ predict-casanovo-celegans-test:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/casanovo_celegans \
 	output_folder=$(ANALYSIS_RESULTS)/casanovo_celegans_predictions_test/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
-	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/casanovo_celegans_predictions_test)
 
 predict-casanovo-celegans-unlabelled:
 	uv run winnow predict --config-dir configs/casanovo \
@@ -2137,7 +2161,6 @@ predict-casanovo-celegans-unlabelled:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/casanovo_celegans \
 	output_folder=$(ANALYSIS_RESULTS)/casanovo_celegans_predictions_unlabelled/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
-	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/casanovo_celegans_predictions_unlabelled)
 
 predict-casanovo-celegans-raw_less_train:
 	uv run winnow predict --config-dir configs/casanovo \
@@ -2146,7 +2169,6 @@ predict-casanovo-celegans-raw_less_train:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/casanovo_celegans \
 	output_folder=$(ANALYSIS_RESULTS)/casanovo_celegans_predictions_raw_less_train/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
-	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/casanovo_celegans_predictions_raw_less_train)
 
 plot-casanovo-celegans:
 	uv run python scripts/plot_analysis.py \
@@ -2175,19 +2197,20 @@ train-primenovo-helaqc:
 	dataset.spectrum_path_or_directory=$(PRIMENOVO_ROOT)/helaqc_mgf/helaqc_annotated_train.mgf \
 	dataset.predictions_path=$(PRIMENOVO_ROOT)/predictions/helaqc/helaqc_denovo_annotated_train.tsv \
 	training_matrix_output_path=$(ANALYSIS_MODELS)/primenovo_helaqc/features_train.parquet \
-	$(ANALYSIS_KOINA_OVERRIDES)
+	$(ANALYSIS_REDUCED_FEATURE_OVERRIDES_NO_BEAM) $(ANALYSIS_KOINA_OVERRIDES)
 	uv run winnow compute-features --config-dir configs/primenovo \
 	dataset.spectrum_path_or_directory=$(PRIMENOVO_ROOT)/helaqc_mgf/helaqc_annotated_val.mgf \
 	dataset.predictions_path=$(PRIMENOVO_ROOT)/predictions/helaqc/helaqc_denovo_annotated_val.tsv \
 	training_matrix_output_path=$(ANALYSIS_MODELS)/primenovo_helaqc/features_val.parquet \
-	$(ANALYSIS_KOINA_OVERRIDES)
+	$(ANALYSIS_REDUCED_FEATURE_OVERRIDES_NO_BEAM) $(ANALYSIS_KOINA_OVERRIDES)
 	uv run winnow train --config-dir configs/primenovo \
 	features_path=$(ANALYSIS_MODELS)/primenovo_helaqc/features_train.parquet \
 	val_features_path=$(ANALYSIS_MODELS)/primenovo_helaqc/features_val.parquet \
 	model_output_dir=$(ANALYSIS_MODELS)/primenovo_helaqc \
 	dataset_output_path=null \
 	irt_regressor_output_path=$(ANALYSIS_MODELS)/primenovo_helaqc/irt_regressors.safetensors \
-	training_history_path=$(ANALYSIS_MODELS)/primenovo_helaqc/training_history.json
+	training_history_path=$(ANALYSIS_MODELS)/primenovo_helaqc/training_history.json \
+	$(ANALYSIS_REDUCED_FEATURE_OVERRIDES_NO_BEAM)
 
 predict-primenovo-helaqc-test:
 	uv run winnow predict --config-dir configs/primenovo \
@@ -2196,7 +2219,6 @@ predict-primenovo-helaqc-test:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/primenovo_helaqc \
 	output_folder=$(ANALYSIS_RESULTS)/primenovo_helaqc_predictions_test/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
-	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/primenovo_helaqc_predictions_test)
 
 predict-primenovo-helaqc-unlabelled:
 	uv run winnow predict --config-dir configs/primenovo \
@@ -2205,7 +2227,6 @@ predict-primenovo-helaqc-unlabelled:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/primenovo_helaqc \
 	output_folder=$(ANALYSIS_RESULTS)/primenovo_helaqc_predictions_unlabelled/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
-	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/primenovo_helaqc_predictions_unlabelled)
 
 predict-primenovo-helaqc-raw_less_train:
 	uv run winnow predict --config-dir configs/primenovo \
@@ -2214,7 +2235,6 @@ predict-primenovo-helaqc-raw_less_train:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/primenovo_helaqc \
 	output_folder=$(ANALYSIS_RESULTS)/primenovo_helaqc_predictions_raw_less_train/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
-	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/primenovo_helaqc_predictions_raw_less_train)
 
 plot-primenovo-helaqc:
 	uv run python scripts/plot_analysis.py \
@@ -2239,19 +2259,20 @@ train-primenovo-celegans:
 	dataset.spectrum_path_or_directory=$(PRIMENOVO_ROOT)/celegans_mgf/celegans_annotated_train.mgf \
 	dataset.predictions_path=$(PRIMENOVO_ROOT)/predictions/celegans/celegans_denovo_annotated_train.tsv \
 	training_matrix_output_path=$(ANALYSIS_MODELS)/primenovo_celegans/features_train.parquet \
-	$(ANALYSIS_KOINA_OVERRIDES)
+	$(ANALYSIS_REDUCED_FEATURE_OVERRIDES_NO_BEAM) $(ANALYSIS_KOINA_OVERRIDES)
 	uv run winnow compute-features --config-dir configs/primenovo \
 	dataset.spectrum_path_or_directory=$(PRIMENOVO_ROOT)/celegans_mgf/celegans_annotated_val.mgf \
 	dataset.predictions_path=$(PRIMENOVO_ROOT)/predictions/celegans/celegans_denovo_annotated_val.tsv \
 	training_matrix_output_path=$(ANALYSIS_MODELS)/primenovo_celegans/features_val.parquet \
-	$(ANALYSIS_KOINA_OVERRIDES)
+	$(ANALYSIS_REDUCED_FEATURE_OVERRIDES_NO_BEAM) $(ANALYSIS_KOINA_OVERRIDES)
 	uv run winnow train --config-dir configs/primenovo \
 	features_path=$(ANALYSIS_MODELS)/primenovo_celegans/features_train.parquet \
 	val_features_path=$(ANALYSIS_MODELS)/primenovo_celegans/features_val.parquet \
 	model_output_dir=$(ANALYSIS_MODELS)/primenovo_celegans \
 	dataset_output_path=null \
 	irt_regressor_output_path=$(ANALYSIS_MODELS)/primenovo_celegans/irt_regressors.safetensors \
-	training_history_path=$(ANALYSIS_MODELS)/primenovo_celegans/training_history.json
+	training_history_path=$(ANALYSIS_MODELS)/primenovo_celegans/training_history.json \
+	$(ANALYSIS_REDUCED_FEATURE_OVERRIDES_NO_BEAM)
 
 predict-primenovo-celegans-test:
 	uv run winnow predict --config-dir configs/primenovo \
@@ -2260,7 +2281,6 @@ predict-primenovo-celegans-test:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/primenovo_celegans \
 	output_folder=$(ANALYSIS_RESULTS)/primenovo_celegans_predictions_test/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
-	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/primenovo_celegans_predictions_test)
 
 predict-primenovo-celegans-unlabelled:
 	uv run winnow predict --config-dir configs/primenovo \
@@ -2269,7 +2289,6 @@ predict-primenovo-celegans-unlabelled:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/primenovo_celegans \
 	output_folder=$(ANALYSIS_RESULTS)/primenovo_celegans_predictions_unlabelled/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
-	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/primenovo_celegans_predictions_unlabelled)
 
 predict-primenovo-celegans-raw_less_train:
 	uv run winnow predict --config-dir configs/primenovo \
@@ -2278,7 +2297,6 @@ predict-primenovo-celegans-raw_less_train:
 	calibrator.pretrained_model_name_or_path=$(ANALYSIS_MODELS)/primenovo_celegans \
 	output_folder=$(ANALYSIS_RESULTS)/primenovo_celegans_predictions_raw_less_train/ \
 	$(ANALYSIS_PREDICT_OVERRIDES) $(ANALYSIS_KOINA_OVERRIDES)
-	$(call upload_analysis_predictions,$(ANALYSIS_RESULTS)/primenovo_celegans_predictions_raw_less_train)
 
 plot-primenovo-celegans:
 	uv run python scripts/plot_analysis.py \
@@ -2479,7 +2497,37 @@ predict-instanovo-split-parquets: \
 
 plot-instanovo-split-parquets: plot-instanovo-pxd019483 plot-instanovo-sbrodae plot-instanovo-celegans
 
-.PHONY: plot-fdr-method-comparison
+# ── Analysis rerun helpers (reduced features + scoped workflows) ─────
+# InstaNovo reuse (helaqc/celegans): skip train/predict when models/instanovo_{ds}/ exists,
+# features_train.parquet has mass_error_da and lacks mass_error_ppm/spectral_angle/xcorr,
+# and results/instanovo_{ds}_predictions_{test,unlabelled}/preds_and_fdr_metrics.csv exist.
+#
+# Phase A (FDR tools): make -C $(GLISSADE_ROOT) helaqc celegans sbrodae PXD019483
+# Phase B (DNS): make retrain-dns-models && make plot-feature-investigation-instanovo-helaqc
+# Phase C (FDR plots): make prepare-fdr-comparison
+
+.PHONY: retrain-dns-models predict-dns-models prepare-fdr-comparison plot-fdr-method-comparison
+
+retrain-dns-models:
+	$(MAKE) train-casanovo-helaqc train-casanovo-celegans \
+		train-primenovo-helaqc train-primenovo-celegans
+
+predict-dns-models:
+	$(MAKE) predict-casanovo-helaqc-test predict-casanovo-helaqc-unlabelled \
+		predict-casanovo-helaqc-raw_less_train \
+		predict-casanovo-celegans-test predict-casanovo-celegans-unlabelled \
+		predict-casanovo-celegans-raw_less_train \
+		predict-primenovo-helaqc-test predict-primenovo-helaqc-unlabelled \
+		predict-primenovo-helaqc-raw_less_train \
+		predict-primenovo-celegans-test predict-primenovo-celegans-unlabelled \
+		predict-primenovo-celegans-raw_less_train
+
+prepare-fdr-comparison: \
+	predict-instanovo-helaqc-test predict-instanovo-helaqc-unlabelled \
+	predict-instanovo-celegans-test predict-instanovo-celegans-unlabelled \
+	predict-instanovo-pxd019483-test predict-instanovo-pxd019483-unlabelled \
+	predict-instanovo-sbrodae-test predict-instanovo-sbrodae-unlabelled \
+	plot-fdr-method-comparison
 
 plot-fdr-method-comparison:
 	uv run python scripts/plot_fdr_method_comparison.py \
