@@ -850,7 +850,12 @@ LEGACY_FLAT_PROJECTS := PXD004732 PXD014877 PXD023064 astral
 NEW_EVAL_PROJECTS      := $(NEW_EVAL_RUNS) $(LEGACY_FLAT_PROJECTS)
 
 NEW_EVAL_MODEL_DIR ?= train_extra_small_mass_error_da
-NEW_EVAL_PREDS_DIR ?= predictions/$(NEW_EVAL_MODEL_DIR)_new_eval
+## Local mirror of s3://…/new_eval_sets_results/{lcfm,acfm}/… (Winnow predict outputs)
+NEW_EVAL_RESULTS_DIR ?= new_eval_sets_results
+NEW_EVAL_PREDS_LABELLED_DIR   ?= $(NEW_EVAL_RESULTS_DIR)/lcfm
+NEW_EVAL_PREDS_UNLABELLED_DIR ?= $(NEW_EVAL_RESULTS_DIR)/acfm
+## Input spectra + InstaNovo CSVs: s3://…/new_eval_sets/ (not used by acfm-minus-lcfm replots)
+NEW_EVAL_SETS_DIR ?= new_eval_data
 ## Local mirror of s3://…/new_eval_sets_plots/{lcfm,acfm,unlabelled,…}
 NEW_EVAL_PLOTS_DIR ?= analysis/new_eval_sets_plots
 NEW_EVAL_PLOTS_LCFM_DIR              ?= $(NEW_EVAL_PLOTS_DIR)/lcfm
@@ -861,8 +866,6 @@ NEW_EVAL_PLOTS_NOVELTY_DIR           ?= $(NEW_EVAL_PLOTS_DIR)/novelty
 NEW_EVAL_PLOTS_UPSCORED_FPS_DIR      ?= $(NEW_EVAL_PLOTS_DIR)/upscored_fps
 NEW_EVAL_PLOTS_ABLATIONS_DIR         ?= $(NEW_EVAL_PLOTS_DIR)/ablations
 NEW_EVAL_PLOTS_FEATURE_IMPORTANCE_DIR ?= $(NEW_EVAL_PLOTS_DIR)/feature_importance
-NEW_EVAL_PREDS_LABELLED_DIR   ?= $(NEW_EVAL_PREDS_DIR)/labelled
-NEW_EVAL_PREDS_UNLABELLED_DIR ?= $(NEW_EVAL_PREDS_DIR)/unlabelled
 
 FASTA_HUMAN        := fasta/human.fasta
 FASTA_ARABIDOPSIS  := fasta/UP000006548_3702.fasta
@@ -871,7 +874,7 @@ FASTA_ECOLI_ASTRAL := fasta/UP000000625_83333.fasta
 
 NEW_EVAL_HUMAN_UNLABELLED_RUNS := $(NEW_EVAL_RUN_PXD004452) $(NEW_EVAL_RUN_PXD006939)
 
-NEW_EVAL_DATA_DIR ?= new_eval_data
+NEW_EVAL_DATA_DIR ?= $(NEW_EVAL_SETS_DIR)
 
 ## PXD004452 + PXD006939 per-run keys (acfm minus lcfm subset)
 NEW_EVAL_RUN_PXD452_939 := $(NEW_EVAL_RUN_PXD004452) $(NEW_EVAL_RUN_PXD006939)
@@ -890,45 +893,48 @@ download-new-eval-fasta:
 	$(S3_CP) $(FASTA_S3)/Celegans.fasta $(FASTA_CELEGANS)
 	$(S3_CP) $(FASTA_S3)/UP000000625_83333.fasta $(FASTA_ECOLI_ASTRAL)
 
-## Download predict outputs from new_eval_sets_results (flattened per-run / flat project keys)
+## Download predict outputs from new_eval_sets_results (PXD*/run + flat legacy keys)
 download-new-eval-results:
-	@echo "=== Downloading new eval results to $(NEW_EVAL_PREDS_DIR) ==="
+	@echo "=== Downloading $(NEW_EVAL_RESULTS_S3) -> $(NEW_EVAL_RESULTS_DIR) ==="
 	mkdir -p $(NEW_EVAL_PREDS_LABELLED_DIR) $(NEW_EVAL_PREDS_UNLABELLED_DIR)
-	@# PXD004452 — per-run subfolders
+	@# PXD004452 — per-run subfolders (mirrors S3: lcfm|acfm/PXD004452/<run>/)
 	for run in $(NEW_EVAL_RUN_PXD004452); do \
-		mkdir -p $(NEW_EVAL_PREDS_LABELLED_DIR)/$$run $(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run; \
+		mkdir -p $(NEW_EVAL_PREDS_LABELLED_DIR)/PXD004452/$$run \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/PXD004452/$$run; \
 		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/PXD004452/$$run/preds_and_fdr_metrics.csv \
-			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$run/ || true; \
+			$(NEW_EVAL_PREDS_LABELLED_DIR)/PXD004452/$$run/ || true; \
 		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/PXD004452/$$run/metadata.csv \
-			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$run/ || true; \
+			$(NEW_EVAL_PREDS_LABELLED_DIR)/PXD004452/$$run/ || true; \
 		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/PXD004452/$$run/preds_and_fdr_metrics.csv \
-			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run/ || true; \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/PXD004452/$$run/ || true; \
 		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/PXD004452/$$run/metadata.csv \
-			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run/ || true; \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/PXD004452/$$run/ || true; \
 	done
 	@# PXD006939 — per-run subfolders
 	for run in $(NEW_EVAL_RUN_PXD006939); do \
-		mkdir -p $(NEW_EVAL_PREDS_LABELLED_DIR)/$$run $(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run; \
+		mkdir -p $(NEW_EVAL_PREDS_LABELLED_DIR)/PXD006939/$$run \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/PXD006939/$$run; \
 		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/PXD006939/$$run/preds_and_fdr_metrics.csv \
-			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$run/ || true; \
+			$(NEW_EVAL_PREDS_LABELLED_DIR)/PXD006939/$$run/ || true; \
 		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/PXD006939/$$run/metadata.csv \
-			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$run/ || true; \
+			$(NEW_EVAL_PREDS_LABELLED_DIR)/PXD006939/$$run/ || true; \
 		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/PXD006939/$$run/preds_and_fdr_metrics.csv \
-			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run/ || true; \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/PXD006939/$$run/ || true; \
 		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/PXD006939/$$run/metadata.csv \
-			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run/ || true; \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/PXD006939/$$run/ || true; \
 	done
 	@# PXD013868 — single run
 	for run in $(NEW_EVAL_RUN_PXD013868); do \
-		mkdir -p $(NEW_EVAL_PREDS_LABELLED_DIR)/$$run $(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run; \
+		mkdir -p $(NEW_EVAL_PREDS_LABELLED_DIR)/PXD013868/$$run \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/PXD013868/$$run; \
 		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/PXD013868/$$run/preds_and_fdr_metrics.csv \
-			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$run/ || true; \
+			$(NEW_EVAL_PREDS_LABELLED_DIR)/PXD013868/$$run/ || true; \
 		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/lcfm/PXD013868/$$run/metadata.csv \
-			$(NEW_EVAL_PREDS_LABELLED_DIR)/$$run/ || true; \
+			$(NEW_EVAL_PREDS_LABELLED_DIR)/PXD013868/$$run/ || true; \
 		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/PXD013868/$$run/preds_and_fdr_metrics.csv \
-			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run/ || true; \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/PXD013868/$$run/ || true; \
 		$(S3_CP) $(NEW_EVAL_RESULTS_S3)/acfm/PXD013868/$$run/metadata.csv \
-			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/$$run/ || true; \
+			$(NEW_EVAL_PREDS_UNLABELLED_DIR)/PXD013868/$$run/ || true; \
 	done
 	@# Flat legacy projects (PXD004732, PXD014877, PXD023064, astral labelled)
 	for project in $(LEGACY_FLAT_PROJECTS); do \
@@ -984,21 +990,21 @@ replot-new-eval-labelled:
 	@for run in $(NEW_EVAL_RUN_PXD004452); do \
 		uv run python scripts/plot_eval_results.py \
 			--predictions-root $(NEW_EVAL_PREDS_LABELLED_DIR) \
-			--projects "$$run" \
+			--projects "PXD004452/$$run" \
 			--eval-type labelled \
 			--output-dir $(NEW_EVAL_PLOTS_LCFM_DIR)/PXD004452; \
 	done
 	@for run in $(NEW_EVAL_RUN_PXD006939); do \
 		uv run python scripts/plot_eval_results.py \
 			--predictions-root $(NEW_EVAL_PREDS_LABELLED_DIR) \
-			--projects "$$run" \
+			--projects "PXD006939/$$run" \
 			--eval-type labelled \
 			--output-dir $(NEW_EVAL_PLOTS_LCFM_DIR)/PXD006939; \
 	done
 	@for run in $(NEW_EVAL_RUN_PXD013868); do \
 		uv run python scripts/plot_eval_results.py \
 			--predictions-root $(NEW_EVAL_PREDS_LABELLED_DIR) \
-			--projects "$$run" \
+			--projects "PXD013868/$$run" \
 			--eval-type labelled \
 			--output-dir $(NEW_EVAL_PLOTS_LCFM_DIR)/PXD013868; \
 	done
@@ -1015,21 +1021,21 @@ replot-new-eval-unlabelled:
 	@for run in $(NEW_EVAL_RUN_PXD004452); do \
 		uv run python scripts/plot_eval_results.py \
 			--predictions-root $(NEW_EVAL_PREDS_UNLABELLED_DIR) \
-			--projects "$$run" \
+			--projects "PXD004452/$$run" \
 			--eval-type unlabelled \
 			--output-dir $(NEW_EVAL_PLOTS_ACFM_DIR)/PXD004452; \
 	done
 	@for run in $(NEW_EVAL_RUN_PXD006939); do \
 		uv run python scripts/plot_eval_results.py \
 			--predictions-root $(NEW_EVAL_PREDS_UNLABELLED_DIR) \
-			--projects "$$run" \
+			--projects "PXD006939/$$run" \
 			--eval-type unlabelled \
 			--output-dir $(NEW_EVAL_PLOTS_ACFM_DIR)/PXD006939; \
 	done
 	@for run in $(NEW_EVAL_RUN_PXD013868); do \
 		uv run python scripts/plot_eval_results.py \
 			--predictions-root $(NEW_EVAL_PREDS_UNLABELLED_DIR) \
-			--projects "$$run" \
+			--projects "PXD013868/$$run" \
 			--eval-type unlabelled \
 			--output-dir $(NEW_EVAL_PLOTS_ACFM_DIR)/PXD013868; \
 	done
@@ -1051,7 +1057,7 @@ eval-extra-small-acfm-minus-lcfm:
 		--projects "$(NEW_EVAL_PROJECTS)" \
 		--output-dir $(NEW_EVAL_PLOTS_UNLABELLED_DIR)
 
-eval-extra-small-acfm-minus-lcfm-pxd452-939:
+eval-extra-small-acfm-minus-lcfm-pxd452-939: download-new-eval-results
 	mkdir -p $(NEW_EVAL_PLOTS_UNLABELLED_DIR)
 	uv run python scripts/plot_acfm_minus_lcfm_fdr.py \
 		--labelled-dir $(NEW_EVAL_PREDS_LABELLED_DIR) \

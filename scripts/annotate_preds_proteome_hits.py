@@ -224,6 +224,23 @@ def _resolve_fasta_path(raw: str) -> Path:
     return (_REPO_ROOT / p).resolve()
 
 
+_PXD_RUN_PARENTS = ("PXD004452", "PXD006939", "PXD013868")
+
+
+def _resolve_project_dir(predictions_root: Path, project: str) -> Path:
+    """Resolve per-run folder under *predictions_root* (flat or PXD*/run)."""
+    if "/" in project:
+        return predictions_root / project
+    direct = predictions_root / project
+    if direct.is_dir():
+        return direct
+    for pxd in _PXD_RUN_PARENTS:
+        nested = predictions_root / pxd / project
+        if nested.is_dir():
+            return nested
+    return direct
+
+
 @app.command()
 def main(
     projects: Annotated[
@@ -284,7 +301,7 @@ def main(
     metrics = _metrics_from_residues_yaml(residues_config)
 
     for project in project_list:
-        out_dir = predictions_root / project
+        out_dir = _resolve_project_dir(predictions_root, project)
         logger.info(
             "project=%s folder=%s fasta=%s min_residues=%s dry_run=%s",
             project,

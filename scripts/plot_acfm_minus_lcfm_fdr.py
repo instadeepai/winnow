@@ -43,6 +43,10 @@ def _safe_basename(project: str) -> str:
     return project.replace("/", "_")
 
 
+# Per-run keys under new_eval_sets_results/{lcfm,acfm}/<accession>/<run>/
+_PXD_RUN_PARENTS: tuple[str, ...] = ("PXD004452", "PXD006939", "PXD013868")
+
+
 def _preds_csv_candidates(root: Path, project: str, *, role: str) -> list[Path]:
     """Paths to try for ``preds_and_fdr_metrics.csv`` under *root*.
 
@@ -69,12 +73,19 @@ def _preds_csv_candidates(root: Path, project: str, *, role: str) -> list[Path]:
     if "/" in project:
         add(*project.split("/"))
 
-    # Makefile download flattens to {root}/{run}/; S3 keeps {root}/PXD*/{run}/.
-    if "/" not in project and root.is_dir():
-        for child in sorted(root.iterdir()):
-            if child.is_dir() and child.name.startswith("PXD"):
-                add(child.name, project)
-                add(child.name, f"{project}{role_suffix}")
+    # S3 and download-new-eval-results: {root}/PXD*/{run}/; legacy flat {root}/{run}/.
+    if "/" not in project:
+        pxd_seen: set[str] = set()
+        for pxd in _PXD_RUN_PARENTS:
+            add(pxd, project)
+            add(pxd, f"{project}{role_suffix}")
+            pxd_seen.add(pxd)
+        if root.is_dir():
+            for child in sorted(root.iterdir()):
+                if child.is_dir() and child.name.startswith("PXD"):
+                    if child.name not in pxd_seen:
+                        add(child.name, project)
+                        add(child.name, f"{project}{role_suffix}")
 
     return candidates
 
