@@ -9,7 +9,8 @@ nominal FDR:
     are not a match.
   * Categorise discordant calls (partial match, PTM candidate, single-AA variant,
     near-miss edit distance 2-3, fully discordant).
-  * Full-search Venns (raw/unlabelled Winnow vs paired annotated/labelled DB set).
+  * Full-search Venns: Winnow (calibrated confidence FDR) vs database search unique
+    peptides at the same nominal FDR (q-values fit on raw database confidence).
   * Violin plots comparing database-matched vs fully novel retained PSMs.
 
 Inputs are ``winnow predict`` output folders arranged as subdirectories under two
@@ -70,6 +71,8 @@ _MOD_PLUS = re.compile(r"\(\+\d+\.?\d*\)-?")
 _MOD_UNIMOD = re.compile(r"\[UNIMOD:\d+\]-?")
 
 FDR_THRESHOLDS = [0.01, 0.05, 0.10]
+RAW_CONFIDENCE_COL = "confidence"
+DB_Q_VALUE_COL = "db_psm_q_value"
 
 DATASET_DISPLAY_NAMES: dict[str, str] = {
     "gluc": "HeLa degradome",
@@ -505,13 +508,38 @@ def discover_project_pairs(
 
 
 def _add_q_values(
-    df: pd.DataFrame, conf_col: str = "calibrated_confidence"
+    df: pd.DataFrame,
+    conf_col: str = "calibrated_confidence",
+    *,
+    q_col: str = "psm_q_value",
 ) -> pd.DataFrame:
-    if "psm_q_value" in df.columns:
+    """Attach PSM q-values from a non-parametric FDR fit on *conf_col*."""
+    if q_col in df.columns:
         return df
+    if conf_col not in df.columns:
+        raise ValueError(f"Missing confidence column {conf_col!r}")
+
+    existing_q = df["psm_q_value"] if "psm_q_value" in df.columns else None
+    work = df.drop(columns=["psm_q_value", "psm_fdr"], errors="ignore")
+
     fdr = NonParametricFDRControl()
-    fdr.fit(dataset=df[conf_col])
-    return fdr.add_psm_q_value(df, confidence_col=conf_col)
+    fdr.fit(dataset=work[conf_col])
+    out = fdr.add_psm_q_value(work, confidence_col=conf_col)
+    if q_col != "psm_q_value":
+        out = out.rename(columns={"psm_q_value": q_col})
+    if existing_q is not None and q_col != "psm_q_value":
+        out["psm_q_value"] = existing_q
+    return out
+
+
+def _unique_peptides_at_fdr(
+    df: pd.DataFrame,
+    sequence_col: str,
+    q_col: str,
+    fdr_t: float,
+) -> set[str]:
+    retained = df[df[q_col] <= fdr_t]
+    return set(retained[sequence_col].dropna().map(_sequence_match_key)) - {""}
 
 
 def _empty_overlap_row(
@@ -659,16 +687,26 @@ def compute_overlap_table(
 # Plots
 # ---------------------------------------------------------------------------
 def _plot_venn_panels(
-    db_peptides: set[str],
-    df: pd.DataFrame,
+    winnow_df: pd.DataFrame,
     project: str,
     output_path: Path,
     *,
     winnow_label: str,
-    title_suffix: str,
+    suptitle: str,
+    db_df: pd.DataFrame | None = None,
+    db_peptides_static: set[str] | None = None,
 ) -> None:
-    display = _display_name(project)
-    df = _add_q_values(df)
+    if db_df is None and db_peptides_static is None:
+        raise ValueError("Provide db_df or db_peptides_static for Venn panels")
+
+    winnow_scored = _add_q_values(winnow_df.copy())
+    db_scored: pd.DataFrame | None = None
+    if db_df is not None:
+        db_scored = _add_q_values(
+            db_df.copy(),
+            conf_col=RAW_CONFIDENCE_COL,
+            q_col=DB_Q_VALUE_COL,
+        )
 
     n_thresholds = len(FDR_THRESHOLDS)
     fig, axes = plt.subplots(1, n_thresholds, figsize=(5 * n_thresholds, 5))
@@ -676,26 +714,34 @@ def _plot_venn_panels(
         axes = [axes]
 
     for ax, fdr_t in zip(axes, FDR_THRESHOLDS):
-        retained = df[df["psm_q_value"] <= fdr_t]
-        winnow_peptides = set(
-            retained["prediction"].dropna().map(_sequence_match_key)
-        ) - {""}
+        winnow_peptides = _unique_peptides_at_fdr(
+            winnow_scored, "prediction", "psm_q_value", fdr_t
+        )
+        if db_scored is not None:
+            db_peptides = _unique_peptides_at_fdr(
+                db_scored, "sequence", DB_Q_VALUE_COL, fdr_t
+            )
+        else:
+            assert db_peptides_static is not None
+            db_peptides = db_peptides_static
 
+        pct = int(fdr_t * 100)
         if not winnow_peptides and not db_peptides:
-            ax.set_title(f"No peptides retained at {int(fdr_t * 100)}% FDR")
+            ax.set_title(f"No peptides retained at {pct}% FDR")
             ax.axis("off")
             continue
 
-        if not winnow_peptides:
+        if not winnow_peptides or not db_peptides:
+            missing = "Winnow" if not winnow_peptides else "Database search"
             ax.text(
                 0.5,
                 0.5,
-                f"No PSMs retained at {int(fdr_t * 100)}% FDR",
+                f"No {missing} peptides at {pct}% FDR",
                 ha="center",
                 va="center",
                 transform=ax.transAxes,
             )
-            ax.set_title(f"{int(fdr_t * 100)}% FDR")
+            ax.set_title(f"{pct}% FDR")
             ax.axis("off")
             continue
 
@@ -706,13 +752,10 @@ def _plot_venn_panels(
             alpha=0.6,
             ax=ax,
         )
-        ax.set_title(f"Unique peptides at {int(fdr_t * 100)}% FDR")
+        ax.set_title(f"Unique peptides at {pct}% FDR")
         _style_ax(ax)
 
-    fig.suptitle(
-        f"Peptide overlap between full search space and labelled subset for {display}",
-        fontsize=12,
-    )
+    fig.suptitle(suptitle, fontsize=12)
     fig.tight_layout()
     _save_fig(fig, output_path)
 
@@ -723,19 +766,23 @@ def plot_full_search_venn(
     project: str,
     plots_dir: Path,
 ) -> None:
-    """Venn diagrams of database peptides vs Winnow full-search peptides per FDR."""
-    db_peptides = {
-        _sequence_match_key(s)
-        for s in db_df["sequence"].dropna()
-        if _sequence_match_key(s)
-    }
+    """Venn diagrams of FDR-filtered DB vs Winnow full-search unique peptides.
+
+    Database peptides are retained at each nominal FDR using q-values from a
+    non-parametric fit on ``confidence`` (raw database-search scores). Winnow
+    peptides use ``calibrated_confidence`` q-values on the full-search run.
+    """
+    display = _display_name(project)
     _plot_venn_panels(
-        db_peptides,
         df,
         project,
         plots_dir / f"venn_{project}_full_search",
         winnow_label="Winnow",
-        title_suffix="full search space",
+        suptitle=(
+            f"Database search vs Winnow full search at matched FDR for {display} "
+            "(DB q from raw confidence, Winnow q from calibrated confidence)"
+        ),
+        db_df=db_df,
     )
 
 
@@ -750,13 +797,14 @@ def plot_labelled_subset_venn(
         for s in df["sequence"].dropna()
         if _sequence_match_key(s)
     }
+    display = _display_name(project)
     _plot_venn_panels(
-        db_peptides,
         df,
         project,
         plots_dir / f"venn_{project}_labelled_subset",
         winnow_label="Winnow",
-        title_suffix="labelled subset",
+        suptitle=f"Peptide overlap on labelled spectra for {display}",
+        db_peptides_static=db_peptides,
     )
 
 
