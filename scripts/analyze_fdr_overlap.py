@@ -158,6 +158,15 @@ def _search_space_tag_from_folder(folder_name: str) -> str:
     return "full_search"
 
 
+def _eval_type_display(eval_type: str) -> str:
+    """Human-readable eval-type label for plot titles."""
+    return {
+        "full_search": "full search space",
+        "raw": "raw",
+        "unlabelled": "unlabelled",
+    }.get(eval_type, eval_type)
+
+
 def _get_residue_masses() -> dict[str, float]:
     config_path = _REPO_ROOT / "winnow" / "configs" / "residues.yaml"
     with open(config_path) as f:
@@ -954,7 +963,8 @@ def plot_novel_feature_violins(
 
         pct = int(fdr_t * 100)
         fig.suptitle(
-            f"{display} ({eval_type}): database-matched vs novel features at {pct}% FDR",
+            f"{display} ({_eval_type_display(eval_type)}): "
+            f"database-matched vs novel features at {pct}% FDR",
             fontsize=12,
         )
         fig.tight_layout()
