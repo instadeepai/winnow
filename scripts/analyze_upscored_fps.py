@@ -203,16 +203,16 @@ def _discover_labelled_folders(root: Path) -> dict[str, Path]:
 def _load_dataset(folder: Path) -> pd.DataFrame:
     """Load and merge preds + metadata CSVs for a single evaluation folder."""
     preds = pd.read_csv(folder / "preds_and_fdr_metrics.csv")
-    meta = pd.read_csv(folder / "metadata.csv")
-    if "confidence" in meta.columns and "confidence" not in preds.columns:
+    meta_path = folder / "metadata.csv"
+    if not meta_path.is_file():
+        return preds
+    meta = pd.read_csv(meta_path)
+    join_cols = ["spectrum_id"] + [
+        c for c in meta.columns if c != "spectrum_id" and c not in preds.columns
+    ]
+    if len(join_cols) > 1:
         preds = preds.merge(
-            meta[["spectrum_id", "confidence"]], on="spectrum_id", how="left"
-        )
-    feature_cols = [c for c in FEATURE_COLUMNS_OF_INTEREST if c in meta.columns]
-    if feature_cols:
-        merge_cols = ["spectrum_id"] + feature_cols
-        preds = preds.merge(
-            meta[merge_cols].drop_duplicates(subset=["spectrum_id"]),
+            meta[join_cols].drop_duplicates(subset=["spectrum_id"]),
             on="spectrum_id",
             how="left",
         )
@@ -532,8 +532,15 @@ def main(
         logger.info("Processing %s ...", name)
         df = _load_dataset(folder)
 
-        if "confidence" not in df.columns or "calibrated_confidence" not in df.columns:
-            logger.warning("Skipping %s: missing confidence columns", name)
+        missing_conf = [
+            c for c in ("confidence", "calibrated_confidence") if c not in df.columns
+        ]
+        if missing_conf:
+            logger.warning(
+                "Skipping %s: missing confidence columns %s",
+                name,
+                missing_conf,
+            )
             continue
         if "correct" not in df.columns:
             logger.warning("Skipping %s: missing 'correct' column", name)

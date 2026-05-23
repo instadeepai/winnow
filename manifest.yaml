@@ -11,17 +11,17 @@ builder:
 spec:
   debug:
       vscode:
-        enabled: true
+        enabled: false
         path: "/aichor/code"
         provider: "github"
   operator: jobset
   image: winnow-koina
-  command: make eval-extra-small-acfm-minus-lcfm-pxd452-939
+  command: make analyze-upscored-fps-new-eval
   types:
     worker:
       count: 1
       resources:
-        cpus: 4
+        cpus: 6
         ramRatio: 8 # >= 2
 
         accelerators:
