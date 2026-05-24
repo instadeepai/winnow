@@ -63,6 +63,8 @@ _MOD_PLUS = re.compile(r"\(\+\d+\.?\d*\)-?")
 _MOD_UNIMOD = re.compile(r"\[UNIMOD:\d+\]-?")
 
 FDR_THRESHOLDS = [0.01, 0.05, 0.10]
+_FEATURE_VIOLIN_FDR_THRESHOLDS = [0.05, 0.10]
+_MIN_FEATURE_VIOLIN_PSMs = 20
 
 # Max PSMs per correctness panel in the raw-vs-calibrated confidence scatter.
 _CONFIDENCE_SCATTER_MAX_POINTS = 10_000
@@ -93,6 +95,9 @@ DATASET_DISPLAY_NAMES: dict[str, str] = {
 
 _FOLDER_SUFFIXES = ("_annotated", "_labelled", "_raw", "_unlabelled")
 
+# new_eval_sets_results layout: lcfm/PXD004452/<run>/preds_and_fdr_metrics.csv
+_PXD_ACCESSION_PREFIX = "PXD"
+
 FEATURE_COLUMNS_OF_INTEREST = [
     "spectral_angle",
     "xcorr",
@@ -105,6 +110,8 @@ FEATURE_COLUMNS_OF_INTEREST = [
     "confidence",
 ]
 
+_MASS_ERROR_COLUMNS = ("mass_error_da", "mass_error_ppm")
+
 _NICE_LABELS: dict[str, str] = {
     "ion_matches": "Ion match rate",
     "ion_match_intensity": "Ion match intensity",
@@ -113,6 +120,7 @@ _NICE_LABELS: dict[str, str] = {
     "spectral_angle": "Spectral angle",
     "xcorr": "Cross-correlation (XCorr)",
     "mass_error_ppm": "Precursor mass error (ppm)",
+    "mass_error_da": "Precursor mass error (Da)",
     "irt_error": "iRT prediction error",
     "confidence": "Model confidence",
     "margin": "Beam margin",
@@ -127,6 +135,27 @@ _NICE_LABELS: dict[str, str] = {
 
 def _nice_label(col: str) -> str:
     return _NICE_LABELS.get(col, col.replace("_", " ").capitalize())
+
+
+def _mass_error_column(df: pd.DataFrame, *, min_count: int = 10) -> str | None:
+    """Return ``mass_error_da`` or ``mass_error_ppm`` when present with enough data."""
+    for col in _MASS_ERROR_COLUMNS:
+        if col in df.columns and df[col].notna().sum() > min_count:
+            return col
+    return None
+
+
+def _violin_feature_columns(df: pd.DataFrame) -> list[str]:
+    """Feature list for violin plots, resolving Da vs ppm mass error."""
+    cols: list[str] = []
+    for col in FEATURE_COLUMNS_OF_INTEREST:
+        if col == "mass_error_ppm":
+            mass_col = _mass_error_column(df)
+            if mass_col is not None:
+                cols.append(mass_col)
+        else:
+            cols.append(col)
+    return cols
 
 
 # ---------------------------------------------------------------------------
@@ -183,20 +212,55 @@ def _strip_mods(seq: str) -> str:
     return s.replace("I", "L")
 
 
+def _project_key_from_folder(folder_name: str) -> str:
+    """Strip a known eval suffix to get the project key (e.g. ``gluc_raw`` -> ``gluc``)."""
+    for suffix in _FOLDER_SUFFIXES:
+        if folder_name.endswith(suffix):
+            return folder_name[: -len(suffix)]
+    return folder_name
+
+
+def _is_labelled_preds_folder(folder: Path) -> bool:
+    preds_csv = folder / "preds_and_fdr_metrics.csv"
+    if not preds_csv.is_file():
+        return False
+    header = pd.read_csv(preds_csv, nrows=0).columns.tolist()
+    required = {"sequence", "prediction", "calibrated_confidence"}
+    return required.issubset(header)
+
+
 def _discover_labelled_folders(root: Path) -> dict[str, Path]:
-    """Find subfolders with labelled ``preds_and_fdr_metrics.csv``."""
+    """Find folders with labelled ``preds_and_fdr_metrics.csv``.
+
+    Supports flat project folders (``{root}/PXD004732/``) and nested per-run
+    layouts used by new eval sets (``{root}/PXD004452/<run>/``).
+    """
     results: dict[str, Path] = {}
+    if not root.is_dir():
+        return results
+
+    def _register(key: str, folder: Path) -> None:
+        if key in results:
+            logger.warning(
+                "Duplicate labelled project key %r: %s and %s",
+                key,
+                results[key],
+                folder,
+            )
+            return
+        results[key] = folder
+
     for child in sorted(root.iterdir()):
         if not child.is_dir():
             continue
-        preds_csv = child / "preds_and_fdr_metrics.csv"
-        if not preds_csv.is_file():
+        if _is_labelled_preds_folder(child):
+            _register(_project_key_from_folder(child.name), child)
             continue
-        header = pd.read_csv(preds_csv, nrows=0).columns.tolist()
-        required = {"sequence", "prediction", "calibrated_confidence"}
-        if not required.issubset(header):
+        if not child.name.startswith(_PXD_ACCESSION_PREFIX):
             continue
-        results[child.name] = child
+        for run_dir in sorted(child.iterdir()):
+            if run_dir.is_dir() and _is_labelled_preds_folder(run_dir):
+                _register(run_dir.name, run_dir)
     return results
 
 
@@ -204,18 +268,22 @@ def _load_dataset(folder: Path) -> pd.DataFrame:
     """Load and merge preds + metadata CSVs for a single evaluation folder."""
     preds = pd.read_csv(folder / "preds_and_fdr_metrics.csv")
     meta_path = folder / "metadata.csv"
-    if not meta_path.is_file():
-        return preds
-    meta = pd.read_csv(meta_path)
-    join_cols = ["spectrum_id"] + [
-        c for c in meta.columns if c != "spectrum_id" and c not in preds.columns
-    ]
-    if len(join_cols) > 1:
-        preds = preds.merge(
-            meta[join_cols].drop_duplicates(subset=["spectrum_id"]),
-            on="spectrum_id",
-            how="left",
-        )
+    if meta_path.is_file():
+        meta = pd.read_csv(meta_path)
+        join_cols = ["spectrum_id"] + [
+            c for c in meta.columns if c != "spectrum_id" and c not in preds.columns
+        ]
+        if len(join_cols) > 1:
+            preds = preds.merge(
+                meta[join_cols].drop_duplicates(subset=["spectrum_id"]),
+                on="spectrum_id",
+                how="left",
+            )
+    if "correct" not in preds.columns and {"sequence", "prediction"}.issubset(
+        preds.columns
+    ):
+        preds = preds.copy()
+        preds["correct"] = preds["sequence"] == preds["prediction"]
     return preds
 
 
@@ -329,49 +397,61 @@ def _plot_confidence_scatter(
     _save_fig(fig, output_dir / f"confidence_scatter_{dataset_name}", plot_format)
 
 
-def _plot_feature_distributions(
-    df: pd.DataFrame,
+def _plot_feature_distributions_at_fdr(
+    upscored: pd.DataFrame,
+    *,
+    fdr_t: float,
     delta_threshold: float,
     dataset_name: str,
     output_dir: Path,
     plot_format: str,
 ) -> None:
-    """Violin plots of feature values for up-scored TPs vs up-scored FPs."""
-    upscored = df[df["delta_confidence"] > delta_threshold].copy()
-    if len(upscored) < 10:
-        logger.warning(
-            "Too few up-scored PSMs (%d) for feature plots on %s",
-            len(upscored),
+    """Violin plots of features for up-scored TPs vs FPs retained at one FDR cutoff."""
+    n = len(upscored)
+    pct = int(fdr_t * 100)
+    if n < _MIN_FEATURE_VIOLIN_PSMs:
+        logger.info(
+            "Skipping feature violins for %s at %d%% FDR (n=%d up-scored retained)",
             dataset_name,
+            pct,
+            n,
         )
         return
 
     available = [
         c
-        for c in FEATURE_COLUMNS_OF_INTEREST
-        if c in upscored.columns and upscored[c].notna().sum() > 10
+        for c in _violin_feature_columns(upscored)
+        if c in upscored.columns
+        and upscored[c].notna().sum() >= _MIN_FEATURE_VIOLIN_PSMs
     ]
     if not available:
-        logger.warning("No feature columns available for %s", dataset_name)
+        logger.warning(
+            "No feature columns with >=%d values for %s at %d%% FDR",
+            _MIN_FEATURE_VIOLIN_PSMs,
+            dataset_name,
+            pct,
+        )
         return
 
-    upscored["label"] = upscored["correct"].map({True: "TP", False: "FP"})
+    plot_df = upscored.copy()
+    plot_df["label"] = plot_df["correct"].map({True: "Correct", False: "Incorrect"})
     n_features = len(available)
     n_cols = min(3, n_features)
     n_rows = (n_features + n_cols - 1) // n_cols
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows))
     axes = np.atleast_1d(axes).flatten()
 
-    palette = {"TP": TP_COLOR, "FP": FP_COLOR}
+    palette = {"Correct": TP_COLOR, "Incorrect": FP_COLOR}
+    n_plotted = 0
 
     for i, col in enumerate(available):
         ax = axes[i]
-        plot_data = upscored[[col, "label"]].dropna(subset=[col])
-        if len(plot_data) < 5:
+        sub = plot_df[[col, "label"]].dropna(subset=[col])
+        if len(sub) < _MIN_FEATURE_VIOLIN_PSMs:
             ax.set_visible(False)
             continue
         sns.violinplot(
-            data=plot_data,
+            data=sub,
             x="label",
             y=col,
             palette=palette,
@@ -384,18 +464,56 @@ def _plot_feature_distributions(
         ax.set_ylabel(_nice_label(col))
         ax.set_title(_nice_label(col))
         _style_ax(ax)
+        n_plotted += 1
 
     for i in range(len(available), len(axes)):
         axes[i].set_visible(False)
 
+    if n_plotted == 0:
+        plt.close(fig)
+        logger.info(
+            "Skipping feature violins for %s at %d%% FDR (no feature panels with n>=%d)",
+            dataset_name,
+            pct,
+            _MIN_FEATURE_VIOLIN_PSMs,
+        )
+        return
+
     display = _folder_display_name(dataset_name)
     fig.suptitle(
-        f"Feature distributions for up-scored PSMs "
-        f"(calibration increase > {delta_threshold:.2f}) on {display}",
+        f"Feature distributions for up-scored PSMs retained at {pct}% FDR "
+        f"(calibration increase > {delta_threshold:.2f}) on {display}\n"
+        f"(n={n:,})",
         fontsize=13,
     )
     fig.tight_layout()
-    _save_fig(fig, output_dir / f"upscored_features_{dataset_name}", plot_format)
+    _save_fig(
+        fig,
+        output_dir / f"upscored_features_{dataset_name}_fdr{pct}",
+        plot_format,
+    )
+
+
+def _plot_feature_distributions(
+    df: pd.DataFrame,
+    delta_threshold: float,
+    dataset_name: str,
+    output_dir: Path,
+    plot_format: str,
+) -> None:
+    """Violin plots at 5% and 10% FDR for up-scored correct vs incorrect PSMs."""
+    df = _add_q_values(df)
+    upscored_mask = df["delta_confidence"] > delta_threshold
+    for fdr_t in _FEATURE_VIOLIN_FDR_THRESHOLDS:
+        retained = df[upscored_mask & (df["psm_q_value"] <= fdr_t)].copy()
+        _plot_feature_distributions_at_fdr(
+            retained,
+            fdr_t=fdr_t,
+            delta_threshold=delta_threshold,
+            dataset_name=dataset_name,
+            output_dir=output_dir,
+            plot_format=plot_format,
+        )
 
 
 def _upscored_fp_detail(
@@ -495,9 +613,9 @@ def main(
         float,
         typer.Option(
             help="Minimum delta (calibrated - raw) to classify a PSM as up-scored. "
-            "Default 0.1 (10 percentage-point increase).",
+            "Default 0.2 (20 percentage-point increase).",
         ),
-    ] = 0.1,
+    ] = 0.2,
     plot_format: Annotated[
         str,
         typer.Option(help="Plot format: 'pdf', 'png', or 'both'."),

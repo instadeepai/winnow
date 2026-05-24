@@ -764,6 +764,21 @@ def _load_data(predictions_dir: Path) -> pl.DataFrame:
     return preds
 
 
+_SPLIT_DISPLAY_NAMES = {
+    "test": "test set",
+    "unlabelled": "unlabelled space",
+    "raw_less_train": "full search space",
+}
+
+
+def _split_display(split: str) -> str:
+    return _SPLIT_DISPLAY_NAMES.get(split, split)
+
+
+def _eval_title(prefix: str, split_label: str, eval_kind: str) -> str:
+    return f"{prefix} {split_label}\nusing {eval_kind}"
+
+
 def _save_training_history_plot(model_dir: Path, out_dir: Path) -> None:
     hist_path = model_dir / "training_history.json"
     if not hist_path.exists():
@@ -781,12 +796,13 @@ def _plot_calibration_and_pr(
     labelled: bool,
     out_dir: Path,
 ) -> None:
+    split_label = _split_display(split)
     print("Plotting calibration curves")
     if labelled:
         fig = plot_calibration_curves(
             df,
             "correct",
-            f"Calibration curves for {split} using database search",
+            _eval_title("Calibration curves for", split_label, "database search"),
             df_raw=df_raw_conf,
         )
         _save(fig, out_dir, f"calibration_{split}_db_search")
@@ -794,7 +810,7 @@ def _plot_calibration_and_pr(
     fig = plot_calibration_curves(
         df,
         "proteome_hit",
-        f"Calibration curves for {split} using proteome mapping",
+        _eval_title("Calibration curves for", split_label, "proteome mapping"),
         df_raw=df_raw_conf,
     )
     _save(fig, out_dir, f"calibration_{split}_proteome")
@@ -804,7 +820,7 @@ def _plot_calibration_and_pr(
         fig = plot_pr_curves(
             df,
             "correct",
-            f"PR curves for {split} using database search",
+            _eval_title("PR curves for", split_label, "database search"),
             df_raw=df_raw_conf,
         )
         _save(fig, out_dir, f"pr_{split}_db_search")
@@ -812,7 +828,7 @@ def _plot_calibration_and_pr(
     fig = plot_pr_curves(
         df,
         "proteome_hit",
-        f"PR curves for {split} using proteome mapping",
+        _eval_title("PR curves for", split_label, "proteome mapping"),
         df_raw=df_raw_conf,
     )
     _save(fig, out_dir, f"pr_{split}_proteome")
@@ -825,6 +841,7 @@ def _plot_confidence_histograms(
     labelled: bool,
     out_dir: Path,
 ) -> None:
+    split_label = _split_display(split)
     print("Plotting confidence histograms")
     for conf_col, conf_label, tag in [
         ("confidence", "Raw confidence", "raw"),
@@ -837,7 +854,7 @@ def _plot_confidence_histograms(
                 "correct",
                 conf_col,
                 conf_label,
-                f"{conf_label} for {split} using database search",
+                _eval_title(f"{conf_label} for", split_label, "database search"),
             )
             _save(fig, out_dir, f"hist_{tag}_{split}_db_search")
 
@@ -846,7 +863,7 @@ def _plot_confidence_histograms(
             "proteome_hit",
             conf_col,
             conf_label,
-            f"{conf_label} for {split} using proteome mapping",
+            _eval_title(f"{conf_label} for", split_label, "proteome mapping"),
         )
         _save(fig, out_dir, f"hist_{tag}_{split}_proteome")
 
@@ -858,6 +875,7 @@ def _plot_fdr_accuracy_plots(
     residue_masses: dict,
     out_dir: Path,
 ) -> None:
+    split_label = _split_display(split)
     print("Plotting FDR accuracy")
     use_shortcut = not labelled
     for metric, tag in [("fdr", "fdr"), ("q_value", "qvalue")]:
@@ -867,7 +885,9 @@ def _plot_fdr_accuracy_plots(
                 df,
                 "correct",
                 residue_masses,
-                f"{metric_name} accuracy for {split} using database search",
+                _eval_title(
+                    f"{metric_name} accuracy for", split_label, "database search"
+                ),
                 metric="fdr" if metric == "fdr" else "q_value",
                 use_proteome_shortcut=False,
             )
@@ -877,7 +897,7 @@ def _plot_fdr_accuracy_plots(
             df,
             "proteome_hit",
             residue_masses,
-            f"{metric_name} accuracy for {split} using proteome mapping",
+            _eval_title(f"{metric_name} accuracy for", split_label, "proteome mapping"),
             metric="fdr" if metric == "fdr" else "q_value",
             use_proteome_shortcut=use_shortcut,
         )
@@ -891,6 +911,7 @@ def _plot_labelled_diagnostics(
     residue_masses: dict,
     out_dir: Path,
 ) -> None:
+    split_label = _split_display(split)
     label_col = "correct"
     print("Plotting labelled-only diagnostics")
 
@@ -898,36 +919,49 @@ def _plot_labelled_diagnostics(
         df,
         label_col,
         residue_masses,
-        f"Ranked predictions vs q-value for {split} using database search",
+        _eval_title(
+            "Ranked predictions vs q-value for", split_label, "database search"
+        ),
     )
     _save(fig, out_dir, f"ranked_qvalue_{split}_db_search")
 
-    fig = plot_ranked_fdr_pep(df, f"Ranked predictions vs FDR and PEP for {split}")
+    fig = plot_ranked_fdr_pep(
+        df, f"Ranked predictions vs FDR and PEP for {split_label}"
+    )
     _save(fig, out_dir, f"ranked_fdr_pep_{split}_nonparametric")
 
-    for metric, tag in [("fdr", "fdr"), ("q_value", "qvalue")]:
+    for metric, file_tag, metric_name in [
+        ("fdr", "fdr", "FDR"),
+        ("q_value", "qvalue", "q-value"),
+    ]:
         fig = plot_ranked_fdr_raw_vs_cal(
             df,
             label_col,
             residue_masses,
-            f"Ranked predictions vs {tag} for {split} using database search",
+            _eval_title(
+                f"Ranked predictions vs {metric_name} for",
+                split_label,
+                "database search",
+            ),
             metric=metric,
             df_raw=df_raw_conf,
         )
-        _save(fig, out_dir, f"ranked_{tag}_raw_vs_cal_{split}_db_search")
+        _save(fig, out_dir, f"ranked_{file_tag}_raw_vs_cal_{split}_db_search")
 
     fig = plot_bar_psms_fdr(
         df,
         label_col,
         residue_masses,
-        f"PSMs at database-grounded FDR thresholds for {split}",
+        f"PSMs at database-grounded FDR thresholds for {split_label}",
         df_raw=df_raw_conf,
     )
     _save(fig, out_dir, f"bar_psms_fdr_thresholds_{split}_db_search")
 
     if len(df_raw_conf) > 0:
         fig = plot_raw_vs_cal_scatter(
-            df_raw_conf, label_col, f"Raw vs calibrated confidence for {split}"
+            df_raw_conf,
+            label_col,
+            f"Raw vs calibrated confidence for {split_label}",
         )
         _save(fig, out_dir, f"scatter_raw_vs_cal_confidence_{split}")
 
@@ -937,7 +971,7 @@ def _plot_labelled_diagnostics(
             label_col,
             "margin",
             "confidence",
-            f"Raw confidence vs margin for {split}",
+            f"Raw confidence vs margin for {split_label}",
             x_label="Margin",
             y_label="Raw confidence",
         )
@@ -948,14 +982,14 @@ def _plot_labelled_diagnostics(
             label_col,
             "margin",
             "calibrated_confidence",
-            f"Calibrated confidence vs margin for {split}",
+            f"Calibrated confidence vs margin for {split_label}",
             x_label="Margin",
             y_label="Calibrated confidence",
         )
         _save(fig, out_dir, f"scatter_cal_confidence_vs_margin_{split}")
 
     fig, pca_model, feat_names = plot_pca_features(
-        df, label_col, f"PCA of calibrator features for {split}"
+        df, label_col, f"PCA of calibrator features for {split_label}"
     )
     _save(fig, out_dir, f"pca_features_{split}")
 
@@ -980,7 +1014,7 @@ def main() -> None:
         "--split",
         type=str,
         required=True,
-        help="Split name for plot titles (test / unlabelled / raw_less_train)",
+        help="Split id for filenames; titles use test set / unlabelled space / full search space",
     )
     parser.add_argument(
         "--label-mode",

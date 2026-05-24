@@ -10,9 +10,10 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, Iterable, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -43,13 +44,28 @@ if not logger.handlers:
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
 # ---------------------------------------------------------------------------
-# Plot theme and colour assignments — Paul Tol "bright" palette (colour-blind safe)
+# Plot theme and colour assignments — Paul Tol qualitative (colour-blind safe)
 # ---------------------------------------------------------------------------
 _PALETTE = ["#4477AA", "#EE6677", "#228833", "#CCBB44", "#66CCEE", "#AA3377", "#BBBBBB"]
+# Ablation series only (never reuse for raw baseline).
+_ABLATION_PALETTE = [
+    "#4477AA",
+    "#EE6677",
+    "#228833",
+    "#CCBB44",
+    "#66CCEE",
+    "#AA3377",
+    "#EE7733",
+    "#0077BB",
+    "#33BBEE",
+    "#CC3311",
+]
+_RAW_LINE_COLOUR = "#BBBBBB"
 
 sns.set_theme(style="white", palette=_PALETTE, context="paper", font_scale=1.5)
 
 DATASET_DISPLAY_NAMES: dict[str, str] = {
+    "HCT116": "Human colon",
     "gluc": "HeLa degradome",
     "helaqc": "HeLa single shot",
     "herceptin": "Herceptin",
@@ -203,7 +219,28 @@ def build_ablation_configs(
 ABLATION_CONFIGS: dict[str, list[str]] = {}
 
 ABLATION_COLORS: dict[str, str] = {}
-ORIGINAL_COLOR = _PALETTE[6]
+
+
+def _dataset_display_name(key: str) -> str:
+    """Publication-ready dataset label for plot titles."""
+    if key in EVAL_DATASETS:
+        return str(EVAL_DATASETS[key]["label"])
+    return DATASET_DISPLAY_NAMES.get(key, key)
+
+
+def assign_ablation_colors(config_names: Iterable[str]) -> dict[str, str]:
+    """Assign a unique colour per ablation config (no palette wrap)."""
+    names = list(config_names)
+    if len(names) > len(_ABLATION_PALETTE):
+        raise ValueError(
+            f"Need {len(names)} ablation colours but only {len(_ABLATION_PALETTE)} defined."
+        )
+    return {name: _ABLATION_PALETTE[i] for i, name in enumerate(names)}
+
+
+def _configure_ablation_colors(config_names: Iterable[str]) -> None:
+    global ABLATION_COLORS
+    ABLATION_COLORS = assign_ablation_colors(sorted(set(config_names)))
 
 # Default training hyperparameters (overridden by --hyperparams-from-model).
 TRAIN_HYPERPARAMS = {
@@ -859,6 +896,48 @@ def _save_fig(fig: plt.Figure, base_path: Path, plot_format: str) -> None:
     plt.close(fig)
 
 
+def _lineplot(
+    ax: plt.Axes,
+    data: pd.DataFrame,
+    *,
+    x: str,
+    y: str,
+    label: str,
+    color: str,
+    linestyle: str = "-",
+    linewidth: float = 1.0,
+    marker: str | None = None,
+) -> None:
+    """Line plot with consistent linewidth (seaborn, no auto legend)."""
+    kwargs: dict = {
+        "data": data,
+        "x": x,
+        "y": y,
+        "label": label,
+        "color": color,
+        "linestyle": linestyle,
+        "linewidth": linewidth,
+        "ax": ax,
+        "legend": False,
+    }
+    if marker is not None:
+        kwargs["marker"] = marker
+    sns.lineplot(**kwargs)
+
+
+def _generate_plots_for_dataset(
+    ds_results: list[EvalResult],
+    ds_name: str,
+    plots_dir: Path,
+    plot_format: str,
+) -> None:
+    """Generate all ablation figures for one dataset."""
+    plot_precision_recall(ds_results, ds_name, plots_dir, plot_format)
+    plot_calibration(ds_results, ds_name, plots_dir, plot_format)
+    plot_fdr_vs_confidence(ds_results, ds_name, plots_dir, plot_format)
+    plot_fdr_accepted_psms(ds_results, ds_name, plots_dir, plot_format)
+
+
 def plot_precision_recall(
     results: list[EvalResult],
     dataset_name: str,
@@ -877,34 +956,33 @@ def plot_precision_recall(
         raw_pr = compute_precision_recall_curve(
             results[0].eval_df, "confidence", "correct", "Raw confidence"
         )
-        sns.lineplot(
-            data=raw_pr,
+        _lineplot(
+            ax,
+            raw_pr,
             x="recall",
             y="precision",
             label="Raw confidence",
-            color=ORIGINAL_COLOR,
-            linestyle="--",
-            linewidth=2.0,
-            ax=ax,
+            color=_RAW_LINE_COLOUR,
+            linestyle=":",
         )
 
     for r in results:
-        sns.lineplot(
-            data=r.pr_curve,
+        _lineplot(
+            ax,
+            r.pr_curve,
             x="recall",
             y="precision",
             label=r.config_name,
             color=ABLATION_COLORS[r.config_name],
-            ax=ax,
         )
 
-    display = DATASET_DISPLAY_NAMES.get(dataset_name, dataset_name)
+    display = _dataset_display_name(dataset_name)
     ax.set(
         xlabel="Recall",
         ylabel="Precision",
         title=f"{display} precision-recall by feature set",
     )
-    ax.legend(fontsize=9)
+    ax.legend(loc="lower left", fontsize=7)
     _style_axes(ax)
     fig.tight_layout()
     _save_fig(fig, output_dir / f"pr_curve_{dataset_name}", plot_format)
@@ -922,35 +1000,36 @@ def plot_calibration(
     raw_cal = compute_calibration_curve(
         results[0].eval_df, "confidence", "correct", "Raw confidence"
     )
-    sns.lineplot(
-        data=raw_cal,
+    _lineplot(
+        ax,
+        raw_cal,
         x="pred_mean",
         y="empirical",
         label="Raw confidence",
-        color=ORIGINAL_COLOR,
+        color=_RAW_LINE_COLOUR,
+        linestyle=":",
         marker="o",
-        ax=ax,
     )
 
     for r in results:
-        sns.lineplot(
-            data=r.calibration_curve,
+        _lineplot(
+            ax,
+            r.calibration_curve,
             x="pred_mean",
             y="empirical",
             label=r.config_name,
             color=ABLATION_COLORS[r.config_name],
             marker="o",
-            ax=ax,
         )
 
-    display = DATASET_DISPLAY_NAMES.get(dataset_name, dataset_name)
+    display = _dataset_display_name(dataset_name)
     ax.plot([0, 1], [0, 1], ls="--", color="gray", lw=1)
     ax.set(
         xlabel="Mean predicted probability",
-        ylabel="Empirical accuracy (database label)",
+        ylabel="Empirical accuracy\n(database label)",
         title=f"{display} probability calibration by feature set",
     )
-    ax.legend(fontsize=9)
+    ax.legend(loc="lower right", fontsize=7)
     _style_axes(ax)
     fig.tight_layout()
     _save_fig(fig, output_dir / f"calibration_{dataset_name}", plot_format)
@@ -998,6 +1077,8 @@ def plot_fdr_vs_confidence(
                     label="Database-grounded",
                     ax=ax,
                     color=_PALETTE[3],
+                    linewidth=1,
+                    legend=False,
                 )
             except Exception as e:
                 logger.warning(
@@ -1013,15 +1094,17 @@ def plot_fdr_vs_confidence(
             label="Winnow (non-parametric)",
             ax=ax,
             color=_PALETTE[0],
+            linewidth=1,
+            legend=False,
         )
 
         ax.set_xlabel("Calibrated confidence")
         ax.set_ylabel("PSM FDR")
         ax.set_title(r.config_name)
-        ax.legend(fontsize=8)
+        ax.legend(fontsize=7)
         _style_axes(ax)
 
-    display = DATASET_DISPLAY_NAMES.get(dataset_name, dataset_name)
+    display = _dataset_display_name(dataset_name)
     fig.suptitle(
         f"{display} PSM FDR vs calibrated confidence by feature set", fontsize=12
     )
@@ -1060,25 +1143,31 @@ def plot_fdr_accepted_psms(
             counts,
             label=r.config_name,
             color=ABLATION_COLORS[r.config_name],
+            linewidth=1,
         )
 
     for fdr_line in [0.01, 0.05, 0.10]:
         ax.axvline(fdr_line, ls="--", color="gray", lw=0.8, alpha=0.7)
+
+    ax.relim()
+    ax.autoscale_view()
+    y_text = ax.get_ylim()[1] * 0.02
+    for fdr_line in [0.01, 0.05, 0.10]:
         ax.text(
-            fdr_line + 0.002,
-            ax.get_ylim()[1] * 0.02,
+            fdr_line - 0.002,
+            y_text,
             f"{fdr_line:.0%}",
-            ha="left",
+            ha="right",
             va="bottom",
-            fontsize=8,
+            fontsize=7,
             color="gray",
         )
 
-    display = DATASET_DISPLAY_NAMES.get(dataset_name, dataset_name)
+    display = _dataset_display_name(dataset_name)
     ax.set_xlabel("Non-parametric q-value threshold")
     ax.set_ylabel("Accepted PSMs")
     ax.set_title(f"{display} accepted PSMs at non-parametric q-value threshold")
-    ax.legend(fontsize=9)
+    ax.legend(loc="upper left", fontsize=7)
     _style_axes(ax)
     fig.tight_layout()
     _save_fig(fig, output_dir / f"fdr_accepted_psms_{dataset_name}", plot_format)
@@ -1101,6 +1190,74 @@ def save_eval_results(all_results: list[EvalResult], output_dir: Path) -> None:
         df.to_parquet(path, index=False)
 
     logger.info("Saved %d eval result Parquets to %s", len(all_results), results_dir)
+
+
+def load_eval_results_for_plotting(
+    output_dir: Path,
+) -> dict[str, list[EvalResult]]:
+    """Load saved eval Parquets and rebuild curve data for plotting."""
+    results_dir = output_dir / "eval_results"
+    if not results_dir.is_dir():
+        raise FileNotFoundError(f"No eval_results directory at {results_dir}")
+
+    paths = sorted(results_dir.glob("*.parquet"))
+    if not paths:
+        raise FileNotFoundError(f"No eval result Parquets in {results_dir}")
+
+    grouped: dict[str, list[EvalResult]] = defaultdict(list)
+    for path in paths:
+        df = pd.read_parquet(path)
+        config_name = str(df["config_name"].iloc[0])
+        dataset_name = str(df["dataset_name"].iloc[0])
+        meta = df.drop(columns=["config_name", "dataset_name"], errors="ignore")
+        calibrated = meta["calibrated_confidence"].to_numpy(dtype=np.float64)
+        labels = meta["correct"].to_numpy(dtype=np.float32)
+        pr = compute_precision_recall_curve(
+            meta, "calibrated_confidence", "correct", config_name
+        )
+        cal = compute_calibration_curve(
+            meta, "calibrated_confidence", "correct", config_name
+        )
+        grouped[dataset_name].append(
+            EvalResult(
+                config_name=config_name,
+                dataset_name=dataset_name,
+                ece=0.0,
+                tail_ece=0.0,
+                brier=0.0,
+                ids_at_1pct=0,
+                ids_at_5pct=0,
+                ids_at_10pct=0,
+                pr_curve=pr,
+                calibration_curve=cal,
+                calibrated_scores=calibrated,
+                labels=labels,
+                raw_confidence=meta["confidence"].to_numpy(dtype=np.float64),
+                eval_df=meta,
+            )
+        )
+
+    for ds_name in grouped:
+        grouped[ds_name].sort(key=lambda r: r.config_name)
+
+    return dict(grouped)
+
+
+def _run_plots_only(output_dir: Path, plot_format: str) -> None:
+    """Regenerate plots from ``{output_dir}/eval_results`` without inference."""
+    plots_dir = output_dir / "plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
+
+    grouped = load_eval_results_for_plotting(output_dir)
+    config_names = [r.config_name for results in grouped.values() for r in results]
+    _configure_ablation_colors(config_names)
+
+    for ds_name in sorted(grouped):
+        ds_results = grouped[ds_name]
+        logger.info("Generating plots for %s (%d configs)...", ds_name, len(ds_results))
+        _generate_plots_for_dataset(ds_results, ds_name, plots_dir, plot_format)
+
+    logger.info("Plots saved to %s", plots_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -1169,9 +1326,7 @@ def _configure_ablation_configs(
     else:
         first_eval = next(iter(eval_dfs.values()))
         ABLATION_CONFIGS = build_ablation_configs(first_eval, hyperparams_from_model)
-    ABLATION_COLORS = {
-        name: _PALETTE[i % len(_PALETTE)] for i, name in enumerate(ABLATION_CONFIGS)
-    }
+    _configure_ablation_colors(ABLATION_CONFIGS.keys())
     logger.info("Ablation configs: %s", list(ABLATION_CONFIGS.keys()))
 
 
@@ -1243,10 +1398,7 @@ def _evaluate_ablations(
             )
 
         logger.info("Step 5: Generating plots for %s...", ds_name)
-        plot_precision_recall(ds_results, ds_name, plots_dir, plot_format)
-        plot_calibration(ds_results, ds_name, plots_dir, plot_format)
-        plot_fdr_vs_confidence(ds_results, ds_name, plots_dir, plot_format)
-        plot_fdr_accepted_psms(ds_results, ds_name, plots_dir, plot_format)
+        _generate_plots_for_dataset(ds_results, ds_name, plots_dir, plot_format)
 
     return all_results
 
@@ -1343,8 +1495,23 @@ def main(
             "(e.g. HPO best model). Reads config.json.",
         ),
     ] = None,
+    plots_only: Annotated[
+        bool,
+        typer.Option(
+            "--plots-only",
+            help="Regenerate plots from {output-dir}/eval_results only "
+            "(no feature compute, training, or evaluation).",
+        ),
+    ] = False,
 ) -> None:
     """Run feature ablation study for the Winnow calibrator."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if plots_only:
+        _run_plots_only(output_dir, plot_format)
+        logger.info("Feature ablation plots complete.")
+        return
+
     _validate_training_inputs(
         skip_training=skip_training,
         train_features=train_features,
@@ -1352,7 +1519,6 @@ def main(
         validation_fraction=validation_fraction,
     )
 
-    output_dir.mkdir(parents=True, exist_ok=True)
     plots_dir = output_dir / "plots"
     plots_dir.mkdir(parents=True, exist_ok=True)
 

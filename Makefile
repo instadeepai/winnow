@@ -825,7 +825,7 @@ replot-local-external: replot-local-external-labelled replot-local-external-unla
         download-new-eval-ablation-data download-astral-for-ablation \
         download-cluster-new-eval-cpu-inputs download-cluster-ablation-inputs \
         download-cluster-feature-importance-inputs \
-        ablation-extra-small ablation-extra-small-cluster \
+        ablation-extra-small ablation-extra-small-cluster replot-new-eval-ablations \
         replot-novelty-plots-new-eval novelty-replot-new-eval new-eval-plots \
         cluster-new-eval-fdr-overlap cluster-new-eval-acfm-minus-lcfm-pxd452-939 \
         cluster-new-eval-novelty cluster-new-eval-upscored-fps \
@@ -876,8 +876,9 @@ NEW_EVAL_HUMAN_UNLABELLED_RUNS := $(NEW_EVAL_RUN_PXD004452) $(NEW_EVAL_RUN_PXD00
 
 NEW_EVAL_DATA_DIR ?= $(NEW_EVAL_SETS_DIR)
 
-## PXD004452 + PXD006939 per-run keys (acfm minus lcfm subset)
-NEW_EVAL_RUN_PXD452_939 := $(NEW_EVAL_RUN_PXD004452) $(NEW_EVAL_RUN_PXD006939)
+## PXD004452 + PXD006939 + PXD013868 per-run keys (acfm minus lcfm subset)
+NEW_EVAL_RUN_PXD452_939 := $(NEW_EVAL_RUN_PXD004452) $(NEW_EVAL_RUN_PXD006939) \
+	$(NEW_EVAL_RUN_PXD013868)
 
 ## Self-hosted Koina on cluster (winnow-koina image: run `make koina-up` first)
 NEW_EVAL_CLUSTER_KOINA_URL ?= localhost:8500
@@ -1064,12 +1065,14 @@ eval-extra-small-acfm-minus-lcfm-pxd452-939: download-new-eval-results
 		--unlabelled-dir $(NEW_EVAL_PREDS_UNLABELLED_DIR) \
 		--projects "$(NEW_EVAL_RUN_PXD452_939)" \
 		--output-dir $(NEW_EVAL_PLOTS_UNLABELLED_DIR)
+	$(MAKE) upload-new-eval-plots-unlabelled
 
 analyze-upscored-fps-new-eval: download-new-eval-results
 	mkdir -p $(NEW_EVAL_PLOTS_UPSCORED_FPS_DIR)
 	uv run python scripts/analyze_upscored_fps.py \
 		--predictions-root $(NEW_EVAL_PREDS_LABELLED_DIR) \
 		--output-dir $(NEW_EVAL_PLOTS_UPSCORED_FPS_DIR)
+	$(MAKE) upload-new-eval-plots-upscored-fps
 
 analyze-fdr-overlap-new-eval: download-new-eval-results annotate-new-eval-unlabelled
 	mkdir -p $(NEW_EVAL_PLOTS_FDR_OVERLAP_DIR)
@@ -1083,12 +1086,16 @@ upload-new-eval-plots-fdr-overlap:
 	$(S3_CP) --recursive $(NEW_EVAL_PLOTS_FDR_OVERLAP_DIR)/ $(NEW_EVAL_PLOTS_S3)/fdr_overlap/
 
 upload-new-eval-plots-unlabelled:
+	@test -d "$(NEW_EVAL_PLOTS_UNLABELLED_DIR)" || \
+		(echo "Missing plots dir: $(NEW_EVAL_PLOTS_UNLABELLED_DIR)" && exit 1)
 	$(S3_CP) --recursive $(NEW_EVAL_PLOTS_UNLABELLED_DIR)/ $(NEW_EVAL_PLOTS_S3)/unlabelled/
 
 upload-new-eval-plots-novelty:
 	$(S3_CP) --recursive $(NEW_EVAL_PLOTS_NOVELTY_DIR)/ $(NEW_EVAL_PLOTS_S3)/novelty/
 
 upload-new-eval-plots-upscored-fps:
+	@test -d "$(NEW_EVAL_PLOTS_UPSCORED_FPS_DIR)" || \
+		(echo "Missing plots dir: $(NEW_EVAL_PLOTS_UPSCORED_FPS_DIR)" && exit 1)
 	$(S3_CP) --recursive $(NEW_EVAL_PLOTS_UPSCORED_FPS_DIR)/ $(NEW_EVAL_PLOTS_S3)/upscored_fps/
 
 upload-new-eval-plots-feature-importance:
@@ -1207,6 +1214,13 @@ ablation-extra-small: download-extra-small-train-data download-extra-small-mass-
 ablation-extra-small-cluster: download-cluster-ablation-inputs koina-up
 	$(MAKE) ablation-extra-small-run $(NEW_EVAL_CLUSTER_KOINA_MAKE)
 
+## Regenerate ablation plots from saved eval_results (no training / inference)
+replot-new-eval-ablations:
+	uv run python scripts/run_feature_ablations.py \
+		--output-dir $(NEW_EVAL_PLOTS_ABLATIONS_DIR) \
+		--plots-only \
+		--plot-format both
+
 replot-novelty-plots-new-eval:
 	mkdir -p $(NEW_EVAL_PLOTS_NOVELTY_DIR)/chymotrypsin \
 		$(NEW_EVAL_PLOTS_NOVELTY_DIR)/proteometools
@@ -1238,22 +1252,30 @@ upload-new-eval-plots-all: new-eval-plots upload-new-eval-plots
 ## GPU + koina-up: feature_importance, ablations
 #########################################################
 
-cluster-new-eval-fdr-overlap: download-cluster-new-eval-cpu-inputs \
-	annotate-new-eval-unlabelled analyze-fdr-overlap-new-eval upload-new-eval-plots-fdr-overlap
+cluster-new-eval-fdr-overlap:
+	$(MAKE) download-cluster-new-eval-cpu-inputs
+	$(MAKE) annotate-new-eval-unlabelled
+	$(MAKE) analyze-fdr-overlap-new-eval
+	$(MAKE) upload-new-eval-plots-fdr-overlap
 
-cluster-new-eval-acfm-minus-lcfm-pxd452-939: download-new-eval-results \
-	eval-extra-small-acfm-minus-lcfm-pxd452-939 upload-new-eval-plots-unlabelled
+cluster-new-eval-acfm-minus-lcfm-pxd452-939:
+	$(MAKE) eval-extra-small-acfm-minus-lcfm-pxd452-939
 
-cluster-new-eval-novelty: download-cluster-new-eval-cpu-inputs replot-novelty-plots-new-eval \
-	upload-new-eval-plots-novelty
+cluster-new-eval-novelty:
+	$(MAKE) download-cluster-new-eval-cpu-inputs
+	$(MAKE) replot-novelty-plots-new-eval
+	$(MAKE) upload-new-eval-plots-novelty
 
-cluster-new-eval-upscored-fps: download-new-eval-results analyze-upscored-fps-new-eval \
-	upload-new-eval-plots-upscored-fps
+cluster-new-eval-upscored-fps:
+	$(MAKE) analyze-upscored-fps-new-eval
 
-cluster-new-eval-feature-importance: feature-analysis-extra-small-cluster \
-	upload-new-eval-plots-feature-importance
+cluster-new-eval-feature-importance:
+	$(MAKE) feature-analysis-extra-small-cluster
+	$(MAKE) upload-new-eval-plots-feature-importance
 
-cluster-new-eval-ablations: ablation-extra-small-cluster upload-new-eval-plots-ablations
+cluster-new-eval-ablations:
+	$(MAKE) ablation-extra-small-cluster
+	$(MAKE) upload-new-eval-plots-ablations
 
 ## Feature-shift plots: woundfluids lcfm (labelled) vs acfm (unlabelled)
 .PHONY: predict-feature-shift-woundfluids plot-feature-shift-woundfluids feature-shift-woundfluids

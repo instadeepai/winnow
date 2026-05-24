@@ -131,9 +131,10 @@ _NICE_LABELS: dict[str, str] = {
     "max_ion_gap": "Max ion gap",
     "spectral_angle": "Spectral angle",
     "xcorr": "Cross-correlation (XCorr)",
-    "mass_error_ppm": "Precursor mass error (ppm)",
-    "log_abs_mass_error_ppm": "Log-absolute mass error (ln ppm)",
-    "mass_error_da": "Precursor mass error (Da)",
+    "mass_error_ppm": "Precursor mass error",
+    "log_abs_mass_error_ppm": "Log-absolute mass error",
+    "log_abs_mass_error_da": "Log-absolute mass error",
+    "mass_error_da": "Precursor mass error",
     "irt_error": "iRT prediction error",
     "confidence": "Model confidence",
     "margin": "Beam margin",
@@ -553,17 +554,49 @@ def plot_mass_error(df: pd.DataFrame, output_dir: Path) -> None:
 
     fig, _ = plot_kde_by_class(
         work,
+        raw_col,
+        title=f"{_nice_label(raw_col)} distribution",
+    )
+    _save_fig(fig, f"02a_{raw_col}_kde", output_dir)
+
+    fig, _ = plot_feature_vs_confidence(
+        work,
+        raw_col,
+        title=f"{_nice_label(raw_col)} vs model confidence",
+    )
+    _save_fig(fig, f"02b_{raw_col}_vs_confidence", output_dir)
+
+    fig, _ = plot_kde_by_class(
+        work,
         log_col,
         title="Log-absolute precursor mass error distribution",
     )
-    _save_fig(fig, "02a_mass_error_kde", output_dir)
+    _save_fig(fig, "02c_mass_error_log_kde", output_dir)
 
     fig, _ = plot_feature_vs_confidence(
         work,
         log_col,
         title="Log-absolute precursor mass error vs model confidence",
     )
-    _save_fig(fig, "02b_mass_error_vs_confidence", output_dir)
+    _save_fig(fig, "02d_mass_error_log_vs_confidence", output_dir)
+
+    if raw_col == "mass_error_da":
+        da_ylim = (-0.2, 0.2)
+        fig, _ = plot_kde_by_class(
+            work,
+            raw_col,
+            title=f"{_nice_label(raw_col)} distribution",
+            clip=da_ylim,
+        )
+        _save_fig(fig, "02e_mass_error_da_kde_within_0.2da", output_dir)
+
+        fig, _ = plot_feature_vs_confidence(
+            work,
+            raw_col,
+            title=f"{_nice_label(raw_col)} vs model confidence",
+            ylim=da_ylim,
+        )
+        _save_fig(fig, "02f_mass_error_da_vs_confidence_within_0.2da", output_dir)
 
 
 def plot_mirror_spectra(df_meta: pd.DataFrame, output_dir: Path) -> None:

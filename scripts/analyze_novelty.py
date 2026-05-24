@@ -12,6 +12,12 @@ from the standard tryptic database-search training distribution:
    after FDR, compare raw InstaNovo versus Winnow calibrated scores, and
    quantify calibration shifts (``calibrated_confidence - confidence``).
 
+   Inputs are **full search space** Winnow predictions (acfm / unlabelled eval:
+   all candidate spectra, not the labelled database-search subset and not
+   acfm-minus-lcfm).  The ``proteome_hit`` column flags predictions whose
+   stripped sequence occurs in the reference proteome FASTA; plots and tables
+   label this cohort **full search space**.
+
    *Non-tryptic* is defined solely by the C-terminal residue of the
    mod-stripped, I/L-normalised prediction.  N-terminal context is not
    checked because positional information is lost in the substring proteome
@@ -76,8 +82,16 @@ _PROTEOME_JOIN_SEP = "\x1f"
 
 FDR_THRESHOLDS = [0.01, 0.05, 0.10]
 
+# Display label for the ``proteome_hit`` cohort (full-search / acfm evaluation).
+FULL_SEARCH_SPACE_LABEL = "full search space"
+COHORT_FULL_SEARCH = "full_search_space"
+COHORT_FULL_SEARCH_AT_FDR = "full_search_space_at_fdr"
+
 _NONTRYPTIC_CALIBRATION_SCATTER_MAX_POINTS = 10_000
 _NONTRYPTIC_CALIBRATION_SCATTER_RANDOM_STATE = 42
+_C_TERMINUS_ORDER = ("Tryptic (K/R)", "Non-tryptic")
+_NONTRYPTIC_GROUP_ALPHA = 0.6
+_TRYPTIC_GROUP_ALPHA = 0.7
 
 FEATURE_COLUMNS = [
     "spectral_angle",
@@ -231,11 +245,24 @@ def _is_tryptic_cterm(seq: str) -> bool:
     return stripped[-1] in ("K", "R")
 
 
+def _nontryptic_full_search_panel_title(fdr_t: float, n_psms: int) -> str:
+    """Subplot title for FDR-filtered full-search-space PSMs."""
+    pct = int(fdr_t * 100)
+    return (
+        f"{FULL_SEARCH_SPACE_LABEL.title()} identifications at {pct}% FDR\n"
+        f"(n={n_psms:,})"
+    )
+
+
 def _nontryptic_annotate(
     df: pl.DataFrame,
     fasta_path: Path,
 ) -> pl.DataFrame:
-    """Annotate predictions with proteome-hit and tryptic-terminus flags."""
+    """Annotate full-search predictions with proteome and tryptic-terminus flags.
+
+    ``proteome_hit`` is True when the mod-stripped prediction is a substring of
+    the reference proteome FASTA (same rule as ``annotate_preds_proteome_hits``).
+    """
     haystack = _load_proteome_haystack(fasta_path)
 
     processed = df["prediction"].map_elements(
@@ -281,7 +308,7 @@ def _nontryptic_terminus_proportions_table(df: pd.DataFrame) -> pd.DataFrame:
         _terminus_count_row(df, cohort="all_predictions", fdr_threshold=None),
         _terminus_count_row(
             df[df["proteome_hit"]],
-            cohort="proteome_hit",
+            cohort=COHORT_FULL_SEARCH,
             fdr_threshold=None,
         ),
     ]
@@ -297,7 +324,7 @@ def _nontryptic_terminus_proportions_table(df: pd.DataFrame) -> pd.DataFrame:
         rows.append(
             _terminus_count_row(
                 retained[retained["proteome_hit"]],
-                cohort="proteome_hit_at_fdr",
+                cohort=COHORT_FULL_SEARCH_AT_FDR,
                 fdr_threshold=fdr_t,
             )
         )
@@ -345,7 +372,7 @@ def _nontryptic_calibration_delta_rows(
 
 
 def _nontryptic_calibration_delta_table(df: pd.DataFrame) -> pd.DataFrame:
-    """Mean calibration shift (calibrated - raw) by terminus and cohort."""
+    """Mean calibration shift by terminus and cohort."""
     if "confidence" not in df.columns:
         return pd.DataFrame()
 
@@ -364,7 +391,7 @@ def _nontryptic_calibration_delta_table(df: pd.DataFrame) -> pd.DataFrame:
     rows.extend(
         _nontryptic_calibration_delta_rows(
             work[work["proteome_hit"]],
-            cohort="proteome_hit",
+            cohort=COHORT_FULL_SEARCH,
             fdr_threshold=None,
         )
     )
@@ -373,7 +400,7 @@ def _nontryptic_calibration_delta_table(df: pd.DataFrame) -> pd.DataFrame:
         rows.extend(
             _nontryptic_calibration_delta_rows(
                 retained,
-                cohort="proteome_hit_at_fdr",
+                cohort=COHORT_FULL_SEARCH_AT_FDR,
                 fdr_threshold=fdr_t,
             )
         )
@@ -397,7 +424,7 @@ def _nontryptic_summary_table(df: pd.DataFrame) -> pd.DataFrame:
             {
                 "fdr_threshold": fdr_t,
                 "n_retained": n_retained,
-                "n_proteome_hit": n_hit,
+                "n_full_search_space": n_hit,
                 "n_tryptic_hit": n_tryp,
                 "n_non_tryptic_hit": n_non,
                 "pct_non_tryptic_among_hits": (
@@ -424,6 +451,20 @@ def _nontryptic_score_label(score_col: str) -> str:
     return "Calibrated confidence"
 
 
+def _finalize_nontryptic_violin_figure(
+    fig: plt.Figure,
+    axes: list[plt.Axes],
+    *,
+    y_label: str,
+    suptitle: str,
+) -> None:
+    """Apply shared y-axis label and suptitle after multi-panel violin plots."""
+    if len(axes) > 0:
+        axes[0].set_ylabel(y_label)
+    fig.tight_layout(rect=[0, 0, 1, 0.92])
+    fig.suptitle(suptitle, fontsize=13, y=0.98)
+
+
 def _plot_nontryptic_score_by_terminus(
     df: pd.DataFrame,
     out_dir: Path,
@@ -438,32 +479,43 @@ def _plot_nontryptic_score_by_terminus(
         return
 
     df = _add_q_values(df)
-    n_cols = len(FDR_THRESHOLDS)
-    fig, axes = plt.subplots(1, n_cols, figsize=(5 * n_cols, 5), sharey=True)
-    if n_cols == 1:
-        axes = [axes]
-
-    palette = {"Tryptic (K/R)": _MAIN_LINE_COLOUR, "Non-tryptic": _NOVEL_COLOUR}
     y_label = _nontryptic_score_label(score_col)
+    palette = {"Tryptic (K/R)": _MAIN_LINE_COLOUR, "Non-tryptic": _NOVEL_COLOUR}
 
-    for ax, fdr_t in zip(axes, FDR_THRESHOLDS):
+    panels: list[tuple[float, pd.DataFrame]] = []
+    for fdr_t in FDR_THRESHOLDS:
         retained = df[(df["psm_q_value"] <= fdr_t) & df["proteome_hit"]]
         retained = retained.dropna(subset=[score_col])
         if len(retained) < 5:
-            ax.set_title(
-                f"Too few proteome-hit PSMs at {int(fdr_t * 100)}% FDR\n"
+            print(
+                f"  skipping {int(fdr_t * 100)}% FDR panel in {save_name} "
                 f"(n={len(retained):,})"
             )
-            ax.set_visible(False)
             continue
         retained = retained.copy()
         retained["C-terminus"] = retained["tryptic_cterm"].map(
             {True: "Tryptic (K/R)", False: "Non-tryptic"},
         )
+        panels.append((fdr_t, retained))
+
+    if not panels:
+        print(
+            f"  skipping {save_name} (no FDR panels with enough "
+            f"{FULL_SEARCH_SPACE_LABEL} PSMs)"
+        )
+        return
+
+    n_cols = len(panels)
+    fig, axes = plt.subplots(1, n_cols, figsize=(5 * n_cols, 5), sharey=True)
+    if n_cols == 1:
+        axes = [axes]
+
+    for ax, (fdr_t, retained) in zip(axes, panels):
         sns.violinplot(
             data=retained,
             x="C-terminus",
             y=score_col,
+            order=list(_C_TERMINUS_ORDER),
             palette=palette,
             ax=ax,
             inner="quartile",
@@ -471,16 +523,12 @@ def _plot_nontryptic_score_by_terminus(
             linewidth=0.8,
         )
         ax.set_xlabel("")
-        ax.set_ylabel(y_label)
         pct = int(fdr_t * 100)
-        ax.set_title(
-            f"Proteome-hit identifications at {pct}% FDR\n(n={len(retained):,})"
-        )
+        ax.set_title(_nontryptic_full_search_panel_title(fdr_t, len(retained)))
         ax.grid(False)
         _spine_fmt(ax)
 
-    fig.suptitle(suptitle, fontsize=13)
-    fig.tight_layout()
+    _finalize_nontryptic_violin_figure(fig, axes, y_label=y_label, suptitle=suptitle)
     _save(fig, out_dir, save_name)
 
 
@@ -498,7 +546,7 @@ def _plot_nontryptic_conf_by_terminus(
         score_col="calibrated_confidence",
         save_name=f"{prefix}_conf_by_terminus",
         suptitle=(
-            f"Calibrated confidence for {dataset_label} proteome-hit PSMs\n"
+            f"Calibrated confidence for {dataset_label} {FULL_SEARCH_SPACE_LABEL} PSMs\n"
             "by C-terminal residue"
         ),
     )
@@ -518,7 +566,7 @@ def _plot_nontryptic_raw_conf_by_terminus(
         score_col="confidence",
         save_name=f"{prefix}_raw_conf_by_terminus",
         suptitle=(
-            f"Raw InstaNovo confidence for {dataset_label} proteome-hit PSMs\n"
+            f"Raw InstaNovo confidence for {dataset_label} {FULL_SEARCH_SPACE_LABEL} PSMs\n"
             "by C-terminal residue"
         ),
     )
@@ -542,22 +590,22 @@ def _plot_nontryptic_overlapping_score_histogram(
     bins = 50
 
     ax.hist(
-        tryp,
-        bins=bins,
-        alpha=0.6,
-        label=f"Tryptic (K/R, n={len(tryp):,})",
-        density=False,
-        edgecolor="black",
-        color=_MAIN_LINE_COLOUR,
-    )
-    ax.hist(
         non_tryp,
         bins=bins,
-        alpha=0.6,
+        alpha=_NONTRYPTIC_GROUP_ALPHA,
         label=f"Non-tryptic (n={len(non_tryp):,})",
         density=False,
         edgecolor="black",
         color=_NOVEL_COLOUR,
+    )
+    ax.hist(
+        tryp,
+        bins=bins,
+        alpha=_TRYPTIC_GROUP_ALPHA,
+        label=f"Tryptic (K/R, n={len(tryp):,})",
+        density=False,
+        edgecolor="black",
+        color=_MAIN_LINE_COLOUR,
     )
 
     all_vals = np.concatenate([tryp, non_tryp]) if len(non_tryp) else tryp
@@ -567,12 +615,12 @@ def _plot_nontryptic_overlapping_score_histogram(
     x_grid = np.linspace(x_min, x_max, 300)
     bin_width = (x_max - x_min) / bins if bins > 1 else 1.0
 
-    if len(tryp) > 1:
-        y_tryp = gaussian_kde(tryp)(x_grid) * len(tryp) * bin_width
-        ax.plot(x_grid, y_tryp, color=_MAIN_LINE_COLOUR, lw=1.5)
     if len(non_tryp) > 1:
         y_non = gaussian_kde(non_tryp)(x_grid) * len(non_tryp) * bin_width
         ax.plot(x_grid, y_non, color=_NOVEL_COLOUR, lw=1.5)
+    if len(tryp) > 1:
+        y_tryp = gaussian_kde(tryp)(x_grid) * len(tryp) * bin_width
+        ax.plot(x_grid, y_tryp, color=_MAIN_LINE_COLOUR, lw=1.5)
 
     ax.set_xlabel(_nontryptic_score_label(score_col))
     ax.set_ylabel("Frequency")
@@ -624,7 +672,7 @@ def _plot_nontryptic_score_histograms_at_fdr(
     prefix: str = "nontryptic_digest",
     dataset_label: str = "Non-tryptic digest",
 ) -> None:
-    """Calibrated confidence histogram at 5% FDR for proteome hits."""
+    """Calibrated confidence histogram at 5% FDR for full search space PSMs."""
     df = _add_q_values(df)
     retained = df[(df["psm_q_value"] <= 0.05) & df["proteome_hit"]]
     _plot_nontryptic_score_histograms(
@@ -632,7 +680,10 @@ def _plot_nontryptic_score_histograms_at_fdr(
         out_dir,
         score_col="calibrated_confidence",
         save_name=f"{prefix}_score_histograms",
-        title=f"Calibrated confidence for {dataset_label} proteome hits at 5% FDR",
+        title=(
+            f"Calibrated confidence for {dataset_label} {FULL_SEARCH_SPACE_LABEL} "
+            "at 5% FDR"
+        ),
         subset=retained,
     )
 
@@ -644,7 +695,7 @@ def _plot_nontryptic_raw_score_histograms_at_fdr(
     prefix: str = "nontryptic_digest",
     dataset_label: str = "Non-tryptic digest",
 ) -> None:
-    """Raw InstaNovo confidence histogram at 5% FDR for proteome hits."""
+    """Raw InstaNovo confidence histogram at 5% FDR for full search space PSMs."""
     df = _add_q_values(df)
     retained = df[(df["psm_q_value"] <= 0.05) & df["proteome_hit"]]
     _plot_nontryptic_score_histograms(
@@ -652,7 +703,10 @@ def _plot_nontryptic_raw_score_histograms_at_fdr(
         out_dir,
         score_col="confidence",
         save_name=f"{prefix}_raw_score_histograms",
-        title=f"Raw InstaNovo confidence for {dataset_label} proteome hits at 5% FDR",
+        title=(
+            f"Raw InstaNovo confidence for {dataset_label} {FULL_SEARCH_SPACE_LABEL} "
+            "at 5% FDR"
+        ),
         subset=retained,
     )
 
@@ -716,22 +770,22 @@ def _plot_nontryptic_full_score_histograms(
         tryp = subset.loc[subset["tryptic_cterm"], score_col].to_numpy()
         non_tryp = subset.loc[~subset["tryptic_cterm"], score_col].to_numpy()
         ax.hist(
-            tryp,
-            bins=bins,
-            alpha=0.6,
-            label=f"Tryptic (K/R, n={len(tryp):,})",
-            density=False,
-            edgecolor="black",
-            color=_MAIN_LINE_COLOUR,
-        )
-        ax.hist(
             non_tryp,
             bins=bins,
-            alpha=0.6,
+            alpha=_NONTRYPTIC_GROUP_ALPHA,
             label=f"Non-tryptic (n={len(non_tryp):,})",
             density=False,
             edgecolor="black",
             color=_NOVEL_COLOUR,
+        )
+        ax.hist(
+            tryp,
+            bins=bins,
+            alpha=_TRYPTIC_GROUP_ALPHA,
+            label=f"Tryptic (K/R, n={len(tryp):,})",
+            density=False,
+            edgecolor="black",
+            color=_MAIN_LINE_COLOUR,
         )
         ax.set_xlabel(y_label)
         ax.set_ylabel("Frequency")
@@ -740,11 +794,12 @@ def _plot_nontryptic_full_score_histograms(
         ax.grid(False)
         _spine_fmt(ax)
 
+    fig.tight_layout(rect=[0, 0, 1, 0.92])
     fig.suptitle(
         f"Score distributions for all {dataset_label} predictions by C-terminal residue",
         fontsize=13,
+        y=0.98,
     )
-    fig.tight_layout()
     _save(fig, out_dir, f"{prefix}_score_histogram_full_panel")
 
 
@@ -770,10 +825,10 @@ def _plot_nontryptic_calibration_scatter(
     n_show = len(plot_df)
     fig, ax = plt.subplots(figsize=(7.5, 7))
     panels = [
-        ("Tryptic (K/R)", _MAIN_LINE_COLOUR, True),
-        ("Non-tryptic", _NOVEL_COLOUR, False),
+        ("Non-tryptic", _NOVEL_COLOUR, False, _NONTRYPTIC_GROUP_ALPHA),
+        ("Tryptic (K/R)", _MAIN_LINE_COLOUR, True, _TRYPTIC_GROUP_ALPHA),
     ]
-    for label, colour, tryptic in panels:
+    for label, colour, tryptic, alpha in panels:
         sub = plot_df.loc[plot_df["tryptic_cterm"] == tryptic]
         if len(sub) == 0:
             continue
@@ -782,7 +837,7 @@ def _plot_nontryptic_calibration_scatter(
             sub["calibrated_confidence"],
             c=colour,
             s=12,
-            alpha=0.3,
+            alpha=alpha,
             rasterized=True,
             label=f"{label}",
         )
@@ -820,39 +875,48 @@ def _plot_nontryptic_delta_by_terminus(
     prefix: str = "nontryptic_digest",
     dataset_label: str = "Non-tryptic digest",
 ) -> None:
-    """Calibration shift (calibrated - raw) by C-terminal residue."""
+    """Calibration shift by C-terminal residue."""
     if "confidence" not in df.columns:
         print(f"  skipping {prefix}_delta_by_terminus (missing confidence)")
         return
 
     df = _add_q_values(df)
-    n_cols = len(FDR_THRESHOLDS)
-    fig, axes = plt.subplots(1, n_cols, figsize=(5 * n_cols, 5), sharey=True)
-    if n_cols == 1:
-        axes = [axes]
-
+    y_label = "Calibration shift"
     palette = {"Tryptic (K/R)": _MAIN_LINE_COLOUR, "Non-tryptic": _NOVEL_COLOUR}
     work = df.copy()
     work["delta_confidence"] = work["calibrated_confidence"] - work["confidence"]
 
-    for ax, fdr_t in zip(axes, FDR_THRESHOLDS):
+    panels: list[tuple[float, pd.DataFrame]] = []
+    for fdr_t in FDR_THRESHOLDS:
         retained = work[(work["psm_q_value"] <= fdr_t) & work["proteome_hit"]]
         retained = retained.dropna(subset=["delta_confidence"])
         if len(retained) < 5:
-            ax.set_title(
-                f"Too few proteome-hit PSMs at {int(fdr_t * 100)}% FDR\n"
-                f"(n={len(retained):,})"
+            print(
+                f"  skipping {int(fdr_t * 100)}% FDR panel in "
+                f"{prefix}_delta_by_terminus (n={len(retained):,})"
             )
-            ax.set_visible(False)
             continue
         retained = retained.copy()
         retained["C-terminus"] = retained["tryptic_cterm"].map(
             {True: "Tryptic (K/R)", False: "Non-tryptic"},
         )
+        panels.append((fdr_t, retained))
+
+    if not panels:
+        print(f"  skipping {prefix}_delta_by_terminus (no FDR panels with enough PSMs)")
+        return
+
+    n_cols = len(panels)
+    fig, axes = plt.subplots(1, n_cols, figsize=(5 * n_cols, 5), sharey=True)
+    if n_cols == 1:
+        axes = [axes]
+
+    for ax, (fdr_t, retained) in zip(axes, panels):
         sns.violinplot(
             data=retained,
             x="C-terminus",
             y="delta_confidence",
+            order=list(_C_TERMINUS_ORDER),
             palette=palette,
             ax=ax,
             inner="quartile",
@@ -861,20 +925,20 @@ def _plot_nontryptic_delta_by_terminus(
         )
         ax.axhline(0.0, ls="--", color=_IDEAL_LINE_COLOUR, lw=1)
         ax.set_xlabel("")
-        ax.set_ylabel("Calibration shift (calibrated − raw)")
         pct = int(fdr_t * 100)
-        ax.set_title(
-            f"Proteome-hit identifications at {pct}% FDR\n(n={len(retained):,})"
-        )
+        ax.set_title(_nontryptic_full_search_panel_title(fdr_t, len(retained)))
         ax.grid(False)
         _spine_fmt(ax)
 
-    fig.suptitle(
-        f"Winnow calibration shift for {dataset_label} proteome-hit PSMs\n"
-        "by C-terminal residue",
-        fontsize=13,
+    _finalize_nontryptic_violin_figure(
+        fig,
+        axes,
+        y_label=y_label,
+        suptitle=(
+            f"Winnow calibration shift for {dataset_label} {FULL_SEARCH_SPACE_LABEL} PSMs\n"
+            "by C-terminal residue"
+        ),
     )
-    fig.tight_layout()
     _save(fig, out_dir, f"{prefix}_delta_by_terminus")
 
 
@@ -931,7 +995,7 @@ def _feature_median_z_score_table(
 
 
 def _nontryptic_feature_table(df: pd.DataFrame) -> pd.DataFrame:
-    """Median feature values for tryptic vs non-tryptic proteome hits at 5% FDR."""
+    """Median feature values for tryptic vs non-tryptic full search space PSMs at 5% FDR."""
     df = _add_q_values(df)
     retained = df[(df["psm_q_value"] <= 0.05) & df["proteome_hit"]]
     available = [c for c in FEATURE_COLUMNS if c in retained.columns]
@@ -957,7 +1021,7 @@ def _plot_grouped_feature_z_scores(
     save_name: str,
     title: str,
     group_style: list[tuple[str, str, str]],
-    z_score_ylabel: str = "Median z-score (vs pooled PSMs at 5% FDR)",
+    z_score_ylabel: str = "Median z-score",
 ) -> None:
     """Grouped bar chart of pooled z-scored feature medians."""
     if feat_df.empty:
@@ -1030,7 +1094,7 @@ def _plot_nontryptic_feature_comparison(
         save_name=f"{prefix}_feature_comparison",
         title=(
             f"Median feature values for {dataset_label} tryptic versus "
-            "non-tryptic proteome hits at 5% FDR"
+            f"non-tryptic {FULL_SEARCH_SPACE_LABEL} PSMs at 5% FDR"
         ),
         group_style=[
             ("tryptic", "Tryptic (K/R)", _MAIN_LINE_COLOUR),
@@ -1054,10 +1118,10 @@ def _nontryptic_digest_analysis(
     df_pl = _load_data(predictions_dir)
     print(f"  {df_pl.height:,} rows loaded")
 
-    print(f"Annotating with proteome hits from {fasta}")
+    print(f"Annotating {FULL_SEARCH_SPACE_LABEL} predictions against {fasta}")
     df_pl = _nontryptic_annotate(df_pl, fasta)
     n_hits = df_pl.filter(pl.col("proteome_hit")).height
-    print(f"  {n_hits:,} proteome hits")
+    print(f"  {n_hits:,} PSMs in {FULL_SEARCH_SPACE_LABEL} (proteome substring match)")
 
     df = df_pl.to_pandas()
 
@@ -1108,7 +1172,10 @@ def nontryptic_digest(
         Path,
         typer.Option(
             "--predictions-dir",
-            help="winnow predict output folder for the non-tryptic enzyme digest.",
+            help=(
+                "winnow predict output folder for the non-tryptic enzyme digest "
+                "(full search space / acfm)."
+            ),
         ),
     ],
     fasta: Annotated[
@@ -1150,7 +1217,7 @@ def chymotrypsin(
         Path,
         typer.Option(
             "--predictions-dir",
-            help="winnow predict output folder for HeLa chymotrypsin (acfm).",
+            help="winnow predict output folder for HeLa chymotrypsin (full search space / acfm).",
         ),
     ],
     fasta: Annotated[

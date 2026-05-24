@@ -60,6 +60,9 @@ DATASET_DISPLAY_NAMES: dict[str, str] = {
     "20170609_QEh1_LC1_ChCh_FAMA_SA_HLAIIp_JY_all_R1": "HLA Class II (JY cells)",
 }
 
+_FOLDER_SUFFIXES = ("_annotated", "_labelled", "_raw", "_unlabelled")
+_DISPLAY_NAME_LOOKUP = {k.lower(): v for k, v in DATASET_DISPLAY_NAMES.items()}
+
 # Paul Tol "bright" palette (colour-blind safe)
 _PALETTE = [
     "#4477AA",
@@ -83,9 +86,23 @@ _DIAGNOSTIC_ALPHAS = (0.01, 0.05, 0.10)
 _HOEFFDING_DELTA = 0.05
 
 
+def _normalize_project_key(key: str) -> str:
+    """Strip eval suffixes and nested path segments for display-name lookup."""
+    key = key.strip()
+    if "/" in key:
+        key = key.rsplit("/", 1)[-1]
+    for suffix in _FOLDER_SUFFIXES:
+        if key.endswith(suffix):
+            return key[: -len(suffix)]
+    return key
+
+
 def _display_name(key: str) -> str:
     """Look up the publication-ready display name for a dataset key."""
-    return DATASET_DISPLAY_NAMES.get(key, key)
+    normalized = _normalize_project_key(key)
+    if normalized in DATASET_DISPLAY_NAMES:
+        return DATASET_DISPLAY_NAMES[normalized]
+    return _DISPLAY_NAME_LOOKUP.get(normalized.lower(), normalized)
 
 
 def _ground_truth_qualifier(eval_type: str) -> str:
