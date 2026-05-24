@@ -4,13 +4,15 @@
 For each project (see ``plot_eval_results.py`` CLI pattern), at 1 %, 5 %, and 10 %
 nominal FDR:
 
-  * Count retained PSMs / unique peptides vs database-search reference peptides.
+  * Count retained PSMs / unique peptides vs database-search reference peptides at
+    the same nominal FDR (Winnow: non-parametric on calibrated confidence;
+    database search: database-grounded on raw confidence).
   * Match rule: exact ProForma sequence after I/L equivalence; PTM differences
     are not a match.
   * Categorise discordant calls (partial match, PTM candidate, single-AA variant,
     near-miss edit distance 2-3, fully discordant).
-  * Full-search Venns: Winnow (calibrated confidence FDR) vs database search unique
-    peptides at the same nominal FDR (q-values fit on raw database confidence).
+  * Full-search Venns: Winnow (non-parametric calibrated confidence) vs database
+    search unique peptides at the same nominal FDR (database-grounded raw confidence).
   * Violin plots comparing database-matched vs fully novel retained PSMs.
 
 Inputs are ``winnow predict`` output folders arranged as subdirectories under two
@@ -38,6 +40,7 @@ import yaml
 from matplotlib_venn import venn2
 from rich.logging import RichHandler
 
+from winnow.fdr.database_grounded import DatabaseGroundedFDRControl
 from winnow.fdr.nonparametric import NonParametricFDRControl
 
 logger = logging.getLogger(__name__)
@@ -73,6 +76,7 @@ _MOD_UNIMOD = re.compile(r"\[UNIMOD:\d+\]-?")
 _PXD_ACCESSION_PREFIX = "PXD"
 
 FDR_THRESHOLDS = [0.01, 0.05, 0.10]
+_DB_GROUNDED_DROP = 10
 RAW_CONFIDENCE_COL = "confidence"
 DB_Q_VALUE_COL = "db_psm_q_value"
 
@@ -548,6 +552,10 @@ def discover_project_pairs(
     return pairs
 
 
+def _effective_db_grounded_drop(n_rows: int, drop: int = _DB_GROUNDED_DROP) -> int:
+    return min(drop, max(0, n_rows - 1))
+
+
 def _add_q_values(
     df: pd.DataFrame,
     conf_col: str = "calibrated_confidence",
@@ -570,6 +578,37 @@ def _add_q_values(
         out = out.rename(columns={"psm_q_value": q_col})
     if existing_q is not None and q_col != "psm_q_value":
         out["psm_q_value"] = existing_q
+    return out
+
+
+def _add_database_grounded_q_values(
+    df: pd.DataFrame,
+    residue_masses: dict[str, float],
+    confidence_col: str = RAW_CONFIDENCE_COL,
+    *,
+    q_col: str = DB_Q_VALUE_COL,
+    correct_col: str = "correct",
+) -> pd.DataFrame:
+    """Attach PSM q-values from database-grounded FDR on *confidence_col*."""
+    if q_col in df.columns:
+        return df
+    if confidence_col not in df.columns:
+        raise ValueError(f"Missing confidence column {confidence_col!r}")
+    if "sequence" not in df.columns or "prediction" not in df.columns:
+        raise ValueError(
+            "Database-grounded FDR requires 'sequence' and 'prediction' columns"
+        )
+
+    work = df.drop(columns=[q_col, "psm_fdr"], errors="ignore").copy()
+    ctrl = DatabaseGroundedFDRControl(
+        confidence_feature=confidence_col,
+        residue_masses=residue_masses,
+        drop=_effective_db_grounded_drop(len(work)),
+    )
+    ctrl.fit(dataset=work.copy(), correct_column=correct_col)
+    out = ctrl.add_psm_q_value(work, confidence_col=confidence_col)
+    if q_col != "psm_q_value":
+        out = out.rename(columns={"psm_q_value": q_col})
     return out
 
 
@@ -650,17 +689,33 @@ def compute_overlap_table(
     df: pd.DataFrame,
     project: str,
     eval_type: str,
-    db_keys: set[str],
+    db_df: pd.DataFrame,
     discordance_cache: LabelledDiscordanceCache | DbDiscordanceCache,
+    residue_masses: dict[str, float],
     *,
     labelled_subset: bool = False,
 ) -> pd.DataFrame:
-    """Overlap summary at each FDR threshold."""
+    """Overlap summary at each FDR threshold.
+
+    Winnow uses non-parametric FDR on calibrated confidence (full-search run).
+    Database reference peptides use database-grounded FDR on raw confidence in the
+    database-labelled run (see ``plot_full_search_venn``).
+    """
     df = _add_q_values(df.copy())
-    n_db_peptides = len(db_keys)
+    db_scored = _add_database_grounded_q_values(
+        db_df.copy(),
+        residue_masses,
+        confidence_col=RAW_CONFIDENCE_COL,
+        q_col=DB_Q_VALUE_COL,
+    )
 
     rows: list[dict] = []
     for fdr_t in FDR_THRESHOLDS:
+        db_keys_at_fdr = _unique_peptides_at_fdr(
+            db_scored, "sequence", DB_Q_VALUE_COL, fdr_t
+        )
+        n_db_peptides = len(db_keys_at_fdr)
+
         retained = df[df["psm_q_value"] <= fdr_t].copy()
         n_retained = len(retained)
         if n_retained == 0:
@@ -677,7 +732,7 @@ def compute_overlap_table(
             is_match = retained["pred_key"] == retained["seq_key"]
         else:
             is_match = retained["prediction"].map(
-                lambda p: _is_db_match(str(p), db_keys)
+                lambda p: _is_db_match(str(p), db_keys_at_fdr)
             )
 
         n_matching = int(is_match.sum())
@@ -734,6 +789,7 @@ def _plot_venn_panels(
     *,
     winnow_label: str,
     suptitle: str,
+    residue_masses: dict[str, float] | None = None,
     db_df: pd.DataFrame | None = None,
     db_peptides_static: set[str] | None = None,
 ) -> None:
@@ -743,9 +799,12 @@ def _plot_venn_panels(
     winnow_scored = _add_q_values(winnow_df.copy())
     db_scored: pd.DataFrame | None = None
     if db_df is not None:
-        db_scored = _add_q_values(
+        if residue_masses is None:
+            raise ValueError("residue_masses required when db_df is provided")
+        db_scored = _add_database_grounded_q_values(
             db_df.copy(),
-            conf_col=RAW_CONFIDENCE_COL,
+            residue_masses,
+            confidence_col=RAW_CONFIDENCE_COL,
             q_col=DB_Q_VALUE_COL,
         )
 
@@ -806,12 +865,13 @@ def plot_full_search_venn(
     db_df: pd.DataFrame,
     project: str,
     plots_dir: Path,
+    residue_masses: dict[str, float],
 ) -> None:
     """Venn diagrams of FDR-filtered DB vs Winnow full-search unique peptides.
 
-    Database peptides are retained at each nominal FDR using q-values from a
-    non-parametric fit on ``confidence`` (raw database-search scores). Winnow
-    peptides use ``calibrated_confidence`` q-values on the full-search run.
+    Database peptides use database-grounded q-values on raw ``confidence`` in the
+    database-labelled run. Winnow peptides use non-parametric q-values on
+    ``calibrated_confidence`` in the full-search run.
     """
     display = _display_name(project)
     _plot_venn_panels(
@@ -819,10 +879,8 @@ def plot_full_search_venn(
         project,
         plots_dir / f"venn_{project}_full_search",
         winnow_label="Winnow",
-        suptitle=(
-            f"Database search vs Winnow full search at matched FDR for {display} "
-            "(DB q from raw confidence, Winnow q from calibrated confidence)"
-        ),
+        suptitle=f"Database search vs Winnow full search at matched FDR for {display}",
+        residue_masses=residue_masses,
         db_df=db_df,
     )
 
@@ -1034,11 +1092,12 @@ def generate_all_analyses(
         df,
         project,
         eval_type,
-        db_keys,
+        db_df,
         disc_cache,
+        residue_masses,
         labelled_subset=False,
     )
-    plot_full_search_venn(df, db_df, project, plots_dir)
+    plot_full_search_venn(df, db_df, project, plots_dir, residue_masses)
     plot_novel_feature_violins(
         df,
         db_keys,
