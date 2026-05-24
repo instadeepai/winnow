@@ -399,6 +399,133 @@ def predict_entry_point(
     logger.info("Prediction pipeline completed successfully.")
 
 
+def diagnose_calibration_entry_point(
+    overrides: Optional[List[str]] = None,
+    execute: bool = True,
+    config_dir: Optional[str] = None,
+) -> None:
+    """Run tail calibration diagnostics on a labelled holdout set."""
+    from hydra import initialize_config_dir, compose
+    from hydra.utils import instantiate
+    from omegaconf import OmegaConf
+
+    from winnow.calibration.calibrator import ProbabilityCalibrator
+    from winnow.calibration.diagnostics import (
+        resolve_diagnostics_labels,
+        run_calibration_diagnostic,
+        validate_label_config,
+        write_diagnostic_report,
+    )
+    from winnow.fdr.nonparametric import NonParametricFDRControl
+    from winnow.utils.config_path import get_primary_config_dir
+
+    primary_config_dir = get_primary_config_dir(config_dir)
+
+    with initialize_config_dir(
+        config_dir=str(primary_config_dir),
+        version_base="1.3",
+        job_name="winnow_diagnose_calibration",
+    ):
+        cfg = compose(config_name="diagnose_calibration", overrides=overrides)
+
+    if not execute:
+        print_config(cfg)
+        return
+
+    diag = cfg.diagnostics
+    label_column = diag.label_column if diag.label_column is not None else None
+    validate_label_config(diag.label_source, label_column)
+
+    logger.info("Starting calibration diagnostic pipeline.")
+    logger.info(f"Configuration: {cfg}")
+
+    data_loader = instantiate(cfg.data_loader)
+    dataset_params = dict(cfg.dataset)
+    dataset_params["data_path"] = dataset_params.pop("spectrum_path_or_directory")
+    dataset_params["predictions_path"] = dataset_params.pop("predictions_path", None)
+
+    dataset = data_loader.load(**dataset_params)
+    logger.info(f"Loaded: {len(dataset.metadata)} spectra")
+
+    dataset = filter_dataset(dataset)
+    logger.info(f"After filtering: {len(dataset.metadata)} spectra")
+
+    residue_masses = OmegaConf.to_container(cfg.residue_masses, resolve=True)
+    residue_remapping = OmegaConf.to_container(
+        getattr(cfg.data_loader, "residue_remapping", None) or {}, resolve=True
+    )
+
+    logger.info("Loading trained calibrator.")
+    calibrator = ProbabilityCalibrator.load(
+        pretrained_model_name_or_path=cfg.calibrator.pretrained_model_name_or_path,
+        cache_dir=cfg.calibrator.cache_dir,
+    )
+    logger.info("Calibrating scores.")
+    calibrator.predict(dataset)
+
+    # Resolve labels after predict: feature computation may filter invalid PSMs in place.
+    labels, resolved_label_column = resolve_diagnostics_labels(
+        dataset,
+        diag.label_source,
+        label_column,
+        residue_masses=residue_masses,
+        residue_remapping=residue_remapping,
+    )
+    logger.info(
+        f"Resolved labels via label_source={diag.label_source!r} "
+        f"(column={resolved_label_column!r})."
+    )
+
+    confidence_col = cfg.fdr_control.confidence_column
+    scores = dataset.metadata[confidence_col].to_numpy(dtype=float)
+
+    fdr_control = NonParametricFDRControl()
+    fdr_control.fit(dataset.metadata[confidence_col])
+    conf_cutoff = fdr_control.get_confidence_cutoff(
+        threshold=cfg.fdr_control.fdr_threshold
+    )
+    logger.info(
+        f"Operating confidence cutoff conf_cutoff={conf_cutoff:.4f} "
+        f"at nominal FDR={cfg.fdr_control.fdr_threshold}."
+    )
+
+    result = run_calibration_diagnostic(
+        scores=scores,
+        labels=labels.to_numpy(dtype=bool),
+        conf_cutoff=conf_cutoff,
+        nominal_fdr=cfg.fdr_control.fdr_threshold,
+        tolerance=diag.tolerance,
+        label_source=diag.label_source,
+        label_column=resolved_label_column,
+        min_tail_psms=diag.min_tail_psms,
+        n_bins=diag.n_bins,
+    )
+
+    write_diagnostic_report(
+        result,
+        diag.output_dir,
+        plot=diag.plot,
+        scores=scores,
+        labels=labels.to_numpy(dtype=bool),
+        n_bins=diag.n_bins,
+    )
+    logger.info(f"Wrote diagnostic report to {diag.output_dir}")
+
+    logger.info(
+        f"sTECE={result.stece:.5f}, TECE={result.tece:.5f}, "
+        f"N_tail={result.n_tail}, within_tolerance={result.within_tolerance}"
+    )
+    logger.info(result.interpretation)
+
+    if not result.within_tolerance:
+        logger.warning(
+            f"|sTECE|={abs(result.stece):.5f} exceeds tolerance={diag.tolerance:.5f}. "
+            "Reported FDR may deviate from the realised error rate at this threshold."
+        )
+        if diag.fail_on_warning:
+            raise typer.Exit(code=1)
+
+
 @app.command(
     name="train",
     help=(
@@ -519,6 +646,37 @@ def predict(
     predict_entry_point(overrides, config_dir=config_dir)
 
 
+@app.command(
+    name="diagnose-calibration",
+    help=(
+        "Assess tail calibration of confidence scores on a labelled holdout set.\n\n"
+        "Computes signed tail expected calibration error (sTECE) and TECE at the "
+        "FDR operating threshold, writes a reliability diagram, and warns when "
+        "|sTECE| exceeds `diagnostics.tolerance`.\n\n"
+        "[bold cyan]Required overrides:[/bold cyan]\n"
+        "  [dim]diagnostics.label_source=sequence[/dim]  # derive correct from sequence vs prediction\n"
+        "  [dim]diagnostics.label_source=precomputed diagnostics.label_column=proteome_hit[/dim]\n\n"
+        "[bold cyan]Quick start:[/bold cyan]\n"
+        "  [dim]winnow diagnose-calibration diagnostics.label_source=sequence[/dim]\n"
+    ),
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def diagnose_calibration(
+    ctx: typer.Context,
+    config_dir: Annotated[
+        Optional[str],
+        typer.Option(
+            "--config-dir",
+            "-cp",
+            help="Path to custom config directory (relative or absolute).",
+        ),
+    ] = None,
+) -> None:
+    """Run tail calibration diagnostics on a labelled holdout."""
+    overrides = ctx.args if ctx.args else None
+    diagnose_calibration_entry_point(overrides, config_dir=config_dir)
+
+
 @config_app.command(
     name="train",
     help=(
@@ -607,6 +765,31 @@ def config_predict(
     """Display the resolved prediction configuration."""
     overrides = ctx.args if ctx.args else None
     predict_entry_point(overrides, execute=False, config_dir=config_dir)
+
+
+@config_app.command(
+    name="diagnose-calibration",
+    help=(
+        "Display the resolved diagnose-calibration configuration without running.\n\n"
+        "[bold cyan]Usage:[/bold cyan]\n"
+        "  [dim]winnow config diagnose-calibration diagnostics.label_source=sequence[/dim]\n"
+    ),
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def config_diagnose_calibration(
+    ctx: typer.Context,
+    config_dir: Annotated[
+        Optional[str],
+        typer.Option(
+            "--config-dir",
+            "-cp",
+            help="Path to custom config directory (relative or absolute).",
+        ),
+    ] = None,
+) -> None:
+    """Display the resolved calibration diagnostic configuration."""
+    overrides = ctx.args if ctx.args else None
+    diagnose_calibration_entry_point(overrides, execute=False, config_dir=config_dir)
 
 
 if __name__ == "__main__":
