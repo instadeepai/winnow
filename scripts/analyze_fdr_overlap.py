@@ -599,17 +599,23 @@ def _add_database_grounded_q_values(
             "Database-grounded FDR requires 'sequence' and 'prediction' columns"
         )
 
-    work = df.drop(columns=[q_col, "psm_fdr"], errors="ignore").copy()
+    # Drop Winnow NP q-values before fitting; merge-based add_psm_q_value can
+    # leave duplicate psm_q_value_* columns and skip the rename to db_psm_q_value.
+    work = df.drop(
+        columns=[q_col, "psm_q_value", "psm_fdr", "fdr"],
+        errors="ignore",
+    ).copy()
     ctrl = DatabaseGroundedFDRControl(
         confidence_feature=confidence_col,
         residue_masses=residue_masses,
         drop=_effective_db_grounded_drop(len(work)),
     )
     ctrl.fit(dataset=work.copy(), correct_column=correct_col)
-    out = ctrl.add_psm_q_value(work, confidence_col=confidence_col)
-    if q_col != "psm_q_value":
-        out = out.rename(columns={"psm_q_value": q_col})
-    return out
+    q_df = ctrl.add_psm_q_value(
+        work[[confidence_col]].copy(), confidence_col=confidence_col
+    )
+    work[q_col] = q_df["psm_q_value"].values
+    return work
 
 
 def _unique_peptides_at_fdr(
