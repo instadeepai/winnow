@@ -15,9 +15,9 @@ nominal FDR:
 
 Inputs are ``winnow predict`` output folders arranged as subdirectories under two
 roots: an **unlabelled** tree (full-search Winnow predictions) and a **labelled**
-tree (database-search reference with ``sequence``). Each subfolder must contain
-``preds_and_fdr_metrics.csv``; ``metadata.csv`` is merged when present for violin
-plots.
+tree (database-search reference with ``sequence``). Each project folder (flat or
+``PXD*/<run>/`` nested) must contain ``preds_and_fdr_metrics.csv``;
+``metadata.csv`` is merged when present for violin plots.
 """
 
 from __future__ import annotations
@@ -69,6 +69,8 @@ sns.set_theme(style="white", palette=_PALETTE, context="paper", font_scale=1.5)
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _MOD_PLUS = re.compile(r"\(\+\d+\.?\d*\)-?")
 _MOD_UNIMOD = re.compile(r"\[UNIMOD:\d+\]-?")
+
+_PXD_ACCESSION_PREFIX = "PXD"
 
 FDR_THRESHOLDS = [0.01, 0.05, 0.10]
 RAW_CONFIDENCE_COL = "confidence"
@@ -412,6 +414,16 @@ def _preds_header(folder: Path) -> set[str] | None:
     return set(pd.read_csv(preds_path, nrows=0).columns.tolist())
 
 
+def _is_unlabelled_preds_folder(folder: Path) -> bool:
+    header = _preds_header(folder)
+    return header is not None and "sequence" not in header
+
+
+def _is_labelled_preds_folder(folder: Path) -> bool:
+    header = _preds_header(folder)
+    return header is not None and "sequence" in header
+
+
 def _load_from_folder(folder: Path) -> pd.DataFrame:
     """Load preds_and_fdr_metrics.csv merged with metadata.csv from a project folder."""
     preds_path = folder / "preds_and_fdr_metrics.csv"
@@ -432,52 +444,72 @@ def _load_from_folder(folder: Path) -> pd.DataFrame:
 
 
 def _discover_unlabelled_folders(root: Path) -> dict[str, Path]:
-    """Map project key -> full-search folder under ``root``."""
+    """Map project key -> full-search folder under ``root``.
+
+    Supports flat project folders (``{root}/PXD004732/``) and nested per-run
+    layouts (``{root}/PXD004452/<run>/``) used by new eval sets.
+    """
     projects: dict[str, Path] = {}
     if not root.is_dir():
         return projects
-    for child in sorted(root.iterdir()):
-        if not child.is_dir():
-            continue
-        header = _preds_header(child)
-        if header is None:
-            continue
-        if "sequence" in header:
-            continue
-        key = _project_key_from_folder(child.name)
+
+    def _register(key: str, folder: Path) -> None:
         if key in projects:
             logger.warning(
                 "Duplicate unlabelled project key %r: %s and %s",
                 key,
                 projects[key],
-                child,
+                folder,
             )
+            return
+        projects[key] = folder
+
+    for child in sorted(root.iterdir()):
+        if not child.is_dir():
             continue
-        projects[key] = child
+        if _is_unlabelled_preds_folder(child):
+            _register(_project_key_from_folder(child.name), child)
+            continue
+        if not child.name.startswith(_PXD_ACCESSION_PREFIX):
+            continue
+        for run_dir in sorted(child.iterdir()):
+            if run_dir.is_dir() and _is_unlabelled_preds_folder(run_dir):
+                _register(run_dir.name, run_dir)
     return projects
 
 
 def _discover_labelled_folders(root: Path) -> dict[str, Path]:
-    """Map project key -> database-reference folder under ``root``."""
+    """Map project key -> database-reference folder under ``root``.
+
+    Supports flat project folders (``{root}/PXD004732/``) and nested per-run
+    layouts (``{root}/PXD004452/<run>/``) used by new eval sets.
+    """
     projects: dict[str, Path] = {}
     if not root.is_dir():
         return projects
-    for child in sorted(root.iterdir()):
-        if not child.is_dir():
-            continue
-        header = _preds_header(child)
-        if header is None or "sequence" not in header:
-            continue
-        key = _project_key_from_folder(child.name)
+
+    def _register(key: str, folder: Path) -> None:
         if key in projects:
             logger.warning(
                 "Duplicate labelled project key %r: %s and %s",
                 key,
                 projects[key],
-                child,
+                folder,
             )
+            return
+        projects[key] = folder
+
+    for child in sorted(root.iterdir()):
+        if not child.is_dir():
             continue
-        projects[key] = child
+        if _is_labelled_preds_folder(child):
+            _register(_project_key_from_folder(child.name), child)
+            continue
+        if not child.name.startswith(_PXD_ACCESSION_PREFIX):
+            continue
+        for run_dir in sorted(child.iterdir()):
+            if run_dir.is_dir() and _is_labelled_preds_folder(run_dir):
+                _register(run_dir.name, run_dir)
     return projects
 
 
