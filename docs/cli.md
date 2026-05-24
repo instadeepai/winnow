@@ -44,6 +44,9 @@ winnow config predict
 # Show compute-features configuration
 winnow config compute-features
 
+# Show calibration diagnostic configuration
+winnow config diagnose-calibration diagnostics.label_source=sequence
+
 # Check configuration with overrides
 winnow config train data_loader=mztab model_output_dir=models/my_model
 winnow config predict fdr_method=database_grounded fdr_control.fdr_threshold=0.01
@@ -148,6 +151,47 @@ winnow predict calibrator.pretrained_model_name_or_path=models/my_model
 - `output_folder`: Folder path to write output files
 
 By default, `winnow predict` uses the pretrained model `InstaDeepAI/winnow-general-model` from Hugging Face Hub. To use a different model, override the calibrator settings (see [Configuration guide](configuration.md#prediction-configuration) for details).
+
+### `winnow diagnose-calibration`
+
+Assess tail calibration on a labelled holdout set before trusting non-parametric FDR at your operating threshold. The command applies a trained calibrator, derives the confidence cutoff $\tau$ at `fdr_control.fdr_threshold`, estimates signed tail expected calibration error (sTECE) and TECE on $\{S \ge \tau\}$ using isotonic regression, writes a reliability diagram, and warns when $|\widehat{\mathrm{sTECE}}(\tau)|$ exceeds `diagnostics.tolerance` (default `0.005`, i.e. 0.5 percentage points on the FDR scale — about 10% of a 5% FDR target).
+
+**Configuration:** see [Calibration diagnostic configuration](configuration.md#calibration-diagnostic-configuration) for the full parameter reference.
+
+**Required:** set `diagnostics.label_source` on every run (`sequence` or `precomputed`). There is no automatic label detection.
+
+**Label configuration rules:**
+
+| `label_source` | `label_column` | Behaviour |
+| --- | --- | --- |
+| `sequence` | must be unset (`null`) | Derives `correct` from `sequence` and `prediction`. Do not pass `label_column`. |
+| `precomputed` | required (e.g. `proteome_hit`, `correct`) | Uses the given boolean column from predictions/metadata. |
+
+Setting `label_column` while `label_source=sequence` (or omitting `label_column` for `precomputed`) raises an error.
+
+```bash
+# Sequence-derived labels (full match of sequence vs prediction)
+winnow diagnose-calibration diagnostics.label_source=sequence \
+  dataset.spectrum_path_or_directory=holdout/spectra.ipc \
+  dataset.predictions_path=holdout/preds.csv
+
+# Pre-computed labels (e.g. proteome mapping done offline)
+winnow diagnose-calibration \
+  diagnostics.label_source=precomputed diagnostics.label_column=proteome_hit \
+  dataset.predictions_path=holdout/preds_with_hits.csv
+
+# Stricter tolerance for 1% FDR workflows
+winnow diagnose-calibration diagnostics.label_source=sequence diagnostics.tolerance=0.002
+```
+
+**Outputs** (under `diagnostics.output_dir`, default `results/calibration_diagnostic`):
+
+- `diagnostic_report.json` — `conf_cutoff`, `n_tail`, sTECE, TECE, tolerance check, interpretation
+- `reliability_diagram.png` — empirical calibration curve on the operating tail ($S \ge \text{conf\_cutoff}$) vs the identity line
+
+Set `diagnostics.fail_on_warning=true` to exit with code 1 when $|\widehat{\mathrm{sTECE}}| >$ `diagnostics.tolerance` at the operating cutoff (useful in CI).
+
+See also the supplementary theory note in the repository ([`analysis/methods/calibration_fdr_theory.md`](https://github.com/instadeepai/winnow/blob/main/analysis/methods/calibration_fdr_theory.md)).
 
 ## Configuration system
 

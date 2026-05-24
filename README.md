@@ -131,6 +131,7 @@ Installing Winnow provides the `winnow` command with three sub-commands:
 1. `winnow train` – Performs confidence calibration on a dataset of annotated PSMs, outputting the fitted model checkpoint.
 2. `winnow compute-features` – Computes and outputs the feature set for a dataset of PSMs.
 3. `winnow predict` – Performs confidence calibration using a fitted model checkpoint (defaults to a pretrained general model from Hugging Face), estimates and controls FDR using the calibrated confidence scores.
+4. `winnow diagnose-calibration` – On a labelled holdout, estimates tail calibration error (sTECE/TECE) at the FDR operating threshold and writes a reliability diagram.
 
 By default, `winnow predict` uses a pretrained general model ([`InstaDeepAI/winnow-general-model`](https://huggingface.co/InstaDeepAI/winnow-general-model)) hosted on Hugging Face Hub, allowing you to get started immediately without training. You can also specify custom Hugging Face models or use locally trained models.
 
