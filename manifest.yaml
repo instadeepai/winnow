@@ -11,12 +11,12 @@ builder:
 spec:
   debug:
       vscode:
-        enabled: true
+        enabled: false
         path: "/aichor/code"
         provider: "github"
   operator: jobset
   image: winnow-koina
-  command: make analyze-fdr-overlap-new-eval upload-new-eval-plots-fdr-overlap
+  command: make cluster-new-eval-fdr-overlap
   types:
     worker:
       count: 1
