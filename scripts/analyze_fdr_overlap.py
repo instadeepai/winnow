@@ -13,7 +13,8 @@ nominal FDR:
     near-miss edit distance 2-3, fully discordant).
   * Full-search Venns: Winnow (non-parametric calibrated confidence) vs database
     search unique peptides at the same nominal FDR (database-grounded raw confidence).
-  * Violin plots comparing database-matched vs fully novel retained PSMs.
+  * Violin plots comparing database-matched vs fully novel retained PSMs at
+    matched FDR (same retention rules as overlap summaries).
 
 Inputs are ``winnow predict`` output folders arranged as subdirectories under two
 roots: an **unlabelled** tree (full-search Winnow predictions) and a **labelled**
@@ -915,7 +916,7 @@ def plot_labelled_subset_venn(
 
 def _assign_retained_groups(
     retained: pd.DataFrame,
-    db_keys: set[str],
+    db_keys: set[str] | None,
     discordance_cache: LabelledDiscordanceCache | DbDiscordanceCache,
     *,
     labelled_subset: bool,
@@ -935,6 +936,8 @@ def _assign_retained_groups(
         return groups
 
     db_cache = cast(DbDiscordanceCache, discordance_cache)
+    if db_keys is None:
+        raise ValueError("db_keys required for full-search retained-group assignment")
     is_match = retained["prediction"].map(lambda p: _is_db_match(str(p), db_keys))
     groups = pd.Series("Database match", index=retained.index)
     disc_mask = ~is_match
@@ -961,7 +964,8 @@ def _subsample_violin_groups(df: pd.DataFrame, category_col: str) -> pd.DataFram
 
 def plot_novel_feature_violins(
     df: pd.DataFrame,
-    db_keys: set[str],
+    db_df: pd.DataFrame | None,
+    residue_masses: dict[str, float] | None,
     discordance_cache: LabelledDiscordanceCache | DbDiscordanceCache,
     project: str,
     eval_type: str,
@@ -969,7 +973,12 @@ def plot_novel_feature_violins(
     *,
     labelled_subset: bool = False,
 ) -> None:
-    """Violin plots: database-matched vs fully discordant retained PSMs."""
+    """Violin plots: database-matched vs fully discordant retained PSMs.
+
+    Winnow retention uses non-parametric FDR on calibrated confidence. For
+    full-search comparisons, database match uses peptides retained at the same
+    nominal FDR via database-grounded FDR on raw confidence (see overlap table).
+    """
     available = [
         (col, label) for col, label in NOVEL_FEATURE_COLUMNS if col in df.columns
     ]
@@ -983,6 +992,19 @@ def plot_novel_feature_violins(
     df = _add_q_values(df.copy())
     display = _display_name(project)
 
+    db_scored: pd.DataFrame | None = None
+    if not labelled_subset:
+        if db_df is None or residue_masses is None:
+            raise ValueError(
+                "Full-search violin plots require db_df and residue_masses"
+            )
+        db_scored = _add_database_grounded_q_values(
+            db_df.copy(),
+            residue_masses,
+            confidence_col=RAW_CONFIDENCE_COL,
+            q_col=DB_Q_VALUE_COL,
+        )
+
     for fdr_t in FDR_THRESHOLDS:
         retained = df[df["psm_q_value"] <= fdr_t].copy()
         if len(retained) < _MIN_VIOLIN_GROUP_SIZE:
@@ -994,9 +1016,17 @@ def plot_novel_feature_violins(
             )
             continue
 
+        if labelled_subset:
+            match_keys: set[str] | None = None
+        else:
+            assert db_scored is not None
+            match_keys = _unique_peptides_at_fdr(
+                db_scored, "sequence", DB_Q_VALUE_COL, fdr_t
+            )
+
         groups = _assign_retained_groups(
             retained,
-            db_keys,
+            match_keys,
             discordance_cache,
             labelled_subset=labelled_subset,
         )
@@ -1106,7 +1136,8 @@ def generate_all_analyses(
     plot_full_search_venn(df, db_df, project, plots_dir, residue_masses)
     plot_novel_feature_violins(
         df,
-        db_keys,
+        db_df,
+        residue_masses,
         disc_cache,
         project,
         eval_type,
