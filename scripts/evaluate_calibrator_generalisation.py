@@ -1,12 +1,14 @@
-"""Evaluate calibrator generalisation by training on one biological validation dataset and testing on all others.
+"""Evaluate calibrator generalisation by training on one source dataset and testing on all others.
 
-For each project in the data directory, trains a fresh calibrator, evaluates it
-in-distribution (held-out 20 %) and out-of-distribution (every other project),
-then saves a combined results CSV for downstream plotting.
+Uses the ``train_extra_small`` train parquet and predictions CSV, with a ``source``
+column derived from biological-validation experiment names (everything else is HepG2).
+For each source, trains a fresh calibrator, evaluates it in-distribution (held-out
+20 %) and out-of-distribution (every other source), then saves a combined results CSV.
 """
 
 import logging
 import re
+import sys
 from pathlib import Path
 from typing import Annotated, Dict, List, Optional
 
@@ -26,6 +28,11 @@ from winnow.calibration.features import (
 )
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.datasets.data_loaders import InstaNovoDatasetLoader
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
+
+from scripts.calibrator_generalisation_utils import annotate_train_source_labels  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -71,23 +78,6 @@ with open(_CONFIGS_DIR / "calibrator.yaml") as _f:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _extract_project_name(parquet_path: Path) -> str:
-    """Extract project name from a filename like ``dataset-helaqc-annotated-0000-0001.parquet``."""
-    match = re.match(r"dataset-(.+?)-annotated", parquet_path.stem)
-    if match:
-        return match.group(1)
-    return parquet_path.stem
-
-
-def _find_predictions_path(predictions_dir: Path, project: str) -> Optional[Path]:
-    """Locate the CSV predictions file for *project* inside *predictions_dir*."""
-    candidates = sorted(predictions_dir.glob(f"dataset-{project}-annotated*.csv"))
-    if candidates:
-        return candidates[0]
-    return None
-
 
 _IRT_TRAIN_FRACTION_OVERRIDES: Dict[str, float] = {
     "herceptin": 0.15,
@@ -161,7 +151,7 @@ def initialise_calibrator(
 
 
 def load_dataset(data_path: Path, predictions_path: Path) -> CalibrationDataset:
-    """Load a single annotated dataset."""
+    """Load the combined train_extra_small dataset."""
     logger.info("Loading dataset from %s and %s", data_path, predictions_path)
     loader = InstaNovoDatasetLoader(
         residue_masses=RESIDUE_MASSES,
@@ -169,6 +159,34 @@ def load_dataset(data_path: Path, predictions_path: Path) -> CalibrationDataset:
         beam_columns=BEAM_COLUMNS,
     )
     return loader.load(data_path=data_path, predictions_path=predictions_path)
+
+
+def subset_dataset(dataset: CalibrationDataset, idx: np.ndarray) -> CalibrationDataset:
+    """Return a row subset of *dataset* with aligned beam predictions."""
+    meta = dataset.metadata.iloc[idx].reset_index(drop=True)
+    preds = (
+        [dataset.predictions[i] for i in idx.tolist()]
+        if dataset.predictions is not None
+        else None
+    )
+    return CalibrationDataset(metadata=meta, predictions=preds)
+
+
+def split_dataset_by_source(
+    dataset: CalibrationDataset,
+) -> Dict[str, CalibrationDataset]:
+    """Split a combined dataset into one CalibrationDataset per ``source`` label."""
+    if "source" not in dataset.metadata.columns:
+        raise ValueError(
+            "Expected a 'source' column in the train parquet metadata. "
+            "Run annotate_train_source_labels() first."
+        )
+
+    datasets: Dict[str, CalibrationDataset] = {}
+    for source in sorted(dataset.metadata["source"].unique()):
+        idx = np.where(dataset.metadata["source"].values == source)[0]
+        datasets[source] = subset_dataset(dataset, idx)
+    return datasets
 
 
 _MOD_RE = re.compile(r"\[UNIMOD:\d+\]")
@@ -208,16 +226,7 @@ def create_train_test_split(
     train_idx = np.where(train_mask)[0]
     test_idx = np.where(~train_mask)[0]
 
-    def _subset(idx: np.ndarray) -> CalibrationDataset:
-        m = meta.iloc[idx].reset_index(drop=True)
-        preds = (
-            [dataset.predictions[i] for i in idx.tolist()]
-            if dataset.predictions is not None
-            else None
-        )
-        return CalibrationDataset(metadata=m, predictions=preds)
-
-    return _subset(train_idx), _subset(test_idx)
+    return subset_dataset(dataset, train_idx), subset_dataset(dataset, test_idx)
 
 
 def evaluate_model(
@@ -243,18 +252,32 @@ def evaluate_model(
 # ---------------------------------------------------------------------------
 _DEFAULT_MODEL_OUTPUT_DIR = Path("models/generalisation")
 _DEFAULT_RESULTS_OUTPUT_DIR = Path("results/generalisation")
+_DEFAULT_TRAIN_PARQUET = Path("train_extra_small/train.parquet")
+_DEFAULT_TRAIN_PREDS = Path("train_extra_small/train_preds.csv")
+_DEFAULT_BIOLOGICAL_VALIDATION_DIR = Path(
+    "held_out_projects/biological_validation/annotated"
+)
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
 
 @app.command()
 def main(
-    data_dir: Annotated[
-        Path, typer.Option(help="Directory containing annotated parquet files.")
-    ],
-    predictions_dir: Annotated[
-        Path, typer.Option(help="Directory containing prediction CSV files.")
-    ],
+    train_parquet: Annotated[
+        Path, typer.Option(help="Combined train_extra_small parquet file.")
+    ] = _DEFAULT_TRAIN_PARQUET,
+    train_predictions: Annotated[
+        Path, typer.Option(help="Combined train_extra_small predictions CSV.")
+    ] = _DEFAULT_TRAIN_PREDS,
+    biological_validation_dir: Annotated[
+        Path,
+        typer.Option(
+            help=(
+                "Directory of biological validation annotated parquets used to map "
+                "experiment_name values to source labels."
+            )
+        ),
+    ] = _DEFAULT_BIOLOGICAL_VALIDATION_DIR,
     model_output_dir: Annotated[
         Path, typer.Option(help="Directory to save trained models.")
     ] = _DEFAULT_MODEL_OUTPUT_DIR,
@@ -266,38 +289,35 @@ def main(
     ] = None,
     koina_ssl: Annotated[bool, typer.Option(help="Use SSL for Koina server.")] = True,
 ) -> None:
-    """Evaluate calibrator generalisation across biological validation datasets."""
+    """Evaluate calibrator generalisation across train_extra_small source datasets."""
     model_output_dir.mkdir(parents=True, exist_ok=True)
     results_output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Discover datasets
-    parquet_files = sorted(data_dir.glob("*.parquet"))
-    if not parquet_files:
-        logger.error("No parquet files found in %s", data_dir)
+    if not train_parquet.exists():
+        logger.error("Train parquet not found: %s", train_parquet)
+        raise typer.Exit(1)
+    if not train_predictions.exists():
+        logger.error("Train predictions CSV not found: %s", train_predictions)
+        raise typer.Exit(1)
+    if not biological_validation_dir.exists():
+        logger.error(
+            "Biological validation directory not found: %s", biological_validation_dir
+        )
         raise typer.Exit(1)
 
-    projects: Dict[str, tuple[Path, Path]] = {}
-    for pf in parquet_files:
-        project = _extract_project_name(pf)
-        pred_path = _find_predictions_path(predictions_dir, project)
-        if pred_path is None:
-            logger.warning(
-                "No predictions file found for project %s, skipping.", project
-            )
-            continue
-        projects[project] = (pf, pred_path)
+    annotate_train_source_labels(
+        train_parquet, train_predictions, biological_validation_dir
+    )
 
-    logger.info("Found %d projects: %s", len(projects), list(projects.keys()))
-
-    # Load all datasets
-    datasets: Dict[str, CalibrationDataset] = {}
-    for project, (data_path, pred_path) in projects.items():
-        datasets[project] = load_dataset(data_path, pred_path)
-        logger.info("  %s: %d samples", project, len(datasets[project].metadata))
+    full_dataset = load_dataset(train_parquet, train_predictions)
+    datasets = split_dataset_by_source(full_dataset)
+    logger.info("Found %d source datasets: %s", len(datasets), list(datasets.keys()))
+    for source, dataset in datasets.items():
+        logger.info("  %s: %d samples", source, len(dataset.metadata))
 
     # Train-on-each, evaluate-on-all
     all_results: List[pd.DataFrame] = []
-    for train_project in projects:
+    for train_project in datasets:
         logger.info("=== Training on %s ===", train_project)
 
         train_ds, in_dist_test_ds = create_train_test_split(datasets[train_project])
@@ -334,7 +354,7 @@ def main(
         )
 
         # Out-of-distribution evaluation
-        for test_project in projects:
+        for test_project in datasets:
             if test_project == train_project:
                 continue
             test_ds = datasets[test_project]
