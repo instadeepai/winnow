@@ -242,6 +242,7 @@ def _configure_ablation_colors(config_names: Iterable[str]) -> None:
     global ABLATION_COLORS
     ABLATION_COLORS = assign_ablation_colors(sorted(set(config_names)))
 
+
 # Default training hyperparameters (overridden by --hyperparams-from-model).
 TRAIN_HYPERPARAMS = {
     "hidden_dims": [128, 64],
@@ -905,7 +906,7 @@ def _lineplot(
     label: str,
     color: str,
     linestyle: str = "-",
-    linewidth: float = 1.0,
+    linewidth: float = 0.5,
     marker: str | None = None,
 ) -> None:
     """Line plot with consistent linewidth (seaborn, no auto legend)."""
@@ -1023,7 +1024,7 @@ def plot_calibration(
         )
 
     display = _dataset_display_name(dataset_name)
-    ax.plot([0, 1], [0, 1], ls="--", color="gray", lw=1)
+    ax.plot([0, 1], [0, 1], ls="--", color="gray", lw=0.5)
     ax.set(
         xlabel="Mean predicted probability",
         ylabel="Empirical accuracy\n(database label)",
@@ -1077,7 +1078,7 @@ def plot_fdr_vs_confidence(
                     label="Database-grounded",
                     ax=ax,
                     color=_PALETTE[3],
-                    linewidth=1,
+                    linewidth=0.5,
                     legend=False,
                 )
             except Exception as e:
@@ -1094,7 +1095,7 @@ def plot_fdr_vs_confidence(
             label="Winnow (non-parametric)",
             ax=ax,
             color=_PALETTE[0],
-            linewidth=1,
+            linewidth=0.5,
             legend=False,
         )
 
@@ -1143,11 +1144,11 @@ def plot_fdr_accepted_psms(
             counts,
             label=r.config_name,
             color=ABLATION_COLORS[r.config_name],
-            linewidth=1,
+            linewidth=0.5,
         )
 
     for fdr_line in [0.01, 0.05, 0.10]:
-        ax.axvline(fdr_line, ls="--", color="gray", lw=0.8, alpha=0.7)
+        ax.axvline(fdr_line, ls="--", color="gray", lw=0.5, alpha=0.7)
 
     ax.relim()
     ax.autoscale_view()
@@ -1315,7 +1316,7 @@ def _configure_ablation_configs(
     eval_dfs: dict[str, pl.DataFrame],
     hyperparams_from_model: Path | None,
 ) -> None:
-    global ABLATION_CONFIGS, ABLATION_COLORS
+    global ABLATION_CONFIGS
 
     if not skip_training:
         assert train_features is not None

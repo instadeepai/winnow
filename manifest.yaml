@@ -16,7 +16,7 @@ spec:
         provider: "github"
   operator: jobset
   image: winnow-koina
-  command: make cluster-new-eval-fdr-overlap
+  command: make replot-new-eval-ablations
   types:
     worker:
       count: 1
