@@ -3,7 +3,7 @@ kind: AIchorManifest
 apiVersion: 0.2.1
 builder:
   image: winnow-koina
-  dockerfile: ./Dockerfile
+  dockerfile: ./Dockerfile.koina
   context: .
   buildArgs:
     USE_CUDA: "true"
@@ -16,7 +16,7 @@ spec:
         provider: "github"
   operator: jobset
   image: winnow-koina
-  command: make replot-new-eval-ablations
+  command: ./entrypoint.koina.sh make cluster-generalisation-heatmaps
   types:
     worker:
       count: 1
@@ -26,6 +26,6 @@ spec:
 
         accelerators:
           gpu:
-            count: 0
+            count: 1
             type: gpu
             product: NVIDIA-H100-80GB-HBM3-MIG-3g.40gb

@@ -819,6 +819,7 @@ replot-local-external: replot-local-external-labelled replot-local-external-unla
         upload-new-eval-plots-fdr-overlap upload-new-eval-plots-unlabelled \
         upload-new-eval-plots-novelty upload-new-eval-plots-upscored-fps \
         upload-new-eval-plots-feature-importance upload-new-eval-plots-ablations \
+        upload-new-eval-plots-generalisation \
         reviewer-analyses-new-eval \
         feature-analysis-model feature-analysis-extra-small-mass-error-da \
         feature-analysis-extra-small-cluster \
@@ -829,7 +830,8 @@ replot-local-external: replot-local-external-labelled replot-local-external-unla
         replot-novelty-plots-new-eval novelty-replot-new-eval new-eval-plots \
         cluster-new-eval-fdr-overlap cluster-new-eval-acfm-minus-lcfm-pxd452-939 \
         cluster-new-eval-novelty cluster-new-eval-upscored-fps \
-        cluster-new-eval-feature-importance cluster-new-eval-ablations
+        cluster-new-eval-feature-importance cluster-new-eval-ablations \
+        cluster-generalisation-heatmaps
 
 NEW_EVAL_SETS_S3        ?= $(S3_BASE)/new_eval_sets
 NEW_EVAL_RESULTS_S3     ?= $(S3_BASE)/new_eval_sets_results
@@ -866,6 +868,7 @@ NEW_EVAL_PLOTS_NOVELTY_DIR           ?= $(NEW_EVAL_PLOTS_DIR)/novelty
 NEW_EVAL_PLOTS_UPSCORED_FPS_DIR      ?= $(NEW_EVAL_PLOTS_DIR)/upscored_fps
 NEW_EVAL_PLOTS_ABLATIONS_DIR         ?= $(NEW_EVAL_PLOTS_DIR)/ablations
 NEW_EVAL_PLOTS_FEATURE_IMPORTANCE_DIR ?= $(NEW_EVAL_PLOTS_DIR)/feature_importance
+NEW_EVAL_PLOTS_GENERALISATION_DIR ?= $(NEW_EVAL_PLOTS_DIR)/leave_one_out_generalisation
 
 FASTA_HUMAN        := fasta/human.fasta
 FASTA_ARABIDOPSIS  := fasta/UP000006548_3702.fasta
@@ -1105,9 +1108,19 @@ upload-new-eval-plots-feature-importance:
 upload-new-eval-plots-ablations:
 	$(S3_CP) --recursive $(NEW_EVAL_PLOTS_ABLATIONS_DIR)/ $(NEW_EVAL_PLOTS_S3)/ablations/
 
+upload-new-eval-plots-generalisation:
+	@test -d "$(NEW_EVAL_PLOTS_GENERALISATION_DIR)" || \
+		(echo "Missing plots dir: $(NEW_EVAL_PLOTS_GENERALISATION_DIR)" && exit 1)
+	$(S3_CP) --recursive $(NEW_EVAL_PLOTS_GENERALISATION_DIR)/ \
+		$(NEW_EVAL_PLOTS_S3)/leave_one_out_generalisation/
+	@if [ -f "$(GENERALISATION_DIR)/calibrator_generalisation_results.csv" ]; then \
+		$(S3_CP) $(GENERALISATION_DIR)/calibrator_generalisation_results.csv \
+			$(NEW_EVAL_PLOTS_S3)/leave_one_out_generalisation/; \
+	fi
+
 upload-new-eval-plots:
 	@echo "=== Uploading $(NEW_EVAL_PLOTS_DIR) -> $(NEW_EVAL_PLOTS_S3) ==="
-	@for subdir in lcfm acfm unlabelled fdr_overlap novelty upscored_fps ablations feature_importance; do \
+	@for subdir in lcfm acfm unlabelled fdr_overlap novelty upscored_fps ablations feature_importance leave_one_out_generalisation; do \
 		if [ -d "$(NEW_EVAL_PLOTS_DIR)/$$subdir" ]; then \
 			$(S3_CP) --recursive "$(NEW_EVAL_PLOTS_DIR)/$$subdir/" \
 				"$(NEW_EVAL_PLOTS_S3)/$$subdir/"; \
@@ -1249,7 +1262,7 @@ upload-new-eval-plots-all: new-eval-plots upload-new-eval-plots
 #########################################################
 ## Cluster pipelines (download S3 → run → upload one subdir)
 ## CPU-only: fdr_overlap, acfm_minus_lcfm, novelty, upscored_fps
-## GPU + koina-up: feature_importance, ablations
+## GPU + koina-up: feature_importance, ablations, leave_one_out_generalisation
 #########################################################
 
 cluster-new-eval-fdr-overlap:
@@ -1276,6 +1289,10 @@ cluster-new-eval-feature-importance:
 cluster-new-eval-ablations:
 	$(MAKE) ablation-extra-small-cluster
 	$(MAKE) upload-new-eval-plots-ablations
+
+cluster-generalisation-heatmaps:
+	$(MAKE) generalisation-heatmaps-cluster
+	$(MAKE) upload-new-eval-plots-generalisation
 
 ## Feature-shift plots: woundfluids lcfm (labelled) vs acfm (unlabelled)
 .PHONY: predict-feature-shift-woundfluids plot-feature-shift-woundfluids feature-shift-woundfluids
@@ -1744,7 +1761,7 @@ ablation-replot: ablation-download
 ## Evaluate general model commands
 #########################################################
 
-.PHONY: evaluate_general_model_annotated_biological_validation evaluate_general_model_raw_biological_validation evaluate_general_model_labelled_external_datasets evaluate_general_model_unlabelled_external_datasets annotate_preds_proteome_hits generalisation_analysis generalisation_heatmaps analyze_features analyze_upscored_fps analyze_fdr_overlap
+.PHONY: evaluate_general_model_annotated_biological_validation evaluate_general_model_raw_biological_validation evaluate_general_model_labelled_external_datasets evaluate_general_model_unlabelled_external_datasets annotate_preds_proteome_hits generalisation_analysis generalisation_heatmaps generalisation-analysis-run generalisation-heatmaps-run download-generalisation-biological-validation download-cluster-generalisation-inputs generalisation-heatmaps-cluster cluster-generalisation-heatmaps upload-new-eval-plots-generalisation analyze_features analyze_upscored_fps analyze_fdr_overlap
 
 BIOLOGICAL_VALIDATION_PROJECTS := gluc helaqc herceptin immuno sbrodae snakevenoms tplantibodies woundfluids
 
@@ -1835,26 +1852,58 @@ evaluate_general_model_unlabelled_external_datasets:
 ## Calibrator generalisation analysis
 #########################################################
 
-# Leave-one-out training uses the same feature set as train-extra-small-mass-error-da:
+# Leave-one-out training uses train_extra_small (all biological validation sources
+# plus HepG2/PXD019483), with source labels derived from biological validation
+# experiment names. Same feature set as train-extra-small-mass-error-da:
 # mass_error_da; fragment match without spectral_angle/xcorr/complementary_ion_count/max_ion_gap;
 # beam without edit_distance; token scores retained; Koina CE/frag constants (no per-row columns).
 # Implemented in scripts/evaluate_calibrator_generalisation.py (EXTRA_SMALL_TRAIN_HP hyperparams).
+#
+# Cluster (winnow-koina image): make cluster-generalisation-heatmaps
+#   - pulls train.parquet + train_preds.csv from $(EXTRA_SMALL_TRAIN_S3)
+#   - pulls biological-validation annotated parquets from $(HELD_OUT_S3)
+#   - runs in-pod Koina via `make koina-up` (localhost:8500)
+#   - uploads plots to $(NEW_EVAL_PLOTS_S3)/leave_one_out_generalisation/
 
-## Train per-dataset calibrators and cross-evaluate on biological validation datasets
-generalisation_analysis:
+GENERALISATION_DIR ?= analysis/generalisation
+GENERALISATION_PLOTS_DIR ?= analysis/generalisation/plots
+GENERALISATION_BIOVAL_DIR ?= held_out_projects/biological_validation/annotated
+
+## Annotated biological-validation parquets (experiment_name -> source mapping only)
+download-generalisation-biological-validation:
+	mkdir -p $(GENERALISATION_BIOVAL_DIR)
+	$(S3_CP) --recursive $(HELD_OUT_S3)/biological_validation/annotated/ $(GENERALISATION_BIOVAL_DIR)/
+
+download-cluster-generalisation-inputs: download-extra-small-train-data \
+	download-generalisation-biological-validation
+
+## Train per-source calibrators and cross-evaluate on train_extra_small datasets
+generalisation-analysis-run:
+	mkdir -p $(GENERALISATION_DIR)/models
 	uv run python scripts/evaluate_calibrator_generalisation.py \
-		--data-dir held_out_projects/biological_validation/annotated \
-		--predictions-dir held_out_projects/biological_validation/annotated_predictions \
-		--model-output-dir analysis/generalisation \
-		--results-output-dir analysis/generalisation \
+		--train-parquet $(EXTRA_SMALL_TRAIN_SPECTRA) \
+		--train-predictions $(EXTRA_SMALL_TRAIN_PREDS) \
+		--biological-validation-dir $(GENERALISATION_BIOVAL_DIR) \
+		--model-output-dir $(GENERALISATION_DIR)/models \
+		--results-output-dir $(GENERALISATION_DIR) \
 		$(if $(KOINA_SERVER_URL),--koina-server-url $(KOINA_SERVER_URL),) \
 		$(if $(filter false,$(KOINA_SSL)),--no-koina-ssl,)
 
-## Plot PR-AUC heatmaps from generalisation results (runs generalisation_analysis first)
-generalisation_heatmaps: generalisation_analysis
+generalisation-heatmaps-run:
+	mkdir -p $(GENERALISATION_PLOTS_DIR)
 	uv run python scripts/plot_calibrator_generalisation_heatmap.py \
-		--results-path analysis/generalisation/calibrator_generalisation_results.csv \
-		--output-dir analysis/generalisation/plots
+		--results-path $(GENERALISATION_DIR)/calibrator_generalisation_results.csv \
+		--output-dir $(GENERALISATION_PLOTS_DIR)
+
+generalisation_analysis: generalisation-analysis-run
+
+## Plot PR-AUC heatmaps from generalisation results (runs generalisation_analysis first)
+generalisation_heatmaps: generalisation_analysis generalisation-heatmaps-run
+
+generalisation-heatmaps-cluster: download-cluster-generalisation-inputs koina-up
+	$(MAKE) generalisation-analysis-run $(NEW_EVAL_CLUSTER_KOINA_MAKE)
+	$(MAKE) generalisation-heatmaps-run \
+		GENERALISATION_PLOTS_DIR=$(NEW_EVAL_PLOTS_GENERALISATION_DIR)
 
 #########################################################
 ## Feature importance analysis
@@ -2210,6 +2259,7 @@ ANALYSIS_FASTA_sbrodae     := fasta/Sb_proteome.fasta
 # analysis_data/ (populated by `make download-analysis-data`).
 CASANOVO_ROOT  ?= /home/j-daniel/repos/casanovo
 PRIMENOVO_ROOT ?= /home/j-daniel/repos/pi-PrimeNovo
+PRIMENOVO_DNS_MODEL := '$$\pi$$-PrimeNovo'
 
 # ── Result directory roots ─────────────────────────────
 ANALYSIS_MODELS  := models
@@ -2583,15 +2633,18 @@ plot-casanovo-helaqc:
 		--predictions-dir $(ANALYSIS_RESULTS)/casanovo_helaqc_predictions_test \
 		--split test --label-mode labelled \
 		--fasta $(ANALYSIS_FASTA_helaqc) \
-		--model-dir $(ANALYSIS_MODELS)/casanovo_helaqc
+		--model-dir $(ANALYSIS_MODELS)/casanovo_helaqc \
+		--dns-model Casanovo
 	uv run python scripts/plot_analysis.py \
 		--predictions-dir $(ANALYSIS_RESULTS)/casanovo_helaqc_predictions_unlabelled \
 		--split unlabelled --label-mode unlabelled \
-		--fasta $(ANALYSIS_FASTA_helaqc)
+		--fasta $(ANALYSIS_FASTA_helaqc) \
+		--dns-model Casanovo
 	uv run python scripts/plot_analysis.py \
 		--predictions-dir $(ANALYSIS_RESULTS)/casanovo_helaqc_predictions_raw_less_train \
 		--split raw_less_train --label-mode unlabelled \
-		--fasta $(ANALYSIS_FASTA_helaqc)
+		--fasta $(ANALYSIS_FASTA_helaqc) \
+		--dns-model Casanovo
 
 # -- celegans --
 .PHONY: train-casanovo-celegans predict-casanovo-celegans-test predict-casanovo-celegans-unlabelled predict-casanovo-celegans-raw_less_train plot-casanovo-celegans
@@ -2645,15 +2698,18 @@ plot-casanovo-celegans:
 		--predictions-dir $(ANALYSIS_RESULTS)/casanovo_celegans_predictions_test \
 		--split test --label-mode labelled \
 		--fasta $(ANALYSIS_FASTA_celegans) \
-		--model-dir $(ANALYSIS_MODELS)/casanovo_celegans
+		--model-dir $(ANALYSIS_MODELS)/casanovo_celegans \
+		--dns-model Casanovo
 	uv run python scripts/plot_analysis.py \
 		--predictions-dir $(ANALYSIS_RESULTS)/casanovo_celegans_predictions_unlabelled \
 		--split unlabelled --label-mode unlabelled \
-		--fasta $(ANALYSIS_FASTA_celegans)
+		--fasta $(ANALYSIS_FASTA_celegans) \
+		--dns-model Casanovo
 	uv run python scripts/plot_analysis.py \
 		--predictions-dir $(ANALYSIS_RESULTS)/casanovo_celegans_predictions_raw_less_train \
 		--split raw_less_train --label-mode unlabelled \
-		--fasta $(ANALYSIS_FASTA_celegans)
+		--fasta $(ANALYSIS_FASTA_celegans) \
+		--dns-model Casanovo
 
 # ═══════════════════════════════════════════════════════
 # PrimeNovo — data lives in external repo as MGF + TSV
@@ -2711,15 +2767,18 @@ plot-primenovo-helaqc:
 		--predictions-dir $(ANALYSIS_RESULTS)/primenovo_helaqc_predictions_test \
 		--split test --label-mode labelled \
 		--fasta $(ANALYSIS_FASTA_helaqc) \
-		--model-dir $(ANALYSIS_MODELS)/primenovo_helaqc
+		--model-dir $(ANALYSIS_MODELS)/primenovo_helaqc \
+		--dns-model $(PRIMENOVO_DNS_MODEL)
 	uv run python scripts/plot_analysis.py \
 		--predictions-dir $(ANALYSIS_RESULTS)/primenovo_helaqc_predictions_unlabelled \
 		--split unlabelled --label-mode unlabelled \
-		--fasta $(ANALYSIS_FASTA_helaqc)
+		--fasta $(ANALYSIS_FASTA_helaqc) \
+		--dns-model $(PRIMENOVO_DNS_MODEL)
 	uv run python scripts/plot_analysis.py \
 		--predictions-dir $(ANALYSIS_RESULTS)/primenovo_helaqc_predictions_raw_less_train \
 		--split raw_less_train --label-mode unlabelled \
-		--fasta $(ANALYSIS_FASTA_helaqc)
+		--fasta $(ANALYSIS_FASTA_helaqc) \
+		--dns-model $(PRIMENOVO_DNS_MODEL)
 
 # -- celegans --
 .PHONY: train-primenovo-celegans predict-primenovo-celegans-test predict-primenovo-celegans-unlabelled predict-primenovo-celegans-raw_less_train plot-primenovo-celegans
@@ -2773,15 +2832,18 @@ plot-primenovo-celegans:
 		--predictions-dir $(ANALYSIS_RESULTS)/primenovo_celegans_predictions_test \
 		--split test --label-mode labelled \
 		--fasta $(ANALYSIS_FASTA_celegans) \
-		--model-dir $(ANALYSIS_MODELS)/primenovo_celegans
+		--model-dir $(ANALYSIS_MODELS)/primenovo_celegans \
+		--dns-model $(PRIMENOVO_DNS_MODEL)
 	uv run python scripts/plot_analysis.py \
 		--predictions-dir $(ANALYSIS_RESULTS)/primenovo_celegans_predictions_unlabelled \
 		--split unlabelled --label-mode unlabelled \
-		--fasta $(ANALYSIS_FASTA_celegans)
+		--fasta $(ANALYSIS_FASTA_celegans) \
+		--dns-model $(PRIMENOVO_DNS_MODEL)
 	uv run python scripts/plot_analysis.py \
 		--predictions-dir $(ANALYSIS_RESULTS)/primenovo_celegans_predictions_raw_less_train \
 		--split raw_less_train --label-mode unlabelled \
-		--fasta $(ANALYSIS_FASTA_celegans)
+		--fasta $(ANALYSIS_FASTA_celegans) \
+		--dns-model $(PRIMENOVO_DNS_MODEL)
 
 # ═══════════════════════════════════════════════════════
 # raw_less_train creation
@@ -3002,6 +3064,22 @@ prepare-fdr-comparison: \
 plot-fdr-method-comparison:
 	uv run python scripts/plot_fdr_method_comparison.py \
 		--output-dir results/fdr_method_comparison/
+
+EXTERNAL_PEPTIDE_HOLDOUT_DATASETS ?= helaqc celegans # sbrodae PXD019483
+EXTERNAL_PEPTIDE_HOLDOUT_FRACS ?= 0.5
+EXTERNAL_PEPTIDE_HOLDOUT_SEED ?= 42
+EXTERNAL_PEPTIDE_HOLDOUT_ITERATIONS ?= 10
+EXTERNAL_PEPTIDE_HOLDOUT_BOOTSTRAPS ?= 25
+
+.PHONY: external-peptide-holdout-benchmark
+external-peptide-holdout-benchmark:
+	uv run python scripts/run_external_peptide_holdout_benchmark.py \
+		$(foreach d,$(EXTERNAL_PEPTIDE_HOLDOUT_DATASETS),--datasets $(d)) \
+		$(foreach f,$(EXTERNAL_PEPTIDE_HOLDOUT_FRACS),--holdout-fracs $(f)) \
+		--seed $(EXTERNAL_PEPTIDE_HOLDOUT_SEED) \
+		--n-iterations $(EXTERNAL_PEPTIDE_HOLDOUT_ITERATIONS) \
+		--n-bootstraps $(EXTERNAL_PEPTIDE_HOLDOUT_BOOTSTRAPS) \
+		--output-dir results/external_peptide_holdout_benchmark/
 
 .PHONY: train-all predict-all plot-all
 
