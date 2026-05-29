@@ -1229,6 +1229,7 @@ ablation-extra-small-cluster: download-cluster-ablation-inputs koina-up
 
 ## Regenerate ablation plots from saved eval_results (no training / inference)
 replot-new-eval-ablations:
+	aws s3 cp --recursive $(NEW_EVAL_PLOTS_ABLATIONS_DIR)/ $(NEW_EVAL_PLOTS_S3)/ablations/
 	uv run python scripts/run_feature_ablations.py \
 		--output-dir $(NEW_EVAL_PLOTS_ABLATIONS_DIR) \
 		--plots-only \

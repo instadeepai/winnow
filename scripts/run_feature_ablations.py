@@ -29,6 +29,10 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.feature_subsets import FEATURE_SUBSETS  # noqa: E402
+from scripts.plot_ablation_summary import (  # noqa: E402
+    assign_ablation_colors,
+    ordered_ablation_configs,
+)
 
 from winnow.calibration.calibrator import ProbabilityCalibrator  # noqa: E402
 from winnow.datasets.feature_dataset import FeatureDataset  # noqa: E402
@@ -44,23 +48,9 @@ if not logger.handlers:
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
 # ---------------------------------------------------------------------------
-# Plot theme and colour assignments — Paul Tol qualitative (colour-blind safe)
+# Plot theme — Paul Tol qualitative (colour-blind safe)
 # ---------------------------------------------------------------------------
 _PALETTE = ["#4477AA", "#EE6677", "#228833", "#CCBB44", "#66CCEE", "#AA3377", "#BBBBBB"]
-# Ablation series only (never reuse for raw baseline).
-_ABLATION_PALETTE = [
-    "#4477AA",
-    "#EE6677",
-    "#228833",
-    "#CCBB44",
-    "#66CCEE",
-    "#AA3377",
-    "#EE7733",
-    "#0077BB",
-    "#33BBEE",
-    "#CC3311",
-]
-_RAW_LINE_COLOUR = "#BBBBBB"
 
 sns.set_theme(style="white", palette=_PALETTE, context="paper", font_scale=1.5)
 
@@ -228,19 +218,11 @@ def _dataset_display_name(key: str) -> str:
     return DATASET_DISPLAY_NAMES.get(key, key)
 
 
-def assign_ablation_colors(config_names: Iterable[str]) -> dict[str, str]:
-    """Assign a unique colour per ablation config (no palette wrap)."""
-    names = list(config_names)
-    if len(names) > len(_ABLATION_PALETTE):
-        raise ValueError(
-            f"Need {len(names)} ablation colours but only {len(_ABLATION_PALETTE)} defined."
-        )
-    return {name: _ABLATION_PALETTE[i] for i, name in enumerate(names)}
-
-
 def _configure_ablation_colors(config_names: Iterable[str]) -> None:
     global ABLATION_COLORS
-    ABLATION_COLORS = assign_ablation_colors(sorted(set(config_names)))
+    ABLATION_COLORS = assign_ablation_colors(
+        ordered_ablation_configs(set(config_names))
+    )
 
 
 # Default training hyperparameters (overridden by --hyperparams-from-model).
@@ -945,27 +927,8 @@ def plot_precision_recall(
     output_dir: Path,
     plot_format: str,
 ) -> None:
-    """PR curve: one line per ablation + raw InstaNovo confidence baseline."""
+    """PR curve: one line per ablation config."""
     fig, ax = plt.subplots(figsize=(6, 4))
-
-    if "confidence" not in results[0].eval_df.columns:
-        logger.warning(
-            "Skipping raw confidence PR baseline for %s (no confidence column)",
-            dataset_name,
-        )
-    else:
-        raw_pr = compute_precision_recall_curve(
-            results[0].eval_df, "confidence", "correct", "Raw confidence"
-        )
-        _lineplot(
-            ax,
-            raw_pr,
-            x="recall",
-            y="precision",
-            label="Raw confidence",
-            color=_RAW_LINE_COLOUR,
-            linestyle=":",
-        )
 
     for r in results:
         _lineplot(
@@ -997,20 +960,6 @@ def plot_calibration(
 ) -> None:
     """Calibration diagram: reliability curves + diagonal."""
     fig, ax = plt.subplots(figsize=(6, 4))
-
-    raw_cal = compute_calibration_curve(
-        results[0].eval_df, "confidence", "correct", "Raw confidence"
-    )
-    _lineplot(
-        ax,
-        raw_cal,
-        x="pred_mean",
-        y="empirical",
-        label="Raw confidence",
-        color=_RAW_LINE_COLOUR,
-        linestyle=":",
-        marker="o",
-    )
 
     for r in results:
         _lineplot(
