@@ -30,7 +30,15 @@ if str(_REPO_ROOT) not in sys.path:
 
 from scripts.feature_subsets import FEATURE_SUBSETS  # noqa: E402
 from scripts.plot_ablation_summary import (  # noqa: E402
+    FDR_BIAS_COLUMN_BY_THRESHOLD,
+    Q_DEV_COLUMN_BY_THRESHOLD,
+    TAIL_ECE_COLUMN_BY_THRESHOLD,
     assign_ablation_colors,
+    compute_ece,
+    compute_fdr_bias_at_fdr_thresholds,
+    compute_pr_auc,
+    compute_q_value_deviations,
+    compute_tail_ece_at_fdr,
     ordered_ablation_configs,
 )
 
@@ -726,35 +734,6 @@ def compute_calibration_curve(
     return grouped[["pred_mean", "empirical", "count", "bin_center", "name"]]
 
 
-def compute_ece(pred: np.ndarray, labels: np.ndarray, n_bins: int = 10) -> float:
-    """Expected Calibration Error."""
-    bins = np.linspace(0.0, 1.0, n_bins + 1)
-    bin_indices = np.digitize(pred, bins) - 1
-    bin_indices = np.clip(bin_indices, 0, n_bins - 1)
-    ece = 0.0
-    for b in range(n_bins):
-        mask = bin_indices == b
-        if mask.sum() == 0:
-            continue
-        avg_conf = pred[mask].mean()
-        avg_acc = labels[mask].mean()
-        ece += mask.sum() / len(pred) * abs(avg_conf - avg_acc)
-    return float(ece)
-
-
-def compute_tail_ece(
-    pred: np.ndarray, labels: np.ndarray, tail_fraction: float = 0.1, n_bins: int = 10
-) -> float:
-    """ECE in the high-confidence tail (top `tail_fraction` by predicted probability)."""
-    threshold_idx = max(1, int(len(pred) * (1 - tail_fraction)))
-    sorted_indices = np.argsort(pred)
-    tail_mask = np.zeros(len(pred), dtype=bool)
-    tail_mask[sorted_indices[threshold_idx:]] = True
-    if tail_mask.sum() == 0:
-        return 0.0
-    return compute_ece(pred[tail_mask], labels[tail_mask], n_bins=n_bins)
-
-
 def compute_brier_score(pred: np.ndarray, labels: np.ndarray) -> float:
     """Brier score."""
     return float(np.mean((pred - labels) ** 2))
@@ -782,11 +761,17 @@ class EvalResult:
     config_name: str
     dataset_name: str
     ece: float
-    tail_ece: float
+    tail_ece_at_5pct: float
+    tail_ece_at_10pct: float
     brier: float
     ids_at_1pct: int
     ids_at_5pct: int
     ids_at_10pct: int
+    pr_auc: float
+    fdr_bias_at_5pct: float
+    fdr_bias_at_10pct: float
+    q_dev_at_5pct: float
+    q_dev_at_10pct: float
     pr_curve: pd.DataFrame = field(repr=False)
     calibration_curve: pd.DataFrame = field(repr=False)
     calibrated_scores: np.ndarray = field(repr=False)
@@ -833,22 +818,35 @@ def evaluate_single(
     )
 
     ece = compute_ece(calibrated, labels)
-    tail_ece = compute_tail_ece(calibrated, labels)
+    fdr_ctrl = NonParametricFDRControl()
+    fdr_ctrl.fit(dataset=pd.Series(calibrated, name="score"))
+    tail_ece_5 = compute_tail_ece_at_fdr(calibrated, labels, 0.05, fdr_ctrl=fdr_ctrl)
+    tail_ece_10 = compute_tail_ece_at_fdr(calibrated, labels, 0.10, fdr_ctrl=fdr_ctrl)
     brier = compute_brier_score(calibrated, labels)
 
     ids_1 = compute_ids_at_fdr(calibrated, labels, 0.01)
     ids_5 = compute_ids_at_fdr(calibrated, labels, 0.05)
     ids_10 = compute_ids_at_fdr(calibrated, labels, 0.10)
 
+    pr_auc = compute_pr_auc(meta)
+    fdr_bias = compute_fdr_bias_at_fdr_thresholds(meta)
+    q_dev = compute_q_value_deviations(meta)
+
     return EvalResult(
         config_name=config_name,
         dataset_name=dataset_name,
         ece=ece,
-        tail_ece=tail_ece,
+        tail_ece_at_5pct=tail_ece_5,
+        tail_ece_at_10pct=tail_ece_10,
         brier=brier,
         ids_at_1pct=ids_1,
         ids_at_5pct=ids_5,
         ids_at_10pct=ids_10,
+        pr_auc=pr_auc,
+        fdr_bias_at_5pct=fdr_bias[0.05],
+        fdr_bias_at_10pct=fdr_bias[0.10],
+        q_dev_at_5pct=q_dev[0.05],
+        q_dev_at_10pct=q_dev[0.10],
         pr_curve=pr,
         calibration_curve=cal,
         calibrated_scores=calibrated,
@@ -1173,11 +1171,17 @@ def load_eval_results_for_plotting(
                 config_name=config_name,
                 dataset_name=dataset_name,
                 ece=0.0,
-                tail_ece=0.0,
+                tail_ece_at_5pct=float("nan"),
+                tail_ece_at_10pct=float("nan"),
                 brier=0.0,
                 ids_at_1pct=0,
                 ids_at_5pct=0,
                 ids_at_10pct=0,
+                pr_auc=0.0,
+                fdr_bias_at_5pct=float("nan"),
+                fdr_bias_at_10pct=float("nan"),
+                q_dev_at_5pct=float("nan"),
+                q_dev_at_10pct=float("nan"),
                 pr_curve=pr,
                 calibration_curve=cal,
                 calibrated_scores=calibrated,
@@ -1222,8 +1226,14 @@ def build_summary_table(all_results: list[EvalResult]) -> pd.DataFrame:
                 "config": r.config_name,
                 "dataset": r.dataset_name,
                 "ECE": round(r.ece, 5),
-                "tail_ECE": round(r.tail_ece, 5),
+                TAIL_ECE_COLUMN_BY_THRESHOLD[0.05]: round(r.tail_ece_at_5pct, 5),
+                TAIL_ECE_COLUMN_BY_THRESHOLD[0.10]: round(r.tail_ece_at_10pct, 5),
                 "Brier": round(r.brier, 5),
+                "PR_AUC": round(r.pr_auc, 5),
+                FDR_BIAS_COLUMN_BY_THRESHOLD[0.05]: round(r.fdr_bias_at_5pct, 5),
+                FDR_BIAS_COLUMN_BY_THRESHOLD[0.10]: round(r.fdr_bias_at_10pct, 5),
+                Q_DEV_COLUMN_BY_THRESHOLD[0.05]: round(r.q_dev_at_5pct, 5),
+                Q_DEV_COLUMN_BY_THRESHOLD[0.10]: round(r.q_dev_at_10pct, 5),
                 "IDs@1%FDR": r.ids_at_1pct,
                 "IDs@5%FDR": r.ids_at_5pct,
                 "IDs@10%FDR": r.ids_at_10pct,
