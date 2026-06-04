@@ -500,7 +500,7 @@ FASTA_RAW_woundfluids := fasta/human.fasta
 # FASTA assignments for unlabelled external proteome annotation
 FASTA_UNLABELLED_PXD014877 := fasta/Celegans.fasta
 FASTA_UNLABELLED_PXD023064 := fasta/human.fasta
-FASTA_UNLABELLED_Astral := fasta/UP000000625_83333.fasta
+FASTA_UNLABELLED_Astral := fasta/ECOLI_ZORYA.fasta
 
 ## Download all evaluation data from S3
 download-eval-data:
@@ -672,7 +672,7 @@ eval-external-unlabelled:
 	uv run python scripts/annotate_preds_proteome_hits.py unlabelled_external \
 		--predictions-root $(PREDS_DIR) \
 		$(foreach p,$(EXTERNAL_FULL_PROJECTS) PXD023064,$(if $(strip $(FASTA_UNLABELLED_$(p))),--map $(p)=$(FASTA_UNLABELLED_$(p)),))
-	@# Annotate proteome hits for Astral with UP000000625_83333.fasta
+	@# Annotate proteome hits for Astral with ECOLI_ZORYA.fasta
 	uv run python scripts/annotate_preds_proteome_hits.py unlabelled_external \
 		--predictions-root $(PREDS_DIR) \
 		--map Astral=$(FASTA_UNLABELLED_Astral)
@@ -873,7 +873,7 @@ NEW_EVAL_PLOTS_GENERALISATION_DIR ?= $(NEW_EVAL_PLOTS_DIR)/leave_one_out_general
 FASTA_HUMAN        := fasta/human.fasta
 FASTA_ARABIDOPSIS  := fasta/UP000006548_3702.fasta
 FASTA_CELEGANS     := fasta/Celegans.fasta
-FASTA_ECOLI_ASTRAL := fasta/UP000000625_83333.fasta
+FASTA_ECOLI_ASTRAL := fasta/ECOLI_ZORYA.fasta
 
 NEW_EVAL_HUMAN_UNLABELLED_RUNS := $(NEW_EVAL_RUN_PXD004452) $(NEW_EVAL_RUN_PXD006939)
 
@@ -895,7 +895,7 @@ download-new-eval-fasta:
 	$(S3_CP) $(FASTA_S3)/human.fasta $(FASTA_HUMAN)
 	$(S3_CP) $(FASTA_S3)/UP000006548_3702.fasta $(FASTA_ARABIDOPSIS)
 	$(S3_CP) $(FASTA_S3)/Celegans.fasta $(FASTA_CELEGANS)
-	$(S3_CP) $(FASTA_S3)/UP000000625_83333.fasta $(FASTA_ECOLI_ASTRAL)
+	$(S3_CP) $(FASTA_S3)/ECOLI_ZORYA.fasta $(FASTA_ECOLI_ASTRAL)
 
 ## Download predict outputs from new_eval_sets_results (PXD*/run + flat legacy keys)
 download-new-eval-results:
@@ -3098,3 +3098,15 @@ predict-all: predict-instanovo-helaqc-test predict-instanovo-helaqc-unlabelled p
 plot-all: plot-instanovo-helaqc plot-instanovo-celegans \
           plot-casanovo-helaqc plot-casanovo-celegans \
           plot-primenovo-helaqc plot-primenovo-celegans
+
+fdr-tool-doover:
+	uv run python scripts/plot_fdr_method_comparison.py \
+		--datasets helaqc \
+		--datasets celegans \
+		--output-dir results/fdr_method_comparison/
+	uv run python scripts/run_external_peptide_holdout_benchmark.py \
+		--datasets helaqc \
+		--datasets celegans \
+		--n-iterations 3 \
+		--n-bootstraps 5 \
+		--output-dir results/external_peptide_holdout_benchmark/
