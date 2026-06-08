@@ -859,6 +859,43 @@ class TestRetentionTimeFeature:
         assert restored.train_fraction == 0.5
         assert restored.min_train_points == 2
 
+    @patch("winnow.calibration.calibration_features.koinapy.Koina")
+    def test_legacy_pickle_state_backfills_min_train_points(self, mock_koina):
+        """Test old pickled RetentionTimeFeature state restores current defaults."""
+        mock_model_instance = Mock()
+        mock_koina.return_value = mock_model_instance
+        mock_model_instance.model_inputs = ["peptide_sequences"]
+        mock_model_instance.predict.return_value = pd.DataFrame({"irt": range(10)})
+
+        legacy_state = {
+            "train_fraction": 1.0,
+            "learn_from_missing": True,
+            "seed": 42,
+            "unsupported_residues": [],
+            "irt_model_name": "Prosit_2019_irt",
+            "max_peptide_length": 30,
+        }
+
+        feature = RetentionTimeFeature.__new__(RetentionTimeFeature)
+        feature.__setstate__(legacy_state)
+
+        assert feature.min_train_points == 10
+
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.95 - (idx * 0.01) for idx in range(10)],
+                "prediction": [["A", "G"] for _ in range(10)],
+                "retention_time": [float(idx) for idx in range(10)],
+                "spectrum_id": list(range(10)),
+                "experiment_name": ["exp_a"] * 10,
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
+
+        feature.prepare(dataset)
+
+        assert "exp_a" in feature.irt_predictors
+
     def test_save_and_load_regressors(self, tmp_path):
         """Test save_regressors and load_regressors round-trip."""
         from sklearn.linear_model import LinearRegression
