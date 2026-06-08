@@ -617,6 +617,39 @@ class TestRetentionTimeFeature:
         assert len(feature.irt_predictors) == 2
 
     @patch("winnow.calibration.calibration_features.koinapy.Koina")
+    def test_compute_handles_non_string_experiment_name(self, mock_koina):
+        """Test per-experiment iRT computation with non-string experiment_name values."""
+        mock_model_instance = Mock()
+        mock_koina.return_value = mock_model_instance
+        mock_model_instance.model_inputs = ["peptide_sequences"]
+
+        def predict(inputs):
+            return pd.DataFrame({"irt": range(len(inputs))}, index=inputs.index)
+
+        mock_model_instance.predict.side_effect = predict
+
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.95, 0.90, 0.85, 0.80],
+                "prediction": [["A", "G"], ["G", "A"], ["S", "P"], ["V"]],
+                "retention_time": [10.5, 15.2, 20.1, 8.7],
+                "spectrum_id": [0, 1, 2, 3],
+                "experiment_name": [1, 1, 2, 2],
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
+
+        feature = RetentionTimeFeature(train_fraction=1.0, min_train_points=2)
+        feature.prepare(dataset)
+
+        feature.compute(dataset)
+
+        assert "irt_error" in dataset.metadata.columns
+        assert "predicted iRT" in dataset.metadata.columns
+        assert dataset.metadata["irt_error"].notna().all()
+        assert dataset.metadata["predicted iRT"].notna().all()
+
+    @patch("winnow.calibration.calibration_features.koinapy.Koina")
     def test_prepare_skips_preloaded_experiments(self, mock_koina):
         """Test that prepare skips experiments with pre-loaded regressors."""
         mock_model_instance = Mock()
