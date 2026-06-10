@@ -465,46 +465,34 @@ class RetentionTimeFeature(CalibrationFeatures):
         n_unique_peptides = self._count_unique_sequences(train_data)
         if n_unique_peptides < 2:
             raise ValueError(
-                f"Experiment '{experiment_name}': cannot fit iRT calibration "
-                f"regressor — training pool has only {n_unique_peptides} "
-                f"unique peptide(s) after applying train_fraction="
-                f"{self.train_fraction}. Koina predicts one iRT per "
-                f"sequence, so RT->iRT regression requires at least 2 "
-                f"distinct peptides. Increase "
-                f"calibrator.irt_calibration.train_fraction or provide more "
-                f"peptide diversity."
+                f"Experiment '{experiment_name}': cannot fit iRT calibration regressor —\n"
+                f"  training pool has only {n_unique_peptides} unique peptide(s) after applying train_fraction={self.train_fraction}.\n"
+                f"  Koina iRT prediction models output one iRT per peptide sequence, so RT->iRT regression requires at least 2 distinct training peptides.\n"
+                f"  Increase calibrator.irt_calibration.train_fraction or provide more peptide diversity."
             )
 
         if 2 < n_unique_peptides < self.min_train_points:
             warnings.warn(
-                f"Experiment '{experiment_name}': iRT calibration pool (top "
-                f"{self.train_fraction:.0%}, {len(train_data)} PSMs) has only "
-                f"{n_unique_peptides} unique peptide(s), below "
-                f"min_train_points={self.min_train_points}. The RT->iRT "
-                f"regressor fit may be unreliable. Consider increasing "
-                f"calibrator.irt_calibration.train_fraction or "
-                f"de-duplicating peptides.",
+                f"Experiment '{experiment_name}': iRT calibration pool (top {self.train_fraction:.0%}, {len(train_data)} PSMs):\n"
+                f"  Only {n_unique_peptides} unique peptide(s), below min_train_points={self.min_train_points}.\n"
+                f"  The RT->iRT regressor fit may be unreliable.\n"
+                f"  Consider increasing calibrator.irt_calibration.train_fraction or de-duplicating peptides.",
                 stacklevel=2,
             )
 
         if train_data["retention_time"].nunique() < 2:
             raise ValueError(
-                f"Experiment '{experiment_name}': cannot fit iRT calibration "
-                f"regressor — training pool has only "
-                f"{train_data['retention_time'].nunique()} unique retention "
-                f"time value(s) after applying train_fraction="
-                f"{self.train_fraction}. Increase "
-                f"calibrator.irt_calibration.train_fraction."
+                f"Experiment '{experiment_name}': cannot fit iRT calibration regressor —\n"
+                f"  training pool has only {train_data['retention_time'].nunique()} unique retention time value(s) after applying train_fraction={self.train_fraction}.\n"
+                f"  Increase calibrator.irt_calibration.train_fraction."
             )
 
         if len(train_data) < self.min_train_points:
             raise ValueError(
-                f"Experiment '{experiment_name}': insufficient data for iRT "
-                f"calibration. After applying train_fraction={self.train_fraction}, "
-                f"only {len(train_data)} valid training points remain "
-                f"(from {len(metadata)} total spectra), but "
-                f"min_train_points={self.min_train_points} are required. "
-                f"Adjust train_fraction, min_train_points, or provide more data."
+                f"Experiment '{experiment_name}': insufficient data for iRT calibration.\n"
+                f"  After applying train_fraction={self.train_fraction}, only {len(train_data)} valid training points remain (from {len(metadata)} total spectra),\n"
+                f"  but min_train_points={self.min_train_points} are required.\n"
+                f"  Adjust train_fraction, min_train_points, or provide more data."
             )
 
         return train_data

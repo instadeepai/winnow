@@ -396,7 +396,10 @@ class TestRetentionTimeFeature:
 
         with pytest.raises(
             ValueError,
-            match="only 1 unique peptide\\(s\\).*Koina predicts one iRT per sequence",
+            match=(
+                r"(?s)training pool has only 1 unique peptide\(s\).*"
+                r"Koina iRT prediction models output one iRT per peptide sequence"
+            ),
         ):
             feature._select_training_data(metadata, "exp_a")
 
@@ -473,7 +476,7 @@ class TestRetentionTimeFeature:
 
         with pytest.raises(
             ValueError,
-            match="only 1 unique retention time value\\(s\\)",
+            match=r"training pool has only 1 unique retention time value\(s\)",
         ):
             feature._select_training_data(metadata, "exp_a")
 
