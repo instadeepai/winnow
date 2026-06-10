@@ -9,6 +9,7 @@ from winnow.calibration.features.utils import (
     find_matching_ions,
     validate_model_input_params,
     resolve_model_inputs,
+    compute_ion_identifications,
     compute_longest_ion_series,
     compute_complementary_ion_count,
     compute_max_ion_gap,
@@ -482,6 +483,39 @@ class TestSpectrumMatchQualityFunctions:
         """Test complementary ion count with no complementary pairs."""
         annotations = ["b1+1", "b2+1", "y1+1", "y2+1"]
         assert compute_complementary_ion_count(annotations, peptide_length=5) == 0
+
+    def test_compute_ion_identifications_uses_per_row_prediction_length(self):
+        """Complementary ion counts should use each row's prediction length."""
+        dataset = pd.DataFrame(
+            {
+                "runner_up_prosit_mz": [[100.0, 200.0], [300.0], [400.0]],
+                "runner_up_annotation": [["b1+1", "y3+1"], ["b1+1"], ["b1+1"]],
+                "mz_array": [[100.0, 200.0], [300.0], [400.0]],
+                "intensity_array": [[10.0, 20.0], [30.0], [40.0]],
+            }
+        )
+        runner_up_predictions = [
+            ["A", "C", "D", "K"],
+            ["P", "E"],
+            ["G", "G"],
+        ]
+
+        (
+            _ion_matches,
+            _match_intensity,
+            _longest_b_series,
+            _longest_y_series,
+            complementary_ion_count,
+            _max_ion_gap,
+        ) = compute_ion_identifications(
+            dataset=dataset,
+            source_column="runner_up_prosit_mz",
+            source_annotation_column="runner_up_annotation",
+            mz_tolerance=0.01,
+            predictions=runner_up_predictions,
+        )
+
+        assert complementary_ion_count[0] == 1
 
     def test_compute_max_ion_gap_basic(self):
         """Test max ion gap calculation."""
