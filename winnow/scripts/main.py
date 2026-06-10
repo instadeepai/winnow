@@ -10,8 +10,9 @@ from __future__ import annotations
 from typing import Union, Tuple, Optional, List, TYPE_CHECKING, Annotated
 import typer
 import logging
-from rich.logging import RichHandler
 from pathlib import Path
+
+from winnow.utils.rich_console import STDERR_CONSOLE, notebook_safe_rich_handler
 
 import polars as pl
 import pandas as pd
@@ -29,7 +30,7 @@ logger.setLevel(logging.INFO)
 # Prevent duplicate messages by disabling propagation and using only RichHandler
 logger.propagate = False
 if not logger.handlers:
-    logger.addHandler(RichHandler())
+    logger.addHandler(notebook_safe_rich_handler())
 
 
 # Typer CLI setup
@@ -119,9 +120,7 @@ def _require_spectrum_path(spectrum_path_or_directory: Optional[str]) -> Path:
         spectrum_path_or_directory is None
         or not str(spectrum_path_or_directory).strip()
     ):
-        from rich.console import Console
-
-        Console(stderr=True).print(
+        STDERR_CONSOLE.print(
             "[bold red]Error:[/bold red] No dataset supplied.\n\n"
             "Set dataset.spectrum_path_or_directory to your spectrum "
             "parquet file or a directory of internal Winnow datasets.\n\n"
@@ -147,8 +146,6 @@ def _require_spectra_after_features(n_spectra: int) -> None:
     if n_spectra > 0:
         return
 
-    from rich.console import Console
-
     lines = [
         "[bold red]Error:[/bold red] All spectra were removed during feature "
         "computation; nothing left to calibrate.",
@@ -166,7 +163,7 @@ def _require_spectra_after_features(n_spectra: int) -> None:
         "setting learn_from_missing=True on affected features, or "
         "fixing input data.",
     ]
-    Console(stderr=True).print("\n".join(lines))
+    STDERR_CONSOLE.print("\n".join(lines))
     raise typer.Exit(code=1)
 
 

@@ -54,7 +54,7 @@ def validate_irt_calibration_config(
     if not explicit:
         return
 
-    from rich.console import Console
+    from winnow.utils.rich_console import STDERR_CONSOLE
 
     fields = ", ".join(f"calibrator.irt_calibration.{f}" for f in sorted(explicit))
     lines = [
@@ -69,7 +69,7 @@ def validate_irt_calibration_config(
         "  [dim]calibrator.irt_regressor_path=null "
         "calibrator.irt_calibration.train_fraction=0.3[/dim]",
     ]
-    Console(stderr=True).print("\n".join(lines))
+    STDERR_CONSOLE.print("\n".join(lines))
     raise typer.Exit(code=1)
 
 

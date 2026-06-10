@@ -133,7 +133,7 @@ def validate_koina_intensity_config(
     if not conflicts:
         return
 
-    from rich.console import Console
+    from winnow.utils.rich_console import STDERR_CONSOLE
 
     lines = [
         "[bold red]Error:[/bold red] Koina model input(s) cannot be set in both "
@@ -150,7 +150,7 @@ def validate_koina_intensity_config(
             "  [dim]koina.input_columns.collision_energies=collision_energy[/dim]",
         ]
     )
-    Console(stderr=True).print("\n".join(lines))
+    STDERR_CONSOLE.print("\n".join(lines))
     raise typer.Exit(code=1)
 
 
