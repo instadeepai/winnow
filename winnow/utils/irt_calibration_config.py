@@ -59,12 +59,12 @@ def validate_irt_calibration_config(
     fields = ", ".join(f"calibrator.irt_calibration.{f}" for f in sorted(explicit))
     lines = [
         "[bold red]Error:[/bold red] Cannot set iRT calibration training parameters "
-        "when [bold]calibrator.irt_regressor_path[/bold] is set.",
+        "when calibrator.irt_regressor_path is set.",
         "",
         f"Conflicting override(s): {fields}",
         "",
         "Pre-loaded regressors are used as-is. Unset "
-        "[bold]calibrator.irt_regressor_path[/bold] to re-fit with custom "
+        "calibrator.irt_regressor_path to re-fit with custom "
         "calibration settings, for example:",
         "  [dim]calibrator.irt_regressor_path=null "
         "calibrator.irt_calibration.train_fraction=0.3[/dim]",

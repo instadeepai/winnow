@@ -123,7 +123,7 @@ def _require_spectrum_path(spectrum_path_or_directory: Optional[str]) -> Path:
 
         Console(stderr=True).print(
             "[bold red]Error:[/bold red] No dataset supplied.\n\n"
-            "Set [bold]dataset.spectrum_path_or_directory[/bold] to your spectrum "
+            "Set dataset.spectrum_path_or_directory to your spectrum "
             "parquet file or a directory of internal Winnow datasets.\n\n"
             "[bold cyan]Example:[/bold cyan]\n"
             "  [dim]winnow predict data_loader=winnow "
@@ -131,7 +131,7 @@ def _require_spectrum_path(spectrum_path_or_directory: Optional[str]) -> Path:
             "  [dim]winnow predict data_loader=instanovo "
             "dataset.spectrum_path_or_directory=/path/to/data.parquet "
             "dataset.predictions_path=/path/to/instanovo_predictions.csv[/dim]\n\n"
-            "Edit [bold]predict.yaml[/bold] or pass overrides on the command line. "
+            "Edit predict.yaml or pass overrides on the command line. "
             "Run [dim]winnow config predict[/dim] to inspect the resolved config.",
         )
         raise typer.Exit(code=1)
@@ -154,16 +154,16 @@ def _require_spectra_after_features(n_spectra: int) -> None:
         "computation; nothing left to calibrate.",
         "",
         "Check the warnings above. Common causes:",
-        "  • [bold]iRT calibration[/bold] skipped an experiment (e.g. only one "
+        "  • iRT calibration skipped an experiment (e.g. only one "
         "peptide in the top train_fraction pool, insufficient RT spread, or too "
         "few calibration points) while the iRT feature has "
-        "[bold]learn_from_missing=False[/bold]",
+        "learn_from_missing=False",
         "  • Koina validity filters (peptide length, precursor charge, "
-        "unsupported residues) with [bold]learn_from_missing=False[/bold] on "
+        "unsupported residues) with learn_from_missing=False on "
         "intensity or iRT features",
         "",
-        "Try increasing [bold]calibrator.irt_calibration.train_fraction[/bold], "
-        "setting [bold]learn_from_missing=True[/bold] on affected features, or "
+        "Try increasing calibrator.irt_calibration.train_fraction, "
+        "setting learn_from_missing=True on affected features, or "
         "fixing input data.",
     ]
     Console(stderr=True).print("\n".join(lines))

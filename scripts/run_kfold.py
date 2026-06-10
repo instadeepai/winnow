@@ -491,7 +491,7 @@ def main(
 ) -> None:
     """K-fold cross-validation and full run for a single spectrum parquet and predictions CSV.
 
-    Options match [dim]winnow[/dim] (e.g. [bold]--config-dir[/bold] / [bold]-cp[/bold]); logs use Rich.
+    Options match [dim]winnow[/dim] (e.g. --config-dir / -cp); logs use Rich.
     """
     _configure_script_logging()
     config_path = config_dir if config_dir is not None else get_config_dir()

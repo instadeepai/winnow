@@ -137,11 +137,11 @@ def validate_koina_intensity_config(
 
     lines = [
         "[bold red]Error:[/bold red] Koina model input(s) cannot be set in both "
-        "[bold]koina.input_constants[/bold] and [bold]koina.input_columns[/bold]:",
+        "koina.input_constants and koina.input_columns:",
         "",
     ]
     for key in conflicts:
-        lines.append(f"  • [bold]{key}[/bold]")
+        lines.append(f"  • {key}")
     lines.extend(
         [
             "",
