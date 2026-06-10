@@ -215,10 +215,21 @@ def apply_fdr_control(
 
 def check_if_labelled(dataset: CalibrationDataset) -> None:
     """Check if the dataset contains a ground-truth column."""
-    if "sequence" not in dataset.metadata.columns:
+    if not _has_ground_truth_sequences(dataset.metadata):
         raise ValueError(
             "Database-grounded FDR control can only be performed on annotated data."
         )
+
+
+def _has_ground_truth_sequences(metadata: pd.DataFrame) -> bool:
+    """Return True when metadata contains at least one tokenised ground-truth sequence."""
+    if "sequence" not in metadata.columns:
+        return False
+    return (
+        metadata["sequence"]
+        .apply(lambda value: isinstance(value, list) and len(value) > 0)
+        .any()
+    )
 
 
 def separate_metadata_and_predictions(
@@ -248,10 +259,8 @@ def separate_metadata_and_predictions(
     # NonParametricFDRControl adds psm_pep column
     if isinstance(fdr_control, NonParametricFDRControl):
         preds_and_fdr_metrics_cols.append("psm_pep")
-    if "sequence" in dataset_metadata.columns:
-        preds_and_fdr_metrics_cols.append("sequence")
-        preds_and_fdr_metrics_cols.append("num_matches")
-        preds_and_fdr_metrics_cols.append("correct")
+    if _has_ground_truth_sequences(dataset_metadata):
+        preds_and_fdr_metrics_cols.extend(["sequence", "num_matches", "correct"])
     dataset_preds_and_fdr_metrics = dataset_metadata[
         ["spectrum_id"] + preds_and_fdr_metrics_cols
     ]
