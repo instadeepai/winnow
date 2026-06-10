@@ -673,8 +673,14 @@ class ProbabilityCalibrator:
         assert self.feature_mean is not None
         assert self.feature_std is not None
 
-        features = self._extract_feature_matrix(dataset, labelled=False)
+        if len(dataset) == 0:
+            raise ValueError(
+                "Cannot predict on an empty dataset: no spectra remain after "
+                "feature computation. Check feature validity filters and "
+                "learn_from_missing settings."
+            )
 
+        features = self._extract_feature_matrix(dataset, labelled=False)
         device = next(self.network.parameters()).device
         x = torch.as_tensor(features, dtype=torch.float32, device=device)
         x = (x - self.feature_mean) / self.feature_std

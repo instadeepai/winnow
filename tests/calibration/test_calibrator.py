@@ -733,6 +733,30 @@ class TestProbabilityCalibrator:
         features = calibrator._extract_feature_matrix(empty_dataset, labelled=False)
         assert features.shape[0] == 0
 
+    def test_predict_empty_dataset_raises(self):
+        """Predict on zero rows should fail with a clear error, not a torch dtype error."""
+        n_train = 20
+        train_metadata = pd.DataFrame(
+            {
+                "confidence": np.linspace(0.9, 0.5, n_train),
+                "correct": np.ones(n_train, dtype=int),
+            }
+        )
+        train_raw = CalibrationDataset(
+            metadata=train_metadata, predictions=[None] * n_train
+        )
+        calibrator = ProbabilityCalibrator(max_epochs=1, hidden_dims=(4,), seed=42)
+        calibrator.add_feature(MockCalibrationFeature("mock_feat", ["mock_col"]))
+        calibrator.fit(train_raw)
+
+        empty_dataset = CalibrationDataset(
+            metadata=train_metadata.iloc[:0].copy(), predictions=[]
+        )
+        calibrator.compute_features(empty_dataset)
+
+        with pytest.raises(ValueError, match="empty dataset"):
+            calibrator.predict(empty_dataset)
+
     def test_get_config_on_mock_feature(self):
         """Test that get_config returns expected keys."""
         feature = MockCalibrationFeature("test", ["col1", "col2"])

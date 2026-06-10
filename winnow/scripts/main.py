@@ -138,6 +138,38 @@ def _require_spectrum_path(spectrum_path_or_directory: Optional[str]) -> Path:
     return Path(spectrum_path_or_directory)
 
 
+def _require_spectra_after_features(n_spectra: int) -> None:
+    """Abort the CLI when feature computation removed every spectrum.
+
+    Raises:
+        typer.Exit: If ``n_spectra`` is zero (exit code 1).
+    """
+    if n_spectra > 0:
+        return
+
+    from rich.console import Console
+
+    lines = [
+        "[bold red]Error:[/bold red] All spectra were removed during feature "
+        "computation; nothing left to calibrate.",
+        "",
+        "Check the warnings above. Common causes:",
+        "  • [bold]iRT calibration[/bold] skipped an experiment (e.g. only one "
+        "peptide in the top train_fraction pool, insufficient RT spread, or too "
+        "few calibration points) while the iRT feature has "
+        "[bold]learn_from_missing=False[/bold]",
+        "  • Koina validity filters (peptide length, precursor charge, "
+        "unsupported residues) with [bold]learn_from_missing=False[/bold] on "
+        "intensity or iRT features",
+        "",
+        "Try increasing [bold]calibrator.irt_calibration.train_fraction[/bold], "
+        "setting [bold]learn_from_missing=True[/bold] on affected features, or "
+        "fixing input data.",
+    ]
+    Console(stderr=True).print("\n".join(lines))
+    raise typer.Exit(code=1)
+
+
 def filter_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
     """Filter out rows whose predictions are empty or contain unsupported PSMs.
 
@@ -853,6 +885,7 @@ def predict_entry_point(
 
     combined_metadata = pd.concat(all_metadata, ignore_index=True)
     logger.info(f"Total spectra after feature computation: {len(combined_metadata)}")
+    _require_spectra_after_features(len(combined_metadata))
 
     dataset = CalibrationDataset(metadata=combined_metadata)
 
