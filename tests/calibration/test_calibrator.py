@@ -19,7 +19,7 @@ from winnow.calibration.calibration_features import (
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.datasets.feature_dataset import FeatureDataset
 from winnow.calibration.features.fragment_match import FragmentMatchFeatures
-from winnow.utils.koina_config import (
+from winnow.utils.koina_intensity_config import (
     DEFAULT_KOINA_INPUT_COLUMNS,
     KOINA_RUNTIME_CONFIG_KEYS,
 )

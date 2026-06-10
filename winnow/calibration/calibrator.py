@@ -25,7 +25,7 @@ from winnow.calibration.calibration_features import (
 from winnow.calibration.features.utils import validate_model_input_params
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.datasets.feature_dataset import FeatureDataset
-from winnow.utils.koina_config import (
+from winnow.utils.koina_intensity_config import (
     resolve_feature_model_inputs,
     strip_runtime_keys_from_feature_config,
 )

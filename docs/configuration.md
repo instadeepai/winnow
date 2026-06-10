@@ -410,6 +410,11 @@ calibrator:
   cache_dir: null  # can be set to null if using local model or for the default cache directory
   # Optional: pre-fitted iRT regressors from training (see RetentionTimeFeature docs)
   irt_regressor_path: null
+  # Optional predict-time overrides for RT->iRT regressor fitting (null = use loaded model).
+  # Cannot be combined with irt_regressor_path.
+  irt_calibration:
+    train_fraction: null
+    min_train_points: null
 
 # Optional: Koina intensity input overrides at inference (same `input_constants` /
 # `input_columns` keys as the `koina` block in calibrator.yaml; merged per key into
@@ -438,7 +443,8 @@ output_folder: results/predictions
 - `calibrator.pretrained_model_name_or_path`: Hugging Face model identifier or local model directory path
 - `calibrator.cache_dir`: Directory to cache Hugging Face models (null for default)
 - `calibrator.irt_regressor_path`: Optional path to iRT regressors saved during training; when set, skips re-fitting for known experiments
-- `koina.input_constants` / `koina.input_columns`: Optional overrides for Koina collision energy / fragmentation (and other intensity-model inputs) at inference; same structure as the `koina` block in `calibrator.yaml`; see [Inference-time Koina overrides](#inference-time-koina-overrides-winnow-predict)
+- `calibrator.irt_calibration.train_fraction` / `min_train_points`: Optional predict-time overrides for per-experiment RT→iRT linear regressor fitting; defaults come from the loaded model; a warning is logged when overridden. These cannot be set when `irt_regressor_path` is set.
+- `koina.input_constants` / `koina.input_columns`: Optional overrides for Koina collision energy / fragmentation type on **intensity** models at inference; same structure as the `koina` block in `calibrator.yaml`; server URL/SSL also applies to iRT Koina calls; see [Inference-time Koina overrides](#inference-time-koina-overrides-winnow-predict)
 - `fdr_method`: FDR estimation method (via defaults: `nonparametric` or `database_grounded`)
 - `fdr_control.fdr_threshold`: Target FDR threshold (e.g. 0.01 for 1%, 0.05 for 5%)
 - `fdr_control.confidence_column`: Column name with confidence scores

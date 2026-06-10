@@ -32,6 +32,11 @@ calibrator:
   # Useful for within-experiment use cases where the unlabelled data has an unreliable confidence distribution
   # for training a new RT->iRT regressor.
   irt_regressor_path: null
+  # Optional predict-time overrides for per-experiment RT->iRT regressor fitting.
+  # null values use settings from the loaded model. Cannot be combined with irt_regressor_path.
+  irt_calibration:
+    train_fraction: null
+    min_train_points: null
 
 # Koina inference-time settings. CE/frag are not stored in saved models; configure per run here.
 # Set exactly one of input_constants or input_columns per key (not both).

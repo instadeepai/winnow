@@ -60,42 +60,53 @@ def print_config(cfg) -> None:
     formatter.print_config(cfg)
 
 
-def _handle_koina_config(
+def _handle_koina_intensity_config(
     cfg,
     calibrator: Optional["ProbabilityCalibrator"] = None,
     *,
     hydra_overrides: Optional[List[str]] = None,
     execute: bool = True,
 ) -> None:
-    """Validate Koina overrides and apply server / model-input settings to a calibrator."""
-    from winnow.utils.koina_config import (
-        log_resolved_koina_inputs,
-        parse_koina_overrides,
-        validate_koina_overrides,
+    """Validate and apply Koina intensity-model predict-time settings."""
+    from winnow.utils.koina_intensity_config import (
+        apply_koina_intensity_config,
+        validate_koina_intensity_config,
     )
 
     koina_cfg = cfg.get("koina")
-    validate_koina_overrides(koina_cfg, hydra_overrides)
+    validate_koina_intensity_config(koina_cfg, hydra_overrides)
 
-    if not execute:
+    if not execute or calibrator is None:
         return
 
-    if calibrator is None or koina_cfg is None:
-        return
+    apply_koina_intensity_config(calibrator, koina_cfg, logger)
 
-    constants, columns = parse_koina_overrides(koina_cfg)
-    calibrator.apply_koina_model_input_overrides(
-        model_input_constants=constants,
-        model_input_columns=columns,
+
+def _handle_irt_calibration_config(
+    cfg,
+    calibrator: Optional["ProbabilityCalibrator"] = None,
+    *,
+    hydra_overrides: Optional[List[str]] = None,
+    execute: bool = True,
+) -> None:
+    """Validate and apply predict-time iRT regressor calibration overrides."""
+    from winnow.utils.irt_calibration_config import (
+        apply_irt_calibration_config,
+        validate_irt_calibration_config,
     )
-    server_url = koina_cfg.get("server_url")
-    ssl = koina_cfg.get("ssl")
-    if server_url is not None or ssl is not None:
-        calibrator.apply_koina_server_overrides(
-            server_url=server_url,
-            ssl=ssl,
-        )
-    log_resolved_koina_inputs(calibrator, logger)
+
+    validate_irt_calibration_config(cfg, hydra_overrides)
+
+    if not execute or calibrator is None:
+        return
+
+    irt_calibration_cfg = cfg.calibrator.get("irt_calibration")
+    apply_irt_calibration_config(
+        calibrator,
+        irt_calibration_cfg,
+        hydra_overrides=hydra_overrides,
+        logger=logger,
+    )
 
 
 def _require_spectrum_path(spectrum_path_or_directory: Optional[str]) -> Path:
@@ -256,7 +267,7 @@ def train_entry_point(
         cfg = compose(config_name="train", overrides=overrides)
 
     if not execute:
-        _handle_koina_config(cfg, hydra_overrides=overrides, execute=False)
+        _handle_koina_intensity_config(cfg, hydra_overrides=overrides, execute=False)
         print_config(cfg)
         return
 
@@ -265,7 +276,7 @@ def train_entry_point(
     logger.info("Starting training pipeline.")
     logger.info(f"Training configuration: {cfg}")
 
-    _handle_koina_config(cfg, hydra_overrides=overrides, execute=True)
+    _handle_koina_intensity_config(cfg, hydra_overrides=overrides, execute=True)
 
     calibrator = instantiate(cfg.calibrator)
     features_path = cfg.get("features_path")
@@ -701,13 +712,13 @@ def compute_features_entry_point(
         cfg = compose(config_name="compute_features", overrides=overrides)
 
     if not execute:
-        _handle_koina_config(cfg, hydra_overrides=overrides, execute=False)
+        _handle_koina_intensity_config(cfg, hydra_overrides=overrides, execute=False)
         print_config(cfg)
         return
 
     spectrum_path = _require_spectrum_path(cfg.dataset.spectrum_path_or_directory)
 
-    _handle_koina_config(cfg, hydra_overrides=overrides, execute=True)
+    _handle_koina_intensity_config(cfg, hydra_overrides=overrides, execute=True)
 
     logger.info("Starting compute-features pipeline.")
     logger.info(f"Compute-features configuration: {cfg}")
@@ -783,13 +794,15 @@ def predict_entry_point(
         cfg = compose(config_name="predict", overrides=overrides)
 
     if not execute:
-        _handle_koina_config(cfg, hydra_overrides=overrides, execute=False)
+        _handle_koina_intensity_config(cfg, hydra_overrides=overrides, execute=False)
+        _handle_irt_calibration_config(cfg, hydra_overrides=overrides, execute=False)
         print_config(cfg)
         return
 
     spectrum_path = _require_spectrum_path(cfg.dataset.spectrum_path_or_directory)
 
-    _handle_koina_config(cfg, hydra_overrides=overrides, execute=True)
+    _handle_koina_intensity_config(cfg, hydra_overrides=overrides, execute=True)
+    _handle_irt_calibration_config(cfg, hydra_overrides=overrides, execute=True)
 
     from winnow.calibration.calibrator import ProbabilityCalibrator
     from winnow.datasets.calibration_dataset import CalibrationDataset
@@ -805,7 +818,12 @@ def predict_entry_point(
         cache_dir=cfg.calibrator.cache_dir,
     )
 
-    _handle_koina_config(cfg, calibrator, hydra_overrides=overrides, execute=True)
+    _handle_koina_intensity_config(
+        cfg, calibrator, hydra_overrides=overrides, execute=True
+    )
+    _handle_irt_calibration_config(
+        cfg, calibrator, hydra_overrides=overrides, execute=True
+    )
 
     # Load pre-fitted iRT regressors if configured
     irt_regressor_path = cfg.calibrator.get("irt_regressor_path")

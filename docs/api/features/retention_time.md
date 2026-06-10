@@ -89,6 +89,20 @@ When pre-fitted regressors are loaded, `prepare()` skips re-fitting for those ex
 Experiments in the inference data that were not in the training checkpoint are still fitted
 from scratch.
 
+**Mutual exclusivity:** `calibrator.irt_calibration.*` overrides (e.g. `train_fraction`) cannot
+be used together with `calibrator.irt_regressor_path`. Use one or the other.
+
+### Predict-time calibration overrides
+
+Override RT→iRT regressor fitting settings without retraining the calibrator MLP:
+
+```bash
+winnow predict calibrator.irt_calibration.train_fraction=0.3 ...
+```
+
+`null` values in `predict.yaml` use the settings stored in the loaded model. Non-default
+overrides log a warning.
+
 This is separate from the calibrator model itself and should not be confused with the
 general pretrained calibrator workflow, where regressors are always re-fitted automatically
 from the inference data.
@@ -117,3 +131,6 @@ The dataset must contain:
 - iRT error is always positive (absolute value)
 - Peptides with unsupported residues or exceeding length limits are handled according to `learn_from_missing` setting
 - When `learn_from_missing=True`, invalid rows get imputed error values and an `is_missing_irt_error` indicator column
+- Fitting **fails** (experiment skipped) when the calibration pool has fewer than two distinct peptides — Koina returns one iRT per sequence, so a single peptide cannot anchor RT→iRT regression; increase `train_fraction` or add sequence diversity
+- Fitting **fails** (experiment skipped) when the calibration pool has fewer than two distinct `retention_time` values — a line cannot be fit; increase `train_fraction` or fix input RT values
+- A **warning** is issued when the pool has more than two but fewer than `min_train_points` unique sequences (partial diversity; the fit may be unreliable)

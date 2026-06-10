@@ -146,21 +146,36 @@ class TestRetentionTimeFeature:
         mock_koina.return_value = mock_model_instance
         mock_model_instance.model_inputs = ["peptide_sequences"]
 
+        predictions = [
+            ["A", "G"],
+            ["G", "A"],
+            ["L", "K"],
+            ["M", "V"],
+            ["P", "S"],
+            ["T", "W"],
+            ["Y", "H"],
+            ["R", "N"],
+            ["D", "E"],
+            ["F", "I"],
+        ]
         metadata = pd.DataFrame(
             {
-                "confidence": [0.95, 0.90],
-                "prediction": [["A", "G"], ["G", "A"]],
-                "retention_time": [10.5, 15.2],
-                "spectrum_id": [0, 1],
-                "experiment_name": ["exp_a", "exp_a"],
+                "confidence": [0.95 - 0.01 * i for i in range(len(predictions))],
+                "prediction": predictions,
+                "retention_time": [10.5 + i * 2.1 for i in range(len(predictions))],
+                "spectrum_id": list(range(len(predictions))),
+                "experiment_name": ["exp_a"] * len(predictions),
             }
         )
         dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
-        feature = RetentionTimeFeature(train_fraction=0.1, min_train_points=10)
+        feature = RetentionTimeFeature(train_fraction=1.0, min_train_points=11)
 
-        with pytest.warns(UserWarning, match="Skipping experiment 'exp_a'"):
-            feature.prepare(dataset)
+        with pytest.warns(
+            UserWarning, match=r"unique peptide\(s\), below min_train_points"
+        ):
+            with pytest.warns(UserWarning, match="Skipping experiment 'exp_a'"):
+                feature.prepare(dataset)
 
         assert "exp_a" not in feature.irt_predictors
 
@@ -178,36 +193,53 @@ class TestRetentionTimeFeature:
         # Simulate koinapy crash on empty input
         mock_model_instance.predict.side_effect = IndexError("list index out of range")
 
+        predictions = [
+            ["A", "G"],
+            ["G", "A"],
+            ["L", "K"],
+            ["M", "V"],
+            ["P", "S"],
+            ["T", "W"],
+            ["Y", "H"],
+            ["R", "N"],
+            ["D", "E"],
+            ["F", "I"],
+        ]
+        n_spectra = len(predictions)
         metadata = pd.DataFrame(
             {
-                "confidence": [0.95, 0.90, 0.85, 0.80, 0.75],
-                "prediction": [
-                    ["A", "G"],
-                    ["G", "A"],
-                    ["L", "K"],
-                    ["M", "V"],
-                    ["P", "S"],
-                ],
-                "retention_time": [10.5, 15.2, 20.1, 25.3, 30.0],
-                "spectrum_id": [0, 1, 2, 3, 4],
-                "experiment_name": ["exp_a"] * 5,
+                "confidence": [0.95 - 0.01 * i for i in range(n_spectra)],
+                "prediction": predictions,
+                "retention_time": [10.5 + i * 2.1 for i in range(n_spectra)],
+                "spectrum_id": list(range(n_spectra)),
+                "experiment_name": ["exp_a"] * n_spectra,
             }
         )
         dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
         feature = RetentionTimeFeature(
-            train_fraction=0.1,
-            min_train_points=10,
+            train_fraction=1.0,
+            min_train_points=11,
             learn_from_missing=False,
         )
 
-        with pytest.warns(UserWarning, match="Skipping experiment 'exp_a'"):
-            feature.prepare(dataset)
+        with pytest.warns(
+            UserWarning, match=r"unique peptide\(s\), below min_train_points"
+        ):
+            with pytest.warns(UserWarning, match="Skipping experiment 'exp_a'"):
+                feature.prepare(dataset)
 
         assert "exp_a" not in feature.irt_predictors
 
         # compute should not crash even though all spectra will be dropped
-        feature.compute(dataset)
+        with pytest.warns(
+            UserWarning,
+            match=(
+                rf"Filtered {n_spectra} spectra that do not satisfy the validity "
+                rf"constraints for the Koina iRT model"
+            ),
+        ):
+            feature.compute(dataset)
 
         # All rows should have been dropped (learn_from_missing=False)
         assert dataset.metadata.empty
@@ -344,6 +376,131 @@ class TestRetentionTimeFeature:
 
         assert len(dataset.metadata) == 3
         assert set(dataset.metadata["spectrum_id"].values) == {10, 20, 40}
+
+    def test_select_training_data_errors_on_single_unique_peptide(self):
+        """Raise when duplicate peptides yield a single Koina iRT target."""
+        feature = RetentionTimeFeature(
+            train_fraction=1.0,
+            min_train_points=2,
+            learn_from_missing=False,
+        )
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.95, 0.90, 0.85, 0.80, 0.75, 0.70],
+                "prediction": [["A", "G"]] * 6,
+                "retention_time": [10.0, 11.0, 12.0, 13.0, 14.0, 15.0],
+                "precursor_charge": [2] * 6,
+                "spectrum_id": list(range(6)),
+            }
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="only 1 unique peptide\\(s\\).*Koina predicts one iRT per sequence",
+        ):
+            feature._select_training_data(metadata, "exp_a")
+
+    def test_select_training_data_warns_on_partial_sequence_diversity(self):
+        """Warn when unique sequences are above 2 but below min_train_points."""
+        feature = RetentionTimeFeature(
+            train_fraction=1.0,
+            min_train_points=5,
+            learn_from_missing=False,
+        )
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.95, 0.90, 0.85, 0.80, 0.75, 0.70],
+                "prediction": [
+                    ["A", "G"],
+                    ["A", "G"],
+                    ["G", "A"],
+                    ["G", "A"],
+                    ["L", "K"],
+                    ["M", "V"],
+                ],
+                "retention_time": [10.0, 11.0, 12.0, 13.0, 14.0, 15.0],
+                "precursor_charge": [2] * 6,
+                "spectrum_id": list(range(6)),
+            }
+        )
+
+        with pytest.warns(
+            UserWarning, match=r"unique peptide\(s\), below min_train_points"
+        ):
+            train_data = feature._select_training_data(metadata, "exp_a")
+
+        assert len(train_data) == 6
+
+    def test_select_training_data_no_warn_when_two_unique_peptides(self):
+        """Do not warn when the pool has exactly two distinct peptides."""
+        feature = RetentionTimeFeature(
+            train_fraction=1.0,
+            min_train_points=2,
+            learn_from_missing=False,
+        )
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.95, 0.90, 0.85, 0.80],
+                "prediction": [["A", "G"], ["A", "G"], ["G", "A"], ["G", "A"]],
+                "retention_time": [10.0, 11.0, 12.0, 13.0],
+                "precursor_charge": [2] * 4,
+                "spectrum_id": list(range(4)),
+            }
+        )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            train_data = feature._select_training_data(metadata, "exp_a")
+
+        assert len(train_data) == 4
+
+    def test_select_training_data_errors_on_single_retention_time(self):
+        """Raise when the calibration pool has no RT spread for linear regression."""
+        feature = RetentionTimeFeature(
+            train_fraction=1.0,
+            min_train_points=2,
+            learn_from_missing=False,
+        )
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.95, 0.90, 0.85],
+                "prediction": [["A", "G"], ["G", "A"], ["S", "P"]],
+                "retention_time": [10.0, 10.0, 10.0],
+                "precursor_charge": [2, 2, 2],
+                "spectrum_id": [0, 1, 2],
+            }
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="only 1 unique retention time value\\(s\\)",
+        ):
+            feature._select_training_data(metadata, "exp_a")
+
+    @patch("winnow.calibration.features.retention_time.koinapy.Koina")
+    def test_prepare_skips_experiment_with_single_unique_peptide(self, mock_koina):
+        """Prepare skips experiments whose calibration pool has one peptide."""
+        mock_model_instance = Mock()
+        mock_koina.return_value = mock_model_instance
+        mock_model_instance.model_inputs = ["peptide_sequences"]
+
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.95, 0.90, 0.85, 0.80],
+                "prediction": [["A", "G"]] * 4,
+                "retention_time": [10.0, 11.0, 12.0, 13.0],
+                "spectrum_id": list(range(4)),
+                "experiment_name": ["exp_a"] * 4,
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
+        feature = RetentionTimeFeature(train_fraction=1.0, min_train_points=2)
+
+        with pytest.warns(UserWarning, match="Skipping experiment 'exp_a'"):
+            feature.prepare(dataset)
+
+        assert "exp_a" not in feature.irt_predictors
+        mock_model_instance.predict.assert_not_called()
 
     def test_save_and_load_regressors_safetensors(self, tmp_path):
         """Test save_regressors and load_regressors round-trip with safetensors."""

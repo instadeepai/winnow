@@ -1,10 +1,17 @@
-"""Koina runtime configuration helpers for predict / train / compute-features."""
+"""Koina intensity-model runtime configuration for predict / train / compute-features.
+
+Collision energy and fragmentation type resolution applies to intensity Koina models
+(``FragmentMatchFeatures``, ``ChimericFeatures``). Server URL/SSL overrides also
+apply to ``RetentionTimeFeature`` iRT Koina calls; CE/frag inputs do not.
+"""
 
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import typer
+
+from winnow.utils.hydra_overrides import hydra_override_keys
 
 KOINA_RUNTIME_CONFIG_KEYS = frozenset(
     {
@@ -56,7 +63,7 @@ def strip_runtime_keys_from_feature_config(
     }
 
 
-def parse_koina_overrides(
+def parse_koina_intensity_config(
     koina_cfg: Any,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, str]]]:
     """Extract input_constants / input_columns dicts from a Hydra koina config block."""
@@ -77,19 +84,6 @@ def parse_koina_overrides(
         else None
     )
     return constants, columns
-
-
-def hydra_override_keys(overrides: Optional[List[str]]) -> Set[str]:
-    """Normalised Hydra override paths (without leading ``+`` / ``~``)."""
-    keys: Set[str] = set()
-    if not overrides:
-        return keys
-    for item in overrides:
-        if "=" not in item:
-            continue
-        path = item.split("=", 1)[0].lstrip("~+")
-        keys.add(path)
-    return keys
 
 
 def _active_non_null(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -120,7 +114,7 @@ def user_specified_column(
     return value != DEFAULT_KOINA_INPUT_COLUMNS.get(key)
 
 
-def validate_koina_overrides(
+def validate_koina_intensity_config(
     koina_cfg: Any,
     hydra_overrides: Optional[List[str]] = None,
 ) -> None:
@@ -128,7 +122,7 @@ def validate_koina_overrides(
 
     Shipped default columns with null constants are not treated as a dual specification.
     """
-    constants, columns = parse_koina_overrides(koina_cfg)
+    constants, columns = parse_koina_intensity_config(koina_cfg)
     override_keys = hydra_override_keys(hydra_overrides)
     conflicts = [
         key
@@ -178,7 +172,7 @@ def format_resolved_koina_input(
     return "unset"
 
 
-def log_resolved_koina_inputs(calibrator: Any, logger: Any) -> None:
+def log_resolved_koina_intensity_config(calibrator: Any, logger: Any) -> None:
     """Log how CE/frag inputs are resolved on intensity-based features."""
     logged: Set[str] = set()
     for feature in calibrator.feature_dict.values():
@@ -198,3 +192,27 @@ def log_resolved_koina_inputs(calibrator: Any, logger: Any) -> None:
             continue
         logged.add(feature_label)
         logger.info("Koina inputs (%s): %s", feature_label, "; ".join(parts))
+
+
+def apply_koina_intensity_config(
+    calibrator: Any,
+    koina_cfg: Any,
+    logger: Any,
+) -> None:
+    """Apply server URL/SSL and CE/frag overrides from predict config to a calibrator."""
+    if koina_cfg is None:
+        return
+
+    constants, columns = parse_koina_intensity_config(koina_cfg)
+    calibrator.apply_koina_model_input_overrides(
+        model_input_constants=constants,
+        model_input_columns=columns,
+    )
+    server_url = koina_cfg.get("server_url")
+    ssl = koina_cfg.get("ssl")
+    if server_url is not None or ssl is not None:
+        calibrator.apply_koina_server_overrides(
+            server_url=server_url,
+            ssl=ssl,
+        )
+    log_resolved_koina_intensity_config(calibrator, logger)

@@ -14,7 +14,7 @@ from winnow.calibration.features.utils import (
     compute_ion_identifications,
     _validate_mz_tolerance,
 )
-from winnow.utils.koina_config import resolve_feature_model_inputs
+from winnow.utils.koina_intensity_config import resolve_feature_model_inputs
 from winnow.utils.peptide import tokens_to_proforma
 
 

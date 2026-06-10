@@ -165,6 +165,7 @@ winnow predict \
 - `dataset.predictions_path`: Path to predictions file
 - `koina.input_constants` / `koina.input_columns`: Optional Koina intensity-model inputs at inference (same keys as the `koina` block in `calibrator.yaml`); see [Configuration guide](configuration.md#inference-time-koina-overrides-winnow-predict)
 - `calibrator.irt_regressor_path`: Optional pre-saved iRT regressors from training
+- `calibrator.irt_calibration.train_fraction` / `min_train_points`: Optional RT→iRT regressor fit overrides (mutually exclusive with `irt_regressor_path`)
 - `fdr_method`: FDR estimation method (`nonparametric` or `database_grounded`)
 - `fdr_control.fdr_threshold`: Target FDR threshold (e.g. 0.01 for 1%)
 - `output_folder`: Folder path to write output files

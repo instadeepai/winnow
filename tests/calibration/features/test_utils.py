@@ -18,7 +18,7 @@ from winnow.calibration.features.utils import (
     _validate_mz_tolerance,
 )
 from winnow.calibration.features.fragment_match import FragmentMatchFeatures
-from winnow.utils.koina_config import DEFAULT_KOINA_INPUT_COLUMNS
+from winnow.utils.koina_intensity_config import DEFAULT_KOINA_INPUT_COLUMNS
 from winnow.calibration.features.chimeric import ChimericFeatures
 from winnow.datasets.calibration_dataset import CalibrationDataset
 

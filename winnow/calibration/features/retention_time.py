@@ -113,6 +113,18 @@ class RetentionTimeFeature(CalibrationFeatures):
             columns.append("is_missing_irt_error")
         return columns
 
+    @staticmethod
+    def _sequence_key(row: pd.Series) -> tuple:
+        """Hashable key for a predicted peptide sequence."""
+        prediction = row["prediction"]
+        if isinstance(prediction, list):
+            return tuple(prediction)
+        if "prediction_untokenised" in row.index and pd.notna(
+            row.get("prediction_untokenised")
+        ):
+            return (str(row["prediction_untokenised"]),)
+        return (str(prediction),)
+
     def check_valid_irt_prediction(self, dataset: CalibrationDataset) -> pd.Series:
         """Check which predictions are valid for iRT prediction.
 
@@ -400,7 +412,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         if "experiment_name" in dataset.metadata.columns:
             predicted_irt = pd.Series(np.nan, index=dataset.metadata.index)
             for exp_name, group in dataset.metadata.groupby("experiment_name"):
-                regressor = self.irt_predictors.get(exp_name)
+                regressor = self.irt_predictors.get(str(exp_name))
                 if regressor is None:
                     continue
                 predicted_irt.loc[group.index] = regressor.predict(
@@ -411,6 +423,10 @@ class RetentionTimeFeature(CalibrationFeatures):
             dataset.metadata["predicted_irt"] = self.irt_predictors[
                 "__global__"
             ].predict(dataset.metadata["retention_time"].values.reshape(-1, 1))
+
+    def _count_unique_sequences(self, metadata: pd.DataFrame) -> int:
+        """Count distinct predicted sequences in a metadata subset."""
+        return len({self._sequence_key(row) for _, row in metadata.iterrows()})
 
     def _select_training_data(
         self, metadata: pd.DataFrame, experiment_name: str
@@ -445,6 +461,41 @@ class RetentionTimeFeature(CalibrationFeatures):
         train_data = valid_input.metadata.sort_values(by="confidence", ascending=False)
         n_train = max(1, int(self.train_fraction * len(train_data)))
         train_data = train_data.iloc[:n_train]
+
+        n_unique_peptides = self._count_unique_sequences(train_data)
+        if n_unique_peptides < 2:
+            raise ValueError(
+                f"Experiment '{experiment_name}': cannot fit iRT calibration "
+                f"regressor — training pool has only {n_unique_peptides} "
+                f"unique peptide(s) after applying train_fraction="
+                f"{self.train_fraction}. Koina predicts one iRT per "
+                f"sequence, so RT->iRT regression requires at least 2 "
+                f"distinct peptides. Increase "
+                f"calibrator.irt_calibration.train_fraction or provide more "
+                f"peptide diversity."
+            )
+
+        if 2 < n_unique_peptides < self.min_train_points:
+            warnings.warn(
+                f"Experiment '{experiment_name}': iRT calibration pool (top "
+                f"{self.train_fraction:.0%}, {len(train_data)} PSMs) has only "
+                f"{n_unique_peptides} unique peptide(s), below "
+                f"min_train_points={self.min_train_points}. The RT->iRT "
+                f"regressor fit may be unreliable. Consider increasing "
+                f"calibrator.irt_calibration.train_fraction or "
+                f"de-duplicating peptides.",
+                stacklevel=2,
+            )
+
+        if train_data["retention_time"].nunique() < 2:
+            raise ValueError(
+                f"Experiment '{experiment_name}': cannot fit iRT calibration "
+                f"regressor — training pool has only "
+                f"{train_data['retention_time'].nunique()} unique retention "
+                f"time value(s) after applying train_fraction="
+                f"{self.train_fraction}. Increase "
+                f"calibrator.irt_calibration.train_fraction."
+            )
 
         if len(train_data) < self.min_train_points:
             raise ValueError(
