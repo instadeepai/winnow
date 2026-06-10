@@ -22,51 +22,67 @@ from winnow.calibration.calibration_features import (
     CalibrationFeatures,
     FeatureDependency,
 )
+from winnow.calibration.features.utils import validate_model_input_params
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.datasets.feature_dataset import FeatureDataset
+from winnow.utils.koina_config import (
+    resolve_feature_model_inputs,
+    strip_runtime_keys_from_feature_config,
+)
 from winnow.utils.paths import resolve_data_path
 
 logger = logging.getLogger(__name__)
 
 
-def _deserialize_calibration_feature(feat_cfg: Dict[str, Any]) -> CalibrationFeatures:
+def _deserialize_calibration_feature(
+    feature_config: Dict[str, Any],
+) -> CalibrationFeatures:
     """Rebuild a feature instance from a saved ``config.json`` entry."""
-    cfg = dict(feat_cfg)
-    target = cfg.pop("_target_")
+    feature_config = strip_runtime_keys_from_feature_config(dict(feature_config))
+    target = feature_config.pop("_target_")
     module_path, class_name = target.rsplit(".", 1)
     module = importlib.import_module(module_path)
-    feat_cls = getattr(module, class_name)
-    return feat_cls(**cfg)
+    feature_class = getattr(module, class_name)
+    return feature_class(**feature_config)
 
 
 def _apply_koina_constant_overrides(
-    mc: Dict[str, Any],
-    mcol: Dict[str, str],
+    model_input_constants: Dict[str, Any],
+    model_input_columns: Dict[str, str],
     overrides: Optional[Dict[str, Any]],
 ) -> None:
-    """Merge constant overrides into ``mc`` and drop those keys from ``mcol``."""
+    """Merge constant overrides and drop those keys from column mappings."""
     if not overrides:
         return
     for key, value in overrides.items():
         if value is None:
             continue
-        mc[key] = value
-        mcol.pop(key, None)
+        model_input_constants[key] = value
+        model_input_columns.pop(key, None)
 
 
 def _apply_koina_column_overrides(
-    mc: Dict[str, Any],
-    mcol: Dict[str, str],
+    model_input_constants: Dict[str, Any],
+    model_input_columns: Dict[str, str],
     overrides: Optional[Dict[str, str]],
 ) -> None:
-    """Merge column overrides into ``mcol`` and drop those keys from ``mc``."""
+    """Merge column overrides and drop those keys from constants."""
     if not overrides:
         return
     for key, value in overrides.items():
         if value is None:
             continue
-        mcol[key] = value
-        mc.pop(key, None)
+        # Constants applied first take precedence; ignore default column entries in
+        # the composed config when a constant override is already set for this key.
+        if key in model_input_constants:
+            continue
+        model_input_columns[key] = value
+        model_input_constants.pop(key, None)
+
+
+def _feature_config_for_save(feature: CalibrationFeatures) -> Dict[str, Any]:
+    """Serialise a feature for ``config.json``, omitting runtime-only Koina keys."""
+    return strip_runtime_keys_from_feature_config(feature.get_config())
 
 
 def _merge_koina_overrides_into_single_feature(
@@ -75,23 +91,26 @@ def _merge_koina_overrides_into_single_feature(
     model_input_columns: Optional[Dict[str, str]],
 ) -> None:
     """Apply Koina constant/column overrides to one feature object."""
-    from winnow.calibration.features.utils import validate_model_input_params
-
-    mc = dict(feature.model_input_constants or {})
-    mcol = dict(feature.model_input_columns or {})
-    _apply_koina_constant_overrides(mc, mcol, model_input_constants)
-    _apply_koina_column_overrides(mc, mcol, model_input_columns)
-    validate_model_input_params(mc or None, mcol or None)
-    feature.model_input_constants = mc if mc else None
-    feature.model_input_columns = mcol if mcol else None
+    merged_constants = dict(feature.model_input_constants or {})
+    merged_columns = dict(feature.model_input_columns or {})
+    _apply_koina_constant_overrides(
+        merged_constants, merged_columns, model_input_constants
+    )
+    _apply_koina_column_overrides(merged_constants, merged_columns, model_input_columns)
+    resolved_constants, resolved_columns = resolve_feature_model_inputs(
+        merged_constants or None, merged_columns or None
+    )
+    validate_model_input_params(resolved_constants, resolved_columns)
+    feature.model_input_constants = resolved_constants
+    feature.model_input_columns = resolved_columns
 
 
 def _load_saved_features_section(
     calibrator: Any, features_section: Dict[str, Any]
 ) -> None:
     """Populate ``calibrator`` with features from a ``config.json`` ``features`` block."""
-    for _name, feat_cfg in features_section.items():
-        calibrator.add_feature(_deserialize_calibration_feature(feat_cfg))
+    for _name, feature_config in features_section.items():
+        calibrator.add_feature(_deserialize_calibration_feature(feature_config))
 
 
 @dataclass
@@ -361,7 +380,7 @@ class ProbabilityCalibrator:
             "feature_columns": calibrator.columns,
             "feature_names": calibrator.feature_names,
             "features": {
-                name: feature.get_config()
+                name: _feature_config_for_save(feature)
                 for name, feature in calibrator.feature_dict.items()
             },
         }
@@ -465,9 +484,10 @@ class ProbabilityCalibrator:
 
         Args:
             server_url: Koina inference server URL (e.g. ``"localhost:8500"``).
-                When ``None`` the value loaded from the checkpoint is kept.
+                When ``None``, features keep their current value (defaults to the
+                public endpoint at inference time).
             ssl: Whether to use SSL when talking to the Koina server. When
-                ``None`` the value loaded from the checkpoint is kept.
+                ``None``, features keep their current value (defaults to ``True``).
         """
         if server_url is None and ssl is None:
             return
@@ -503,9 +523,6 @@ class ProbabilityCalibrator:
             model_input_columns: Koina input names mapped to metadata column
                 names for per-row values.
         """
-        if not model_input_constants and not model_input_columns:
-            return
-
         for feature in self.feature_dict.values():
             if not hasattr(feature, "model_input_constants") or not hasattr(
                 feature, "model_input_columns"

@@ -9,6 +9,7 @@ import warnings
 import koinapy
 
 from winnow.calibration.features.base import CalibrationFeatures, FeatureDependency
+from winnow.calibration.features.constants import DEFAULT_KOINA_SERVER_URL
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.utils.peptide import tokens_to_proforma
 
@@ -234,7 +235,7 @@ class RetentionTimeFeature(CalibrationFeatures):
 
         koina_model = koinapy.Koina(
             self.irt_model_name,
-            server_url=self.koina_server_url or "koina.wilhelmlab.org:443",
+            server_url=self.koina_server_url or DEFAULT_KOINA_SERVER_URL,
             ssl=self.koina_ssl,
         )
         irt_predictions = koina_model.predict(inputs)
@@ -293,7 +294,7 @@ class RetentionTimeFeature(CalibrationFeatures):
 
         koina_model = koinapy.Koina(
             self.irt_model_name,
-            server_url=self.koina_server_url or "koina.wilhelmlab.org:443",
+            server_url=self.koina_server_url or DEFAULT_KOINA_SERVER_URL,
             ssl=self.koina_ssl,
         )
         predictions = koina_model.predict(inputs)

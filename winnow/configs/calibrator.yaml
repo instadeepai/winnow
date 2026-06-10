@@ -38,8 +38,8 @@ calibrator:
       max_precursor_charge: ${koina.constraints.max_precursor_charge}  # Maximum precursor charge accepted by the Koina intensity model.
       max_peptide_length: ${koina.constraints.max_peptide_length}      # Maximum peptide length accepted by the Koina intensity model.
       unsupported_residues: ${koina.constraints.unsupported_residues}  # Residues unsupported by the configured Koina intensity model.
-      # model_input_constants: ${koina.input_constants}  # Shared Koina model inputs (e.g. collision_energies, fragmentation_types).
-      # model_input_columns: ${koina.input_columns}  # Uncomment to use per-row metadata columns instead.
+      model_input_constants: ${koina.input_constants}  # Shared Koina model inputs (e.g. collision_energies, fragmentation_types).
+      model_input_columns: ${koina.input_columns}  # Per-row metadata columns for Koina inputs.
       koina_server_url: ${koina.server_url}  # Koina inference server URL.
       koina_ssl: ${koina.ssl}                # Whether to use SSL when talking to the Koina server.
 
@@ -92,16 +92,13 @@ koina:
   irt_model: Prosit_2025_irt_22PTM
 
   # Model inputs — applied to FragmentMatchFeatures and ChimericFeatures.
-  # To use a constant value tiled across all rows, specify it under input_constants.
-  # To use per-row values from a metadata column, add the column mapping under input_columns.
-  # Each input key must appear in at most one of these two dicts.
-  # input_constants:
-  #   collision_energies: 27
-  #   fragmentation_types: HCD
-  # input_columns: {
-  #   collision_energies: "collision_energy",
-  #   fragmentation_types: "frag_type",
-  # }
+  # Set exactly one of input_constants or input_columns per key (not both).
+  input_constants:
+    collision_energies: null      # e.g. 27 to tile one value for all rows
+    fragmentation_types: null     # e.g. HCD
+  input_columns:
+    collision_energies: collision_energy    # default metadata column
+    fragmentation_types: frag_type          # default metadata column
 
   # Model constraints — adjust to match the capabilities of your Koina models.
   # See docs/configuration.md for guidance on choosing these values.

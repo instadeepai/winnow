@@ -6,6 +6,7 @@ import koinapy
 
 from winnow.calibration.features.base import CalibrationFeatures, FeatureDependency
 from winnow.datasets.calibration_dataset import CalibrationDataset
+from winnow.calibration.features.constants import DEFAULT_KOINA_SERVER_URL
 from winnow.calibration.features.utils import (
     require_beam_predictions,
     validate_model_input_params,
@@ -14,6 +15,7 @@ from winnow.calibration.features.utils import (
     compute_ion_identifications,
     _validate_mz_tolerance,
 )
+from winnow.utils.koina_config import resolve_feature_model_inputs
 from winnow.utils.peptide import tokens_to_proforma
 
 
@@ -82,7 +84,10 @@ class ChimericFeatures(CalibrationFeatures):
                 appears in both model_input_constants and model_input_columns.
         """
         _validate_mz_tolerance(mz_tolerance_ppm, mz_tolerance_da)
-        validate_model_input_params(model_input_constants, model_input_columns)
+        resolved_constants, resolved_columns = resolve_feature_model_inputs(
+            model_input_constants, model_input_columns
+        )
+        validate_model_input_params(resolved_constants, resolved_columns)
         self.mz_tolerance_ppm = mz_tolerance_ppm
         self.mz_tolerance_da = mz_tolerance_da
         self.learn_from_missing = learn_from_missing
@@ -92,8 +97,8 @@ class ChimericFeatures(CalibrationFeatures):
         self.intensity_model_name = intensity_model_name
         self.max_precursor_charge = max_precursor_charge
         self.max_peptide_length = max_peptide_length
-        self.model_input_constants = model_input_constants
-        self.model_input_columns = model_input_columns
+        self.model_input_constants = resolved_constants
+        self.model_input_columns = resolved_columns
         self.koina_server_url = koina_server_url
         self.koina_ssl = koina_ssl
 
@@ -282,7 +287,7 @@ class ChimericFeatures(CalibrationFeatures):
 
         model = koinapy.Koina(
             self.intensity_model_name,
-            server_url=self.koina_server_url or "koina.wilhelmlab.org:443",
+            server_url=self.koina_server_url or DEFAULT_KOINA_SERVER_URL,
             ssl=self.koina_ssl,
         )
         inputs = resolve_model_inputs(

@@ -18,6 +18,11 @@ from winnow.calibration.calibration_features import (
 )
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.datasets.feature_dataset import FeatureDataset
+from winnow.calibration.features.fragment_match import FragmentMatchFeatures
+from winnow.utils.koina_config import (
+    DEFAULT_KOINA_INPUT_COLUMNS,
+    KOINA_RUNTIME_CONFIG_KEYS,
+)
 
 
 class MockFeatureDependency(FeatureDependency):
@@ -233,14 +238,35 @@ class TestProbabilityCalibrator:
             "collision_energies": 30,
         }
         assert feat.model_input_columns == {"fragmentation_types": "frag_col"}
-        calibrator.apply_koina_model_input_overrides(
-            model_input_columns={"collision_energies": "nce_col"},
+
+    def test_constants_win_over_default_columns_in_composed_cfg(self):
+        """Constants from CLI must not be undone by default column entries in cfg."""
+        calibrator = ProbabilityCalibrator()
+        calibrator.add_feature(
+            FragmentMatchFeatures(
+                mz_tolerance_ppm=20,
+                model_input_columns={
+                    "collision_energies": "collision_energy",
+                    "fragmentation_types": "frag_type",
+                },
+            )
         )
-        assert feat.model_input_constants is None
-        assert feat.model_input_columns == {
-            "fragmentation_types": "frag_col",
-            "collision_energies": "nce_col",
+        calibrator.apply_koina_model_input_overrides(
+            model_input_constants={
+                "collision_energies": 27,
+                "fragmentation_types": "HCD",
+            },
+            model_input_columns={
+                "collision_energies": "collision_energy",
+                "fragmentation_types": "frag_type",
+            },
+        )
+        feat = calibrator.feature_dict["Fragment Match Features"]
+        assert feat.model_input_constants == {
+            "collision_energies": 27,
+            "fragmentation_types": "HCD",
         }
+        assert feat.model_input_columns is None
 
     def test_columns_property_empty(self, calibrator):
         """Test columns property when no features are added."""
@@ -493,6 +519,64 @@ class TestProbabilityCalibrator:
 
         with pytest.raises(RuntimeError, match="not been fitted or loaded"):
             calibrator.predict(sample_dataset)
+
+    def test_save_strips_koina_runtime_keys(self, tmp_path, feature_dataset):
+        """Saved config.json must not persist runtime-only Koina settings."""
+        calibrator = ProbabilityCalibrator(max_epochs=2, hidden_dims=(8,), seed=42)
+        calibrator.add_feature(
+            FragmentMatchFeatures(
+                mz_tolerance_ppm=20,
+                model_input_constants={"collision_energies": 27},
+                model_input_columns={"fragmentation_types": "frag_type"},
+                koina_server_url="localhost:8500",
+                koina_ssl=False,
+            )
+        )
+        calibrator.fit_from_features(feature_dataset)
+        ProbabilityCalibrator.save(calibrator, tmp_path / "koina_model")
+
+        with open(tmp_path / "koina_model" / "config.json") as f:
+            config = json.load(f)
+        feature_config = config["features"]["Fragment Match Features"]
+        for key in KOINA_RUNTIME_CONFIG_KEYS:
+            assert key not in feature_config
+        assert feature_config["intensity_model_name"] == "Prosit_2020_intensity_HCD"
+
+    def test_load_strips_legacy_koina_runtime_keys(self, tmp_path, feature_dataset):
+        """Loading old checkpoints ignores baked-in Koina server and input presets."""
+        calibrator = ProbabilityCalibrator(max_epochs=2, hidden_dims=(8,), seed=42)
+        calibrator.add_feature(
+            FragmentMatchFeatures(
+                mz_tolerance_ppm=20,
+                model_input_columns={
+                    "collision_energies": "collision_energy",
+                    "fragmentation_types": "frag_type",
+                },
+                koina_server_url="localhost:8500",
+                koina_ssl=False,
+            )
+        )
+        calibrator.fit_from_features(feature_dataset)
+        ProbabilityCalibrator.save(calibrator, tmp_path / "legacy_model")
+
+        with open(tmp_path / "legacy_model" / "config.json") as f:
+            config = json.load(f)
+        feature_config = config["features"]["Fragment Match Features"]
+        feature_config["koina_server_url"] = "localhost:8500"
+        feature_config["koina_ssl"] = False
+        feature_config["model_input_columns"] = {
+            "collision_energies": "collision_energy",
+            "fragmentation_types": "frag_type",
+        }
+        with open(tmp_path / "legacy_model" / "config.json", "w") as f:
+            json.dump(config, f, indent=2)
+
+        loaded = ProbabilityCalibrator.load(tmp_path / "legacy_model")
+        feat = loaded.feature_dict["Fragment Match Features"]
+        assert feat.koina_server_url is None
+        assert feat.koina_ssl is True
+        assert feat.model_input_constants is None
+        assert feat.model_input_columns == dict(DEFAULT_KOINA_INPUT_COLUMNS)
 
     def test_save_load_roundtrip(self, tmp_path, feature_dataset):
         """Test that save/load produces a working calibrator with correct config."""

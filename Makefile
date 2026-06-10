@@ -63,17 +63,15 @@ KOINA_OVERRIDES = koina.server_url=$(KOINA_SERVER_URL) \
 # Null out predict.yaml defaults that don't apply to eval targets.
 PREDICT_EVAL_OVERRIDES = calibrator.irt_regressor_path=null
 
-# Biological validation datasets have no per-row CE/frag metadata:
-KOINA_FRAGMENT_MATCH_CONSTANTS = +koina.input_constants.collision_energies=27 \
-                          +koina.input_constants.fragmentation_types=HCD \
-						  +calibrator.features.fragment_match_features.model_input_constants.collision_energies=27 \
-						  +calibrator.features.fragment_match_features.model_input_constants.fragmentation_types=HCD
+# Biological validation datasets have no per-row CE/frag metadata.
+# train/compute-features: calibrator.yaml interpolates ${koina.input_constants} into features.
+# predict: merged via apply_koina_model_input_overrides from the top-level koina block.
+KOINA_FRAGMENT_MATCH_CONSTANTS = koina.input_constants.collision_energies=27 \
+                          koina.input_constants.fragmentation_types=HCD
 
-# External / Astral datasets carry per-row metadata columns:
-KOINA_FRAGMENT_MATCH_COLUMNS = +koina.input_columns.collision_energies=collision_energy \
-                        +koina.input_columns.fragmentation_types=frag_type \
-						+calibrator.features.fragment_match_features.model_input_columns.collision_energies=collision_energy \
-						+calibrator.features.fragment_match_features.model_input_columns.fragmentation_types=frag_type
+# External / Astral datasets carry per-row metadata columns.
+KOINA_FRAGMENT_MATCH_COLUMNS = koina.input_columns.collision_energies=collision_energy \
+                        koina.input_columns.fragmentation_types=frag_type
 
 #################################################################################
 ## Docker build commands													    #
@@ -278,7 +276,8 @@ train-sample:
 	training_history_path=null \
 	dataset_output_path=results/calibrated_dataset.csv \
 	calibrator.features.retention_time_feature.train_fraction=0.3 \
-	$(KOINA_OVERRIDES)
+	$(KOINA_OVERRIDES) \
+	$(KOINA_FRAGMENT_MATCH_CONSTANTS)
 
 ## Run winnow predict with sample data (uses locally trained model from models/new_model)
 predict-sample:
@@ -287,7 +286,8 @@ predict-sample:
 	fdr_control.fdr_threshold=1.0 \
 	dataset.spectrum_path_or_directory=examples/example_data/spectra.ipc \
 	dataset.predictions_path=examples/example_data/predictions.csv \
-	$(KOINA_OVERRIDES)
+	$(KOINA_OVERRIDES) \
+	$(KOINA_FRAGMENT_MATCH_CONSTANTS)
 
 ## Clean output directories (does not delete sample data)
 clean:

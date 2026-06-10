@@ -96,7 +96,7 @@ class TestChimericFeatures:
         assert feature.mz_tolerance_da == 0.01
         assert feature.mz_tolerance_ppm is None
         assert feature.model_input_constants == {"collision_energies": 25}
-        assert feature.model_input_columns is None
+        assert feature.model_input_columns == {"fragmentation_types": "frag_type"}
 
     def test_initialization_with_ppm_tolerance(self):
         """Test initialization with ppm tolerance."""

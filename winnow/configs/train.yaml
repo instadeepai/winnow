@@ -26,19 +26,19 @@ validation_fraction: 0.1
 # Single-phase dataset config (ignored when features_path is set):
 dataset:
   # Path to the spectrum data file or to folder containing saved internal Winnow dataset.
-  spectrum_path_or_directory: new_helaqc_splits/train.parquet # helaqc_exps/train.parquet
+  spectrum_path_or_directory: null
   # Path to the beam predictions file.
   # Leave as `null` if data source is `winnow`, or loading will fail.
-  predictions_path: new_helaqc_splits/train.csv # helaqc_exps/train.csv
+  predictions_path: null
   # NOTE: Make sure that the data loader type matches the data source type in this dataset section.
 
 # Output paths:
-model_output_dir: models/helaqc_model_with_new_splits
-dataset_output_path: results/helaqc_calibrated_dataset_with_new_splits.parquet
+model_output_dir: winnow_model
+dataset_output_path: winnow_results/calibrated_dataset.parquet
 # Optional: save per-experiment iRT regressors for reuse at inference time.
 # Useful when training on well-characterised data and predicting on unlabelled data
 # from the same experiment(s), where the inference confidence distribution may be
 # unreliable for training a new RT->iRT regressor.
-irt_regressor_output_path: models/helaqc_model_with_new_splits/irt_regressors.safetensors
+irt_regressor_output_path: null
 # Optional: save epoch-level training history as JSON for analysis and plotting.
-training_history_path: models/helaqc_model_with_new_splits/training_history.json
+training_history_path: null

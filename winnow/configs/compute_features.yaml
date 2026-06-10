@@ -7,12 +7,12 @@ defaults:
 
 dataset:
   # Dataset paths (same as train):
-  spectrum_path_or_directory: new_helaqc_splits/train.parquet
-  predictions_path: new_helaqc_splits/train.csv
+  spectrum_path_or_directory: null
+  predictions_path: null
 
 # metadata_output_path: results/metadata.csv
 # Optional: write a lean numeric Parquet for model training.
-training_matrix_output_path: results/helaqc_training_matrix_with_new_splits.parquet
+training_matrix_output_path: null
 # Drop rows with empty or non-list predictions (same helper as train/predict).
 filter_empty_predictions: true
 # If true, the dataset must include ground-truth sequence labels.

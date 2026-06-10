@@ -59,9 +59,17 @@ def validate_model_input_params(
     Raises:
         ValueError: If any key is present in both dicts, since this is an unresolvable conflict.
     """
-    if model_input_constants is None or model_input_columns is None:
-        return
-    conflicts = set(model_input_constants) & set(model_input_columns)
+    active_constants = (
+        {k: v for k, v in model_input_constants.items() if v is not None}
+        if model_input_constants
+        else {}
+    )
+    active_columns = (
+        {k: v for k, v in model_input_columns.items() if v is not None}
+        if model_input_columns
+        else {}
+    )
+    conflicts = set(active_constants) & set(active_columns)
     if conflicts:
         raise ValueError(
             f"The following Koina model input(s) are specified in both model_input_constants "
@@ -126,7 +134,16 @@ def resolve_model_inputs(
         if col in constants:
             inputs[col] = np.array([constants[col]] * n_rows)
         else:
-            inputs[col] = metadata[columns[col]].to_numpy()
+            metadata_col = columns[col]
+            if metadata_col not in metadata.columns:
+                raise ValueError(
+                    f"Metadata column {metadata_col!r} not found in dataset. "
+                    f"Required for Koina input {col!r} (model '{model_name}'). "
+                    f"Either add {metadata_col!r} to your dataset metadata or override "
+                    f"with a constant for all rows:\n"
+                    f"  koina.input_constants.{col}=<value>"
+                )
+            inputs[col] = metadata[metadata_col].to_numpy()
 
     return inputs
 

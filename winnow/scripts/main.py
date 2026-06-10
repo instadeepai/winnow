@@ -18,6 +18,7 @@ import pandas as pd
 
 # Lazy imports for heavy dependencies - only imported when actually needed
 if TYPE_CHECKING:
+    from winnow.calibration.calibrator import ProbabilityCalibrator
     from winnow.datasets.calibration_dataset import CalibrationDataset
     from winnow.fdr.nonparametric import NonParametricFDRControl
     from winnow.fdr.database_grounded import DatabaseGroundedFDRControl
@@ -57,6 +58,73 @@ def print_config(cfg) -> None:
 
     formatter = ConfigFormatter()
     formatter.print_config(cfg)
+
+
+def _handle_koina_config(
+    cfg,
+    calibrator: Optional["ProbabilityCalibrator"] = None,
+    *,
+    hydra_overrides: Optional[List[str]] = None,
+    execute: bool = True,
+) -> None:
+    """Validate Koina overrides and apply server / model-input settings to a calibrator."""
+    from winnow.utils.koina_config import (
+        log_resolved_koina_inputs,
+        parse_koina_overrides,
+        validate_koina_overrides,
+    )
+
+    koina_cfg = cfg.get("koina")
+    validate_koina_overrides(koina_cfg, hydra_overrides)
+
+    if not execute:
+        return
+
+    if calibrator is None or koina_cfg is None:
+        return
+
+    constants, columns = parse_koina_overrides(koina_cfg)
+    calibrator.apply_koina_model_input_overrides(
+        model_input_constants=constants,
+        model_input_columns=columns,
+    )
+    server_url = koina_cfg.get("server_url")
+    ssl = koina_cfg.get("ssl")
+    if server_url is not None or ssl is not None:
+        calibrator.apply_koina_server_overrides(
+            server_url=server_url,
+            ssl=ssl,
+        )
+    log_resolved_koina_inputs(calibrator, logger)
+
+
+def _require_spectrum_path(spectrum_path_or_directory: Optional[str]) -> Path:
+    """Validate that a dataset path was supplied and return it as a :class:`Path`.
+
+    Raises:
+        typer.Exit: If no path was provided (exit code 1).
+    """
+    if (
+        spectrum_path_or_directory is None
+        or not str(spectrum_path_or_directory).strip()
+    ):
+        from rich.console import Console
+
+        Console(stderr=True).print(
+            "[bold red]Error:[/bold red] No dataset supplied.\n\n"
+            "Set [bold]dataset.spectrum_path_or_directory[/bold] to your spectrum "
+            "parquet file or a directory of internal Winnow datasets.\n\n"
+            "[bold cyan]Example:[/bold cyan]\n"
+            "  [dim]winnow predict data_loader=winnow "
+            "dataset.spectrum_path_or_directory=/path/to/winnow_dataset[/dim]\n"
+            "  [dim]winnow predict data_loader=instanovo "
+            "dataset.spectrum_path_or_directory=/path/to/data.parquet "
+            "dataset.predictions_path=/path/to/instanovo_predictions.csv[/dim]\n\n"
+            "Edit [bold]predict.yaml[/bold] or pass overrides on the command line. "
+            "Run [dim]winnow config predict[/dim] to inspect the resolved config.",
+        )
+        raise typer.Exit(code=1)
+    return Path(spectrum_path_or_directory)
 
 
 def filter_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
@@ -188,6 +256,7 @@ def train_entry_point(
         cfg = compose(config_name="train", overrides=overrides)
 
     if not execute:
+        _handle_koina_config(cfg, hydra_overrides=overrides, execute=False)
         print_config(cfg)
         return
 
@@ -195,6 +264,8 @@ def train_entry_point(
 
     logger.info("Starting training pipeline.")
     logger.info(f"Training configuration: {cfg}")
+
+    _handle_koina_config(cfg, hydra_overrides=overrides, execute=True)
 
     calibrator = instantiate(cfg.calibrator)
     features_path = cfg.get("features_path")
@@ -630,8 +701,13 @@ def compute_features_entry_point(
         cfg = compose(config_name="compute_features", overrides=overrides)
 
     if not execute:
+        _handle_koina_config(cfg, hydra_overrides=overrides, execute=False)
         print_config(cfg)
         return
+
+    spectrum_path = _require_spectrum_path(cfg.dataset.spectrum_path_or_directory)
+
+    _handle_koina_config(cfg, hydra_overrides=overrides, execute=True)
 
     logger.info("Starting compute-features pipeline.")
     logger.info(f"Compute-features configuration: {cfg}")
@@ -639,8 +715,6 @@ def compute_features_entry_point(
     labelled = bool(cfg.labelled)
     data_loader = instantiate(cfg.data_loader)
     calibrator = instantiate(cfg.calibrator)
-
-    spectrum_path = Path(cfg.dataset.spectrum_path_or_directory)
     predictions_path = cfg.dataset.get("predictions_path")
     filter_empty = bool(cfg.filter_empty_predictions)
 
@@ -709,10 +783,13 @@ def predict_entry_point(
         cfg = compose(config_name="predict", overrides=overrides)
 
     if not execute:
+        _handle_koina_config(cfg, hydra_overrides=overrides, execute=False)
         print_config(cfg)
         return
 
-    from omegaconf import OmegaConf
+    spectrum_path = _require_spectrum_path(cfg.dataset.spectrum_path_or_directory)
+
+    _handle_koina_config(cfg, hydra_overrides=overrides, execute=True)
 
     from winnow.calibration.calibrator import ProbabilityCalibrator
     from winnow.datasets.calibration_dataset import CalibrationDataset
@@ -728,33 +805,7 @@ def predict_entry_point(
         cache_dir=cfg.calibrator.cache_dir,
     )
 
-    koina_cfg = cfg.get("koina")
-    if koina_cfg is not None:
-        koina_const = koina_cfg.get("input_constants")
-        koina_col = koina_cfg.get("input_columns")
-        koina_server_url = koina_cfg.get("server_url")
-        koina_ssl = koina_cfg.get("ssl")
-    else:
-        koina_const, koina_col = None, None
-        koina_server_url, koina_ssl = None, None
-    if koina_const is not None or koina_col is not None:
-        calibrator.apply_koina_model_input_overrides(
-            model_input_constants=(
-                OmegaConf.to_container(koina_const, resolve=True)
-                if koina_const is not None
-                else None
-            ),
-            model_input_columns=(
-                OmegaConf.to_container(koina_col, resolve=True)
-                if koina_col is not None
-                else None
-            ),
-        )
-    if koina_server_url is not None or koina_ssl is not None:
-        calibrator.apply_koina_server_overrides(
-            server_url=koina_server_url,
-            ssl=koina_ssl,
-        )
+    _handle_koina_config(cfg, calibrator, hydra_overrides=overrides, execute=True)
 
     # Load pre-fitted iRT regressors if configured
     irt_regressor_path = cfg.calibrator.get("irt_regressor_path")
@@ -770,7 +821,6 @@ def predict_entry_point(
     logger.info("Loading dataset.")
     data_loader = instantiate(cfg.data_loader)
 
-    spectrum_path = Path(cfg.dataset.spectrum_path_or_directory)
     predictions_path = cfg.dataset.get("predictions_path")
     filter_empty = bool(cfg.filter_empty_predictions)
 

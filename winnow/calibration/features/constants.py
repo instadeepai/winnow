@@ -1,5 +1,9 @@
 """Constants for calibration feature computation."""
 
+# Default public Koina inference endpoint (used when server_url is not overridden).
+DEFAULT_KOINA_SERVER_URL = "koina.wilhelmlab.org:443"
+DEFAULT_KOINA_SSL = True
+
 # Carbon-13 mass shift for isotopic envelope calculation
 CARBON_ISOTOPE_MASS_SHIFT = 1.00335
 # Default bin width matching Comet's fragment_bin_tol for near-unit-dalton bins.

@@ -18,6 +18,7 @@ from winnow.calibration.features.utils import (
     _validate_mz_tolerance,
 )
 from winnow.calibration.features.fragment_match import FragmentMatchFeatures
+from winnow.utils.koina_config import DEFAULT_KOINA_INPUT_COLUMNS
 from winnow.calibration.features.chimeric import ChimericFeatures
 from winnow.datasets.calibration_dataset import CalibrationDataset
 
@@ -323,6 +324,13 @@ class TestModelInputHelpers:
         """No error when both dicts are None."""
         validate_model_input_params(None, None)
 
+    def test_validate_null_in_both_dicts_passes(self):
+        """Null placeholders in both dicts for the same key are not a conflict."""
+        validate_model_input_params(
+            {"collision_energies": None, "fragmentation_types": None},
+            dict(DEFAULT_KOINA_INPUT_COLUMNS),
+        )
+
     def test_validate_conflict_raises(self):
         """ValueError raised when the same key appears in both dicts."""
         with pytest.raises(ValueError, match="collision_energies"):
@@ -341,23 +349,25 @@ class TestModelInputHelpers:
         assert "collision_energies" in str(exc_info.value)
         assert "fragmentation_types" in str(exc_info.value)
 
-    def test_conflict_detected_at_construction_time_fragment_match_feature(self):
-        """FragmentMatchFeatures raises ValueError at construction when keys conflict."""
-        with pytest.raises(ValueError, match="collision_energies"):
-            FragmentMatchFeatures(
-                mz_tolerance_ppm=20,
-                model_input_constants={"collision_energies": 25},
-                model_input_columns={"collision_energies": "ce_col"},
-            )
+    def test_constant_wins_over_column_at_construction_fragment_match(self):
+        """FragmentMatchFeatures prefers constants when both are supplied at init."""
+        feature = FragmentMatchFeatures(
+            mz_tolerance_ppm=20,
+            model_input_constants={"collision_energies": 25},
+            model_input_columns={"collision_energies": "ce_col"},
+        )
+        assert feature.model_input_constants == {"collision_energies": 25}
+        assert "collision_energies" not in (feature.model_input_columns or {})
 
-    def test_conflict_detected_at_construction_time_chimeric_features(self):
-        """ChimericFeatures raises ValueError at construction when keys conflict."""
-        with pytest.raises(ValueError, match="collision_energies"):
-            ChimericFeatures(
-                mz_tolerance_ppm=20,
-                model_input_constants={"collision_energies": 25},
-                model_input_columns={"collision_energies": "ce_col"},
-            )
+    def test_constant_wins_over_column_at_construction_chimeric(self):
+        """ChimericFeatures prefers constants when both are supplied at init."""
+        feature = ChimericFeatures(
+            mz_tolerance_ppm=20,
+            model_input_constants={"collision_energies": 25},
+            model_input_columns={"collision_energies": "ce_col"},
+        )
+        assert feature.model_input_constants == {"collision_energies": 25}
+        assert "collision_energies" not in (feature.model_input_columns or {})
 
     def test_resolve_constant_is_tiled(self):
         """A constant value is tiled across all rows."""
@@ -434,6 +444,27 @@ class TestModelInputHelpers:
                 auto_populated={"peptide_sequences", "precursor_charges"},
                 constants=None,
                 columns=None,
+                model_name="MyModel",
+            )
+
+    def test_resolve_missing_metadata_column_raises_with_hint(self):
+        """Missing metadata column error mentions override path."""
+        inputs = self._make_inputs(2)
+        metadata = self._make_metadata(2)
+        with pytest.raises(
+            ValueError, match="koina.input_constants.collision_energies"
+        ):
+            resolve_model_inputs(
+                inputs=inputs,
+                metadata=metadata,
+                required_model_inputs=[
+                    "peptide_sequences",
+                    "precursor_charges",
+                    "collision_energies",
+                ],
+                auto_populated={"peptide_sequences", "precursor_charges"},
+                constants=None,
+                columns={"collision_energies": "collision_energy"},
                 model_name="MyModel",
             )
 
