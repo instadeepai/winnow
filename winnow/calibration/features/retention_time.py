@@ -365,10 +365,12 @@ class RetentionTimeFeature(CalibrationFeatures):
             try:
                 train_data = self._select_training_data(group, exp_name)
             except ValueError as e:
+                outcome = (
+                    "dropped" if not self.learn_from_missing else "imputed as zero"
+                )
                 warnings.warn(
-                    f"Skipping experiment '{exp_name}': {e}. "
-                    f"Spectra from this experiment will be "
-                    f"{'dropped' if not self.learn_from_missing else 'imputed as zero'}.",
+                    f"Skipping experiment '{exp_name}':\n{e}\n"
+                    f"Spectra from this experiment will be {outcome}.",
                     stacklevel=2,
                 )
                 self._skipped_experiments.append(exp_name)
@@ -465,10 +467,10 @@ class RetentionTimeFeature(CalibrationFeatures):
         n_unique_peptides = self._count_unique_sequences(train_data)
         if n_unique_peptides < 2:
             raise ValueError(
-                f"Experiment '{experiment_name}': cannot fit iRT calibration regressor —\n"
+                "Cannot fit iRT calibration regressor —\n"
                 f"  training pool has only {n_unique_peptides} unique peptide(s) after applying train_fraction={self.train_fraction}.\n"
-                f"  Koina iRT prediction models output one iRT per peptide sequence, so RT->iRT regression requires at least 2 distinct training peptides.\n"
-                f"  Increase calibrator.irt_calibration.train_fraction or provide more peptide diversity."
+                "  Koina iRT prediction models output one iRT per peptide sequence, so RT->iRT regression requires at least 2 distinct training peptides.\n"
+                "  Increase calibrator.irt_calibration.train_fraction or provide more peptide diversity."
             )
 
         if 2 < n_unique_peptides < self.min_train_points:
@@ -482,17 +484,17 @@ class RetentionTimeFeature(CalibrationFeatures):
 
         if train_data["retention_time"].nunique() < 2:
             raise ValueError(
-                f"Experiment '{experiment_name}': cannot fit iRT calibration regressor —\n"
+                "Cannot fit iRT calibration regressor —\n"
                 f"  training pool has only {train_data['retention_time'].nunique()} unique retention time value(s) after applying train_fraction={self.train_fraction}.\n"
-                f"  Increase calibrator.irt_calibration.train_fraction."
+                "  Increase calibrator.irt_calibration.train_fraction."
             )
 
         if len(train_data) < self.min_train_points:
             raise ValueError(
-                f"Experiment '{experiment_name}': insufficient data for iRT calibration.\n"
+                "Insufficient data for iRT calibration.\n"
                 f"  After applying train_fraction={self.train_fraction}, only {len(train_data)} valid training points remain (from {len(metadata)} total spectra),\n"
                 f"  but min_train_points={self.min_train_points} are required.\n"
-                f"  Adjust train_fraction, min_train_points, or provide more data."
+                "  Adjust train_fraction, min_train_points, or provide more data."
             )
 
         return train_data
