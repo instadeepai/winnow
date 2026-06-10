@@ -154,6 +154,27 @@ def validate_koina_intensity_config(
     raise typer.Exit(code=1)
 
 
+def format_resolved_koina_setting(
+    key: str,
+    constants: Optional[Dict[str, Any]],
+    columns: Optional[Dict[str, str]],
+) -> str:
+    """``key=value`` fragment for resolved Koina inputs (matches iRT settings log style)."""
+    active_constants = _active_non_null(constants)
+    active_columns = _active_non_null(columns)
+    if key in active_constants:
+        value = active_constants[key]
+        if isinstance(value, str):
+            return f"{key}={value!r}"
+        return f"{key}={value}"
+    if key in active_columns:
+        return f"{key}={active_columns[key]!r}"
+    default_col = DEFAULT_KOINA_INPUT_COLUMNS.get(key)
+    if default_col is not None:
+        return f"{key}={default_col!r}"
+    return f"{key}=unset"
+
+
 def format_resolved_koina_input(
     key: str,
     constants: Optional[Dict[str, Any]],
@@ -174,24 +195,22 @@ def format_resolved_koina_input(
 
 def log_resolved_koina_intensity_config(calibrator: Any, logger: Any) -> None:
     """Log how CE/frag inputs are resolved on intensity-based features."""
-    logged: Set[str] = set()
     for feature in calibrator.feature_dict.values():
         if not (
             hasattr(feature, "model_input_constants")
             and hasattr(feature, "model_input_columns")
         ):
             continue
-        parts = [
-            f"{key} ← {format_resolved_koina_input(key, feature.model_input_constants, feature.model_input_columns)}"
+        settings = ", ".join(
+            format_resolved_koina_setting(
+                key, feature.model_input_constants, feature.model_input_columns
+            )
             for key in sorted(KOINA_INPUT_KEYS)
-        ]
-        if not parts:
+        )
+        if not settings:
             continue
-        feature_label = getattr(feature, "name", feature.__class__.__name__)
-        if feature_label in logged:
-            continue
-        logged.add(feature_label)
-        logger.info("Koina inputs (%s): %s", feature_label, "; ".join(parts))
+        logger.info("Koina input settings: %s", settings)
+        return
 
 
 def apply_koina_intensity_config(

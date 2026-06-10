@@ -341,9 +341,10 @@ class RetentionTimeFeature(CalibrationFeatures):
             if "__global__" not in self.irt_predictors:
                 warnings.warn(
                     "No 'experiment_name' column found. Fitting a single global "
-                    "RT->iRT regressor. For multi-experiment data, ensure each "
-                    "spectrum file includes an 'experiment_name' column or use "
-                    "MGF format (which derives it from the filename).",
+                    "RT->iRT regressor.\n"
+                    "For multi-experiment data, ensure each spectrum file includes an "
+                    "'experiment_name' column or use MGF format (which derives it from "
+                    "the filename).",
                     stacklevel=2,
                 )
                 return {"__global__": dataset.metadata}
@@ -400,7 +401,7 @@ class RetentionTimeFeature(CalibrationFeatures):
                     f"Filtered {n_invalid} spectra that do not satisfy the validity "
                     f"constraints for the Koina iRT model '{self.irt_model_name}' "
                     f"(learn_from_missing=False).\n"
-                    f"Set learn_from_missing=True to impute missing features instead.",
+                    "Set learn_from_missing=True to impute missing features instead.",
                     stacklevel=3,
                 )
             _filtered = dataset.filter_entries(

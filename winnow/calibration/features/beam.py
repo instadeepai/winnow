@@ -137,8 +137,8 @@ class BeamFeatures(CalibrationFeatures):
         count = sum(len(prediction) < 2 for prediction in dataset.predictions)  # type: ignore
         if count > 0:
             warnings.warn(
-                f"{count} beam search results have fewer than two sequences. "
-                "This may affect the efficacy of computed beam features."
+                f"{count} beam search results have fewer than two sequences.\n"
+                "This may affect the efficacy of computed beam features.",
             )
 
         top_probs = [

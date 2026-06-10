@@ -116,7 +116,7 @@ class TestBeamFeatures:
         """Test beam features computation."""
         with pytest.warns(
             UserWarning,
-            match="1 beam search results have fewer than two sequences. This may affect the efficacy of computed beam features.",
+            match=r"1 beam search results have fewer than two sequences\.\nThis may affect",
         ):
             beam_features.compute(sample_dataset_with_predictions)
 
@@ -162,7 +162,7 @@ class TestBeamFeatures:
 
         with pytest.warns(
             UserWarning,
-            match="1 beam search results have fewer than two sequences. This may affect the efficacy of computed beam features.",
+            match=r"1 beam search results have fewer than two sequences\.\nThis may affect",
         ):
             beam_features.compute(dataset)
 
@@ -196,7 +196,7 @@ class TestBeamFeatures:
 
         with pytest.warns(
             UserWarning,
-            match="1 beam search results have fewer than two sequences. This may affect the efficacy of computed beam features.",
+            match=r"1 beam search results have fewer than two sequences\.\nThis may affect",
         ):
             beam_features.compute(dataset)
 

@@ -246,14 +246,15 @@ class ChimericFeatures(CalibrationFeatures):
             n_invalid = (~is_valid_chimeric_prediction).sum()
             if n_invalid > 0:
                 warnings.warn(
-                    f"Filtered {n_invalid} spectra that do not satisfy the validity constraints "
-                    f"for the Koina intensity model '{self.intensity_model_name}' "
-                    f"(learn_from_missing=False). Constraints applied:\n"
+                    f"Filtered {n_invalid} spectra that do not satisfy the validity "
+                    f"constraints for the Koina intensity model '{self.intensity_model_name}' "
+                    f"(learn_from_missing=False).\n"
+                    "Constraints applied:\n"
                     f"  - Runner-up sequence required (beam search width >= 2)\n"
                     f"  - max_peptide_length={self.max_peptide_length} residue tokens (runner-up sequence)\n"
                     f"  - max_precursor_charge={self.max_precursor_charge}\n"
                     f"  - unsupported_residues: {self.unsupported_residues[:3]}{'...' if len(self.unsupported_residues) > 3 else ''}\n"
-                    f"Set learn_from_missing=True to impute missing features instead of filtering.",
+                    "Set learn_from_missing=True to impute missing features instead of filtering.",
                     stacklevel=2,
                 )
             _filtered = dataset.filter_entries(
