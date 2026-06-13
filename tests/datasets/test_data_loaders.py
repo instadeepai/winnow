@@ -696,6 +696,98 @@ class TestInstaNovoDatasetLoader:
         assert all(b is not None for b in beams)
 
     # ------------------------------------------------------------------
+    # column_mapping
+    # ------------------------------------------------------------------
+
+    def test_default_column_mapping(self, loader):
+        """Default column_mapping matches the legacy hardcoded values."""
+        assert loader.column_mapping == {
+            "predictions": "predictions",
+            "predictions_tokenised": "predictions_tokenised",
+            "log_probability": "log_probs",
+        }
+
+    def test_custom_column_mapping_overrides_defaults(
+        self, residue_masses, residue_remapping
+    ):
+        """Supplying a column_mapping merges with defaults."""
+        loader = InstaNovoDatasetLoader(
+            residue_masses=residue_masses,
+            residue_remapping=residue_remapping,
+            column_mapping={
+                "predictions": "old_preds",
+                "predictions_tokenised": "old_preds_tok",
+                "log_probability": "old_log_prob",
+            },
+        )
+        assert loader.column_mapping["predictions"] == "old_preds"
+        assert loader.column_mapping["predictions_tokenised"] == "old_preds_tok"
+        assert loader.column_mapping["log_probability"] == "old_log_prob"
+
+    def test_custom_column_mapping_partial_override(
+        self, residue_masses, residue_remapping
+    ):
+        """A partial column_mapping only overrides specified keys."""
+        loader = InstaNovoDatasetLoader(
+            residue_masses=residue_masses,
+            residue_remapping=residue_remapping,
+            column_mapping={"log_probability": "log_probability"},
+        )
+        assert loader.column_mapping["predictions"] == "predictions"
+        assert loader.column_mapping["predictions_tokenised"] == "predictions_tokenised"
+        assert loader.column_mapping["log_probability"] == "log_probability"
+
+    def test_process_predictions_with_custom_column_mapping(
+        self, residue_masses, residue_remapping
+    ):
+        """_process_predictions uses column_mapping to find CSV columns."""
+        loader = InstaNovoDatasetLoader(
+            residue_masses=residue_masses,
+            residue_remapping=residue_remapping,
+            column_mapping={
+                "predictions": "old_preds",
+                "predictions_tokenised": "old_preds_tok",
+                "log_probability": "old_log_prob",
+            },
+        )
+        preds_df = pd.DataFrame(
+            {
+                "spectrum_id": [1],
+                "old_preds": ["PEPTIDE"],
+                "old_preds_tok": ["P, E, P, T, I, D, E"],
+                "old_log_prob": [-0.5],
+            }
+        )
+        result = loader._process_predictions(preds_df, ["spectrum_id"])
+        assert "prediction" in result.columns
+        assert "prediction_untokenised" in result.columns
+        assert "confidence" in result.columns
+
+    def test_process_predictions_raises_with_wrong_column_mapping(
+        self, residue_masses, residue_remapping
+    ):
+        """Missing CSV columns should raise ValueError mentioning column_mapping."""
+        loader = InstaNovoDatasetLoader(
+            residue_masses=residue_masses,
+            residue_remapping=residue_remapping,
+            column_mapping={
+                "predictions": "nonexistent_col",
+                "predictions_tokenised": "predictions_tokenised",
+                "log_probability": "log_probs",
+            },
+        )
+        preds_df = pd.DataFrame(
+            {
+                "spectrum_id": [1],
+                "predictions": ["PEPTIDE"],
+                "predictions_tokenised": ["P, E, P, T, I, D, E"],
+                "log_probs": [-0.5],
+            }
+        )
+        with pytest.raises(ValueError, match="column_mapping"):
+            loader._process_predictions(preds_df, ["spectrum_id"])
+
+    # ------------------------------------------------------------------
     # _process_predictions
     # ------------------------------------------------------------------
 
