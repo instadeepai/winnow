@@ -59,10 +59,6 @@ calibrator:
     sequence_features:
       _target_: winnow.calibration.calibration_features.SequenceFeatures
 
-    token_score_features:
-      _target_: winnow.calibration.calibration_features.TokenScoreFeatures
-
-
 # Koina model configuration — shared settings for all intensity- and iRT-based features.
 koina:
   # Model names
