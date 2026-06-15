@@ -12,7 +12,7 @@ load_beams: true
 # to search engine output predictions (e.g. Casanovo, InstaNovo). MGF files always receive
 # these columns regardless of this setting. Set to false if your parquet/ipc files already
 # contain a spectrum_id column.
-add_index_cols: true
+add_index_cols: false
 
 residue_remapping:  # Used to map Casanovo-specific notations to UNIMOD tokens.
   "M+15.995": "M[UNIMOD:35]"  # Oxidation
