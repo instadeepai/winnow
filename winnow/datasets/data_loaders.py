@@ -108,16 +108,23 @@ def _add_index_cols(df: pl.DataFrame, fp: Path | str) -> pl.DataFrame:
 class InstaNovoDatasetLoader(DatasetLoader):
     """Loader for InstaNovo predictions in CSV format."""
 
+    _DEFAULT_COLUMN_MAPPING: dict[str, str] = {
+        "predictions": "predictions",
+        "predictions_tokenised": "predictions_tokenised",
+        "log_probability": "log_probs",
+    }
+
     _df_from_matchms = staticmethod(_df_from_matchms)
     _add_index_cols = staticmethod(_add_index_cols)
 
     def __init__(
         self,
         residue_masses: dict[str, float],
-        residue_remapping: dict[str, str],
+        residue_remapping: Optional[dict[str, str]] = None,
         isotope_error_range: Tuple[int, int] = (0, 1),
         beam_columns: Optional[dict[str, str]] = None,
         add_index_cols: bool = False,
+        column_mapping: Optional[dict[str, str]] = None,
     ) -> None:
         """Initialise the InstaNovoDatasetLoader.
 
@@ -128,6 +135,11 @@ class InstaNovoDatasetLoader(DatasetLoader):
             beam_columns: The names of the beam columns to substring match in the predictions file.
             add_index_cols: If True, add ``experiment_name`` and ``spectrum_id`` to parquet/ipc
                 inputs. MGF inputs always get these columns regardless of this flag.
+            column_mapping: Mapping from logical column names (``predictions``,
+                ``predictions_tokenised``, ``log_probability``) to the actual CSV column
+                names produced by the InstaNovo version you are loading.  Defaults are
+                ``{"predictions": "predictions", "predictions_tokenised":
+                "predictions_tokenised", "log_probability": "log_probs"}``.
         """
         self.metrics = Metrics(
             residue_set=ResidueSet(
@@ -137,6 +149,10 @@ class InstaNovoDatasetLoader(DatasetLoader):
         )
         self.beam_columns = beam_columns
         self.add_index_cols = add_index_cols
+        self.column_mapping = {
+            **self._DEFAULT_COLUMN_MAPPING,
+            **(column_mapping or {}),
+        }
 
     @staticmethod
     def _merge_spectrum_data(
@@ -341,16 +357,16 @@ class InstaNovoDatasetLoader(DatasetLoader):
         Returns:
             List[Optional[List[ScoredSequence]]]: A list of scored sequences for each row in the dataframe.
         """
-        assert (
-            self.beam_columns is not None
-        ), "beam_columns must be set"  # to pass type checking
+        assert self.beam_columns is not None, (
+            "beam_columns must be set"
+        )  # to pass type checking
 
         def convert_row_to_scored_sequences(
             row: dict,
         ) -> Optional[List[ScoredSequence]]:
-            assert (
-                self.beam_columns is not None
-            ), "beam_columns must be set"  # to pass type checking
+            assert self.beam_columns is not None, (
+                "beam_columns must be set"
+            )  # to pass type checking
 
             scored_sequences = []
             num_beams = len(row) // len(self.beam_columns)
@@ -415,9 +431,11 @@ class InstaNovoDatasetLoader(DatasetLoader):
             df["sequence"] = (
                 df["sequence"]
                 .apply(
-                    lambda peptide: peptide.replace("L", "I")
-                    if isinstance(peptide, str)
-                    else peptide
+                    lambda peptide: (
+                        peptide.replace("L", "I")
+                        if isinstance(peptide, str)
+                        else peptide
+                    )
                 )
                 .apply(self.metrics._split_peptide)
             )
@@ -445,16 +463,18 @@ class InstaNovoDatasetLoader(DatasetLoader):
         )
 
         rename_dict = {
-            "predictions": "prediction_untokenised",
-            "predictions_tokenised": "prediction",
-            "log_probs": "confidence",
+            self.column_mapping["predictions"]: "prediction_untokenised",
+            self.column_mapping["predictions_tokenised"]: "prediction",
+            self.column_mapping["log_probability"]: "confidence",
         }
         missing_cols = [
             col for col in rename_dict.keys() if col not in preds_dataset.columns
         ]
         if missing_cols:
             raise ValueError(
-                f"Required columns {missing_cols} not found in predictions dataset."
+                f"Required columns {missing_cols} not found in predictions dataset. "
+                f"If you are using an older InstaNovo version, set column_mapping in "
+                f"the data_loader config to match the CSV headers."
             )
         preds_dataset.rename(rename_dict, axis=1, inplace=True)
 
@@ -464,19 +484,19 @@ class InstaNovoDatasetLoader(DatasetLoader):
             lambda peptide: peptide.split(", ") if isinstance(peptide, str) else peptide
         )
         preds_dataset["prediction"] = preds_dataset["prediction"].apply(
-            lambda peptide: [
-                "I" if amino_acid == "L" else amino_acid for amino_acid in peptide
-            ]
-            if isinstance(peptide, list)
-            else peptide
+            lambda peptide: (
+                ["I" if amino_acid == "L" else amino_acid for amino_acid in peptide]
+                if isinstance(peptide, list)
+                else peptide
+            )
         )
 
         preds_dataset["prediction_untokenised"] = preds_dataset[
             "prediction_untokenised"
         ].apply(
-            lambda peptide: peptide.replace("L", "I")
-            if isinstance(peptide, str)
-            else peptide
+            lambda peptide: (
+                peptide.replace("L", "I") if isinstance(peptide, str) else peptide
+            )
         )
 
         return preds_dataset
@@ -502,12 +522,12 @@ class InstaNovoDatasetLoader(DatasetLoader):
         )
         if has_labels:
             dataset["num_matches"] = dataset.apply(
-                lambda row: self.metrics._novor_match(
-                    row["sequence"], row["prediction"]
-                )
-                if isinstance(row["sequence"], list)
-                and isinstance(row["prediction"], list)
-                else 0,
+                lambda row: (
+                    self.metrics._novor_match(row["sequence"], row["prediction"])
+                    if isinstance(row["sequence"], list)
+                    and isinstance(row["prediction"], list)
+                    else 0
+                ),
                 axis=1,
             )
             dataset["correct"] = dataset.apply(
@@ -935,12 +955,14 @@ class MZTabDatasetLoader(DatasetLoader):
                     # Count matching amino acids between prediction and ground truth
                     pl.struct(["sequence", "prediction"])
                     .map_elements(
-                        lambda row: self.metrics._novor_match(
-                            row["sequence"], row["prediction"]
-                        )
-                        if isinstance(row["sequence"], list)
-                        and isinstance(row["prediction"], list)
-                        else 0,
+                        lambda row: (
+                            self.metrics._novor_match(
+                                row["sequence"], row["prediction"]
+                            )
+                            if isinstance(row["sequence"], list)
+                            and isinstance(row["prediction"], list)
+                            else 0
+                        ),
                         return_dtype=pl.Int64,
                     )
                     .alias("num_matches"),
@@ -1056,14 +1078,22 @@ class WinnowDatasetLoader(DatasetLoader):
             self.metrics._split_peptide
         )
         metadata["mz_array"] = metadata["mz_array"].apply(
-            lambda s: ast.literal_eval(s)
-            if "," in s
-            else ast.literal_eval(re.sub(r"(\n?)(\s+)", ", ", re.sub(r"\[\s+", "[", s)))
+            lambda s: (
+                ast.literal_eval(s)
+                if "," in s
+                else ast.literal_eval(
+                    re.sub(r"(\n?)(\s+)", ", ", re.sub(r"\[\s+", "[", s))
+                )
+            )
         )
         metadata["intensity_array"] = metadata["intensity_array"].apply(
-            lambda s: ast.literal_eval(s)
-            if "," in s
-            else ast.literal_eval(re.sub(r"(\n?)(\s+)", ", ", re.sub(r"\[\s+", "[", s)))
+            lambda s: (
+                ast.literal_eval(s)
+                if "," in s
+                else ast.literal_eval(
+                    re.sub(r"(\n?)(\s+)", ", ", re.sub(r"\[\s+", "[", s))
+                )
+            )
         )
 
         predictions_pkl_path = data_path / Path("predictions.pkl")
