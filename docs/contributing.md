@@ -64,6 +64,20 @@ If you have ideas for enhancements, you can:
     - Reference any related issues
     - Include examples if applicable
 
+### Source layout
+
+Where to look when reading or extending the code:
+
+| Path | Summary |
+| ---- | -------- |
+| **`winnow/datasets/`** | `CalibrationDataset`, `DatasetLoader` implementations (InstaNovo, MZTab, PointNovo, Winnow-native), PSM-oriented types. |
+| **`winnow/calibration/`** | `ProbabilityCalibrator` and `CalibrationFeatures` subclasses (rescoring features fed into calibration). |
+| **`winnow/fdr/`** | Abstract `FDRControl`, then `DatabaseGroundedFDRControl` and `NonParametricFDRControl`. |
+| **`winnow/scripts/`** | Typer CLI backing the `winnow` console command. |
+| **`winnow/configs/`** | Default Hydra YAML shipped with the package. |
+| **`winnow/utils/`**, **`winnow/compat/`** | Config and peptide helpers; compatibility shims. |
+| **`winnow/data_types.py`** | Small shared type aliases (`Peptide`, `Spectrum`) used across modules. |
+
 ## Development guidelines
 
 ### Code style
