@@ -877,7 +877,18 @@ class TestRetentionTimeFeature:
         }
 
         feature = RetentionTimeFeature.__new__(RetentionTimeFeature)
-        feature.__setstate__(legacy_state)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            feature.__setstate__(legacy_state)
+
+            # There should be a warning about min_train_points being set to 10.
+            matched_warning = [
+                warn
+                for warn in w
+                if "min_train_points not found in state, setting to 10"
+                in str(warn.message)
+            ]
+            assert matched_warning, "Expected warning for backfill of min_train_points"
 
         assert feature.min_train_points == 10
 

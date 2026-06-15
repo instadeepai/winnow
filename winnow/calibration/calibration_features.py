@@ -1441,3 +1441,6 @@ class RetentionTimeFeature(CalibrationFeatures):
         """Restore state and initialise empty regressor dict after unpickling."""
         self.__dict__.update(state)
         self.irt_predictors = {}
+        if "min_train_points" not in self.__dict__:
+            self.min_train_points = 10
+            warnings.warn("min_train_points not found in state, setting to 10")
