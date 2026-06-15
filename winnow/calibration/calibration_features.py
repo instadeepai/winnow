@@ -1294,7 +1294,7 @@ class RetentionTimeFeature(CalibrationFeatures):
             y = train_data["iRT"].values
             regressor = LinearRegression()
             regressor.fit(x, y)
-            self.irt_predictors[exp_name] = regressor
+            self.irt_predictors[str(exp_name)] = regressor
 
     def compute(self, dataset: CalibrationDataset) -> None:
         """Compute the iRT error feature for each spectrum.
@@ -1365,7 +1365,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         if "experiment_name" in dataset.metadata.columns:
             predicted_irt = pd.Series(np.nan, index=dataset.metadata.index)
             for exp_name, group in dataset.metadata.groupby("experiment_name"):
-                regressor = self.irt_predictors[exp_name]
+                regressor = self.irt_predictors[str(exp_name)]
                 predicted_irt.loc[group.index] = regressor.predict(
                     group["retention_time"].values.reshape(-1, 1)
                 )

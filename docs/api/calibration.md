@@ -218,7 +218,7 @@ For multi-experiment data, each spectrum must have an `experiment_name` column:
 
 - **MGF files**: Derived automatically from the file stem (e.g., `data/run1.mgf` produces
   `experiment_name = "run1"`).
-- **Parquet / IPC files**: If the column already exists in the file, it is used as-is. If
+- **Parquet / IPC files**: If the column already exists in the file, it is stringified and used as-is. If
   not, the file stem is used as the experiment name.
 
 #### Configuration parameters
