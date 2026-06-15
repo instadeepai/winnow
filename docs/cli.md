@@ -179,7 +179,7 @@ For training (`winnow train`), you need:
 - **Labelled dataset**: Ground truth peptide sequences for evaluation
 - **Predictions**: Model predictions with confidence scores
 - **Spectral data**: MS/MS spectra and metadata
-- **Unique identifiers**: Each PSM must have a unique `spectrum_id` in both input files
+- **Aligned identifiers**: Spectrum and prediction rows must refer to the same spectra
 
 ### Feature export (`winnow compute-features`)
 
@@ -192,14 +192,14 @@ For prediction (`winnow predict`), you need:
 - **Unlabelled dataset**: Predictions and spectra (no ground truth required for non-parametric FDR)
 - **Trained model**: Pretrained model from Hugging Face or output from `winnow train`
 - **Confidence scores**: Raw confidence values to calibrate
-- **Unique identifiers**: Each PSM must have a unique `spectrum_id` in both input files
+- **Aligned identifiers**: Same matching rules as training
 
 ### Data formats
 
 Winnow supports multiple input formats:
 
 - **InstaNovo**: Parquet, IPC, or MGF spectra + CSV predictions (beam search format)
-- **MZTab**: Parquet or IPC spectra + MZTab predictions
+- **MZTab**: Parquet, IPC or MGF spectra + MZTab predictions
 - **PointNovo**: Similar to InstaNovo format
 - **Winnow**: Internal format (directory with metadata.csv and predictions.pkl)
 
