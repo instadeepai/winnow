@@ -90,6 +90,43 @@ loader = WinnowDatasetLoader()
 dataset = loader.load(data_path=Path("saved_dataset_directory"))
 ```
 
+#### Spectrum and prediction matching
+
+InstaNovo and MZTab use **different join keys** to pair spectrum rows with prediction rows.
+
+##### InstaNovo: join on `spectrum_id`
+
+The InstaNovo loader inner-joins the predictions CSV and the spectrum file on a shared `spectrum_id` column. Every prediction row must match exactly one spectrum row.
+
+- The predictions CSV must include `spectrum_id`.
+- The spectrum file must include the same `spectrum_id` values (unless you use `add_index_cols`; see below).
+- After merging, the row count must equal the number of prediction rows. If any prediction has no matching spectrum, or if `spectrum_id` is duplicated in the spectrum file, loading raises a `ValueError`.
+
+InstaNovo predictions from an MGF file use **0-based spectrum position** in the MGF, not the instrument scan number. If your parquet uses `experiment_name:scan_number` IDs but the CSV uses `{stem}:0`, `{stem}:1`, ... you must re-key the parquet (see `scripts/rekey_split_parquet_spectrum_ids.py`) or set `add_index_cols` appropriately.
+
+##### `add_index_cols` (InstaNovo and MZTab)
+
+Controls whether Winnow synthesises `experiment_name` and `spectrum_id` when loading parquet or IPC spectrum files. MGF inputs **always** receive these columns regardless of this setting. Configure via `data_loader.add_index_cols` in the loader YAML (see [configuration guide](../configuration.md#data-loader-configs)).
+
+When `add_index_cols: true`:
+
+- `experiment_name` is set to the spectrum file stem (e.g. `spectra` for `spectra.parquet`).
+- If a `scan_number` column exists, `spectrum_id` is `{file_stem}:{scan_number}`.
+- Otherwise, `spectrum_id` is `{file_stem}:{row_index}` (0-based row position in the file).
+
+##### MZTab: join on row index from `spectra_ref`
+
+The MZTab loader does **not** use `spectrum_id` to match predictions. Instead:
+
+1. Each PSM row in the `.mztab` file provides `spectra_ref` (e.g. `ms_run[1]:index=123`).
+2. Winnow extracts the integer after `index=` as the join key.
+3. Spectrum rows are numbered 0, 1, 2, … in **file order** via a row index.
+4. Predictions and spectra are inner-joined on that numeric index.
+
+So row 0 in your parquet/IPC/MGF must correspond to `index=0` in the mzTab file, row 1 to `index=1`, and so on. Spectra with no matching prediction (or vice versa) are dropped.
+
+A pre-existing `spectrum_id` column (e.g. `{file_stem}:{scan_number}`) is preserved in the output metadata but **ignored for matching**. With `add_index_cols: false`, Winnow does not add or overwrite identifier columns in parquet/IPC files.
+
 ### PSMDataset
 
 A dataset containing multiple peptide-spectrum matches (PSMs). Provides a container for managing collections of PSMs with iteration and indexing support.
