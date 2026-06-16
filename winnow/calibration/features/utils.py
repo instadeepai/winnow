@@ -12,11 +12,29 @@ import numpy as np
 import pandas as pd
 
 from winnow.datasets.calibration_dataset import CalibrationDataset
-from winnow.calibration.features.constants import CARBON_ISOTOPE_MASS_SHIFT
+from winnow.calibration.features.constants import (
+    CARBON_ISOTOPE_MASS_SHIFT,
+    VALID_INTENSITY_MODEL_PROVIDERS,
+)
 
 ########################################################
 # Helper functions
 ########################################################
+
+
+def validate_intensity_model_name(intensity_model_name: str) -> None:
+    """Validate the intensity model name.
+
+    Supported model providers are Prosit, MS2PIP and AlphaPeptDeep.
+
+    Args:
+        intensity_model_name: Name of the intensity model.
+    """
+    name_lower = intensity_model_name.lower()
+    if not any(provider in name_lower for provider in VALID_INTENSITY_MODEL_PROVIDERS):
+        raise ValueError(
+            f"Invalid intensity model name: {intensity_model_name}. Supported model providers are {VALID_INTENSITY_MODEL_PROVIDERS}."
+        )
 
 
 def require_beam_predictions(dataset: CalibrationDataset, feature_name: str) -> None:

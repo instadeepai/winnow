@@ -11,6 +11,7 @@ from winnow.calibration.features.utils import (
     resolve_model_inputs,
     format_intensity_prediction_outputs,
     compute_ion_identifications,
+    validate_intensity_model_name,
 )
 from winnow.utils.peptide import tokens_to_proforma
 
@@ -64,6 +65,7 @@ class FragmentMatchFeatures(CalibrationFeatures):
         Raises:
             ValueError: If the same key appears in both model_input_constants and model_input_columns.
         """
+        validate_intensity_model_name(intensity_model_name)
         validate_model_input_params(model_input_constants, model_input_columns)
         self.mz_tolerance = mz_tolerance
         self.unsupported_residues = (
