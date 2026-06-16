@@ -20,6 +20,14 @@ Modes
   recovered probabilities for metadata confidence; beams with token scores.
 * **Database search** — raw engine scores in metadata; ``predictions`` is always
   ``None``. ``load_beams=True`` raises at load time.
+
+Score assumptions (Casanovo)
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+* **PSM score** (``search_engine_score[1]``): native Casanovo probability in
+  ``[-1, 1]``. Values below zero encode a precursor mass-mismatch penalty
+  (probability minus one). Values outside this range raise at load time.
+* **Token aa_scores**: per-residue **probabilities** in ``[0, 1]``, not
+  log-probabilities. Values outside this range raise at load time.
 """
 
 from __future__ import annotations
@@ -43,6 +51,10 @@ class MZTabDatasetLoader(DatasetLoader):
 
     _LOG_PROB_EPSILON = 1e-10
     _CASANOVO_CV = "MS:1003281"
+    _CASANOVO_PSM_SCORE_MIN = -1.0
+    _CASANOVO_PSM_SCORE_MAX = 1.0
+    _CASANOVO_TOKEN_PROB_MIN = 0.0
+    _CASANOVO_TOKEN_PROB_MAX = 1.0
     _DEFAULT_COLUMN_MAPPING: dict[str, Optional[str]] = {
         "predictions": "opt_ms_run[1]_proforma",
         "confidence": "search_engine_score[1]",
@@ -96,23 +108,82 @@ class MZTabDatasetLoader(DatasetLoader):
         return False
 
     @staticmethod
+    def _validate_casanovo_native_psm_score(score: float) -> None:
+        """Raise if a native Casanovo PSM score is outside ``[-1, 1]``.
+
+        Casanovo ``search_engine_score[1]`` values are assumed to be probabilities,
+        with negatives indicating a mass-mismatch penalty (probability minus one).
+        Log-probability or other encodings are not supported.
+        """
+        if (
+            not MZTabDatasetLoader._CASANOVO_PSM_SCORE_MIN
+            <= score
+            <= (MZTabDatasetLoader._CASANOVO_PSM_SCORE_MAX)
+        ):
+            raise ValueError(
+                "Casanovo PSM score must be in [-1, 1] (native probability encoding). "
+                f"Got {score}. Values below 0 indicate a mass-mismatch penalty "
+                "(probability minus one); log-probability scores are not supported."
+            )
+
+    @staticmethod
+    def _validate_casanovo_token_probability(score: float) -> None:
+        """Raise if a per-residue aa_score is outside ``[0, 1]``.
+
+        Token ``aa_scores`` are assumed to be probabilities, not log-probabilities.
+        """
+        if (
+            not MZTabDatasetLoader._CASANOVO_TOKEN_PROB_MIN
+            <= score
+            <= (MZTabDatasetLoader._CASANOVO_TOKEN_PROB_MAX)
+        ):
+            raise ValueError(
+                "Casanovo per-residue aa_scores must be probabilities in [0, 1]. "
+                f"Got {score}. Log-probability token scores are not supported."
+            )
+
+    @staticmethod
+    def _validate_casanovo_prediction_scores(predictions: pl.DataFrame) -> None:
+        """Validate Casanovo PSM and token score ranges on a processed predictions frame."""
+        for confidence in predictions["confidence"]:
+            if confidence is not None:
+                MZTabDatasetLoader._validate_casanovo_native_psm_score(
+                    float(confidence)
+                )
+
+        if "token_scores" not in predictions.columns:
+            return
+
+        for token_scores in predictions["token_scores"]:
+            if token_scores is None:
+                continue
+            for score in token_scores:
+                if score is not None:
+                    MZTabDatasetLoader._validate_casanovo_token_probability(
+                        float(score)
+                    )
+
+    @staticmethod
     def _casanovo_score_to_probability(score: float) -> float:
         """Recover a probability from a Casanovo PSM score.
 
+        Expects a native Casanovo PSM score in ``[-1, 1]`` (see module docstring).
         Scores below zero indicate a precursor mass mismatch penalty (original
         probability minus one). Epsilon clamp avoids ``log(0)`` downstream.
         """
+        MZTabDatasetLoader._validate_casanovo_native_psm_score(score)
         prob = score + 1.0 if score < 0 else score
         return max(float(prob), MZTabDatasetLoader._LOG_PROB_EPSILON)
 
     @staticmethod
     def _casanovo_raw_score_to_log_probability(score: float) -> float:
-        """Convert a native Casanovo PSM score to a log-probability."""
+        """Convert a native Casanovo PSM score in ``[-1, 1]`` to a log-probability."""
         return float(np.log(MZTabDatasetLoader._casanovo_score_to_probability(score)))
 
     @staticmethod
     def _token_probability_to_log_probability(score: float) -> float:
-        """Convert a per-residue Casanovo aa_score (probability) to log-probability."""
+        """Convert a per-residue Casanovo aa_score (probability in ``[0, 1]``) to log-probability."""
+        MZTabDatasetLoader._validate_casanovo_token_probability(score)
         return float(np.log(max(float(score), MZTabDatasetLoader._LOG_PROB_EPSILON)))
 
     @staticmethod
@@ -239,7 +310,11 @@ class MZTabDatasetLoader(DatasetLoader):
         spectrum_data_columns: List[str],
         is_casanovo: bool,
     ) -> pl.DataFrame:
-        """Parse mzTab columns, extract spectrum index, and sort by native score."""
+        """Parse mzTab columns, extract spectrum index, and sort by native score.
+
+        For Casanovo mzTab, validates that PSM scores lie in ``[-1, 1]`` and token
+        aa_scores in ``[0, 1]`` (see module docstring).
+        """
         self._require_column(predictions, "spectra_ref", "spectra_ref")
         predictions_col = self.column_mapping["predictions"]
         confidence_col = self.column_mapping["confidence"]
@@ -279,6 +354,9 @@ class MZTabDatasetLoader(DatasetLoader):
         predictions = predictions.with_columns(columns_to_add).drop(
             [c for c in drop_cols if c in predictions.columns]
         )
+
+        if is_casanovo:
+            self._validate_casanovo_prediction_scores(predictions)
 
         # Native score descending within each spectrum; negatives sink to the bottom.
         predictions = predictions.sort(
