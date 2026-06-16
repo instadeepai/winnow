@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -14,11 +14,9 @@ import polars.selectors as cs
 from instanovo.utils.metrics import Metrics
 from instanovo.utils.residues import ResidueSet
 
-if TYPE_CHECKING:
-    from matchms import Spectrum
-
 from winnow.compat.instanovo import ScoredSequence
 from winnow.datasets.calibration_dataset import CalibrationDataset
+from winnow.datasets.data_loaders import utils
 from winnow.datasets.interfaces import DatasetLoader
 
 
@@ -30,6 +28,9 @@ class InstaNovoDatasetLoader(DatasetLoader):
         "predictions_tokenised": "predictions_tokenised",
         "log_probability": "log_probs",
     }
+
+    _df_from_matchms = staticmethod(utils.df_from_matchms)
+    _add_index_cols = staticmethod(utils.add_index_cols)
 
     def __init__(
         self,
@@ -67,84 +68,6 @@ class InstaNovoDatasetLoader(DatasetLoader):
             **self._DEFAULT_COLUMN_MAPPING,
             **(column_mapping or {}),
         }
-
-    @staticmethod
-    def _df_from_matchms(spectra: list[Spectrum]) -> pl.DataFrame:
-        """Convert a list of Matchms spectra to a polars DataFrame.
-
-        Includes only metadata columns that matchms exposes for at least one spectrum.
-        ``scan_number`` is always a 0-based enumerate index.
-
-        Args:
-            spectra: List of Matchms spectrum objects.
-
-        Returns:
-            The polars DataFrame.
-        """
-        metadata_map = {
-            "precursor_mz": "precursor_mz",
-            "charge": "precursor_charge",
-            "retention_time": "retention_time",
-        }
-        sequence_keys = ("seq", "peptide_sequence")
-
-        all_metadata_keys: set[str] = set()
-        for spectrum in spectra:
-            all_metadata_keys.update(spectrum.metadata.keys())
-
-        active_columns = {
-            mgf_key: col_name
-            for mgf_key, col_name in metadata_map.items()
-            if mgf_key in all_metadata_keys
-        }
-
-        sequence_key = next((k for k in sequence_keys if k in all_metadata_keys), None)
-
-        data: dict[str, list[Any]] = {"scan_number": []}
-        for col_name in active_columns.values():
-            data[col_name] = []
-        if sequence_key:
-            data["sequence"] = []
-        data["mz_array"] = []
-        data["intensity_array"] = []
-
-        for i, spectrum in enumerate(spectra):
-            data["scan_number"].append(i)
-            for mgf_key, col_name in active_columns.items():
-                data[col_name].append(spectrum.metadata.get(mgf_key))
-            if sequence_key:
-                data["sequence"].append(spectrum.metadata.get(sequence_key))
-            data["mz_array"].append(spectrum.peaks.mz)
-            data["intensity_array"].append(spectrum.peaks.intensities)
-
-        return pl.DataFrame(data)
-
-    @staticmethod
-    def _add_index_cols(df: pl.DataFrame, fp: Path | str) -> pl.DataFrame:
-        """Add ``experiment_name`` and ``spectrum_id`` to align with InstaNovo CSV output.
-
-        If ``scan_number`` is present, ``spectrum_id`` is ``experiment_name:scan_number``.
-        Otherwise uses a row index, matching InstaNovo's data_handler fallback.
-        """
-        exp_name = Path(fp).stem
-        df = df.with_columns(pl.lit(exp_name).alias("experiment_name").cast(pl.Utf8))
-        if "scan_number" in df.columns:
-            df = df.with_columns(
-                (
-                    pl.col("experiment_name")
-                    + ":"
-                    + pl.col("scan_number").cast(pl.Utf8)
-                ).alias("spectrum_id")
-            )
-        else:
-            df = df.with_row_index("idx")
-            df = df.with_columns(
-                (pl.col("experiment_name") + ":" + pl.col("idx").cast(pl.Utf8)).alias(
-                    "spectrum_id"
-                )
-            )
-            df = df.drop("idx")
-        return df
 
     @staticmethod
     def _merge_spectrum_data(
@@ -251,31 +174,9 @@ class InstaNovoDatasetLoader(DatasetLoader):
         Returns:
             Tuple[pl.DataFrame, bool]: A tuple containing the spectrum data and a boolean indicating whether the dataset has ground truth labels.
         """
-        spectrum_path = Path(spectrum_path)
-
-        if spectrum_path.suffix == ".parquet":
-            df = pl.read_parquet(spectrum_path)
-        elif spectrum_path.suffix == ".ipc":
-            df = pl.read_ipc(spectrum_path)
-        elif spectrum_path.suffix == ".mgf":
-            from matchms.importing import load_from_mgf
-
-            spectra = list(load_from_mgf(str(spectrum_path)))
-            df = self._df_from_matchms(spectra)
-        else:
-            raise ValueError(
-                f"Unsupported file format for spectrum data: {spectrum_path.suffix}. Supported formats are .parquet, .ipc and .mgf."
-            )
-
-        if spectrum_path.suffix == ".mgf" or self.add_index_cols:
-            df = self._add_index_cols(df, spectrum_path)
-
-        if "sequence" in df.columns:
-            has_labels = True
-        else:
-            has_labels = False
-
-        return df, has_labels
+        return utils.load_spectrum_data(
+            spectrum_path, add_index_cols=self.add_index_cols
+        )
 
     def _validate_beam_columns(self, columns: List[str]) -> None:
         """Validate that each beam column prefix matches at least one column in the dataframe.
