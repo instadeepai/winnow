@@ -2,7 +2,7 @@
 
 Spectrum-prediction linking
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-PSM rows are joined to spectrum parquet/ipc rows on a numeric ``index`` extracted
+PSM rows are joined to spectrum parquet/ipc/MGF rows on a numeric ``index`` extracted
 from ``spectra_ref`` (``ms_run[k]:index=N``). ``PSM_ID`` is not used for grouping.
 Spectrum row ``N`` is assumed to correspond to ``index=N`` in the mzTab file.
 
@@ -43,6 +43,7 @@ from pyteomics import mztab
 
 from winnow.compat.instanovo import ScoredSequence
 from winnow.datasets.calibration_dataset import CalibrationDataset
+from winnow.datasets.data_loaders import utils
 from winnow.datasets.interfaces import DatasetLoader
 
 
@@ -68,6 +69,7 @@ class MZTabDatasetLoader(DatasetLoader):
         isotope_error_range: Tuple[int, int] = (0, 1),
         load_beams: bool = True,
         column_mapping: Optional[dict[str, Optional[str]]] = None,
+        add_index_cols: bool = False,
     ) -> None:
         """Initialise the MZTabDatasetLoader.
 
@@ -81,6 +83,8 @@ class MZTabDatasetLoader(DatasetLoader):
             column_mapping: Maps logical roles to mzTab column headers. See
                 module docstring and ``_DEFAULT_COLUMN_MAPPING``. Missing mapped
                 columns fail fast with available headers listed.
+            add_index_cols: If True, add ``experiment_name`` and ``spectrum_id`` to
+                parquet/ipc inputs. MGF inputs always get these columns regardless.
         """
         self.metrics = Metrics(
             residue_set=ResidueSet(
@@ -89,6 +93,7 @@ class MZTabDatasetLoader(DatasetLoader):
             isotope_error_range=isotope_error_range,
         )
         self.load_beams = load_beams
+        self.add_index_cols = add_index_cols
         self.column_mapping = {
             **self._DEFAULT_COLUMN_MAPPING,
             **(column_mapping or {}),
@@ -229,23 +234,6 @@ class MZTabDatasetLoader(DatasetLoader):
             )
 
     @staticmethod
-    def _load_spectrum_data(
-        spectrum_path: Path | str,
-    ) -> Tuple[pl.DataFrame, bool]:
-        """Load spectrum data from Parquet or IPC."""
-        spectrum_path = Path(spectrum_path)
-        if spectrum_path.suffix == ".parquet":
-            df = pl.read_parquet(spectrum_path)
-        elif spectrum_path.suffix == ".ipc":
-            df = pl.read_ipc(spectrum_path)
-        else:
-            raise ValueError(
-                f"Unsupported file format for spectrum data: {spectrum_path.suffix}. "
-                "Supported formats are .parquet and .ipc."
-            )
-        return df, "sequence" in df.columns
-
-    @staticmethod
     def _validate_spectra_ref_indices(predictions: pl.DataFrame) -> pl.DataFrame:
         """Extract spectrum index from spectra_ref and raise if any row fails to parse."""
         predictions = predictions.with_columns(
@@ -303,6 +291,21 @@ class MZTabDatasetLoader(DatasetLoader):
             )
 
         return CalibrationDataset(metadata=metadata_pd, predictions=beam_predictions)
+
+    def _load_spectrum_data(
+        self, spectrum_path: Path | str
+    ) -> Tuple[pl.DataFrame, bool]:
+        """Load spectrum data from a Parquet, IPC, or MGF file.
+
+        Args:
+            spectrum_path: Path to spectrum data file (.parquet, .ipc, or .mgf).
+
+        Returns:
+            Tuple of (DataFrame containing spectrum data, whether ground truth labels exist).
+        """
+        return utils.load_spectrum_data(
+            spectrum_path, add_index_cols=self.add_index_cols
+        )
 
     def _process_predictions(
         self,
