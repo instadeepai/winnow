@@ -1,34 +1,26 @@
 <a id="readme-top"></a>
 
 <p align="center">
-    <a href="https://www.python.org/downloads/release/python-390/">
-        <img
-            src="https://img.shields.io/badge/python-3.9+-blue.svg"
-            alt="Python 3.9+"
+    <a href="https://www.python.org/downloads/release/python-3100/"><img
+            src="https://img.shields.io/badge/python-3.10+-blue.svg"
+            alt="Python 3.10+"
             style="max-width:100%;"
-        >
-    </a>
-    <a href="https://docs.astral.sh/ruff">
-        <img
+    ></a>
+    <a href="https://docs.astral.sh/ruff"><img
             src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json"
             alt="Ruff"
             style="max-width:100%;"
-        >
-    </a>
-    <a href="https://github.com/pre-commit/pre-commit">
-        <img
+    ></a>
+    <a href="https://github.com/pre-commit/pre-commit"><img
             src="https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit"
             alt="pre-commit"
             style="max-width:100%;"
-        >
-    </a>
-    <a href="https://github.com/instadeepai/winnow/actions">
-        <img
+    ></a>
+    <a href="https://github.com/instadeepai/winnow/actions"><img
             src="https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/winnowbot/f6df3d7ac249eb608e631192d2efb25e/raw/pytest-coverage-comment.json"
             alt="Test Coverage"
             style="max-width:100%;"
-        >
-    </a>
+    ></a>
 </p>
 
 <!-- PROJECT LOGO -->
@@ -47,8 +39,6 @@
     <a href="https://github.com/instadeepai/winnow/issues/new?labels=enhancement&template=feature_request.md">Request feature</a>
   </p>
 </div>
-
-
 
 <!-- TABLE OF CONTENTS -->
 <details>
@@ -86,36 +76,36 @@ To mitigate this, intermediate steps are introduced to:
 
 For database search-based peptide sequencing, PSM rescoring and target-decoy competition (TDC) are standard approaches, supported by an extensive ecosystem of tools. However, *de novo* peptide sequencing lacks standardised methods for these tasks.
 
-`winnow` aims to fill this gap by implementing the calibrate-estimate framework for FDR estimation. Unlike TDC, this approach is directly applicable to *de novo* sequencing models. Additionally, its calibration step naturally incorporates common confidence rescoring workflows as part of FDR estimation.
+Winnow aims to fill this gap by implementing the calibrate-estimate framework for FDR estimation. Unlike TDC, this approach is directly applicable to *de novo* sequencing models. Additionally, its calibration step naturally incorporates common confidence rescoring workflows as part of FDR estimation.
 
-`winnow` provides both a CLI and a Python package, offering flexibility in performing confidence calibration and FDR estimation.
+Winnow provides both a CLI and a Python package, offering flexibility in performing confidence calibration and FDR estimation.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
-
 
 <!-- GETTING STARTED -->
 ## Installation
 
-`winnow` is available as a Python package and can be installed using `pip` or a `pip`-compatible command (e.g., `uv pip install`):
-```
+Winnow is published on PyPI as **`winnow-fdr`**. Install with `pip` or a `pip`-compatible tool (e.g. `uv pip install`):
+
+```python
 pip install winnow-fdr
 ```
+
 or
-```
+
+```python
 uv pip install winnow-fdr
 ```
+
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- QUICK START -->
 ## Quick Start
 
-Get started with `winnow` in minutes using the included sample data:
+Get started in minutes using the example data in `examples/example_data/`.
 
 ```bash
-# Generate sample data (if not already present)
-make sample-data
-
-# Train a calibrator on the sample data using default settings
+# Train a calibrator on the example data
 make train-sample
 
 # Run prediction with the trained model without filtering on an FDR threshold
@@ -129,17 +119,18 @@ make predict-sample
 <!-- USAGE EXAMPLES -->
 ## Usage
 
-`winnow` supports two usage modes:
+Winnow supports two usage modes:
 
 1. A command-line interface (CLI) with sensible defaults and multiple FDR estimation methods.
 2. A configurable and extensible Python package for advanced users.
 
 ### CLI
 
-Installing `winnow` provides the `winnow` command with two sub-commands:
+Installing Winnow provides the `winnow` command with three sub-commands:
 
 1. `winnow train` – Performs confidence calibration on a dataset of annotated PSMs, outputting the fitted model checkpoint.
-2. `winnow predict` – Performs confidence calibration using a fitted model checkpoint (defaults to a pretrained general model from Hugging Face), estimates and controls FDR using the calibrated confidence scores.
+2. `winnow compute-features` – Computes and outputs the feature set for a dataset of PSMs.
+3. `winnow predict` – Performs confidence calibration using a fitted model checkpoint (defaults to a pretrained general model from Hugging Face), estimates and controls FDR using the calibrated confidence scores.
 
 By default, `winnow predict` uses a pretrained general model ([`InstaDeepAI/winnow-general-model`](https://huggingface.co/InstaDeepAI/winnow-general-model)) hosted on Hugging Face Hub, allowing you to get started immediately without training. You can also specify custom Hugging Face models or use locally trained models.
 
@@ -156,21 +147,9 @@ winnow predict fdr_control.fdr_threshold=0.01
 winnow predict data_loader=mztab dataset.spectrum_path_or_directory=data/spectra.parquet dataset.predictions_path=data/preds.mztab
 ```
 
-Refer to the [CLI Guide](cli.md) and [Configuration Guide](configuration.md) for details on usage and configuration options.
+Refer to the [CLI Guide](https://instadeepai.github.io/winnow/cli/) and [Configuration Guide](https://instadeepai.github.io/winnow/configuration/) for details on usage and configuration options.
 
-### Package
-
-The `winnow` package is organised into three sub-modules:
-
-1. `winnow.datasets` – Handles data loading and saving, including the `CalibrationDataset` class for mapping peptide sequencing output formats.
-2. `winnow.calibration` – Implements confidence calibration. Key components include:
-    - `ProbabilityCalibrator` (defines the calibration model)
-    - `CalibrationFeature` (an extensible interface for defining calibration features)
-3. `winnow.fdr` – Implements FDR estimation methods:
-    - `DatabaseGroundedFDRControl` (for database-grounded FDR control)
-    - `NonParametricFDRControl` (uses a non-parametric and label-free method for FDR estimation)
-
-For an example, check out the [example notebook](https://github.com/instadeepai/winnow/blob/main/examples/getting_started_with_winnow.ipynb).
+The [example notebook](https://github.com/instadeepai/winnow/blob/main/examples/getting_started_with_winnow.ipynb) walks through the Python API for the same workflows you can run from the CLI.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -191,13 +170,15 @@ If you have ideas for enhancements, you can:
 3. Commit your changes (`git commit -m 'feat: add some amazing feature'`).
 4. Push to your branch (`git push origin feat-amazing-feature`).
 
+For more details on the contributing process, see the [Contributing Guide](https://instadeepai.github.io/winnow/contributing/).
+
 Don't forget to give the project a star! Thanks again! :star:
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-### BibTeX entry and citation information
+## BibTeX entry and citation information
 
-If you use `winnow` in your research, please cite the following preprint:
+If you use Winnow in your research, please cite the following preprint:
 
 ```bibtex
 @article{mabona2025novopeptidesequencingrescoring,
