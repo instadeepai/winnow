@@ -3,10 +3,19 @@ _target_: winnow.datasets.data_loaders.MZTabDatasetLoader
 
 residue_masses: ${residue_masses}
 
-# Whether to load beam predictions. Set to false if you do not have beam predictions or if you only
-# need metadata features (e.g., MassErrorFeature, FragmentMatchFeatures, RetentionTimeFeature).
-# Defaults to true.
-load_beams: true
+# Build ScoredSequence beam lists from Casanovo mzTab (multiple PSMs per spectrum).
+# Must be false for traditional database-search mzTab (loader raises if true).
+load_beams: false
+
+# Maps logical roles to mzTab PSM column headers. Missing columns fail at load with
+# the configured name and available headers listed. No silent fallbacks.
+column_mapping:
+  predictions: opt_ms_run[1]_proforma
+  # predictions: sequence
+  # predictions: opt_global_cv_MS:1003169_proforma_peptidoform_sequence
+  confidence: search_engine_score[1]
+  token_scores: opt_ms_run[1]_aa_scores
+  # token_scores: opt_global_aa_scores
 
 residue_remapping:  # Used to map Casanovo-specific notations to UNIMOD tokens.
   "M+15.995": "M[UNIMOD:35]"  # Oxidation
