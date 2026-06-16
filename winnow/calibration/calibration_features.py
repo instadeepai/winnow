@@ -6,7 +6,6 @@ This module re-exports all feature classes and utility functions from the
 For new code, prefer importing directly from the subpackage:
 
     from winnow.calibration.features import FragmentMatchFeatures
-    from winnow.calibration.features import compute_spectrum_match_quality
 
 Or import specific modules:
 

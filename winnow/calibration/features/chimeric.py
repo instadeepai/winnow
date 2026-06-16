@@ -317,26 +317,3 @@ class ChimericFeatures(CalibrationFeatures):
         dataset.metadata["chimeric_longest_y_series"] = longest_y_series
         dataset.metadata["chimeric_complementary_ion_count"] = complementary_ion_count
         dataset.metadata["chimeric_max_ion_gap"] = max_ion_gap
-
-        # # Compute spectrum match quality features for runner-up (chimeric) predictions
-        # # Store runner-up peptide sequences for length calculation
-        # assert dataset.predictions is not None
-        # runner_up_predictions = [
-        #     beam[1].sequence if beam is not None and len(beam) > 1 else []
-        #     for beam in dataset.predictions
-        # ]
-        # dataset.metadata["_runner_up_sequence"] = runner_up_predictions
-
-        # quality_features = compute_spectrum_match_quality(
-        #     dataset=dataset.metadata,
-        #     theoretical_mz_col="runner_up_prosit_mz",
-        #     theoretical_intensity_col="runner_up_prosit_intensity",
-        #     annotation_col="runner_up_annotation",
-        #     peptide_col="_runner_up_sequence",
-        #     mz_tolerance=self.mz_tolerance,
-        # )
-        # for col, values in quality_features.items():
-        #     dataset.metadata[f"chimeric_{col}"] = values
-
-        # # Clean up temporary column
-        # dataset.metadata.drop(columns=["_runner_up_sequence"], inplace=True)
