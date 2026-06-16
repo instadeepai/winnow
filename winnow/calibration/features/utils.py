@@ -280,7 +280,9 @@ def compute_ion_identifications(
     source_annotation_column: str,
     mz_tolerance: float = 0.02,
     predictions: Optional[List[str]] = None,
-) -> Iterator[Tuple[List[float], List[float]]]:
+) -> Iterator[
+    Tuple[List[float], List[float], List[int], List[int], List[int], List[float]]
+]:
     """Computes the ion match rate and match intensity for each spectrum in the dataset.
 
     Args:
