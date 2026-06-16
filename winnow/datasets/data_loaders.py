@@ -635,21 +635,6 @@ class MZTabDatasetLoader(DatasetLoader):
         predictions = mztab.MzTab(str(predictions_path)).spectrum_match_table
         return pl.DataFrame(predictions)
 
-    @staticmethod
-    def _validate_scores(confidence: float, token_scores: List[float]) -> None:
-        """Validate confidence and token scores.
-
-        Args:
-            confidence: Confidence score
-            token_scores: Token scores
-        """
-        if confidence is not None and not 0 <= confidence <= 1:
-            raise ValueError("Detected confidence score outside of valid range (0-1).")
-        if token_scores is not None and not all(
-            0 <= score <= 1 for score in token_scores
-        ):
-            raise ValueError("Detected token scores outside of valid range (0-1).")
-
     def load(
         self, *, data_path: Path, predictions_path: Optional[Path] = None, **kwargs: Any
     ) -> CalibrationDataset:
@@ -824,7 +809,6 @@ class MZTabDatasetLoader(DatasetLoader):
             # Convert to ScoredSequence objects
             scored_sequences = []
             for row in spectrum_preds.iter_rows(named=True):
-                self._validate_scores(row["confidence"], row["token_scores"])
                 scored_sequences.append(
                     ScoredSequence(
                         sequence=row["prediction"],
