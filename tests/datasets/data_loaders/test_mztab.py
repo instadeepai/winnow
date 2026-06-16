@@ -395,16 +395,25 @@ class TestMZTabDatasetLoader:
         )
         assert result["index"].to_list() == [7, 42]  # sorted by index ASC
 
-    def test_process_predictions_replaces_l_with_i(self, db_loader):
+    def test_process_predictions_preserves_modification_names_in_untokenised(
+        self, db_loader
+    ):
         df = pl.DataFrame(
             {
                 "spectra_ref": ["ms_run[1]:index=0"],
-                "sequence": ["PEPTLDE"],
+                "sequence": ["PEPTC[Carbamidomethyl]DE"],
                 "search_engine_score[1]": [0.9],
             }
         )
         result = db_loader._process_predictions(df, ["index"], is_casanovo=False)
-        assert "L" not in result["prediction_untokenised"][0]
+        assert result["prediction_untokenised"][0] == "PEPTC[Carbamidomethyl]DE"
+
+    def test_tokenize_replaces_leucine_at_token_level(self, loader):
+        df = pl.DataFrame({"seq": ["PEPTLDE"]})
+        result = loader._tokenize(df, "seq", "tokens")
+        tokens = result["tokens"][0].to_list()
+        assert "L" not in tokens
+        assert "I" in tokens
 
     def test_process_predictions_without_aa_scores_creates_null_token_scores(
         self, db_loader, minimal_predictions_df
@@ -469,6 +478,14 @@ class TestMZTabDatasetLoader:
         tokens = result["tokens"][0].to_list()
         assert "M[UNIMOD:35]" in tokens
         assert "M[Oxidation]" not in tokens
+
+    def test_tokenize_remaps_carbamidomethyl_without_corrupting_name(self, loader):
+        df = pl.DataFrame({"seq": ["GEEHC[Carbamidomethyl]GHLLQAHK"]})
+        result = loader._tokenize(df, "seq", "tokens")
+        tokens = result["tokens"][0].to_list()
+        assert "C[UNIMOD:4]" in tokens
+        assert "L" not in tokens
+        assert tokens.count("I") == 2
 
     def test_tokenize_unmodified_sequence_passes_through(self, loader):
         df = pl.DataFrame({"seq": ["ACGM"]})

@@ -234,6 +234,25 @@ class MZTabDatasetLoader(DatasetLoader):
             )
 
     @staticmethod
+    def _as_aa_list(value: Any) -> Optional[list[str]]:
+        """Return amino-acid token lists from polars list cells."""
+        if isinstance(value, list):
+            return value
+        if isinstance(value, pl.Series):
+            return value.to_list()
+        return None
+
+    @staticmethod
+    def _normalize_leucine_tokens(tokens: list[str]) -> list[str]:
+        """Map leucine to isoleucine at the token level.
+
+        String-level ``L`` -> ``I`` replacement must not be applied before
+        tokenization because it corrupts modification names such as
+        ``Carbamidomethyl``.
+        """
+        return ["I" if token == "L" else token for token in tokens]
+
+    @staticmethod
     def _validate_spectra_ref_indices(predictions: pl.DataFrame) -> pl.DataFrame:
         """Extract spectrum index from spectra_ref and raise if any row fails to parse."""
         predictions = predictions.with_columns(
@@ -329,9 +348,7 @@ class MZTabDatasetLoader(DatasetLoader):
         predictions = self._validate_spectra_ref_indices(predictions)
 
         columns_to_add = [
-            pl.col(predictions_col)
-            .str.replace("L", "I")
-            .alias("prediction_untokenised"),
+            pl.col(predictions_col).alias("prediction_untokenised"),
             pl.col(confidence_col).cast(pl.Float64).alias("confidence"),
         ]
 
@@ -436,7 +453,13 @@ class MZTabDatasetLoader(DatasetLoader):
         )
 
     def _remap_tokens(self, tokens: list[str]) -> list[str]:
-        """Remap tokens using residue_remapping."""
+        """Remap Casanovo tokens to ProForma and normalise leucine.
+
+        Modification remapping runs after tokenization so ``residue_remapping``
+        keys match whole tokens (``M[Oxidation]``, ``[Acetyl]``, etc.). Leucine
+        normalisation is applied here rather than on raw peptide strings.
+        """
+        tokens = self._normalize_leucine_tokens(tokens)
         return [
             self.metrics.residue_set.residue_remapping.get(token, token)
             for token in tokens
@@ -448,7 +471,7 @@ class MZTabDatasetLoader(DatasetLoader):
         """Tokenize ground-truth sequences when present."""
         if has_labels:
             spectrum_data = spectrum_data.with_columns(
-                pl.col("sequence").str.replace("L", "I").alias("sequence_untokenised")
+                pl.col("sequence").alias("sequence_untokenised")
             )
             spectrum_data = self._tokenize(
                 spectrum_data, "sequence_untokenised", "sequence"
@@ -465,13 +488,39 @@ class MZTabDatasetLoader(DatasetLoader):
             .sort("index")
         )
 
+    def _novor_match_row(self, row: dict[str, Any]) -> int:
+        """Count AA matches for one labelled row via :meth:`Metrics._novor_match`.
+
+        Extracted from an inline polars ``map_elements`` lambda so sequence and
+        prediction are normalised to ``list[str]`` before matching, and so the
+        logic is typed/testable. Bound methods cannot be passed directly to
+        polars UDFs; call via ``lambda row: self._novor_match_row(row)``.
+        """
+        sequence = self._as_aa_list(row["sequence"])
+        prediction = self._as_aa_list(row["prediction"])
+        if sequence is None or prediction is None:
+            return 0
+        return self.metrics._novor_match(sequence, prediction)
+
+    def _prediction_is_correct(self, row: dict[str, Any]) -> bool:
+        """Return whether ``num_matches`` equals full peptide length for a row."""
+        sequence = self._as_aa_list(row["sequence"])
+        prediction = self._as_aa_list(row["prediction"])
+        if sequence is None or prediction is None:
+            return False
+        num_matches = row["num_matches"]
+        return num_matches == len(sequence) == len(prediction)
+
     def _evaluate_predictions(
         self, metadata: pl.DataFrame, has_labels: bool
     ) -> pl.DataFrame:
         """Annotate merged metadata with prediction validity and ground-truth matches."""
         metadata = metadata.with_columns(
             pl.col("prediction")
-            .map_elements(lambda x: isinstance(x, pl.Series), return_dtype=pl.Boolean)
+            .map_elements(
+                lambda x: self._as_aa_list(x) is not None,
+                return_dtype=pl.Boolean,
+            )
             .alias("valid_prediction"),
         )
 
@@ -482,19 +531,15 @@ class MZTabDatasetLoader(DatasetLoader):
             metadata.with_columns(
                 pl.col("sequence")
                 .map_elements(
-                    lambda x: isinstance(x, pl.Series), return_dtype=pl.Boolean
+                    lambda x: self._as_aa_list(x) is not None,
+                    return_dtype=pl.Boolean,
                 )
                 .alias("valid_sequence"),
             )
             .with_columns(
                 pl.struct(["sequence", "prediction"])
                 .map_elements(
-                    lambda row: (
-                        self.metrics._novor_match(row["sequence"], row["prediction"])
-                        if isinstance(row["sequence"], list)
-                        and isinstance(row["prediction"], list)
-                        else 0
-                    ),
+                    lambda row: self._novor_match_row(row),
                     return_dtype=pl.Int64,
                 )
                 .alias("num_matches"),
@@ -502,14 +547,7 @@ class MZTabDatasetLoader(DatasetLoader):
             .with_columns(
                 pl.struct(["sequence", "prediction", "num_matches"])
                 .map_elements(
-                    lambda row: (
-                        row["num_matches"]
-                        == len(row["sequence"])
-                        == len(row["prediction"])
-                        if isinstance(row["sequence"], list)
-                        and isinstance(row["prediction"], list)
-                        else False
-                    ),
+                    lambda row: self._prediction_is_correct(row),
                     return_dtype=pl.Boolean,
                 )
                 .alias("correct")
