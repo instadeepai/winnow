@@ -153,17 +153,21 @@ class ChimericFeatures(CalibrationFeatures):
                 predictions_predicate=lambda beam: beam is None or len(beam) < 2
             )
             .filter_entries(
-                metadata_predicate=lambda row: row["precursor_charge"]
-                > self.max_precursor_charge
+                metadata_predicate=lambda row: (
+                    row["precursor_charge"] > self.max_precursor_charge
+                )
             )
             .filter_entries(
-                predictions_predicate=lambda beam: len(beam) > 1
-                and len(beam[1].sequence) > self.max_peptide_length
+                predictions_predicate=lambda beam: (
+                    len(beam) > 1 and len(beam[1].sequence) > self.max_peptide_length
+                )
             )
             .filter_entries(
-                predictions_predicate=lambda beam: len(beam) > 1
-                and any(
-                    token in beam[1].sequence for token in self.unsupported_residues
+                predictions_predicate=lambda beam: (
+                    len(beam) > 1
+                    and any(
+                        token in beam[1].sequence for token in self.unsupported_residues
+                    )
                 )
             )
         )

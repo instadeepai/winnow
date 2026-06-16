@@ -85,9 +85,11 @@ class MassErrorFeature(CalibrationFeatures):
 
         # Compute dehydrated theoretical mass from peptide sequence
         dehydrated_theoretical_mass = dataset.metadata["prediction"].apply(
-            lambda peptide: sum(self.residue_masses[residue] for residue in peptide)
-            if isinstance(peptide, list)
-            else float("-inf")
+            lambda peptide: (
+                sum(self.residue_masses[residue] for residue in peptide)
+                if isinstance(peptide, list)
+                else float("-inf")
+            )
         )
         # Compute theoretical MH+ mass: residues + H2O (peptide backbone) + H+ (ionisation)
         theoretical_mass = (

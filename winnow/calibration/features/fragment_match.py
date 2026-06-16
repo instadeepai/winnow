@@ -145,12 +145,14 @@ class FragmentMatchFeatures(CalibrationFeatures):
         """
         filtered_dataset = (
             dataset.filter_entries(
-                metadata_predicate=lambda row: row["precursor_charge"]
-                > self.max_precursor_charge
+                metadata_predicate=lambda row: (
+                    row["precursor_charge"] > self.max_precursor_charge
+                )
             )
             .filter_entries(
-                metadata_predicate=lambda row: len(row["prediction"])
-                > self.max_peptide_length
+                metadata_predicate=lambda row: (
+                    len(row["prediction"]) > self.max_peptide_length
+                )
             )
             .filter_entries(
                 metadata_predicate=lambda row: any(

@@ -41,6 +41,21 @@ residue_remapping:  # Used to map InstaNovo legacy notations to UNIMOD tokens.
 #   predictions_token_log_probabilities_0, predictions_token_log_probabilities_1, predictions_token_log_probabilities_2
 #
 # Set `beam_columns` to null to disable beam loading entirely.
+# Column name mapping for the top-1 predictions CSV.
+#
+# Maps the CSV column names to the internal names used by Winnow.
+# Override these if you are loading predictions from an older InstaNovo version
+# that wrote different column headers.
+#
+# Default CSV column      | Description
+# predictions             | Raw peptide string (top-1)
+# predictions_tokenised   | Tokenised peptide (top-1)
+# log_probs               | Log-probability of the top-1 prediction
+column_mapping:
+  predictions: "predictions"
+  predictions_tokenised: "predictions_tokenised"
+  log_probability: "log_probs"
+
 beam_columns:
   sequence: "predictions_beam_"
   log_probability: "predictions_log_probability_beam_"
