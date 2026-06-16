@@ -525,6 +525,45 @@ class TestMZTabDatasetLoader:
             0.82
         ) == pytest.approx(np.log(0.82))
 
+    def test_validate_casanovo_native_psm_score_rejects_out_of_range(self):
+        MZTabDatasetLoader._validate_casanovo_native_psm_score(-0.18)
+        MZTabDatasetLoader._validate_casanovo_native_psm_score(1.0)
+        with pytest.raises(ValueError, match="\\[-1, 1\\]"):
+            MZTabDatasetLoader._validate_casanovo_native_psm_score(1.5)
+        with pytest.raises(ValueError, match="log-probability"):
+            MZTabDatasetLoader._validate_casanovo_native_psm_score(-1.5)
+
+    def test_validate_casanovo_token_probability_rejects_out_of_range(self):
+        MZTabDatasetLoader._validate_casanovo_token_probability(0.0)
+        MZTabDatasetLoader._validate_casanovo_token_probability(1.0)
+        with pytest.raises(ValueError, match="\\[0, 1\\]"):
+            MZTabDatasetLoader._validate_casanovo_token_probability(-0.1)
+        with pytest.raises(ValueError, match="Log-probability"):
+            MZTabDatasetLoader._validate_casanovo_token_probability(1.1)
+
+    def test_process_predictions_rejects_casanovo_psm_score_out_of_range(self, loader):
+        df = pl.DataFrame(
+            {
+                "spectra_ref": ["ms_run[1]:index=0"],
+                "opt_ms_run[1]_proforma": ["PEP"],
+                "search_engine_score[1]": [1.2],
+            }
+        )
+        with pytest.raises(ValueError, match="\\[-1, 1\\]"):
+            loader._process_predictions(df, [], is_casanovo=True)
+
+    def test_process_predictions_rejects_log_probability_token_scores(self, loader):
+        df = pl.DataFrame(
+            {
+                "spectra_ref": ["ms_run[1]:index=0"],
+                "opt_ms_run[1]_proforma": ["PEP"],
+                "search_engine_score[1]": [0.9],
+                "opt_ms_run[1]_aa_scores": ["0.9,-0.1,0.7"],
+            }
+        )
+        with pytest.raises(ValueError, match="\\[0, 1\\]"):
+            loader._process_predictions(df, [], is_casanovo=True)
+
     def test_validate_load_beams_supported_raises_for_db_search(self):
         with pytest.raises(ValueError, match="load_beams=True is only supported"):
             MZTabDatasetLoader._validate_load_beams_supported(
