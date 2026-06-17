@@ -454,8 +454,11 @@ def diagnose_calibration_entry_point(
     logger.info(f"After filtering: {len(dataset.metadata)} spectra")
 
     residue_masses = OmegaConf.to_container(cfg.residue_masses, resolve=True)
-    residue_remapping = OmegaConf.to_container(
-        getattr(cfg.data_loader, "residue_remapping", None) or {}, resolve=True
+    residue_remapping_cfg = getattr(cfg.data_loader, "residue_remapping", None)
+    residue_remapping = (
+        {}
+        if residue_remapping_cfg is None
+        else OmegaConf.to_container(residue_remapping_cfg, resolve=True)
     )
 
     logger.info("Loading trained calibrator.")
