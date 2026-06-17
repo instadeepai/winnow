@@ -158,8 +158,6 @@ Assess tail calibration on a labelled holdout set before trusting non-parametric
 
 **Configuration:** see [Calibration diagnostic configuration](configuration.md#calibration-diagnostic-configuration) for the full parameter reference.
 
-**Required:** set `diagnostics.label_source` on every run (`sequence` or `precomputed`). There is no automatic label detection.
-
 **Label configuration rules:**
 
 | `label_source` | `label_column` | Behaviour |
