@@ -682,6 +682,29 @@ class TestMZTabDatasetLoader:
         with pytest.raises(ValueError, match="\\[0, 1\\]"):
             loader._process_predictions(df, [], is_casanovo=True)
 
+    def test_process_predictions_drops_psm_sequence_when_not_prediction_column(
+        self, loader
+    ):
+        """Casanovo PSM sequence must not leak into metadata as a ground-truth label."""
+        df = pl.DataFrame(
+            {
+                "spectra_ref": ["ms_run[1]:index=0"],
+                "sequence": ["PEPTIDE"],
+                "opt_ms_run[1]_proforma": ["PEPTIDE"],
+                "search_engine_score[1]": [0.9],
+                "opt_ms_run[1]_aa_scores": ["0.9,0.8,0.7,0.6,0.5,0.4,0.3"],
+            }
+        )
+
+        result = loader._process_predictions(
+            df,
+            spectrum_data_columns=["mz_array", "precursor_charge"],
+            is_casanovo=True,
+        )
+
+        assert "prediction_untokenised" in result.columns
+        assert "sequence" not in result.columns
+
     def test_validate_load_beams_supported_raises_for_db_search(self):
         with pytest.raises(ValueError, match="load_beams=True is only supported"):
             MZTabDatasetLoader._validate_load_beams_supported(
