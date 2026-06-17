@@ -1078,8 +1078,8 @@ class RetentionTimeFeature(CalibrationFeatures):
 
     Uses a Koina iRT model to predict indexed retention times (iRT) for high-confidence
     peptides and trains a per-experiment linear regressor to map observed retention times
-    to predicted iRT values. The regressor is always re-fitted at both training and
-    inference time using self-supervised data (no database labels needed).
+    to predicted iRT values. Default behaviour is to always re-fit the regressor at both training and inference time,
+    but this can be overridden by passing a checkpoint file to `load_regressors` at inference time.
     """
 
     def __init__(
@@ -1124,6 +1124,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         self.irt_model_name = irt_model_name
         self.max_peptide_length = max_peptide_length
         self.irt_predictors: Dict[str, LinearRegression] = {}
+        self._loaded_experiment_names: Set[str] = set()
 
     @property
     def dependencies(self) -> List[FeatureDependency]:
@@ -1209,8 +1210,8 @@ class RetentionTimeFeature(CalibrationFeatures):
     def load_regressors(self, path: Union[Path, str]) -> None:
         """Load per-experiment regressors from a pickle file.
 
-        Loaded regressors are merged into ``self.irt_predictors``. Experiments already
-        present are overwritten by the loaded values.
+        Loaded regressors are merged into ``self.irt_predictors`` and pinned so that
+        subsequent ``prepare()`` calls skip re-fitting for those experiments.
 
         Args:
             path: File path to the pickle containing saved regressors.
@@ -1218,14 +1219,15 @@ class RetentionTimeFeature(CalibrationFeatures):
         with open(Path(path), "rb") as f:
             loaded: Dict[str, LinearRegression] = pickle.load(f)
         self.irt_predictors.update(loaded)
+        self._loaded_experiment_names.update(loaded.keys())
 
     def prepare(self, dataset: CalibrationDataset) -> None:
         """Fit per-experiment RT->iRT linear regressors.
 
         For each experiment in the dataset (identified by the ``experiment_name`` column),
         fits a ``LinearRegression`` on the top ``train_fraction`` of spectra by confidence.
-        Experiments that already have a regressor (e.g., loaded via ``load_regressors``)
-        are skipped.
+        Experiments pinned via ``load_regressors`` are skipped; all others are re-fitted
+        on every call.
 
         If ``experiment_name`` is absent, a single global regressor is fitted with a
         warning.
@@ -1244,22 +1246,21 @@ class RetentionTimeFeature(CalibrationFeatures):
             )
 
         if "experiment_name" not in dataset.metadata.columns:
-            if "__global__" not in self.irt_predictors:
-                warnings.warn(
-                    "No 'experiment_name' column found. Fitting a single global "
-                    "RT->iRT regressor. For multi-experiment data, ensure each "
-                    "spectrum file includes an 'experiment_name' column or use "
-                    "MGF format (which derives it from the filename).",
-                    stacklevel=2,
-                )
-                experiments_to_fit = {"__global__": dataset.metadata}
-            else:
+            if "__global__" in self._loaded_experiment_names:
                 return
-        else:
+            warnings.warn(
+                "No 'experiment_name' column found. Fitting a single global "
+                "RT->iRT regressor. For multi-experiment data, ensure each "
+                "spectrum file includes an 'experiment_name' column or use "
+                "MGF format (which derives it from the filename).",
+                stacklevel=2,
+            )
+            experiments_to_fit = {"__global__": dataset.metadata}
+        else:  # Always re-fit for experiments if not loaded from checkpoint
             experiments_to_fit = {
                 str(exp_name): group
                 for exp_name, group in dataset.metadata.groupby("experiment_name")
-                if str(exp_name) not in self.irt_predictors
+                if str(exp_name) not in self._loaded_experiment_names
             }
             if not experiments_to_fit:
                 return
@@ -1435,12 +1436,14 @@ class RetentionTimeFeature(CalibrationFeatures):
         state = self.__dict__.copy()
         state.pop("irt_predictors", None)
         state.pop("irt_predictor", None)
+        state.pop("_loaded_experiment_names", None)
         return state
 
     def __setstate__(self, state: dict) -> None:
         """Restore state and initialise empty regressor dict after unpickling."""
         self.__dict__.update(state)
         self.irt_predictors = {}
+        self._loaded_experiment_names = set()
         if "min_train_points" not in self.__dict__:
             self.min_train_points = 10
             warnings.warn("min_train_points not found in state, setting to 10")
