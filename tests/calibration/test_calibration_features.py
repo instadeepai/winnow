@@ -650,8 +650,8 @@ class TestRetentionTimeFeature:
         assert dataset.metadata["predicted iRT"].notna().all()
 
     @patch("winnow.calibration.calibration_features.koinapy.Koina")
-    def test_prepare_skips_preloaded_experiments(self, mock_koina):
-        """Test that prepare skips experiments with pre-loaded regressors."""
+    def test_prepare_skips_preloaded_experiments(self, mock_koina, tmp_path):
+        """Test that prepare skips experiments loaded via load_regressors."""
         mock_model_instance = Mock()
         mock_koina.return_value = mock_model_instance
         mock_model_instance.model_inputs = ["peptide_sequences"]
@@ -673,15 +673,69 @@ class TestRetentionTimeFeature:
         preloaded = LinearRegression()
         preloaded.fit([[1], [2]], [10, 20])
 
+        regressor_path = tmp_path / "regressors.pkl"
+        donor = RetentionTimeFeature(train_fraction=1.0, min_train_points=2)
+        donor.irt_predictors["exp_a"] = preloaded
+        donor.save_regressors(regressor_path)
+
         feature = RetentionTimeFeature(train_fraction=1.0, min_train_points=2)
-        feature.irt_predictors["exp_a"] = preloaded
+        feature.load_regressors(regressor_path)
         feature.prepare(dataset)
 
-        # exp_a should still be the preloaded regressor
-        assert feature.irt_predictors["exp_a"] is preloaded
-        # exp_b should have been fitted fresh
+        # exp_a should still be the checkpoint regressor (values, not object identity)
+        np.testing.assert_array_almost_equal(
+            feature.irt_predictors["exp_a"].predict([[1.5]]),
+            preloaded.predict([[1.5]]),
+        )
+        assert "exp_a" in feature._loaded_experiment_names
+        # exp_b should have been fitted fresh from the current dataset
+        assert "exp_b" not in feature._loaded_experiment_names
         assert "exp_b" in feature.irt_predictors
-        assert feature.irt_predictors["exp_b"] is not preloaded
+        np.testing.assert_array_almost_equal(
+            feature.irt_predictors["exp_b"].predict([[20.1], [8.7]]),
+            [35.1, 20.7],
+        )
+
+    @patch("winnow.calibration.calibration_features.koinapy.Koina")
+    def test_prepare_refits_regressors_if_not_loaded_from_checkpoint(self, mock_koina):
+        """Test that prepare refits regressors when the same experiment is seen again."""
+        mock_model_instance = Mock()
+        mock_koina.return_value = mock_model_instance
+        mock_model_instance.model_inputs = ["peptide_sequences"]
+        mock_model_instance.predict.return_value = pd.DataFrame({"irt": [10.0, 20.0]})
+
+        metadata_a = pd.DataFrame(
+            {
+                "confidence": [0.95, 0.90],
+                "prediction": [["A", "G"], ["G", "A"]],
+                "retention_time": [1.0, 2.0],
+                "spectrum_id": [0, 1],
+                "experiment_name": ["exp_a", "exp_a"],
+            }
+        )
+        dataset_a = CalibrationDataset(metadata=metadata_a, predictions=None)
+
+        feature = RetentionTimeFeature(train_fraction=1.0, min_train_points=2)
+        feature.prepare(dataset_a)
+        reg_after_a = feature.irt_predictors["exp_a"]
+        coef_a = reg_after_a.coef_[0]
+
+        mock_model_instance.predict.return_value = pd.DataFrame({"irt": [30.0, 40.0]})
+        metadata_b = pd.DataFrame(
+            {
+                "confidence": [0.95, 0.90],
+                "prediction": [["A", "G"], ["G", "A"]],
+                "retention_time": [100.0, 200.0],
+                "spectrum_id": [0, 1],
+                "experiment_name": ["exp_a", "exp_a"],
+            }
+        )
+        dataset_b = CalibrationDataset(metadata=metadata_b, predictions=None)
+        feature.prepare(dataset_b)
+        reg_after_b = feature.irt_predictors["exp_a"]
+
+        assert reg_after_b is not reg_after_a
+        assert reg_after_b.coef_[0] != coef_a
 
     @patch("winnow.calibration.calibration_features.koinapy.Koina")
     def test_prepare_raises_on_insufficient_data(self, mock_koina):
@@ -856,6 +910,7 @@ class TestRetentionTimeFeature:
 
         assert isinstance(restored.irt_predictors, dict)
         assert len(restored.irt_predictors) == 0
+        assert restored._loaded_experiment_names == set()
         assert restored.train_fraction == 0.5
         assert restored.min_train_points == 2
 
@@ -927,6 +982,7 @@ class TestRetentionTimeFeature:
 
         new_feature.load_regressors(path)
         assert set(new_feature.irt_predictors.keys()) == {"exp_a", "exp_b"}
+        assert new_feature._loaded_experiment_names == {"exp_a", "exp_b"}
 
         np.testing.assert_array_almost_equal(
             new_feature.irt_predictors["exp_a"].predict([[1.5]]),
