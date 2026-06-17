@@ -1259,7 +1259,7 @@ class RetentionTimeFeature(CalibrationFeatures):
             experiments_to_fit = {
                 str(exp_name): group
                 for exp_name, group in dataset.metadata.groupby("experiment_name")
-                if exp_name not in self.irt_predictors
+                if str(exp_name) not in self.irt_predictors
             }
             if not experiments_to_fit:
                 return
