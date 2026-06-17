@@ -9,6 +9,7 @@ from typing import Literal, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
+from pandas.api.types import is_bool_dtype, is_numeric_dtype
 from instanovo.utils.metrics import Metrics
 from instanovo.utils.residues import ResidueSet
 from numpy.typing import NDArray
@@ -147,7 +148,7 @@ def _coerce_bool_labels(series: pd.Series, column: str) -> pd.Series:
             "all PSMs must have a label for calibration diagnostics."
         )
     # Allow only boolean or numeric labels
-    if series.dtype not in [bool, int, float]:
+    if not (is_bool_dtype(series.dtype) or is_numeric_dtype(series.dtype)):
         raise ValueError(
             f"Label column {column!r} must be a boolean or numeric series, got {series.dtype}."
         )
