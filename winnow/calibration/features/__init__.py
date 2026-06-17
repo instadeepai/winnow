@@ -12,7 +12,10 @@ from winnow.calibration.features.base import (
 # Feature classes
 from winnow.calibration.features.fragment_match import FragmentMatchFeatures
 from winnow.calibration.features.chimeric import ChimericFeatures
-from winnow.calibration.features.mass_error import MassErrorFeature
+from winnow.calibration.features.mass_error import (
+    MassErrorPPMFeature,
+    MassErrorDaFeature,
+)
 from winnow.calibration.features.beam import BeamFeatures
 from winnow.calibration.features.retention_time import RetentionTimeFeature
 from winnow.calibration.features.sequence import SequenceFeatures
@@ -40,7 +43,8 @@ __all__ = [
     # Feature classes
     "FragmentMatchFeatures",
     "ChimericFeatures",
-    "MassErrorFeature",
+    "MassErrorPPMFeature",
+    "MassErrorDaFeature",
     "BeamFeatures",
     "RetentionTimeFeature",
     "SequenceFeatures",

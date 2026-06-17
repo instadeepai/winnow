@@ -13,7 +13,7 @@ calibrator:
 
   features:
     mass_error:
-      _target_: winnow.calibration.calibration_features.MassErrorFeature
+      _target_: winnow.calibration.calibration_features.MassErrorDaFeature
       residue_masses: ${residue_masses}  # The residue masses to use for the mass error feature.
 
     fragment_match_features:
