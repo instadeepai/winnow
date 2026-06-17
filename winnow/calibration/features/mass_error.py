@@ -3,7 +3,11 @@ from typing import Dict, List, Tuple
 import numpy as np
 
 from winnow.calibration.features.base import CalibrationFeatures, FeatureDependency
-from winnow.calibration.features.constants import CARBON_ISOTOPE_MASS_SHIFT
+from winnow.calibration.features.constants import (
+    CARBON_ISOTOPE_MASS_SHIFT,
+    H2O_MASS,
+    PROTON_MASS,
+)
 from winnow.datasets.calibration_dataset import CalibrationDataset
 
 
@@ -22,9 +26,6 @@ def _compute_signed_mass_errors(
     dataset: CalibrationDataset,
     residue_masses: Dict[str, float],
     isotope_error_range: Tuple[int, int],
-    *,
-    h2o_mass: float = 18.0106,
-    proton_mass: float = 1.007276,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return signed mass errors as (ppm, daltons) with isotope correction."""
     measured_mz = dataset.metadata["precursor_mz"]
@@ -40,12 +41,12 @@ def _compute_signed_mass_errors(
 
     neutral_mass = dataset.metadata["prediction"].apply(
         lambda peptide: (
-            sum(residue_masses[residue] for residue in peptide) + h2o_mass
+            sum(residue_masses[residue] for residue in peptide) + H2O_MASS
             if isinstance(peptide, list)
             else 0.0
         )
     )
-    theoretical_mz = (neutral_mass + charge * proton_mass) / charge
+    theoretical_mz = (neutral_mass + charge * PROTON_MASS) / charge
 
     isotope_offsets = range(isotope_error_range[0], isotope_error_range[1] + 1)
     ppm_per_isotope = np.column_stack(
@@ -80,8 +81,6 @@ class MassErrorPPMFeature(CalibrationFeatures):
     """Calculates the signed precursor mass error in ppm, correcting for possible isotope peak selection."""
 
     INVALID_PPM: float = float("inf")
-    h2o_mass: float = 18.0106
-    proton_mass: float = 1.007276
 
     def __init__(
         self,
@@ -155,17 +154,12 @@ class MassErrorPPMFeature(CalibrationFeatures):
             dataset,
             self.residue_masses,
             self.isotope_error_range,
-            h2o_mass=self.h2o_mass,
-            proton_mass=self.proton_mass,
         )
         dataset.metadata["mass_error_ppm"] = ppm
 
 
 class MassErrorDaFeature(CalibrationFeatures):
     """Signed precursor mass error in Daltons (neutral-mass scale), with isotope correction."""
-
-    h2o_mass: float = 18.0106
-    proton_mass: float = 1.007276
 
     def __init__(
         self,
@@ -221,7 +215,5 @@ class MassErrorDaFeature(CalibrationFeatures):
             dataset,
             self.residue_masses,
             self.isotope_error_range,
-            h2o_mass=self.h2o_mass,
-            proton_mass=self.proton_mass,
         )
         dataset.metadata["mass_error_da"] = da
