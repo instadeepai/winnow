@@ -20,6 +20,34 @@ LabelSource = Literal["sequence", "precomputed"]
 SEQUENCE_LABEL_COLUMN = "correct"
 
 
+@dataclass(frozen=True)
+class DiagnosticArrays:
+    """Aligned confidence scores and boolean correctness labels."""
+
+    scores: NDArray[np.float64]
+    labels: NDArray[np.bool_]
+
+    @classmethod
+    def from_raw(cls, scores: object, labels: object) -> DiagnosticArrays:
+        """Coerce inputs once at the module boundary."""
+        score_array = np.asarray(scores, dtype=np.float64)
+        label_array = np.asarray(labels, dtype=bool)
+        if score_array.shape != label_array.shape:
+            raise ValueError(
+                f"scores and labels must have the same length; "
+                f"got {score_array.shape[0]} and {label_array.shape[0]}."
+            )
+        return cls(scores=score_array, labels=label_array)
+
+
+@dataclass(frozen=True)
+class TailSlice:
+    """Scores and labels restricted to the operating tail S >= conf_cutoff."""
+
+    scores: NDArray[np.float64]
+    labels: NDArray[np.bool_]
+
+
 @dataclass
 class CalibrationDiagnosticResult:
     """Results from a tail calibration diagnostic run."""
@@ -61,6 +89,17 @@ def validate_label_config(
         )
 
 
+def _normalize_peptide_tokens(value: object, metrics: Metrics) -> list[str]:
+    """Normalize a sequence or prediction cell to a list of residue tokens."""
+    if isinstance(value, str):
+        return metrics._split_peptide(value)
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    return []
+
+
 def compute_correct_from_sequence(
     metadata: pd.DataFrame,
     residue_masses: dict[str, float],
@@ -83,18 +122,20 @@ def compute_correct_from_sequence(
         )
     )
     df = metadata.copy()
-    if len(df) > 0 and isinstance(df["sequence"].iloc[0], str):
-        df["sequence"] = df["sequence"].apply(metrics._split_peptide)
-    if len(df) > 0 and isinstance(df["prediction"].iloc[0], str):
-        df["prediction"] = df["prediction"].apply(metrics._split_peptide)
+    df["sequence"] = df["sequence"].apply(
+        lambda value: _normalize_peptide_tokens(value, metrics)
+    )
+    df["prediction"] = df["prediction"].apply(
+        lambda value: _normalize_peptide_tokens(value, metrics)
+    )
 
     def _row_correct(row: pd.Series) -> bool:
-        if not isinstance(row["sequence"], list) or not isinstance(
-            row["prediction"], list
-        ):
+        sequence = row["sequence"]
+        prediction = row["prediction"]
+        if not sequence or not prediction:
             return False
-        num_matches = metrics._novor_match(row["sequence"], row["prediction"])
-        return num_matches == len(row["sequence"]) == len(row["prediction"])
+        num_matches = metrics._novor_match(sequence, prediction)
+        return num_matches == len(sequence) == len(prediction)
 
     return df.apply(_row_correct, axis=1)
 
@@ -133,28 +174,28 @@ def resolve_diagnostics_labels(
 
 
 def filter_tail(
-    scores: NDArray[np.floating],
-    labels: NDArray[np.bool_],
+    data: DiagnosticArrays,
     conf_cutoff: float,
     min_tail_psms: int = 1,
-) -> Tuple[NDArray[np.floating], NDArray[np.bool_]]:
+) -> TailSlice:
     """Restrict scores and labels to the tail S >= conf_cutoff."""
-    mask = scores >= conf_cutoff
+    mask = data.scores >= conf_cutoff
     n_tail = int(mask.sum())
     if n_tail < min_tail_psms:
         raise ValueError(
             f"Only {n_tail} PSMs in the tail (S >= {conf_cutoff:.4f}); "
             f"need at least {min_tail_psms} for a stable isotonic calibration estimate."
         )
-    return scores[mask], labels[mask]
+    return TailSlice(scores=data.scores[mask], labels=data.labels[mask])
 
 
 def empirical_calibration_curve(
-    scores: NDArray[np.floating],
-    labels: NDArray[np.floating],
+    data: DiagnosticArrays | TailSlice,
     n_bins: int = 40,
 ) -> Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.int64]]:
     """Equal-frequency calibration curve. Returns (bin_mean_s, bin_mean_y, bin_weight)."""
+    scores = data.scores
+    labels = data.labels
     order = np.argsort(scores)
     s_sorted = scores[order]
     y_sorted = labels[order]
@@ -175,68 +216,34 @@ def empirical_calibration_curve(
     )
 
 
-def ece(
-    scores: NDArray[np.floating],
-    labels: NDArray[np.floating],
-    n_bins: int = 40,
-) -> float:
-    """Expected calibration error (equal-frequency bins)."""
-    bin_s, bin_y, weights = empirical_calibration_curve(scores, labels, n_bins=n_bins)
-    return float(np.sum(weights * np.abs(bin_s - bin_y)) / weights.sum())
+def empirical_stece(tail: TailSlice) -> float:
+    """Estimate sTECE from pointwise labels on a pre-filtered tail."""
+    return float(tail.labels.mean() - tail.scores.mean())
 
 
-def signed_tail_ece_empirical(
-    scores: NDArray[np.floating],
-    labels: NDArray[np.floating],
-    conf_cutoff: float,
-) -> float:
-    """sTECE(conf_cutoff) = E[c(S) - S | S >= conf_cutoff], estimated from pointwise labels."""
-    mask = scores >= conf_cutoff
-    if not mask.any():
-        return float("nan")
-    return float(labels[mask].mean() - scores[mask].mean())
-
-
-def fit_isotonic_calibration(
-    scores: NDArray[np.floating],
-    labels: NDArray[np.floating],
-) -> IsotonicRegression:
+def fit_isotonic_calibration(tail: TailSlice) -> IsotonicRegression:
     """Fit isotonic regression mapping score -> empirical correctness rate."""
-    iso = IsotonicRegression(out_of_bounds="clip", y_min=0.0, y_max=1.0)
-    iso.fit(scores, labels)
-    return iso
+    calibration_curve = IsotonicRegression(out_of_bounds="clip", y_min=0.0, y_max=1.0)
+    calibration_curve.fit(tail.scores, tail.labels.astype(np.float64))
+    return calibration_curve
 
 
-def signed_tail_ece_isotonic(
-    scores: NDArray[np.floating],
-    labels: NDArray[np.floating],
-    conf_cutoff: float,
-    iso: Optional[IsotonicRegression] = None,
+def isotonic_stece(
+    tail: TailSlice,
+    calibration_curve: IsotonicRegression,
 ) -> float:
     """Compute sTECE via isotonic estimate of c(s): mean(c_hat(s) - s) on the tail."""
-    tail_scores, tail_labels = filter_tail(
-        scores, labels.astype(bool), conf_cutoff, min_tail_psms=1
-    )
-    if iso is None:
-        iso = fit_isotonic_calibration(tail_scores, tail_labels.astype(float))
-    c_hat = iso.predict(tail_scores)
-    return float(np.mean(c_hat - tail_scores))
+    predicted_rate = calibration_curve.predict(tail.scores)
+    return float(np.mean(predicted_rate - tail.scores))
 
 
-def tail_ece(
-    scores: NDArray[np.floating],
-    labels: NDArray[np.floating],
-    conf_cutoff: float,
-    iso: Optional[IsotonicRegression] = None,
+def isotonic_tece(
+    tail: TailSlice,
+    calibration_curve: IsotonicRegression,
 ) -> float:
-    """TECE(conf_cutoff) = E[|c(S) - S| | S >= conf_cutoff] with c estimated isotonically."""
-    tail_scores, tail_labels = filter_tail(
-        scores, labels.astype(bool), conf_cutoff, min_tail_psms=1
-    )
-    if iso is None:
-        iso = fit_isotonic_calibration(tail_scores, tail_labels.astype(float))
-    c_hat = iso.predict(tail_scores)
-    return float(np.mean(np.abs(c_hat - tail_scores)))
+    """TECE on a pre-filtered tail with c estimated isotonically."""
+    predicted_rate = calibration_curve.predict(tail.scores)
+    return float(np.mean(np.abs(predicted_rate - tail.scores)))
 
 
 def _interpret_stece(stece: float) -> str:
@@ -254,44 +261,24 @@ def _interpret_stece(stece: float) -> str:
 
 
 def run_calibration_diagnostic(
-    scores: NDArray[np.floating],
-    labels: NDArray[np.bool_],
+    data: DiagnosticArrays,
     conf_cutoff: float,
     nominal_fdr: float,
     tolerance: float,
     label_source: str,
     label_column: str,
     min_tail_psms: int = 100,
-    n_bins: int = 20,
 ) -> CalibrationDiagnosticResult:
     """Compute tail calibration metrics at the confidence cutoff."""
-    tail_scores, tail_labels = filter_tail(
-        np.asarray(scores, dtype=float),
-        np.asarray(labels, dtype=bool),
-        conf_cutoff,
-        min_tail_psms=min_tail_psms,
-    )
-    labels_f = tail_labels.astype(float)
-    iso = fit_isotonic_calibration(tail_scores, labels_f)
-    stece = signed_tail_ece_isotonic(
-        np.asarray(scores, dtype=float),
-        np.asarray(labels, dtype=bool),
-        conf_cutoff,
-        iso=iso,
-    )
-    tece = tail_ece(
-        np.asarray(scores, dtype=float),
-        np.asarray(labels, dtype=bool),
-        conf_cutoff,
-        iso=iso,
-    )
-    stece_empirical = signed_tail_ece_empirical(
-        np.asarray(scores, dtype=float), labels_f, conf_cutoff
-    )
-    within = abs(stece) <= tolerance
+    tail = filter_tail(data, conf_cutoff, min_tail_psms=min_tail_psms)
+    calibration_curve = fit_isotonic_calibration(tail)
+    stece = isotonic_stece(tail, calibration_curve)
+    tece = isotonic_tece(tail, calibration_curve)
+    stece_empirical = empirical_stece(tail)
+    within_tolerance = abs(stece) <= tolerance
     return CalibrationDiagnosticResult(
         conf_cutoff=float(conf_cutoff),
-        n_tail=int(len(tail_scores)),
+        n_tail=int(len(tail.scores)),
         nominal_fdr=float(nominal_fdr),
         stece=stece,
         tece=tece,
@@ -299,14 +286,13 @@ def run_calibration_diagnostic(
         label_source=label_source,
         label_column=label_column,
         tolerance=tolerance,
-        within_tolerance=within,
+        within_tolerance=within_tolerance,
         interpretation=_interpret_stece(stece),
     )
 
 
 def reliability_diagram(
-    scores: NDArray[np.floating],
-    labels: NDArray[np.floating],
+    data: DiagnosticArrays,
     output_path: Union[Path, str],
     conf_cutoff: float,
     n_bins: int = 20,
@@ -314,15 +300,8 @@ def reliability_diagram(
     """Save a reliability diagram for the operating tail (S >= conf_cutoff)."""
     import matplotlib.pyplot as plt
 
-    tail_scores, tail_labels = filter_tail(
-        np.asarray(scores, dtype=float),
-        np.asarray(labels, dtype=bool),
-        conf_cutoff,
-        min_tail_psms=1,
-    )
-    bin_s, bin_y, _weights = empirical_calibration_curve(
-        tail_scores, tail_labels.astype(float), n_bins=n_bins
-    )
+    tail = filter_tail(data, conf_cutoff, min_tail_psms=1)
+    bin_s, bin_y, _weights = empirical_calibration_curve(tail, n_bins=n_bins)
     fig, ax = plt.subplots(figsize=(5, 5))
     ax.plot([0, 1], [0, 1], "k--", linewidth=1, label="Perfect calibration")
     ax.plot(bin_s, bin_y, "o-", linewidth=1.5, markersize=4, label="Empirical")
@@ -343,8 +322,7 @@ def write_diagnostic_report(
     result: CalibrationDiagnosticResult,
     output_dir: Union[Path, str],
     plot: bool,
-    scores: NDArray[np.floating],
-    labels: NDArray[np.floating],
+    data: DiagnosticArrays,
     n_bins: int,
 ) -> None:
     """Write JSON report and optional reliability diagram."""
@@ -355,8 +333,7 @@ def write_diagnostic_report(
         json.dump(result.to_dict(), fh, indent=2)
     if plot:
         reliability_diagram(
-            scores,
-            labels.astype(float),
+            data,
             out / "reliability_diagram.png",
             conf_cutoff=result.conf_cutoff,
             n_bins=n_bins,

@@ -154,7 +154,7 @@ By default, `winnow predict` uses the pretrained model `InstaDeepAI/winnow-gener
 
 ### `winnow diagnose-calibration`
 
-Assess tail calibration on a labelled holdout set before trusting non-parametric FDR at your operating threshold. The command applies a trained calibrator, derives the confidence cutoff $\tau$ at `fdr_control.fdr_threshold`, estimates signed tail expected calibration error (sTECE) and TECE on $\{S \ge \tau\}$ using isotonic regression, writes a reliability diagram, and warns when $|\widehat{\mathrm{sTECE}}(\tau)|$ exceeds `diagnostics.tolerance` (default `0.005`, i.e. 0.5 percentage points on the FDR scale — about 10% of a 5% FDR target).
+Assess tail calibration on a labelled holdout set before trusting non-parametric FDR at your operating threshold. The command applies a trained calibrator, derives the confidence cutoff $\tau$ at `fdr_control.fdr_threshold`, estimates signed tail expected calibration error (sTECE) and TECE on $\{S \ge \tau\}$ using isotonic regression, writes a reliability diagram, and warns when $|\widehat{\mathrm{sTECE}}(\tau)|$ exceeds `diagnostics.tolerance` (default `0.005`, i.e. 0.5 percentage points on the FDR scale, which is about 10% of a 5% FDR target).
 
 **Configuration:** see [Calibration diagnostic configuration](configuration.md#calibration-diagnostic-configuration) for the full parameter reference.
 
@@ -191,8 +191,6 @@ winnow diagnose-calibration diagnostics.label_source=sequence diagnostics.tolera
 
 Set `diagnostics.fail_on_warning=true` to exit with code 1 when $|\widehat{\mathrm{sTECE}}| >$ `diagnostics.tolerance` at the operating cutoff (useful in CI).
 
-See also the supplementary theory note in the repository ([`analysis/methods/calibration_fdr_theory.md`](https://github.com/instadeepai/winnow/blob/main/analysis/methods/calibration_fdr_theory.md)).
-
 ## Configuration system
 
 Winnow uses [Hydra](https://hydra.cc/) for configuration management. All parameters can be configured via:
@@ -200,7 +198,6 @@ Winnow uses [Hydra](https://hydra.cc/) for configuration management. All paramet
 - **YAML config files** in the `configs/` directory (defines defaults)
 - **Command-line overrides** using `key=value` syntax
 - **Nested parameters** using dot notation (e.g., `calibrator.seed=42`)
-
 
 For comprehensive configuration documentation, including:
 
@@ -418,7 +415,7 @@ winnow config predict   # View resolved prediction configuration
 This CLI guide focuses on **practical command-line usage**. For other information, see:
 
 | Topic | Documentation |
-|-------|---------------|
+| ------- | --------------- |
 | Configuration system, YAML structure, advanced patterns | [Configuration guide](configuration.md) |
 | Python API, feature implementation, programmatic usage | [API reference](api/calibration.md) |
 | Interactive tutorials and examples | [Examples notebook](https://github.com/instadeepai/winnow/blob/main/examples/getting_started_with_winnow.ipynb) |

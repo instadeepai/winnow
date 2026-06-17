@@ -411,6 +411,7 @@ def diagnose_calibration_entry_point(
 
     from winnow.calibration.calibrator import ProbabilityCalibrator
     from winnow.calibration.diagnostics import (
+        DiagnosticArrays,
         resolve_diagnostics_labels,
         run_calibration_diagnostic,
         validate_label_config,
@@ -432,9 +433,11 @@ def diagnose_calibration_entry_point(
         print_config(cfg)
         return
 
-    diag = cfg.diagnostics
-    label_column = diag.label_column if diag.label_column is not None else None
-    validate_label_config(diag.label_source, label_column)
+    diagnostics = cfg.diagnostics
+    label_column = (
+        diagnostics.label_column if diagnostics.label_column is not None else None
+    )
+    validate_label_config(diagnostics.label_source, label_column)
 
     logger.info("Starting calibration diagnostic pipeline.")
     logger.info(f"Configuration: {cfg}")
@@ -466,18 +469,21 @@ def diagnose_calibration_entry_point(
     # Resolve labels after predict: feature computation may filter invalid PSMs in place.
     labels, resolved_label_column = resolve_diagnostics_labels(
         dataset,
-        diag.label_source,
+        diagnostics.label_source,
         label_column,
         residue_masses=residue_masses,
         residue_remapping=residue_remapping,
     )
     logger.info(
-        f"Resolved labels via label_source={diag.label_source!r} "
+        f"Resolved labels via label_source={diagnostics.label_source!r} "
         f"(column={resolved_label_column!r})."
     )
 
     confidence_col = cfg.fdr_control.confidence_column
-    scores = dataset.metadata[confidence_col].to_numpy(dtype=float)
+    diagnostic_data = DiagnosticArrays.from_raw(
+        dataset.metadata[confidence_col],
+        labels,
+    )
 
     fdr_control = NonParametricFDRControl()
     fdr_control.fit(dataset.metadata[confidence_col])
@@ -490,26 +496,23 @@ def diagnose_calibration_entry_point(
     )
 
     result = run_calibration_diagnostic(
-        scores=scores,
-        labels=labels.to_numpy(dtype=bool),
+        data=diagnostic_data,
         conf_cutoff=conf_cutoff,
         nominal_fdr=cfg.fdr_control.fdr_threshold,
-        tolerance=diag.tolerance,
-        label_source=diag.label_source,
+        tolerance=diagnostics.tolerance,
+        label_source=diagnostics.label_source,
         label_column=resolved_label_column,
-        min_tail_psms=diag.min_tail_psms,
-        n_bins=diag.n_bins,
+        min_tail_psms=diagnostics.min_tail_psms,
     )
 
     write_diagnostic_report(
         result,
-        diag.output_dir,
-        plot=diag.plot,
-        scores=scores,
-        labels=labels.to_numpy(dtype=bool),
-        n_bins=diag.n_bins,
+        diagnostics.output_dir,
+        plot=diagnostics.plot,
+        data=diagnostic_data,
+        n_bins=diagnostics.n_bins,
     )
-    logger.info(f"Wrote diagnostic report to {diag.output_dir}")
+    logger.info(f"Wrote diagnostic report to {diagnostics.output_dir}")
 
     logger.info(
         f"sTECE={result.stece:.5f}, TECE={result.tece:.5f}, "
@@ -519,10 +522,10 @@ def diagnose_calibration_entry_point(
 
     if not result.within_tolerance:
         logger.warning(
-            f"|sTECE|={abs(result.stece):.5f} exceeds tolerance={diag.tolerance:.5f}. "
+            f"|sTECE| = {abs(result.stece):.5f} exceeds tolerance = {diagnostics.tolerance:.5f}. "
             "Reported FDR may deviate from the realised error rate at this threshold."
         )
-        if diag.fail_on_warning:
+        if diagnostics.fail_on_warning:
             raise typer.Exit(code=1)
 
 

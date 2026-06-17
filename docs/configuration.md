@@ -434,7 +434,7 @@ Requires ground truth sequences in the dataset.
 
 ### Main config (`configs/diagnose_calibration.yaml`)
 
-Runs tail calibration diagnostics on a labelled holdout set: loads data like `winnow predict`, applies a pretrained calibrator, derives the operating cutoff $\tau$ at `fdr_control.fdr_threshold`, and reports sTECE / TECE on $\{S \ge \tau\}$. See the [CLI reference](cli.md#winnow-diagnose-calibration) for usage examples and interpretation.
+Runs tail calibration diagnostics on a labelled holdout set: loads data like `winnow predict`, applies a pretrained calibrator, derives the operating cutoff $\tau$ at `fdr_control.fdr_threshold`, and reports sTECE and TECE on $\{S \ge \tau\}$. See the [CLI reference](cli.md#winnow-diagnose-calibration) for usage examples and interpretation.
 
 ```yaml
 defaults:
