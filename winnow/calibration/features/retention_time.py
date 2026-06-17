@@ -127,8 +127,9 @@ class RetentionTimeFeature(CalibrationFeatures):
                 the Koina iRT model.
         """
         filtered_dataset = dataset.filter_entries(
-            metadata_predicate=lambda row: len(row["prediction"])
-            > self.max_peptide_length
+            metadata_predicate=lambda row: (
+                len(row["prediction"]) > self.max_peptide_length
+            )
         ).filter_entries(
             metadata_predicate=lambda row: any(
                 token in row["prediction"] for token in self.unsupported_residues
