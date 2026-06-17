@@ -126,7 +126,7 @@ Winnow supports two usage modes:
 
 ### CLI
 
-Installing Winnow provides the `winnow` command with three sub-commands:
+Installing Winnow provides the `winnow` command with four sub-commands:
 
 1. `winnow train` – Performs confidence calibration on a dataset of annotated PSMs, outputting the fitted model checkpoint.
 2. `winnow compute-features` – Computes and outputs the feature set for a dataset of PSMs.
