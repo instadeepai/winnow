@@ -7,11 +7,12 @@ from winnow.calibration.features.mass_error import (
     MassErrorDaFeature,
     MassErrorPPMFeature,
 )
-from winnow.calibration.features.constants import CARBON_ISOTOPE_MASS_SHIFT
+from winnow.calibration.features.constants import (
+    CARBON_ISOTOPE_MASS_SHIFT,
+    H2O_MASS,
+    PROTON_MASS,
+)
 from winnow.datasets.calibration_dataset import CalibrationDataset
-
-H2O = 18.0106
-PROTON = 1.007276
 
 
 @pytest.fixture()
@@ -36,8 +37,8 @@ def residue_masses():
 
 def theoretical_mz(residue_masses, peptide, charge):
     """Compute theoretical m/z for a peptide at a given charge."""
-    neutral = sum(residue_masses[r] for r in peptide) + H2O
-    return (neutral + charge * PROTON) / charge
+    neutral = sum(residue_masses[r] for r in peptide) + H2O_MASS
+    return (neutral + charge * PROTON_MASS) / charge
 
 
 class TestMassErrorPPMFeature:
