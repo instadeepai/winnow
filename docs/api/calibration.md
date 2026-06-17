@@ -14,13 +14,27 @@ from winnow.calibration.calibration_features import (
     MassErrorDaFeature, FragmentMatchFeatures, BeamFeatures
 )
 from winnow.datasets.calibration_dataset import CalibrationDataset
-from winnow.constants import RESIDUE_MASSES
+residue_masses = {
+            "G": 57.021464,
+            "A": 71.037114,
+            "P": 97.052764,
+            "E": 129.042593,
+            "T": 101.047670,
+            "I": 113.084064,
+            "D": 115.026943,
+            "R": 156.101111,
+            "O": 237.147727,
+            "N": 114.042927,
+            "S": 87.032028,
+            "M": 131.040485,
+            "L": 113.084064,
+        }
 
 # Create and configure calibrator
 calibrator = ProbabilityCalibrator(seed=42)
 
 # Add features for calibration
-calibrator.add_feature(MassErrorDaFeature(residue_masses=RESIDUE_MASSES))
+calibrator.add_feature(MassErrorDaFeature(residue_masses=residue_masses))
 calibrator.add_feature(FragmentMatchFeatures(mz_tolerance=0.02))
 calibrator.add_feature(BeamFeatures())
 

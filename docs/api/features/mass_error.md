@@ -52,19 +52,30 @@ The two outputs are related by `da = ppm × mz_measured / 1e6 × z`.
 ## Usage
 
 ```python
-from winnow.calibration.features import MassErrorPPMFeature, MassErrorDaFeature
-from winnow.constants import RESIDUE_MASSES
+from winnow.calibration.calibrator import ProbabilityCalibrator
+from winnow.calibration.features import MassErrorDaFeature
+residue_masses = {
+            "G": 57.021464,
+            "A": 71.037114,
+            "P": 97.052764,
+            "E": 129.042593,
+            "T": 101.047670,
+            "I": 113.084064,
+            "D": 115.026943,
+            "R": 156.101111,
+            "O": 237.147727,
+            "N": 114.042927,
+            "S": 87.032028,
+            "M": 131.040485,
+            "L": 113.084064,
+        }
 
-ppm_feature = MassErrorPPMFeature(
-    residue_masses=RESIDUE_MASSES,
-    isotope_error_range=(0, 1),
-)
 da_feature = MassErrorDaFeature(
-    residue_masses=RESIDUE_MASSES,
+    residue_masses=residue_masses,
     isotope_error_range=(0, 1),
 )
 
-calibrator.add_feature(ppm_feature)
+calibrator = ProbabilityCalibrator(seed=42)
 calibrator.add_feature(da_feature)
 ```
 
