@@ -11,7 +11,7 @@ The main calibration model that transforms raw confidence scores into calibrated
 ```python
 from winnow.calibration import ProbabilityCalibrator
 from winnow.calibration.calibration_features import (
-    MassErrorFeature, FragmentMatchFeatures, BeamFeatures
+    MassErrorDaFeature, FragmentMatchFeatures, BeamFeatures
 )
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.constants import RESIDUE_MASSES
@@ -20,7 +20,7 @@ from winnow.constants import RESIDUE_MASSES
 calibrator = ProbabilityCalibrator(seed=42)
 
 # Add features for calibration
-calibrator.add_feature(MassErrorFeature(residue_masses=RESIDUE_MASSES))
+calibrator.add_feature(MassErrorDaFeature(residue_masses=RESIDUE_MASSES))
 calibrator.add_feature(FragmentMatchFeatures(mz_tolerance=0.02))
 calibrator.add_feature(BeamFeatures())
 
@@ -70,7 +70,7 @@ loaded_calibrator = ProbabilityCalibrator.load("calibrator_checkpoint")
 The calibrator uses a feature-based approach where multiple feature extractors compute signals from the peptide-spectrum match data. See the [Calibration Features](features/index.md) documentation for:
 
 - The `CalibrationFeatures` base class for creating custom features
-- Built-in features: [MassErrorFeature](features/mass_error.md), [BeamFeatures](features/beam.md), [FragmentMatchFeatures](features/fragment_match.md), [ChimericFeatures](features/chimeric.md), [RetentionTimeFeature](features/retention_time.md), [SequenceFeatures](features/sequence.md), [TokenScoreFeatures](features/token_score.md)
+- Built-in features: [Mass Error Features](features/mass_error.md), [Beam Features](features/beam.md), [Fragment Match Features](features/fragment_match.md), [Chimeric Features](features/chimeric.md), [Retention Time Feature](features/retention_time.md), [Sequence Features](features/sequence.md), [Token Score Features](features/token_score.md)
 - Feature dependencies and how they work
 - Handling missing features (learn vs filter strategies)
 

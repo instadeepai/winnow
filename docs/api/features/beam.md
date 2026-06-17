@@ -1,4 +1,4 @@
-# BeamFeatures
+# Beam Features
 
 Extracts confidence signals from beam search diversity metrics, measuring how confident the de novo sequencer is in its top prediction relative to alternatives.
 
