@@ -146,6 +146,11 @@ def _coerce_bool_labels(series: pd.Series, column: str) -> pd.Series:
             f"Label column {column!r} contains missing values; "
             "all PSMs must have a label for calibration diagnostics."
         )
+    # Allow only boolean or numeric labels
+    if series.dtype not in [bool, int, float]:
+        raise ValueError(
+            f"Label column {column!r} must be a boolean or numeric series, got {series.dtype}."
+        )
     return series.astype(bool)
 
 

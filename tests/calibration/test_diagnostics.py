@@ -111,6 +111,22 @@ class TestResolveDiagnosticsLabels:
                 residue_masses=RESIDUE_MASSES,
             )
 
+    def test_precomputed_string_labels_raises(self) -> None:
+        with pytest.raises(ValueError, match="must be a boolean or numeric series"):
+            resolve_diagnostics_labels(
+                CalibrationDataset(
+                    metadata=pd.DataFrame(
+                        {
+                            "confidence": [0.5, 0.7, 0.6],
+                            "proteome_hit": ["True", "False", "True"],
+                        }
+                    )
+                ),
+                "precomputed",
+                "proteome_hit",
+                residue_masses=RESIDUE_MASSES,
+            )
+
 
 class TestDiagnosticArrays:
     def test_from_raw_coerces_inputs(self) -> None:
