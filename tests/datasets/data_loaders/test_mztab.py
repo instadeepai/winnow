@@ -5,6 +5,10 @@ import polars as pl
 import pytest
 
 from winnow.datasets.data_loaders import MZTabDatasetLoader
+from winnow.datasets.data_loaders import utils
+
+
+EXPERIMENT_NAME = "test"
 
 
 class TestMZTabDatasetLoader:
@@ -271,15 +275,8 @@ class TestMZTabDatasetLoader:
         assert "precursor_charge" in result_df.columns
         assert has_labels is False
 
-    def test_load_spectrum_data_mgf_always_adds_index_cols(
-        self, full_residue_masses, standard_remapping, tmp_path
-    ):
-        """MGF inputs get experiment_name and spectrum_id regardless of add_index_cols."""
-        loader = MZTabDatasetLoader(
-            residue_masses=full_residue_masses,
-            residue_remapping=standard_remapping,
-            add_index_cols=False,
-        )
+    def test_load_spectrum_data_mgf_adds_row_order_spectrum_ids(self, loader, tmp_path):
+        """MGF inputs always get experiment_name and row-order spectrum_id."""
         mgf_path = tmp_path / "spectra.mgf"
         mgf_path.write_text(
             "BEGIN IONS\nPEPMASS=500.0\nCHARGE=2+\n100.0 1.0\nEND IONS\n",
@@ -288,6 +285,7 @@ class TestMZTabDatasetLoader:
         result_df, _ = loader._load_spectrum_data(mgf_path)
         assert "experiment_name" in result_df.columns
         assert "spectrum_id" in result_df.columns
+        assert result_df["experiment_name"][0] == "spectra"
         assert result_df["spectrum_id"][0] == "spectra:0"
 
     def test_load_spectrum_data_mgf_has_labels(self, loader, tmp_path):
@@ -308,30 +306,19 @@ class TestMZTabDatasetLoader:
         _, has_labels = loader._load_spectrum_data(mgf_path)
         assert has_labels is False
 
-    def test_load_spectrum_data_parquet_adds_index_cols_when_enabled(
-        self, full_residue_masses, standard_remapping, tmp_path
+    def test_load_spectrum_data_parquet_adds_row_order_spectrum_ids(
+        self, loader, tmp_path
     ):
-        loader = MZTabDatasetLoader(
-            residue_masses=full_residue_masses,
-            residue_remapping=standard_remapping,
-            add_index_cols=True,
-        )
         df = pl.DataFrame({"charge": [2], "mz_array": [[100.0]]})
         path = tmp_path / "spec.parquet"
         df.write_parquet(path)
         result_df, _ = loader._load_spectrum_data(path)
         assert "experiment_name" in result_df.columns
         assert "spectrum_id" in result_df.columns
+        assert result_df["experiment_name"][0] == "spec"
         assert result_df["spectrum_id"][0] == "spec:0"
 
-    def test_load_spectrum_data_ipc_adds_index_cols_when_enabled(
-        self, full_residue_masses, standard_remapping, tmp_path
-    ):
-        loader = MZTabDatasetLoader(
-            residue_masses=full_residue_masses,
-            residue_remapping=standard_remapping,
-            add_index_cols=True,
-        )
+    def test_load_spectrum_data_ipc_adds_row_order_spectrum_ids(self, loader, tmp_path):
         df = pl.DataFrame({"charge": [2], "mz_array": [[100.0]]})
         path = tmp_path / "spec.ipc"
         df.write_ipc(path)
@@ -340,15 +327,36 @@ class TestMZTabDatasetLoader:
         assert "spectrum_id" in result_df.columns
         assert result_df["spectrum_id"][0] == "spec:0"
 
-    def test_load_spectrum_data_parquet_no_index_cols_by_default(
-        self, loader, tmp_path
-    ):
-        df = pl.DataFrame({"charge": [2], "mz_array": [[100.0]]})
-        path = tmp_path / "data.parquet"
+    def test_load_spectrum_data_uses_row_order_not_scan_number(self, loader, tmp_path):
+        df = pl.DataFrame(
+            {
+                "charge": [2, 2],
+                "scan_number": [100, 200],
+                "mz_array": [[100.0], [200.0]],
+            }
+        )
+        path = tmp_path / "spec.parquet"
         df.write_parquet(path)
         result_df, _ = loader._load_spectrum_data(path)
-        assert "experiment_name" not in result_df.columns
-        assert "spectrum_id" not in result_df.columns
+        assert result_df["spectrum_id"].to_list() == ["spec:0", "spec:1"]
+
+    # ------------------------------------------------------------------
+    # add_row_order_spectrum_ids / _parse_spectra_ref
+    # ------------------------------------------------------------------
+
+    def test_add_row_order_spectrum_ids_assigns_sequential_ids(self):
+        df = pl.DataFrame({"charge": [2, 2]})
+        result = utils.add_row_order_spectrum_ids(df, "spec")
+        assert result["experiment_name"].to_list() == ["spec", "spec"]
+        assert result["spectrum_id"].to_list() == ["spec:0", "spec:1"]
+
+    def test_parse_spectra_ref_builds_namespaced_spectrum_id(
+        self, minimal_predictions_df
+    ):
+        result = MZTabDatasetLoader._parse_spectra_ref(minimal_predictions_df, "run")
+        # Preserves input row order; sorting by index is done in _process_predictions.
+        assert result["index"].to_list() == [7, 42]
+        assert result["spectrum_id"].to_list() == ["run:7", "run:42"]
 
     # ------------------------------------------------------------------
     # _load_dataset
@@ -369,7 +377,7 @@ class TestMZTabDatasetLoader:
         """Minimal predictions DataFrame without aa_scores."""
         return pl.DataFrame(
             {
-                "spectra_ref": ["ms_run[1]:index=42", "ms_run[1]:index=7"],
+                "spectra_ref": ["ms_run[1]:index=7", "ms_run[1]:index=42"],
                 "sequence": ["PEPTIDE", "ACGM"],
                 "search_engine_score[1]": [0.9, 0.7],
             }
@@ -391,7 +399,10 @@ class TestMZTabDatasetLoader:
         self, db_loader, minimal_predictions_df
     ):
         result = db_loader._process_predictions(
-            minimal_predictions_df, ["index"], is_casanovo=False
+            minimal_predictions_df,
+            ["index"],
+            is_casanovo=False,
+            experiment_name=EXPERIMENT_NAME,
         )
         assert result["index"].to_list() == [7, 42]  # sorted by index ASC
 
@@ -405,7 +416,9 @@ class TestMZTabDatasetLoader:
                 "search_engine_score[1]": [0.9],
             }
         )
-        result = db_loader._process_predictions(df, ["index"], is_casanovo=False)
+        result = db_loader._process_predictions(
+            df, ["index"], is_casanovo=False, experiment_name=EXPERIMENT_NAME
+        )
         assert result["prediction_untokenised"][0] == "PEPTC[Carbamidomethyl]DE"
 
     def test_tokenize_replaces_leucine_at_token_level(self, loader):
@@ -420,7 +433,10 @@ class TestMZTabDatasetLoader:
     ):
         """Traditional search engines lack aa_scores; token_scores should be null."""
         result = db_loader._process_predictions(
-            minimal_predictions_df, ["index"], is_casanovo=False
+            minimal_predictions_df,
+            ["index"],
+            is_casanovo=False,
+            experiment_name=EXPERIMENT_NAME,
         )
         assert "token_scores" in result.columns
         assert result["token_scores"][0] is None
@@ -429,7 +445,10 @@ class TestMZTabDatasetLoader:
         self, loader, predictions_df_with_aa_scores
     ):
         result = loader._process_predictions(
-            predictions_df_with_aa_scores, ["index"], is_casanovo=True
+            predictions_df_with_aa_scores,
+            ["index"],
+            is_casanovo=True,
+            experiment_name=EXPERIMENT_NAME,
         )
         token_scores = result["token_scores"][0].to_list()
         assert token_scores == pytest.approx([0.9, 0.8, 0.7])
@@ -446,7 +465,9 @@ class TestMZTabDatasetLoader:
                 "search_engine_score[1]": [0.6, 0.9, 0.8],
             }
         )
-        result = db_loader._process_predictions(df, ["index"], is_casanovo=False)
+        result = db_loader._process_predictions(
+            df, ["index"], is_casanovo=False, experiment_name=EXPERIMENT_NAME
+        )
         indices = result["index"].to_list()
         assert indices == sorted(indices)  # index ascending
         # For index=1, confidence 0.8 should come before 0.6
@@ -668,7 +689,9 @@ class TestMZTabDatasetLoader:
             }
         )
         with pytest.raises(ValueError, match="\\[-1, 1\\]"):
-            loader._process_predictions(df, [], is_casanovo=True)
+            loader._process_predictions(
+                df, [], is_casanovo=True, experiment_name=EXPERIMENT_NAME
+            )
 
     def test_process_predictions_rejects_log_probability_token_scores(self, loader):
         df = pl.DataFrame(
@@ -680,7 +703,9 @@ class TestMZTabDatasetLoader:
             }
         )
         with pytest.raises(ValueError, match="\\[0, 1\\]"):
-            loader._process_predictions(df, [], is_casanovo=True)
+            loader._process_predictions(
+                df, [], is_casanovo=True, experiment_name=EXPERIMENT_NAME
+            )
 
     def test_process_predictions_drops_psm_sequence_when_not_prediction_column(
         self, loader
@@ -700,6 +725,7 @@ class TestMZTabDatasetLoader:
             df,
             spectrum_data_columns=["mz_array", "precursor_charge"],
             is_casanovo=True,
+            experiment_name=EXPERIMENT_NAME,
         )
 
         assert "prediction_untokenised" in result.columns
@@ -722,13 +748,18 @@ class TestMZTabDatasetLoader:
                 "search_engine_score[1]": [0.3, 0.9],
             }
         )
-        spectrum = pl.DataFrame(
-            {
-                "charge": [2, 2],
-                "mz_array": [[100.0], [200.0]],
-            }
+        spectrum = utils.add_row_order_spectrum_ids(
+            pl.DataFrame(
+                {
+                    "charge": [2, 2],
+                    "mz_array": [[100.0], [200.0]],
+                }
+            ),
+            EXPERIMENT_NAME,
         )
-        processed = db_loader._process_predictions(raw, [], is_casanovo=False)
+        processed = db_loader._process_predictions(
+            raw, [], is_casanovo=False, experiment_name=EXPERIMENT_NAME
+        )
         processed = db_loader._tokenize(
             processed, "prediction_untokenised", "prediction"
         )
@@ -747,7 +778,9 @@ class TestMZTabDatasetLoader:
             }
         )
         with pytest.raises(ValueError, match="opt_ms_run\\[1\\]_proforma"):
-            loader._process_predictions(df, [], is_casanovo=True)
+            loader._process_predictions(
+                df, [], is_casanovo=True, experiment_name=EXPERIMENT_NAME
+            )
 
     def test_invalid_spectra_ref_raises(self, db_loader):
         df = pl.DataFrame(
@@ -758,4 +791,6 @@ class TestMZTabDatasetLoader:
             }
         )
         with pytest.raises(ValueError, match="spectra_ref"):
-            db_loader._process_predictions(df, [], is_casanovo=False)
+            db_loader._process_predictions(
+                df, [], is_casanovo=False, experiment_name=EXPERIMENT_NAME
+            )

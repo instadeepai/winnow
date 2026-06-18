@@ -62,6 +62,27 @@ def df_from_matchms(spectra: list[Spectrum]) -> pl.DataFrame:
     return pl.DataFrame(data)
 
 
+def add_row_order_spectrum_ids(df: pl.DataFrame, experiment_name: str) -> pl.DataFrame:
+    """Add ``experiment_name`` and ``spectrum_id`` as ``{experiment_name}:{row_index}``.
+
+    Uses 0-based file row order for the index suffix, not ``scan_number``.
+    Replaces any pre-existing ``experiment_name`` or ``spectrum_id`` columns.
+    """
+    drop_cols = [c for c in ("experiment_name", "spectrum_id") if c in df.columns]
+    if drop_cols:
+        df = df.drop(drop_cols)
+    return (
+        df.with_columns(pl.lit(experiment_name).alias("experiment_name").cast(pl.Utf8))
+        .with_row_index("_row_index")
+        .with_columns(
+            (
+                pl.col("experiment_name") + ":" + pl.col("_row_index").cast(pl.Utf8)
+            ).alias("spectrum_id")
+        )
+        .drop("_row_index")
+    )
+
+
 def add_index_cols(df: pl.DataFrame, fp: Path | str) -> pl.DataFrame:
     """Add ``experiment_name`` and ``spectrum_id`` columns.
 

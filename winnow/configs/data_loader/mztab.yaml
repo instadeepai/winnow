@@ -17,12 +17,6 @@ column_mapping:
   token_scores: opt_ms_run[1]_aa_scores
   # token_scores: opt_global_aa_scores
 
-# When true, add experiment_name + spectrum_id to spectrum data.
-# This maps input spectra to search engine output predictions.
-# MGF files always receive these columns regardless of this setting.
-# Set to false if your parquet/ipc files already contain a spectrum_id column.
-add_index_cols: false
-
 residue_remapping:  # Used to map Casanovo-specific notations to UNIMOD tokens.
   "M+15.995": "M[UNIMOD:35]"  # Oxidation
   "Q+0.984": "Q[UNIMOD:7]"  # Deamidation

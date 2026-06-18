@@ -2,10 +2,10 @@
 
 Spectrum-prediction linking
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-PSM rows are joined to spectrum parquet/ipc/MGF rows on a normalized
-``spectrum_id`` derived from ``spectra_ref`` (``ms_run[k]:index=N``). ``PSM_ID``
-is not used for grouping. Spectrum row ``N`` is assumed to correspond to
-``index=N`` in the mzTab file.
+PSM rows are joined to spectrum parquet/ipc/MGF rows on ``spectrum_id`` in
+``{experiment_name}:{index}`` form. ``experiment_name`` is the spectrum file
+stem; ``index`` is parsed from ``spectra_ref`` (``ms_run[k]:index=N``).
+Spectrum row ``N`` in file order must correspond to ``index=N`` in the mzTab file.
 
 Candidate ranking
 ~~~~~~~~~~~~~~~~~
@@ -70,7 +70,6 @@ class MZTabDatasetLoader(DatasetLoader):
         isotope_error_range: Tuple[int, int] = (0, 1),
         load_beams: bool = True,
         column_mapping: Optional[dict[str, Optional[str]]] = None,
-        add_index_cols: bool = False,
     ) -> None:
         """Initialise the MZTabDatasetLoader.
 
@@ -84,8 +83,6 @@ class MZTabDatasetLoader(DatasetLoader):
             column_mapping: Maps logical roles to mzTab column headers. See
                 module docstring and ``_DEFAULT_COLUMN_MAPPING``. Missing mapped
                 columns fail fast with available headers listed.
-            add_index_cols: If True, add ``experiment_name`` and ``spectrum_id`` to
-                parquet/ipc inputs. MGF inputs always get these columns regardless.
         """
         self.metrics = Metrics(
             residue_set=ResidueSet(
@@ -94,7 +91,6 @@ class MZTabDatasetLoader(DatasetLoader):
             isotope_error_range=isotope_error_range,
         )
         self.load_beams = load_beams
-        self.add_index_cols = add_index_cols
         self.column_mapping = {
             **self._DEFAULT_COLUMN_MAPPING,
             **(column_mapping or {}),
@@ -254,8 +250,10 @@ class MZTabDatasetLoader(DatasetLoader):
         return ["I" if token == "L" else token for token in tokens]
 
     @staticmethod
-    def _validate_spectra_ref_indices(predictions: pl.DataFrame) -> pl.DataFrame:
-        """Extract spectrum index and normalized spectrum_id from spectra_ref."""
+    def _parse_spectra_ref(
+        predictions: pl.DataFrame, experiment_name: str
+    ) -> pl.DataFrame:
+        """Parse ``spectra_ref`` into integer ``index`` and ``spectrum_id`` columns."""
         predictions = predictions.with_columns(
             pl.col("spectra_ref")
             .str.extract(r"index=(\d+)")
@@ -271,18 +269,9 @@ class MZTabDatasetLoader(DatasetLoader):
                 f"{bad_refs}"
             )
         return predictions.with_columns(
-            pl.col("index").cast(pl.Utf8).alias("spectrum_id")
-        )
-
-    @staticmethod
-    def _normalize_spectrum_identity(spectrum_data: pl.DataFrame) -> pl.DataFrame:
-        """Create the internal MZTab spectrum_id from zero-based spectrum row order."""
-        if "spectrum_id" in spectrum_data.columns:
-            spectrum_data = spectrum_data.drop("spectrum_id")
-        return (
-            spectrum_data.with_row_index("_spectrum_index")
-            .with_columns(pl.col("_spectrum_index").cast(pl.Utf8).alias("spectrum_id"))
-            .drop("_spectrum_index")
+            (pl.lit(experiment_name) + ":" + pl.col("index").cast(pl.Utf8)).alias(
+                "spectrum_id"
+            )
         )
 
     @staticmethod
@@ -323,9 +312,9 @@ class MZTabDatasetLoader(DatasetLoader):
         if predictions_path is None:
             raise ValueError("predictions_path is required for MZTabDatasetLoader")
 
+        experiment_name = Path(data_path).stem
         spectrum_data, has_labels = self._load_spectrum_data(data_path)
         spectrum_data = self._process_spectrum_data(spectrum_data, has_labels)
-        spectrum_data = self._normalize_spectrum_identity(spectrum_data)
 
         raw_predictions = self._load_dataset(predictions_path)
         is_casanovo = self._is_casanovo_mztab(raw_predictions)
@@ -333,7 +322,10 @@ class MZTabDatasetLoader(DatasetLoader):
         self._validate_load_beams_supported(is_casanovo, self.load_beams)
 
         predictions = self._process_predictions(
-            raw_predictions, spectrum_data.columns, is_casanovo
+            raw_predictions,
+            spectrum_data.columns,
+            is_casanovo,
+            experiment_name,
         )
         predictions = self._tokenize(
             predictions, "prediction_untokenised", "prediction"
@@ -368,15 +360,17 @@ class MZTabDatasetLoader(DatasetLoader):
         Returns:
             Tuple of (DataFrame containing spectrum data, whether ground truth labels exist).
         """
-        return utils.load_spectrum_data(
-            spectrum_path, add_index_cols=self.add_index_cols
-        )
+        spectrum_path = Path(spectrum_path)
+        df, has_labels = utils.load_spectrum_data(spectrum_path, add_index_cols=False)
+        df = utils.add_row_order_spectrum_ids(df, spectrum_path.stem)
+        return df, has_labels
 
     def _process_predictions(
         self,
         predictions: pl.DataFrame,
         spectrum_data_columns: List[str],
         is_casanovo: bool,
+        experiment_name: str,
     ) -> pl.DataFrame:
         """Parse mzTab columns, extract spectrum index, and sort by native score.
 
@@ -391,7 +385,7 @@ class MZTabDatasetLoader(DatasetLoader):
         self._require_column(predictions, "predictions", predictions_col)
         self._require_column(predictions, "confidence", confidence_col)
 
-        predictions = self._validate_spectra_ref_indices(predictions)
+        predictions = self._parse_spectra_ref(predictions, experiment_name)
 
         columns_to_add = [
             pl.col(predictions_col).alias("prediction_untokenised"),
@@ -529,9 +523,7 @@ class MZTabDatasetLoader(DatasetLoader):
     def _merge_data(
         self, spectrum_data: pl.DataFrame, predictions: pl.DataFrame
     ) -> pl.DataFrame:
-        """Inner-join spectrum rows to top PSMs on normalized spectrum_id."""
-        if "spectrum_id" not in spectrum_data.columns:
-            spectrum_data = self._normalize_spectrum_identity(spectrum_data)
+        """Inner-join spectrum rows to top PSMs on spectrum_id."""
         if "index" in spectrum_data.columns:
             spectrum_data = spectrum_data.drop("index")
         self._validate_join_keys(spectrum_data, predictions)
