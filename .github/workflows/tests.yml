@@ -33,7 +33,7 @@ jobs:
       # Dependabot (and some fork PRs) do not receive Actions secrets; skip gist update to avoid 401.
       - name: Create the badge
         if: env.HAS_BOT_TOKEN == 'true'
-        uses: schneegans/dynamic-badges-action@v1.7.0
+        uses: schneegans/dynamic-badges-action@e9a478b16159b4d31420099ba146cdc50f134483
         with:
           auth: ${{ secrets.BOT_ACCESS_TOKEN }}
           gistID: f6df3d7ac249eb608e631192d2efb25e
