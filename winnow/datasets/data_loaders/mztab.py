@@ -2,9 +2,10 @@
 
 Spectrum-prediction linking
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-PSM rows are joined to spectrum parquet/ipc/MGF rows on a numeric ``index`` extracted
-from ``spectra_ref`` (``ms_run[k]:index=N``). ``PSM_ID`` is not used for grouping.
-Spectrum row ``N`` is assumed to correspond to ``index=N`` in the mzTab file.
+PSM rows are joined to spectrum parquet/ipc/MGF rows on a normalized
+``spectrum_id`` derived from ``spectra_ref`` (``ms_run[k]:index=N``). ``PSM_ID``
+is not used for grouping. Spectrum row ``N`` is assumed to correspond to
+``index=N`` in the mzTab file.
 
 Candidate ranking
 ~~~~~~~~~~~~~~~~~
@@ -254,7 +255,7 @@ class MZTabDatasetLoader(DatasetLoader):
 
     @staticmethod
     def _validate_spectra_ref_indices(predictions: pl.DataFrame) -> pl.DataFrame:
-        """Extract spectrum index from spectra_ref and raise if any row fails to parse."""
+        """Extract spectrum index and normalized spectrum_id from spectra_ref."""
         predictions = predictions.with_columns(
             pl.col("spectra_ref")
             .str.extract(r"index=(\d+)")
@@ -269,7 +270,51 @@ class MZTabDatasetLoader(DatasetLoader):
                 "'ms_run[k]:index=N'). Examples of invalid values: "
                 f"{bad_refs}"
             )
-        return predictions
+        return predictions.with_columns(
+            pl.col("index").cast(pl.Utf8).alias("spectrum_id")
+        )
+
+    @staticmethod
+    def _normalize_spectrum_identity(spectrum_data: pl.DataFrame) -> pl.DataFrame:
+        """Create the internal MZTab spectrum_id from zero-based spectrum row order."""
+        if "spectrum_id" in spectrum_data.columns:
+            spectrum_data = spectrum_data.drop("spectrum_id")
+        return (
+            spectrum_data.with_row_index("_spectrum_index")
+            .with_columns(pl.col("_spectrum_index").cast(pl.Utf8).alias("spectrum_id"))
+            .drop("_spectrum_index")
+        )
+
+    @staticmethod
+    def _validate_join_keys(
+        spectrum_data: pl.DataFrame, predictions: pl.DataFrame
+    ) -> None:
+        """Validate normalized spectrum_id columns before joining."""
+        for name, df in (
+            ("spectrum data", spectrum_data),
+            ("predictions", predictions),
+        ):
+            if "spectrum_id" not in df.columns:
+                raise ValueError(f"{name} missing required 'spectrum_id' column.")
+
+        if spectrum_data["spectrum_id"].n_unique() != len(spectrum_data):
+            raise ValueError("Spectrum data 'spectrum_id' values must be unique.")
+
+        missing = (
+            predictions.select("spectrum_id")
+            .unique()
+            .join(
+                spectrum_data.select("spectrum_id").unique(),
+                on="spectrum_id",
+                how="anti",
+            )
+        )
+        if len(missing) > 0:
+            examples = missing["spectrum_id"].head(5).to_list()
+            raise ValueError(
+                "Predictions reference spectrum_id values not present in spectrum data: "
+                f"{examples}"
+            )
 
     def load(
         self, *, data_path: Path, predictions_path: Optional[Path] = None, **kwargs: Any
@@ -280,6 +325,7 @@ class MZTabDatasetLoader(DatasetLoader):
 
         spectrum_data, has_labels = self._load_spectrum_data(data_path)
         spectrum_data = self._process_spectrum_data(spectrum_data, has_labels)
+        spectrum_data = self._normalize_spectrum_identity(spectrum_data)
 
         raw_predictions = self._load_dataset(predictions_path)
         is_casanovo = self._is_casanovo_mztab(raw_predictions)
@@ -368,6 +414,8 @@ class MZTabDatasetLoader(DatasetLoader):
             )
 
         drop_cols = {predictions_col, confidence_col, "spectra_ref"}
+        if predictions_col != "sequence":
+            drop_cols.add("sequence")
         if has_token_col and token_scores_col is not None:
             drop_cols.add(token_scores_col)
 
@@ -387,7 +435,7 @@ class MZTabDatasetLoader(DatasetLoader):
             [
                 col
                 for col in predictions.columns
-                if col in spectrum_data_columns and col != "index"
+                if col in spectrum_data_columns and col not in {"index", "spectrum_id"}
             ]
         )
 
@@ -481,11 +529,14 @@ class MZTabDatasetLoader(DatasetLoader):
     def _merge_data(
         self, spectrum_data: pl.DataFrame, predictions: pl.DataFrame
     ) -> pl.DataFrame:
-        """Inner-join spectrum rows to top PSMs on zero-based row index."""
-        return (
-            spectrum_data.with_row_index("index")
-            .join(predictions, on="index", how="inner")
-            .sort("index")
+        """Inner-join spectrum rows to top PSMs on normalized spectrum_id."""
+        if "spectrum_id" not in spectrum_data.columns:
+            spectrum_data = self._normalize_spectrum_identity(spectrum_data)
+        if "index" in spectrum_data.columns:
+            spectrum_data = spectrum_data.drop("index")
+        self._validate_join_keys(spectrum_data, predictions)
+        return spectrum_data.join(predictions, on="spectrum_id", how="inner").sort(
+            "index"
         )
 
     def _novor_match_row(self, row: dict[str, Any]) -> int:

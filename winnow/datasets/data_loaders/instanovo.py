@@ -82,8 +82,29 @@ class InstaNovoDatasetLoader(DatasetLoader):
         Returns:
             pd.DataFrame: The merged dataframe.
         """
-        # Merge the predictions and input datasets on the spectrum_id column
-        # There should be no duplicate columns between the two datasets except for spectrum_id
+        for name, df in (
+            ("predictions", preds_dataset),
+            ("spectrum data", spectrum_dataset),
+        ):
+            if "spectrum_id" not in df.columns:
+                raise ValueError(f"{name} missing required 'spectrum_id' column.")
+
+        if spectrum_dataset["spectrum_id"].duplicated().any():
+            raise ValueError("Spectrum data 'spectrum_id' values must be unique.")
+
+        missing = preds_dataset.loc[
+            ~preds_dataset["spectrum_id"].isin(spectrum_dataset["spectrum_id"]),
+            "spectrum_id",
+        ].drop_duplicates()
+        if len(missing) > 0:
+            examples = missing.head(5).tolist()
+            raise ValueError(
+                "Merge conflict: predictions reference spectrum_id values not present "
+                f"in spectrum data: {examples}"
+            )
+
+        # Merge the predictions and input datasets on the normalized spectrum_id column.
+        # There should be no duplicate columns between the two datasets except for spectrum_id.
         merged_dataset = pd.merge(
             preds_dataset,
             spectrum_dataset,
