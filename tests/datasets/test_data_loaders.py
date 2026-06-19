@@ -1510,6 +1510,25 @@ class TestMZTabDatasetLoader:
             [np.log(0.4), np.log(0.5), np.log(0.6)]
         )
 
+    def test_create_beam_predictions_preserves_mztab_token_log_probabilities(
+        self, loader
+    ):
+        """mzTab aa_scores are already log-probabilities and must not be logged again."""
+        df = pl.DataFrame(
+            {
+                "index": pl.Series([0], dtype=pl.Int64),
+                "confidence": [0.9],
+                "prediction": [["P", "E", "P"]],
+                "token_scores": pl.Series(
+                    [[-0.1, -0.2, -0.3]], dtype=pl.List(pl.Float64)
+                ),
+            }
+        )
+
+        result = loader._create_beam_predictions(df, [0])
+
+        assert result[0][0].token_log_probabilities == pytest.approx([-0.1, -0.2, -0.3])
+
     # ------------------------------------------------------------------
     # load() – error handling
     # ------------------------------------------------------------------
