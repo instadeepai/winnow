@@ -1,0 +1,91 @@
+# Figshare "Analysis outputs" article deposition manifest.
+# Discover IDs once:
+#   export FIGSHARE_TOKEN=...
+#   make discover-figshare-ids FIGSHARE_PROJECT_ID=<project_id>
+# Or set project_id / article.id below.
+
+project_id: null
+article:
+  title: Analysis outputs
+  id: null
+
+staging_s3_prefix: s3://winnow-g88rh/revisions/new_datasets/figshare_staging/
+aws_profile: winnow
+
+include_globs:
+  - "**/*.csv"
+  - "ablations/eval_results/**/*.parquet"
+  - "feature_importance/**/perm_importance.pkl"
+  - "feature_importance/**/shap_values.pkl"
+exclude_globs:
+  - "**/plots/**"
+  - "**/models/**"
+  - "**/eval_feature_cache/**"
+  - "**/*.png"
+  - "**/*.pdf"
+  - "**/*.svg"
+  - "**/*.json"
+replace_mode: true
+model_name: train_extra_small_mass_error_da
+
+s3_sources:
+  helaqc_results:
+    base: s3://winnow-g88rh/revisions/new_datasets/analysis/results
+    mappings:
+      - { s3_dir: instanovo_helaqc_predictions_test, dest: helaqc_results/instanovo/test }
+      - { s3_dir: instanovo_helaqc_predictions_unlabelled, dest: helaqc_results/instanovo/unlabelled }
+      - { s3_dir: instanovo_helaqc_predictions_raw_less_train, dest: helaqc_results/instanovo/raw_less_train }
+      - { s3_dir: casanovo_helaqc_predictions_test, dest: helaqc_results/casanovo/test }
+      - { s3_dir: casanovo_helaqc_predictions_unlabelled, dest: helaqc_results/casanovo/unlabelled }
+      - { s3_dir: casanovo_helaqc_predictions_raw_less_train, dest: helaqc_results/casanovo/raw_less_train }
+      - { s3_dir: primenovo_helaqc_predictions_test, dest: helaqc_results/primenovo/test }
+      - { s3_dir: primenovo_helaqc_predictions_unlabelled, dest: helaqc_results/primenovo/unlabelled }
+      - { s3_dir: primenovo_helaqc_predictions_raw_less_train, dest: helaqc_results/primenovo/raw_less_train }
+    files: [metadata.csv, preds_and_fdr_metrics.csv]
+
+  general_results:
+    sync:
+      - s3_prefix: s3://winnow-g88rh/revisions/new_datasets/new_eval_sets_results/lcfm
+        dest: general_results/lcfm
+      - s3_prefix: s3://winnow-g88rh/revisions/new_datasets/new_eval_sets_results/acfm
+        dest: general_results/acfm
+    files: [metadata.csv, preds_and_fdr_metrics.csv]
+
+  feature_importance:
+    files:
+      - s3: s3://winnow-g88rh/revisions/new_datasets/new_eval_sets_plots/feature_importance/PXD014877/perm_importance.pkl
+        dest: feature_importance/PXD014877/perm_importance.pkl
+      - s3: s3://winnow-g88rh/revisions/new_datasets/new_eval_sets_plots/feature_importance/PXD014877/shap_values.pkl
+        dest: feature_importance/PXD014877/shap_values.pkl
+
+  generalisation:
+    files:
+      - s3: s3://winnow-g88rh/revisions/new_datasets/new_eval_sets_plots/leave_one_out_generalisation/calibrator_generalisation_results.csv
+        dest: generalisation/calibrator_generalisation_results.csv
+
+  novelty:
+    sync:
+      - s3_prefix: s3://winnow-g88rh/revisions/new_datasets/new_eval_sets_plots/novelty
+        dest: novelty
+    files: ["**/*.csv"]
+
+  upscored_fps:
+    sync:
+      - s3_prefix: s3://winnow-g88rh/revisions/new_datasets/new_eval_sets_plots/upscored_fps
+        dest: upscored_fps
+    files: [upscored_summary.csv, upscored_fp_detail.csv]
+
+  fdr_overlap:
+    sync:
+      - s3_prefix: s3://winnow-g88rh/revisions/new_datasets/new_eval_sets_plots/fdr_overlap
+        dest: fdr_overlap
+    files: ["**/*_overlap_summary.csv", "**/all_projects_overlap_summary.csv"]
+
+  ablations:
+    files:
+      - s3: s3://winnow-g88rh/revisions/new_datasets/new_eval_sets_plots/ablations/ablation_summary.csv
+        dest: ablations/ablation_summary.csv
+    sync:
+      - s3_prefix: s3://winnow-g88rh/revisions/new_datasets/new_eval_sets_plots/ablations/eval_results
+        dest: ablations/eval_results
+    files_in_sync: ["**/*.parquet"]

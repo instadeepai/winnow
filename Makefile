@@ -3110,3 +3110,68 @@ fdr-tool-doover:
 		--n-iterations 3 \
 		--n-bootstraps 5 \
 		--output-dir results/external_peptide_holdout_benchmark/
+
+# ═══════════════════════════════════════════════════════
+# Figshare deposition (Analysis outputs article)
+# ═══════════════════════════════════════════════════════
+
+FIGSHARE_STAGING_DIR ?= figshare_staging
+FIGSHARE_STAGING_S3 ?= $(S3_BASE)/figshare_staging
+FIGSHARE_DEPOSITION_CONFIG ?= configs/figshare_deposition.yaml
+FIGSHARE_AWS_PROFILE ?= winnow
+FIGSHARE_RESUME_STATE ?= figshare_upload_state.json
+FIGSHARE_PREFLIGHT_STATE ?= figshare_upload_state_preflight.json
+FIGSHARE_PREFLIGHT_ONLY ?= feature_importance/PXD014877/perm_importance.pkl
+
+.PHONY: stage-figshare-deposition download-figshare-staging figshare-dry-run \
+	discover-figshare-ids figshare-preflight-upload upload-figshare-project \
+	cluster-upload-figshare
+
+## Build local figshare_staging/ from S3 sources in configs/figshare_deposition.yaml
+## and sync to $(FIGSHARE_STAGING_S3).
+stage-figshare-deposition:
+	uv run python scripts/stage_figshare_deposition.py \
+		--manifest $(FIGSHARE_DEPOSITION_CONFIG) \
+		--staging-dir $(FIGSHARE_STAGING_DIR)
+	aws s3 sync $(FIGSHARE_STAGING_DIR)/ $(FIGSHARE_STAGING_S3)/ \
+		--profile $(FIGSHARE_AWS_PROFILE)
+
+## Pull staged deposition tree from S3 (AIchor entrypoint first step).
+download-figshare-staging:
+	aws s3 sync $(FIGSHARE_STAGING_S3)/ $(FIGSHARE_STAGING_DIR)/ \
+		--profile $(FIGSHARE_AWS_PROFILE)
+
+## List articles in a Figshare project (requires FIGSHARE_TOKEN + FIGSHARE_PROJECT_ID).
+discover-figshare-ids:
+	@test -n "$$FIGSHARE_TOKEN" || (echo "Set FIGSHARE_TOKEN" && exit 1)
+	@test -n "$(FIGSHARE_PROJECT_ID)" || (echo "Set FIGSHARE_PROJECT_ID" && exit 1)
+	curl -s -H "Authorization: token $$FIGSHARE_TOKEN" \
+		"https://api.figshare.com/v2/account/projects/$(FIGSHARE_PROJECT_ID)/articles?page_size=100" \
+		| python3 -m json.tool
+
+## Print matched files and sizes without contacting Figshare upload endpoints.
+figshare-dry-run:
+	uv run python scripts/upload_figshare.py \
+		--manifest $(FIGSHARE_DEPOSITION_CONFIG) \
+		--staging-dir $(FIGSHARE_STAGING_DIR) \
+		--dry-run
+
+## Upload one nested-path file to verify folder rendering in the Figshare UI.
+figshare-preflight-upload: download-figshare-staging
+	uv run python scripts/upload_figshare.py \
+		--manifest $(FIGSHARE_DEPOSITION_CONFIG) \
+		--staging-dir $(FIGSHARE_STAGING_DIR) \
+		--replace \
+		--only $(FIGSHARE_PREFLIGHT_ONLY) \
+		--resume-state $(FIGSHARE_PREFLIGHT_STATE)
+
+## Replace all files in the Analysis outputs article (does not publish by default).
+upload-figshare-project: download-figshare-staging
+	uv run python scripts/upload_figshare.py \
+		--manifest $(FIGSHARE_DEPOSITION_CONFIG) \
+		--staging-dir $(FIGSHARE_STAGING_DIR) \
+		--replace \
+		--resume-state $(FIGSHARE_RESUME_STATE)
+
+## AIchor CPU job entrypoint: download staging from S3 then upload to Figshare.
+cluster-upload-figshare: upload-figshare-project
