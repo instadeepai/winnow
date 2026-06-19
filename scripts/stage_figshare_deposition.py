@@ -27,8 +27,6 @@ def _download_file(
         "cp",
         spec.s3_uri,
         str(local_path),
-        "--profile",
-        profile,
     ]
     subprocess.run(cmd, check=True)
 

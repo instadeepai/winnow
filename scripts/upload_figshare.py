@@ -209,7 +209,7 @@ def _read_local_chunks(path: Path, part_size: int):
 
 
 def _s3_object_size(s3_uri: str, profile: str) -> int:
-    cmd = ["aws", "s3", "ls", s3_uri, "--profile", profile]
+    cmd = ["aws", "s3", "ls", s3_uri]
     result = subprocess.run(cmd, check=True, capture_output=True, text=True)
     lines = [line for line in result.stdout.splitlines() if line.strip()]
     if not lines:
