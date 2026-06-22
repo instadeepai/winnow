@@ -45,11 +45,23 @@ def main(argv: list[str] | None = None) -> int:
         default=Path("figshare_staging"),
     )
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--include-general-results-metadata",
+        action="store_true",
+        help=(
+            "Stage general_results/**/metadata.csv (default: excluded; see manifest "
+            "include_general_results_metadata)."
+        ),
+    )
     args = parser.parse_args(argv)
 
     manifest = load_manifest(args.manifest)
     profile = manifest.get("aws_profile", "winnow")
-    specs = collect_file_specs(manifest)
+    include_metadata = True if args.include_general_results_metadata else None
+    specs = collect_file_specs(
+        manifest,
+        include_general_results_metadata=include_metadata,
+    )
 
     print(f"Matched {len(specs)} deposition files")
     if len(specs) > FIGSHARE_FILE_LIMIT:

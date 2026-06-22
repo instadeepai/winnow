@@ -24,16 +24,59 @@ def load_manifest(path: Path) -> dict:
         return yaml.safe_load(handle)
 
 
+def rel_matches_glob(path: str, pattern: str) -> bool:
+    """Match a relative path against a glob (pathlib match + common /** shorthands)."""
+    normalized = path.replace("\\", "/")
+    if PurePosixPath(normalized).match(pattern):
+        return True
+    if pattern.endswith("/**"):
+        prefix = pattern[:-3]
+        return normalized == prefix or normalized.startswith(f"{prefix}/")
+    if "/**/" in pattern:
+        prefix, suffix = pattern.split("/**/", 1)
+        suffix = suffix.lstrip("/")
+        if not normalized.startswith(f"{prefix}/"):
+            return False
+        return normalized.endswith(f"/{suffix}") or normalized == f"{prefix}/{suffix}"
+    return False
+
+
 def _matches_any(path: str, patterns: list[str]) -> bool:
     normalized = path.replace("\\", "/")
-    return any(PurePosixPath(normalized).match(pattern) for pattern in patterns)
+    return any(rel_matches_glob(normalized, pattern) for pattern in patterns)
+
+
+def is_general_results_metadata(dest: str) -> bool:
+    """True for general_results/.../metadata.csv (any nesting depth)."""
+    normalized = dest.replace("\\", "/")
+    parts = PurePosixPath(normalized).parts
+    return (
+        len(parts) >= 2
+        and parts[0] == "general_results"
+        and parts[-1] == "metadata.csv"
+    )
+
+
+def manifest_includes_general_results_metadata(
+    manifest: dict,
+    *,
+    include_general_results_metadata: bool | None = None,
+) -> bool:
+    """Determine if general_results metadata should be included based on the manifest."""
+    if include_general_results_metadata is not None:
+        return include_general_results_metadata
+    return bool(manifest.get("include_general_results_metadata", False))
 
 
 def _should_include(
     dest: str,
     include_globs: list[str],
     exclude_globs: list[str],
+    *,
+    include_general_results_metadata: bool = True,
 ) -> bool:
+    if not include_general_results_metadata and is_general_results_metadata(dest):
+        return False
     if exclude_globs and _matches_any(dest, exclude_globs):
         return False
     if include_globs:
@@ -231,11 +274,74 @@ def _collect_section_specs(section_cfg: dict, profile: str) -> list[FileSpec]:
     return specs
 
 
-def collect_file_specs(manifest: dict) -> list[FileSpec]:
+def collect_staging_paths(
+    staging_dir: Path,
+    include_globs: list[str],
+    exclude_globs: list[str],
+    *,
+    include_general_results_metadata: bool = True,
+) -> list[str]:
+    """Return relative file paths under staging_dir matching include/exclude globs."""
+    if not staging_dir.is_dir():
+        return []
+
+    paths: list[str] = []
+    for path in sorted(staging_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(staging_dir).as_posix()
+        if _should_include(
+            rel,
+            include_globs,
+            exclude_globs,
+            include_general_results_metadata=include_general_results_metadata,
+        ):
+            paths.append(rel)
+    return paths
+
+
+def summarize_excluded_general_results_metadata(
+    staging_dir: Path,
+    include_globs: list[str],
+    exclude_globs: list[str],
+) -> tuple[int, int]:
+    """Return (file_count, total_bytes) of general_results metadata on disk but excluded."""
+    if not staging_dir.is_dir():
+        return 0, 0
+
+    count = 0
+    total_bytes = 0
+    for path in staging_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(staging_dir).as_posix()
+        if not is_general_results_metadata(rel):
+            continue
+        if not _should_include(
+            rel,
+            include_globs,
+            exclude_globs,
+            include_general_results_metadata=True,
+        ):
+            continue
+        count += 1
+        total_bytes += path.stat().st_size
+    return count, total_bytes
+
+
+def collect_file_specs(
+    manifest: dict,
+    *,
+    include_general_results_metadata: bool | None = None,
+) -> list[FileSpec]:
     """Return deduplicated deposition files from the manifest S3 sources."""
     profile = manifest.get("aws_profile", "winnow")
     include_globs = manifest.get("include_globs", [])
     exclude_globs = manifest.get("exclude_globs", [])
+    include_metadata = manifest_includes_general_results_metadata(
+        manifest,
+        include_general_results_metadata=include_general_results_metadata,
+    )
     specs: list[FileSpec] = []
 
     for section_cfg in manifest.get("s3_sources", {}).values():
@@ -243,7 +349,12 @@ def collect_file_specs(manifest: dict) -> list[FileSpec]:
 
     deduped: dict[str, FileSpec] = {}
     for spec in specs:
-        if not _should_include(spec.dest, include_globs, exclude_globs):
+        if not _should_include(
+            spec.dest,
+            include_globs,
+            exclude_globs,
+            include_general_results_metadata=include_metadata,
+        ):
             continue
         if spec.dest in deduped and spec.dest.startswith("fdr_overlap/"):
             deduped[spec.dest] = _prefer_fdr_overlap_spec(deduped[spec.dest], spec)

@@ -1,20 +1,28 @@
 # Figshare "Analysis outputs" article deposition manifest.
-# Discover IDs once:
-#   export FIGSHARE_TOKEN=...
-#   make discover-figshare-ids FIGSHARE_PROJECT_ID=<project_id>
-# Or set project_id / article.id below.
+#
+# upload_figshare.py uploads whatever files exist under figshare_staging/ that
+# match include_globs / exclude_globs below (local tree is the source of truth).
+#
+# s3_sources is optional: used only by stage_figshare_deposition.py to populate
+# figshare_staging/ from S3 when not assembling the tree manually.
 
 project_id: null
 article:
   title: Analysis outputs
-  id: null
+  id: 30147601
+
+# Related calibrators in the same Figshare collection (not uploaded by this script):
+# - InstaNovo HeLa: https://huggingface.co/InstaDeepAI/winnow-helaqc-model
+# - Casanovo + PrimeNovo HeLa: https://doi.org/10.6084/m9.figshare.32744946
+#   (folders casanovo_helaqc/, primenovo_helaqc/)
+# - Hold-one-out generalisation: https://doi.org/10.6084/m9.figshare.30147364
+#   (folders trained_on_*/)
 
 staging_s3_prefix: s3://winnow-g88rh/revisions/new_datasets/figshare_staging/
 aws_profile: winnow
 
 include_globs:
   - "**/*.csv"
-  - "ablations/eval_results/**/*.parquet"
   - "feature_importance/**/perm_importance.pkl"
   - "feature_importance/**/shap_values.pkl"
 exclude_globs:
@@ -25,6 +33,10 @@ exclude_globs:
   - "**/*.pdf"
   - "**/*.svg"
   - "**/*.json"
+# general_results metadata (mz_array/intensity_array stripped) is ~6.3 GiB; included when
+# include_general_results_metadata is true. Omit if over the 20 GiB Figshare article limit.
+include_general_results_metadata: false
+figshare_storage_limit_gib: 20
 replace_mode: true
 model_name: train_extra_small_mass_error_da
 
