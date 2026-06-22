@@ -1,4 +1,4 @@
-# SequenceFeatures
+# Sequence Features
 
 Computes basic peptide sequence properties that capture characteristics affecting fragmentation behaviour and identification confidence.
 

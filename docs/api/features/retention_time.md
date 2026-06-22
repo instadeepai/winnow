@@ -1,4 +1,4 @@
-# RetentionTimeFeature
+# Retention Time Feature
 
 Uses a Koina iRT model to predict indexed retention times and calibrate against observed retention times, providing chromatographic information for confidence calibration.
 

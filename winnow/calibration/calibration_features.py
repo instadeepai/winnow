@@ -20,7 +20,8 @@ from winnow.calibration.features import (
     # Feature classes
     FragmentMatchFeatures,
     ChimericFeatures,
-    MassErrorFeature,
+    MassErrorPPMFeature,
+    MassErrorDaFeature,
     BeamFeatures,
     RetentionTimeFeature,
     SequenceFeatures,
@@ -50,7 +51,8 @@ __all__ = [
     # Feature classes
     "FragmentMatchFeatures",
     "ChimericFeatures",
-    "MassErrorFeature",
+    "MassErrorPPMFeature",
+    "MassErrorDaFeature",
     "BeamFeatures",
     "RetentionTimeFeature",
     "SequenceFeatures",
