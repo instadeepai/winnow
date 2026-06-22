@@ -13,5 +13,5 @@ dataset:
 dataset_output_path: results/metadata.csv
 # Drop rows with empty or non-list predictions (same helper as train/predict).
 filter_empty_predictions: true
-# If true, compute features for a labelled dataset (needed for RetentionTimeFeature iRT mapping, where we train a model to predict iRT from retention time using a high-confidence labelled subset of the dataset).
+# If true, the dataset must include ground-truth sequence labels.
 labelled: true

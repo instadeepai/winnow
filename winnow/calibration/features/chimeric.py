@@ -12,6 +12,7 @@ from winnow.calibration.features.utils import (
     resolve_model_inputs,
     format_intensity_prediction_outputs,
     compute_ion_identifications,
+    validate_intensity_model_name,
 )
 from winnow.utils.peptide import tokens_to_proforma
 
@@ -64,6 +65,7 @@ class ChimericFeatures(CalibrationFeatures):
         Raises:
             ValueError: If the same key appears in both model_input_constants and model_input_columns.
         """
+        validate_intensity_model_name(prosit_intensity_model_name)
         validate_model_input_params(model_input_constants, model_input_columns)
         self.mz_tolerance = mz_tolerance
         self.learn_from_missing = learn_from_missing
@@ -153,17 +155,21 @@ class ChimericFeatures(CalibrationFeatures):
                 predictions_predicate=lambda beam: beam is None or len(beam) < 2
             )
             .filter_entries(
-                metadata_predicate=lambda row: row["precursor_charge"]
-                > self.max_precursor_charge
+                metadata_predicate=lambda row: (
+                    row["precursor_charge"] > self.max_precursor_charge
+                )
             )
             .filter_entries(
-                predictions_predicate=lambda beam: len(beam) > 1
-                and len(beam[1].sequence) > self.max_peptide_length
+                predictions_predicate=lambda beam: (
+                    len(beam) > 1 and len(beam[1].sequence) > self.max_peptide_length
+                )
             )
             .filter_entries(
-                predictions_predicate=lambda beam: len(beam) > 1
-                and any(
-                    token in beam[1].sequence for token in self.unsupported_residues
+                predictions_predicate=lambda beam: (
+                    len(beam) > 1
+                    and any(
+                        token in beam[1].sequence for token in self.unsupported_residues
+                    )
                 )
             )
         )

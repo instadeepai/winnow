@@ -1,21 +1,16 @@
 # Examples
 
-## Quick Start with Sample Data
+## Quick start with example data
 
-Get started with `winnow` in minutes using the included sample data:
+Try `winnow` in minutes using the bundled example subset under `examples/example_data/`: spectra (`spectra.ipc`) and de novo predictions (`predictions.csv`) from a real HeLa single-shot run, reduced for repository size.
 
 ```bash
-# Generate sample data
-make sample-data
-
 # Train a calibrator
 make train-sample
 
-# Run prediction
+# Run prediction (uses the model from train-sample)
 make predict-sample
 ```
-
-The sample data is automatically configured in the default config files. See the [CLI guide](cli.md#quick-start) for more details.
 
 ## Comprehensive Example Notebook
 

@@ -6,7 +6,6 @@ This module re-exports all feature classes and utility functions from the
 For new code, prefer importing directly from the subpackage:
 
     from winnow.calibration.features import FragmentMatchFeatures
-    from winnow.calibration.features import compute_spectrum_match_quality
 
 Or import specific modules:
 
@@ -21,7 +20,8 @@ from winnow.calibration.features import (
     # Feature classes
     FragmentMatchFeatures,
     ChimericFeatures,
-    MassErrorFeature,
+    MassErrorPPMFeature,
+    MassErrorDaFeature,
     BeamFeatures,
     RetentionTimeFeature,
     SequenceFeatures,
@@ -51,7 +51,8 @@ __all__ = [
     # Feature classes
     "FragmentMatchFeatures",
     "ChimericFeatures",
-    "MassErrorFeature",
+    "MassErrorPPMFeature",
+    "MassErrorDaFeature",
     "BeamFeatures",
     "RetentionTimeFeature",
     "SequenceFeatures",

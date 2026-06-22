@@ -1,4 +1,4 @@
-# FragmentMatchFeatures
+# Fragment Match Features
 
 Extracts features by comparing the observed fragmentation spectrum against a theoretical spectrum predicted by a Koina intensity model.
 

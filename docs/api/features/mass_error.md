@@ -1,56 +1,92 @@
-# MassErrorFeature
+# Mass Error Features
 
-Computes the difference between observed and theoretical precursor mass as a fundamental quality indicator for peptide-spectrum matches.
+Computes the signed precursor mass error, correcting for possible isotope peak selection by the instrument. Two feature classes are available:
+
+- **`MassErrorPPMFeature`** — error in parts per million (ppm)
+- **`MassErrorDaFeature`** — error in Daltons on the neutral-mass scale
+
+Both features share the same isotope-correction logic and differ only in the unit used for the output column.
 
 ## Purpose
 
-Mass accuracy is one of the most direct measures of PSM quality. A correctly identified peptide should have a precursor mass very close to its theoretical mass. Large mass errors often indicate:
+Mass accuracy is one of the most direct measures of PSM quality. A correctly identified peptide should have a precursor m/z very close to its theoretical m/z. Large mass errors often indicate:
 
 - Incorrect peptide identification
 - Unexpected modifications
-- Isotope peak assignment errors
 - Instrument calibration issues
 
-This feature provides the calibrator with mass accuracy information to help distinguish true from false identifications.
+When the instrument selects a precursor ion, it may pick the M+1 or M+2 isotope peak instead of the monoisotopic (M0) peak. Without correction, this would introduce a ~1 Da error that could penalise correct PSMs. Both features account for this by evaluating multiple isotope offsets and selecting the one that gives the smallest absolute ppm error.
 
 ## Implementation
 
-The mass error is computed as:
+For each isotope offset in the configured `isotope_error_range`, the mass error is computed in m/z space. The isotope offset with the smallest absolute ppm error is selected, and its signed value is stored in the requested unit.
+
+**Parts per million (ppm):**
 
 ```python
-mass_error = observed_MH+ - theoretical_MH+
+ppm = (mz_theoretical - (mz_measured - isotope × 1.00335 / z)) / mz_measured × 1e6
+```
+
+**Daltons (neutral-mass scale):**
+
+```python
+da = (mz_theoretical - (mz_measured - isotope × 1.00335 / z)) × z
 ```
 
 Where:
 
-- **Observed MH+** = `precursor_mz × precursor_charge - (precursor_charge - 1) × proton_mass`
-- **Theoretical MH+** = `sum(residue_masses) + water_mass + proton_mass`
-- `water_mass` = 18.01528 Da
-- `proton_mass` = 1.00727 Da
+- **mz_theoretical** = `(neutral_mass + z × proton_mass) / z`
+- **neutral_mass** = `sum(residue_masses) + water_mass`
+- **1.00335** is the carbon-13 isotope mass shift
+- **z** is the precursor charge
 
-The theoretical mass is calculated by summing the monoisotopic masses of all residue tokens in the predicted peptide sequence.
+The two outputs are related by `da = ppm × mz_measured / 1e6 × z`.
 
 ## Columns
 
-| Column | Unit | Description |
-| -------- | ------ | ------------- |
-| `mass_error` | Daltons (Da) | Observed MH+ minus theoretical MH+. Positive = observed heavier than expected. |
+| Column | Feature class | Unit | Description |
+| -------- | --------------- | ------ | ------------- |
+| `mass_error_ppm` | `MassErrorPPMFeature` | Parts per million (ppm) | Signed precursor mass error after isotope correction. Negative = observed m/z is heavier than theoretical. |
+| `mass_error_da` | `MassErrorDaFeature` | Daltons (Da) | Same error on the neutral-mass scale. Negative = observed m/z is heavier than theoretical. |
 
 ## Usage
 
 ```python
-from winnow.calibration.features import MassErrorFeature
-from winnow.constants import RESIDUE_MASSES
+from winnow.calibration.calibrator import ProbabilityCalibrator
+from winnow.calibration.features import MassErrorDaFeature
+residue_masses = {
+            "G": 57.021464,
+            "A": 71.037114,
+            "P": 97.052764,
+            "E": 129.042593,
+            "T": 101.047670,
+            "I": 113.084064,
+            "D": 115.026943,
+            "R": 156.101111,
+            "O": 237.147727,
+            "N": 114.042927,
+            "S": 87.032028,
+            "M": 131.040485,
+            "L": 113.084064,
+        }
 
-feature = MassErrorFeature(residue_masses=RESIDUE_MASSES)
-calibrator.add_feature(feature)
+da_feature = MassErrorDaFeature(
+    residue_masses=residue_masses,
+    isotope_error_range=(0, 1),
+)
+
+calibrator = ProbabilityCalibrator(seed=42)
+calibrator.add_feature(da_feature)
 ```
 
 ### Parameters
 
+Both feature classes accept the same constructor arguments:
+
 | Parameter | Type | Default | Description |
 | ----------- | ------ | --------- | ------------- |
 | `residue_masses` | `Dict[str, float]` | Required | Mapping of residue tokens to monoisotopic masses in Daltons |
+| `isotope_error_range` | `Tuple[int, int]` | `(0, 1)` | Range of isotope offsets to evaluate (inclusive). `(0, 1)` considers M0 and M+1. |
 
 ## Requirements
 
@@ -62,6 +98,8 @@ The dataset must contain:
 
 ## Notes
 
-- Mass error is signed: positive values indicate the observed mass is heavier than theoretical
-- Typical mass accuracy for modern instruments is < 10 ppm (< 0.01 Da for a 1000 Da peptide)
+- The error is signed: negative values indicate the observed m/z is heavier than theoretical
+- Isotope selection always uses the smallest absolute **ppm** error, even when computing the Da column
+- Typical mass accuracy for modern instruments is < 10 ppm
+- The `isotope_error_range` should match the setting used by your data loader
 - For modifications, ensure the `residue_masses` dictionary includes modified residue tokens (e.g., `"M[UNIMOD:35]"` for oxidised methionine)
