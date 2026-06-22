@@ -28,7 +28,7 @@ winnow predict
 
 Winnow's configuration files are organised in the `configs/` directory:
 
-```
+```text
 configs/
 ├── residues.yaml              # Amino acid masses, modifications
 ├── data_loader/               # Dataset format loaders
@@ -507,7 +507,7 @@ winnow train data_loader.beam_columns=null
 ```yaml
 _target_: winnow.datasets.data_loaders.MZTabDatasetLoader
 residue_masses: ${residue_masses}
-load_beams: true  # Set to false to disable beam predictions
+load_beams: false  # Set to false for database-search mzTab or metadata-only features
 residue_remapping:
   "M+15.995": "M[UNIMOD:35]"
   "C+57.021": "C[UNIMOD:4]"
@@ -516,7 +516,8 @@ residue_remapping:
 ```
 
 The `load_beams` parameter controls whether beam predictions are created from multiple
-predictions per spectrum. Set to `false` if you only need metadata features.
+predictions per spectrum. Set to `false` for traditional database-search mzTab or if you
+only need metadata features. Spectrum inputs may be Parquet, IPC, or MGF.
 
 **PointNovo** (`configs/data_loader/pointnovo.yaml`):
 
@@ -656,7 +657,7 @@ For advanced users who have installed Winnow as a package and need to customise 
 
 Your custom config directory should mirror the structure of the package configs:
 
-```
+```text
 my_configs/
 ├── residues.yaml              # Override residue masses/modifications
 ├── calibrator.yaml            # Override calibrator features
