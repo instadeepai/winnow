@@ -2,6 +2,7 @@
 defaults:
   - _self_
   - residues
+  - koina
   - data_loader: instanovo
 
 dataset:
