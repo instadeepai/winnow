@@ -50,8 +50,13 @@ RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.
 RUN apt-get clean && \
     rm -rf /var/lib/{apt,dpkg,cache,log}
 
-# Install AWS CLI
-RUN uv tool install awscli
+# AWS CLI v1 from PyPI. `uv tool install` as root puts the tool env under /root/.local/share/uv/tools;
+# /usr/local/bin/aws is a symlink there, so non-root users get "Permission denied". Install tools
+# under a shared path instead.
+RUN mkdir -p /opt/uv-tools && chmod 755 /opt/uv-tools
+ENV UV_TOOL_DIR=/opt/uv-tools
+ENV UV_TOOL_BIN_DIR=/usr/local/bin
+RUN uv tool install awscli && aws --version
 
 # Create group and user
 RUN groupadd --force --gid $GID $USER && \

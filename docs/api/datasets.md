@@ -90,6 +90,62 @@ loader = WinnowDatasetLoader()
 dataset = loader.load(data_path=Path("saved_dataset_directory"))
 ```
 
+#### Spectrum and prediction matching
+
+InstaNovo and MZTab both inner-join spectrum rows and prediction rows on `spectrum_id`, but they derive that key differently.
+
+##### Join and validation
+
+Both loaders inner-join on `spectrum_id`:
+
+- **Spectrum with no matching prediction** — dropped from the merged dataset (these are treated as spectra that did not survive filtering from the peptide sequencer).
+- **Prediction with no matching spectrum row** — loading raises a `ValueError`.
+
+Loading also raises a `ValueError` if:
+
+- `spectrum_id` is missing from the predictions or spectrum data.
+- `spectrum_id` values are not unique in the spectrum data.
+
+MZTab additionally raises if `spectra_ref` cannot be parsed (expected form `ms_run[k]:index=N`).
+
+##### InstaNovo: join on `spectrum_id`
+
+The InstaNovo loader inner-joins the predictions CSV and the spectrum file on a shared `spectrum_id` column. Every prediction row must match exactly one spectrum row.
+
+- The predictions CSV must include `spectrum_id`.
+- The spectrum file must include the same `spectrum_id` values (unless you use `add_index_cols`; see below).
+
+##### `add_index_cols` (InstaNovo)
+
+Controls whether Winnow synthesises `experiment_name` and `spectrum_id` when loading InstaNovo parquet or IPC spectrum files. MGF inputs **always** receive these columns regardless of this setting. Configure via `data_loader.add_index_cols` in the loader YAML (see [configuration guide](../configuration.md#data-loader-configs)).
+
+When `add_index_cols: true`:
+
+- `experiment_name` is set to the spectrum file stem (e.g. `spectra` for `spectra.parquet`).
+- If a `scan_number` column exists, `spectrum_id` is `{file_stem}:{scan_number}`.
+- Otherwise, `spectrum_id` is `{file_stem}:{row_index}` (0-based row position in the file).
+
+These columns are used directly as the join key (see above).
+
+##### MZTab: join on `{experiment_name}:{index}`
+
+Each row in the mzTab PSM table is one peptide-spectrum match (PSM). Two identifier columns matter for linking predictions to spectra:
+
+- `spectra_ref`: which input spectrum the PSM belongs to (e.g. `ms_run[1]:index=123`). The integer after `index=` is the spectrum’s position in the **full** search input file (0-based). Spectra filtered out before mzTab export are absent from the file, so surviving PSMs can show gaps in `index` (e.g. 0, 2, 5). Every PSM for the same spectrum shares the same `spectra_ref`.
+- `PSM_ID`: a monotonic, one-based row label within the mzTab file only (one per written PSM). Winnow does not use `PSM_ID` for matching; it groups and ranks candidates by the integer `index` parsed from `spectra_ref`.
+
+The MZTab loader inner-joins spectrum rows and PSM rows on `spectrum_id` in `{experiment_name}:{index}` form, matching InstaNovo’s namespaced ID convention:
+
+1. `experiment_name` is the spectrum file stem (`Path(data_path).stem`).
+2. Winnow parses `index` from each PSM’s `spectra_ref` and sets `spectrum_id` to `{experiment_name}:{index}` (e.g. `spectra:123`). The integer `index` column is retained for beam grouping and sorting within each spectrum.
+3. Spectrum rows receive `spectrum_id = {experiment_name}:{N}` where *N* is 0-based **file row order** in your spectrum input, not instrument scan number.
+4. Any pre-existing `experiment_name` or `spectrum_id` columns in the input file are replaced.
+5. Predictions and spectra are inner-joined on `spectrum_id`.
+
+This is always applied for parquet, IPC, and MGF inputs; there is no config flag.
+
+Use the **same** input file in the **same** order Casanovo indexed.
+
 ### PSMDataset
 
 A dataset containing multiple peptide-spectrum matches (PSMs). Provides a container for managing collections of PSMs with iteration and indexing support.

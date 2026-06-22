@@ -86,7 +86,7 @@ install-all:
 ## Development commands														 	#
 #################################################################################
 
-.PHONY: tests clean-coverage test-docker bash build-package clean-build clean-workspace test-build clean-all-build test-cli-isolated test-cli-config set-gcp-credentials set-ceph-credentials
+.PHONY: tests clean-coverage test-docker bash build-package clean-build clean-workspace test-build clean-all-build test-cli-isolated test-cli-config set-gcp-credentials
 
 ## Run all tests
 tests:
@@ -120,19 +120,11 @@ set-gcp-credentials:
 	uv run python scripts/set_gcp_credentials.py
 	gcloud auth activate-service-account dtu-denovo-sa@ext-dtu-denovo-sequencing-gcp.iam.gserviceaccount.com --key-file=ext-dtu-denovo-sequencing-gcp.json --project=ext-dtu-denovo-sequencing-gcp
 
-## Set the Ceph credentials
-set-ceph-credentials:
-	uv run python scripts/set_ceph_credentials.py
-
 #################################################################################
 ## Sample data and CLI commands													#
 #################################################################################
 
-.PHONY: sample-data train-sample predict-sample clean clean-all
-
-## Generate sample data files for testing
-sample-data:
-	uv run python scripts/generate_sample_data.py
+.PHONY: train-sample predict-sample clean clean-all
 
 ## Run winnow train with sample data
 train-sample:
@@ -140,8 +132,11 @@ train-sample:
 	dataset.spectrum_path_or_directory=examples/example_data/spectra.mgf \
 	dataset.predictions_path=examples/example_data/predictions.csv \
 	model_output_dir=models/new_model \
-	dataset_output_path=results/calibrated_dataset.csv \
-	calibrator.features.retention_time_feature.train_fraction=0.3
+	dataset_output_path=results/metadata.csv \
+	calibrator.features.retention_time_feature.train_fraction=0.3 \
+	calibrator.hidden_layer_sizes="[32, 16]" \
+	calibrator.early_stopping=false \
+	calibrator.max_iter=100 \
 
 ## Run winnow predict with sample data (uses locally trained model from models/new_model)
 predict-sample:
@@ -154,6 +149,3 @@ predict-sample:
 ## Clean output directories (does not delete sample data)
 clean:
 	rm -rf models/ results/
-
-## Clean outputs and regenerate sample data
-clean-all: clean sample-data

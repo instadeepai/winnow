@@ -5,7 +5,7 @@ description = "Score calibration and false discovery estimation for de novo pept
 keywords = ["proteomics","mass spectrometry", "de novo peptide sequencing", "false discovery rate",
             "false discovery estimation", "peptide filtering"]
 readme = "README.md"
-version = "1.0.3"
+version = "1.0.4"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 classifiers = [
@@ -20,6 +20,8 @@ dependencies = [
     "huggingface-hub>=0.35.3",
     "hydra-core>=1.3.2",
     "matchms>=0.31.0",
+    "scikit-learn>=1.3.0",
+    "matplotlib>=3.7.0",
 ]
 
 [project.urls]
@@ -32,7 +34,7 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["winnow", "winnow.scripts", "winnow.fdr", "winnow.datasets", "winnow.calibration", "winnow.compat", "winnow.configs", "winnow.configs.data_loader", "winnow.configs.fdr_method"]
+packages = ["winnow", "winnow.scripts", "winnow.fdr", "winnow.datasets", "winnow.datasets.data_loaders", "winnow.calibration", "winnow.calibration.features", "winnow.compat", "winnow.configs", "winnow.configs.data_loader", "winnow.configs.fdr_method", "winnow.utils"]
 
 [tool.setuptools.package-data]
 winnow = ["configs/**/*.yaml", "configs/**/*.yml"]

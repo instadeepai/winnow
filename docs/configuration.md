@@ -28,7 +28,7 @@ winnow predict
 
 Winnow's configuration files are organised in the `configs/` directory:
 
-```
+```text
 configs/
 ├── residues.yaml              # Amino acid masses, modifications
 ├── data_loader/               # Dataset format loaders
@@ -42,7 +42,8 @@ configs/
 ├── train.yaml                 # Main training config
 ├── compute_features.yaml      # Feature-only export (no MLP fit)
 ├── calibrator.yaml            # Model architecture and features
-└── predict.yaml               # Main prediction config
+├── predict.yaml               # Main prediction config
+└── diagnose_calibration.yaml  # Tail calibration diagnostic (sTECE / TECE)
 ```
 
 ## Overriding configuration
@@ -68,6 +69,10 @@ winnow predict data_loader=mztab fdr_control.fdr_threshold=0.01 fdr_method=datab
 
 # Compute-features overrides
 winnow compute-features dataset_output_path=results/features.csv labelled=false
+
+# Calibration diagnostic overrides
+winnow diagnose-calibration diagnostics.label_source=sequence fdr_control.fdr_threshold=0.01
+winnow diagnose-calibration diagnostics.label_source=precomputed diagnostics.label_column=proteome_hit
 ```
 
 ### Nested parameters
@@ -157,7 +162,7 @@ labelled: true
 - `dataset.*`, `data_loader`: Same meaning as in training config
 - `dataset_output_path`: CSV path for metadata after feature computation
 - `filter_empty_predictions`: If true, apply the same empty-prediction filter as train/predict
-- `labelled`: If true, spectrum data must include `sequence` (ground truth); runs feature `prepare()` (needed for e.g. `RetentionTimeFeature`). If false, you must not include `retention_time_feature` in `calibrator.features` (validation error otherwise)
+- `labelled`: If true, spectrum data must include `sequence` (ground truth).
 
 The feature set is the `calibrator.features` block from `calibrator.yaml` (shared with training). Override or drop features with Hydra the same way as for `winnow train`.
 
@@ -179,7 +184,7 @@ calibrator:
 
   features:
     mass_error:
-      _target_: winnow.calibration.calibration_features.MassErrorFeature
+      _target_: winnow.calibration.calibration_features.MassErrorDaFeature
       residue_masses: ${residue_masses}  # The residue masses to use for the mass error feature.
 
     fragment_match_features:
@@ -195,15 +200,10 @@ calibrator:
 
     retention_time_feature:
       _target_: winnow.calibration.calibration_features.RetentionTimeFeature
-      hidden_dim: 10  # The hidden dimension size for the MLP regressor used to predict iRT from observed retention times.
-      train_fraction: 0.1  # The fraction of the data to use for training the iRT predictor.
+      train_fraction: 0.1  # Top fraction of spectra (by confidence, descending) used to train the per-experiment RT->iRT regressor.
+      min_train_points: 10  # Minimum high-confidence spectra needed per experiment. Raises an error if fewer are available.
       learn_from_missing: false  # If True, impute missing features and add an indicator column. If False, filter invalid entries with a warning.
-      seed: 42  # Random seed for the MLP regressor.
-      learning_rate_init: 0.001  # The initial learning rate for the MLP regressor.
-      alpha: 0.0001  # L2 regularisation parameter for the MLP regressor.
-      max_iter: 200  # Maximum number of training iterations for the MLP regressor.
-      early_stopping: true  # Whether to use early stopping for the MLP regressor.
-      validation_fraction: 0.1  # Proportion of training data to use for early stopping validation.
+      seed: 42  # Random seed for reproducibility.
       irt_model_name: ${koina.irt_model}  # The name of the Koina iRT model to use.
       max_peptide_length: ${koina.constraints.max_peptide_length}      # Maximum peptide length accepted by the Koina iRT model.
       unsupported_residues: ${koina.constraints.unsupported_residues}  # Residues unsupported by the configured Koina iRT model.
@@ -277,7 +277,7 @@ filters. Predictions that fail any check are treated as **missing** rather than 
 #### Validity filters
 
 | Parameter | Applies to | Description |
-|---|---|---|
+| --- | --- | --- |
 | `max_precursor_charge` | `FragmentMatchFeatures`, `ChimericFeatures` | Predictions with a precursor charge strictly greater than this value are excluded. |
 | `max_peptide_length` | all three features | Predictions with more residue tokens than this limit are excluded. In `ChimericFeatures`, this limit is applied to the **runner-up (second-best) sequence**, not the top-1 prediction. |
 | `unsupported_residues` | all three features | Predictions containing any of the listed ProForma tokens are excluded. |
@@ -425,6 +425,67 @@ Requires ground truth sequences in the dataset.
 - `isotope_error_range`: Range of isotope errors to consider when matching peptides
 - `drop`: Number of top predictions to drop for stability
 
+## Calibration diagnostic configuration
+
+### Main config (`configs/diagnose_calibration.yaml`)
+
+Runs tail calibration diagnostics on a labelled holdout set: loads data like `winnow predict`, applies a pretrained calibrator, derives the operating cutoff $\tau$ at `fdr_control.fdr_threshold`, and reports sTECE and TECE on $\{S \ge \tau\}$. See the [CLI reference](cli.md#winnow-diagnose-calibration) for usage examples and interpretation.
+
+```yaml
+defaults:
+  - _self_
+  - residues
+  - data_loader: instanovo
+
+dataset:
+  spectrum_path_or_directory: examples/example_data/spectra.ipc
+  predictions_path: examples/example_data/predictions.csv
+
+calibrator:
+  pretrained_model_name_or_path: InstaDeepAI/winnow-general-model
+  cache_dir: null
+
+fdr_control:
+  fdr_threshold: 0.05
+  confidence_column: calibrated_confidence
+
+diagnostics:
+  label_source: sequence       # sequence | precomputed
+  label_column: null           # required only when label_source=precomputed
+  tolerance: 0.005             # warn if |sTECE| exceeds this (FDR-scale units)
+  min_tail_psms: 100           # minimum PSMs with S >= conf_cutoff for isotonic fit
+  n_bins: 20                   # bins for the reliability diagram
+  output_dir: results/calibration_diagnostic
+  fail_on_warning: false       # exit 1 when |sTECE| > tolerance
+  plot: true
+```
+
+**Key parameters:**
+
+- `data_loader`, `dataset.*`: Same meaning as in `predict.yaml` (holdout spectra + predictions)
+- `calibrator.pretrained_model_name_or_path`, `calibrator.cache_dir`: Calibrator checkpoint to score the holdout (same as predict)
+- `fdr_control.fdr_threshold`: Nominal FDR target $\alpha$ used to set $\tau$ via `NonParametricFDRControl.get_confidence_cutoff`
+- `fdr_control.confidence_column`: Column used for scores $S$ after calibration (default `calibrated_confidence`)
+- `diagnostics.label_source`: How correctness labels $Y$ are obtained (see below)
+- `diagnostics.label_column`: Boolean column name when `label_source=precomputed`; must be `null` when `label_source=sequence`
+- `diagnostics.tolerance`: Maximum acceptable $|\widehat{\mathrm{sTECE}}(\tau)|$ before a warning (default `0.005` ≈ 0.5 pp on the FDR scale at $\alpha=0.05$)
+- `diagnostics.min_tail_psms`: Fail if fewer than this many PSMs remain above $\tau$
+- `diagnostics.n_bins`: Equal-frequency bins for the reliability diagram (tail only, $S \ge \text{conf\_cutoff}$)
+- `diagnostics.output_dir`: Writes `diagnostic_report.json` and `reliability_diagram.png`
+- `diagnostics.fail_on_warning`: If true, non-zero exit when tolerance is exceeded (for CI)
+- `diagnostics.plot`: If false, skip writing the reliability diagram
+
+### Label source (`diagnostics.label_source`)
+
+You must choose exactly one labelling mode. The command validates config before loading data.
+
+| `label_source` | `label_column` | Behaviour |
+| --- | --- | --- |
+| `sequence` | must be `null` | Derive `correct` from full-sequence match of `sequence` vs `prediction` (uses `residue_masses` from `residues.yaml`). |
+| `precomputed` | required (e.g. `proteome_hit`) | Read boolean labels from the named column in merged metadata (e.g. offline proteome mapping). |
+
+Extra label columns in the input file (e.g. `proteome_hit` when using `sequence`) are ignored. If both `sequence` and a precomputed column exist, only the path chosen by `label_source` is used.
+
 ## Shared configuration
 
 ### Residues config (`configs/residues.yaml`)
@@ -456,6 +517,7 @@ Winnow represents PTMs using the UNIMOD format internally, so all residue masses
 Each data format has a dedicated loader configuration in `configs/data_loader/`:
 
 **InstaNovo** (`configs/data_loader/instanovo.yaml`):
+
 ```yaml
 _target_: winnow.datasets.data_loaders.InstaNovoDatasetLoader
 add_index_cols: false  # If true, add experiment_name + spectrum_id for parquet/ipc (InstaNovo-style). MGF always gets these columns.
@@ -480,7 +542,7 @@ a setting which changes the column names of saved beams.
 The `beam_columns` parameter specifies the prefix for each required column type:
 
 | Key | Description | Example columns |
-|-----|-------------|-----------------|
+| ----- | ------------- | ----------------- |
 | `sequence` | Peptide sequence for each beam | `predictions_beam_0`, `predictions_beam_1`, ... |
 | `log_probability` | Log probability score for each beam | `predictions_log_probability_beam_0`, ... |
 | `token_log_probabilities` | Per-token log probabilities | `predictions_token_log_probabilities_beam_0`, ... |
@@ -502,10 +564,11 @@ winnow train data_loader.beam_columns=null
 ```
 
 **MZTab** (`configs/data_loader/mztab.yaml`):
+
 ```yaml
 _target_: winnow.datasets.data_loaders.MZTabDatasetLoader
 residue_masses: ${residue_masses}
-load_beams: true  # Set to false to disable beam predictions
+load_beams: false  # Set to false for database-search mzTab or metadata-only features
 residue_remapping:
   "M+15.995": "M[UNIMOD:35]"
   "C+57.021": "C[UNIMOD:4]"
@@ -514,15 +577,18 @@ residue_remapping:
 ```
 
 The `load_beams` parameter controls whether beam predictions are created from multiple
-predictions per spectrum. Set to `false` if you only need metadata features.
+predictions per spectrum. Set to `false` for traditional database-search mzTab or if you
+only need metadata features. Spectrum inputs may be Parquet, IPC, or MGF.
 
 **PointNovo** (`configs/data_loader/pointnovo.yaml`):
+
 ```yaml
 _target_: winnow.datasets.data_loaders.PointNovoDatasetLoader
 residue_masses: ${residue_masses}
 ```
 
 **Winnow** (`configs/data_loader/winnow.yaml`):
+
 ```yaml
 _target_: winnow.datasets.data_loaders.WinnowDatasetLoader
 residue_masses: ${residue_masses}
@@ -569,6 +635,7 @@ Common interpolation patterns in Winnow configs:
 3. Use with: `winnow train data_loader=custom`
 
 Example `configs/data_loader/custom.yaml`:
+
 ```yaml
 _target_: my_module.CustomDatasetLoader
 residue_masses: ${residue_masses}
@@ -579,6 +646,7 @@ custom_param: value
 
 1. Create feature class inheriting from `CalibrationFeatures`
 2. Add to `configs/calibrator.yaml`:
+
    ```yaml
    features:
      custom_feature:
@@ -594,6 +662,7 @@ custom_param: value
 3. Use with: `winnow predict fdr_method=custom_method`
 
 Example `configs/fdr_method/custom_method.yaml`:
+
 ```yaml
 _target_: my_module.CustomFDRControl
 confidence_feature: ${fdr_control.confidence_column}
@@ -615,6 +684,9 @@ winnow config predict
 
 # View compute-features configuration
 winnow config compute-features
+
+# View calibration diagnostic configuration
+winnow config diagnose-calibration diagnostics.label_source=sequence
 
 # View configuration with overrides
 winnow config train data_loader=mztab model_output_dir=custom/path
@@ -649,13 +721,14 @@ For advanced users who have installed Winnow as a package and need to customise 
 
 Your custom config directory should mirror the structure of the package configs:
 
-```
+```text
 my_configs/
 ├── residues.yaml              # Override residue masses/modifications
 ├── calibrator.yaml            # Override calibrator features
 ├── train.yaml                 # Override training config (if needed)
 ├── compute_features.yaml      # Override compute-features config (if needed)
 ├── predict.yaml               # Override prediction config (if needed)
+├── diagnose_calibration.yaml  # Override calibration diagnostic config (if needed)
 ├── data_loader/               # Override data loaders (if needed)
 │   └── instanovo.yaml
 │   └── mztab.yaml
@@ -699,6 +772,7 @@ When you use `--config-dir`, Winnow will:
 - ❌ **Partial configs at key level don't work**: If you provide `calibrator.yaml` with only `seed: 999`, the other settings (`hidden_layer_sizes`, `features`, etc.) will be **missing**, not using package defaults. This will cause errors.
 
 **Example - What happens with minimal config:**
+
 ```yaml
 # custom/calibrator.yaml - TOO MINIMAL
 calibrator:
@@ -709,6 +783,7 @@ calibrator:
 **Result**: Only `_target_` and `seed` are present. All other keys (`hidden_layer_sizes`, `learning_rate_init`, `features`, etc.) are **missing** from the final config. This will cause errors when running the pipeline in most cases.
 
 **Example - What you need (complete structure):**
+
 ```yaml
 # custom/calibrator.yaml - COMPLETE STRUCTURE REQUIRED
 calibrator:
@@ -722,7 +797,7 @@ calibrator:
   validation_fraction: 0.1
   features:
     mass_error:
-      _target_: winnow.calibration.calibration_features.MassErrorFeature
+      _target_: winnow.calibration.calibration_features.MassErrorDaFeature
       residue_masses: ${residue_masses}
     fragment_match_features:
       # ... include all features you want to keep
