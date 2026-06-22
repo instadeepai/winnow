@@ -6,7 +6,7 @@ default_install_hook_types:
 
 repos:
   - repo: https://github.com/PyCQA/flake8
-    rev: 7.3.0
+    rev: d93590f5be797aabb60e3b09f2f52dddb02f349f  # frozen: 7.3.0
     hooks:
       - id: flake8
         args:
@@ -24,10 +24,9 @@ repos:
           - flake8-pytest-style==1.6.0
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v6.0.0
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c  # frozen: v6.0.0
     hooks:
       - id: debug-statements # Check for debugger imports
-      - id: requirements-txt-fixer # Order requirements alphabetically
       - id: check-ast # Simply check whether the files parse as valid python
       - id: check-case-conflict # Check for files that would conflict in case-insensitive filesystems
       - id: check-builtin-literals # Require literal syntax when initializing empty or zero Python builtin types
@@ -40,7 +39,7 @@ repos:
       - id: trailing-whitespace # This hook trims trailing whitespace
 
   - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v4.4.0
+    rev: 3db014c16a9d31997ab8c07a4d61fcce936c8f0d  # frozen: v4.4.0
     hooks:
       - id: conventional-pre-commit
         stages:
@@ -48,7 +47,7 @@ repos:
         args: ["ci", "build", "docs", "feat", "fix", "perf", "refactor", "style", "test", "exp", "chore"]
 
   - repo: https://github.com/pycqa/pydocstyle
-    rev: 6.3.0
+    rev: 07f6707e2c5612960347f7c00125620457f490a7  # frozen: 6.3.0
     hooks:
       - id: pydocstyle
         additional_dependencies: ["tomli"]
@@ -57,17 +56,17 @@ repos:
           - --add-ignore=D100,D104,D105,D107,D417
 
   - repo: https://github.com/codespell-project/codespell
-    rev: v2.4.2
+    rev: 2ccb47ff45ad361a21071a7eedda4c37e6ae8c5a  # frozen: v2.4.2
     hooks:
       - id: codespell
         name: codespell
         description: Checks for common misspellings in text files.
-        entry: codespell --skip="*.js,*.html,*.css, *.svg" -I .codespell-ignore.txt
+        entry: codespell --skip="*.js,*.html,*.css, *.svg, *.csv" -I .codespell-ignore.txt
         language: python
         types: [text]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.8
+    rev: 3b3f7c3f57fe9925356faf5fe6230835138be230  # frozen: v0.15.17
     hooks:
       # Run the linter.
       - id: ruff
@@ -76,14 +75,13 @@ repos:
       - id: ruff-format
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: 'v1.20.0'
+    rev: 'd2823d321df3af8f878f7ee3414dc94d037145b9'  # frozen: v2.1.0
     hooks:
       - id: mypy
         additional_dependencies: [types-requests, types-PyYAML]
         args: [--ignore-missing-imports, "--exclude=(notebooks|tests)", --disable-error-code, "name-defined"]
 
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.11.3
+    rev: fe063293315003e95dff96d43c4928f8799a5c62  # frozen: 0.11.21
     hooks:
-      - id: uv-export
-        args: ["--format", "requirements-txt", "--output-file", "requirements.txt", "--locked"]
+      - id: uv-lock

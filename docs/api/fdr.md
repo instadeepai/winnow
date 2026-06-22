@@ -31,7 +31,21 @@ Implements database-grounded FDR control using database search results as ground
 
 ```python
 from winnow.fdr import DatabaseGroundedFDRControl
-from winnow.constants import RESIDUE_MASSES
+residue_masses = {
+            "G": 57.021464,
+            "A": 71.037114,
+            "P": 97.052764,
+            "E": 129.042593,
+            "T": 101.047670,
+            "I": 113.084064,
+            "D": 115.026943,
+            "R": 156.101111,
+            "O": 237.147727,
+            "N": 114.042927,
+            "S": 87.032028,
+            "M": 131.040485,
+            "L": 113.084064,
+        }
 
 # Create FDR controller
 fdr_control = DatabaseGroundedFDRControl(confidence_feature="confidence")
@@ -39,7 +53,7 @@ fdr_control = DatabaseGroundedFDRControl(confidence_feature="confidence")
 # Fit using labelled dataset
 fdr_control.fit(
     dataset=labelled_dataframe,
-    residue_masses=RESIDUE_MASSES,
+    residue_masses=residue_masses,
     isotope_error_range=(0, 1),
     drop=10  # Drop top N predictions for stability
 )
@@ -103,9 +117,9 @@ dataset_with_q_values = fdr_control.add_psm_q_value(dataset, "confidence")
 
 - **Non-parametric estimation**: Estimates FDR directly by assuming PSM confidences are calibrated
 - **Multiple Metrics**: Computes FDR, q-values, posterior error probability
-    - **FDR**: `compute_fdr(score)` - False discovery rate at cutoff
-    - **PEP**: `compute_posterior_probability(score)` - Posterior error probability
-    - **Q-value**: `compute_q_value(score)` - Minimum FDR for significance
+  - **FDR**: `compute_fdr(score)` - False discovery rate at cutoff
+  - **PEP**: `compute_posterior_probability(score)` - Posterior error probability
+  - **Q-value**: `compute_q_value(score)` - Minimum FDR for significance
 - **No Ground Truth Required**: Works with confidence scores alone
 
 ## Additional features
