@@ -162,7 +162,7 @@ labelled: true
 - `dataset.*`, `data_loader`: Same meaning as in training config
 - `dataset_output_path`: CSV path for metadata after feature computation
 - `filter_empty_predictions`: If true, apply the same empty-prediction filter as train/predict
-- `labelled`: If true, spectrum data must include `sequence` (ground truth); runs feature `prepare()` (needed for e.g. `RetentionTimeFeature`). If false, you must not include `retention_time_feature` in `calibrator.features` (validation error otherwise)
+- `labelled`: If true, spectrum data must include `sequence` (ground truth).
 
 The feature set is the `calibrator.features` block from `calibrator.yaml` (shared with training). Override or drop features with Hydra the same way as for `winnow train`.
 
@@ -200,15 +200,10 @@ calibrator:
 
     retention_time_feature:
       _target_: winnow.calibration.calibration_features.RetentionTimeFeature
-      hidden_dim: 10  # The hidden dimension size for the MLP regressor used to predict iRT from observed retention times.
-      train_fraction: 0.1  # The fraction of the data to use for training the iRT predictor.
+      train_fraction: 0.1  # Top fraction of spectra (by confidence, descending) used to train the per-experiment RT->iRT regressor.
+      min_train_points: 10  # Minimum high-confidence spectra needed per experiment. Raises an error if fewer are available.
       learn_from_missing: false  # If True, impute missing features and add an indicator column. If False, filter invalid entries with a warning.
-      seed: 42  # Random seed for the MLP regressor.
-      learning_rate_init: 0.001  # The initial learning rate for the MLP regressor.
-      alpha: 0.0001  # L2 regularisation parameter for the MLP regressor.
-      max_iter: 200  # Maximum number of training iterations for the MLP regressor.
-      early_stopping: true  # Whether to use early stopping for the MLP regressor.
-      validation_fraction: 0.1  # Proportion of training data to use for early stopping validation.
+      seed: 42  # Random seed for reproducibility.
       irt_model_name: ${koina.irt_model}  # The name of the Koina iRT model to use.
       max_peptide_length: ${koina.constraints.max_peptide_length}      # Maximum peptide length accepted by the Koina iRT model.
       unsupported_residues: ${koina.constraints.unsupported_residues}  # Residues unsupported by the configured Koina iRT model.

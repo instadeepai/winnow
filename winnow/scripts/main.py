@@ -213,6 +213,16 @@ def train_entry_point(
     logger.info(f"Saving model to {cfg.model_output_dir}")
     ProbabilityCalibrator.save(calibrator, cfg.model_output_dir)
 
+    # Save per-experiment iRT regressors if configured
+    irt_regressor_output_path = cfg.get("irt_regressor_output_path")
+    if irt_regressor_output_path:
+        from winnow.calibration.calibration_features import RetentionTimeFeature
+
+        rt_feature = calibrator.feature_dict.get("iRT Feature")
+        if isinstance(rt_feature, RetentionTimeFeature):
+            logger.info(f"Saving iRT regressors to {irt_regressor_output_path}")
+            rt_feature.save_regressors(irt_regressor_output_path)
+
     # Save the training dataset results
     logger.info(f"Final dataset: {len(annotated_dataset)} spectra")
     logger.info(f"Saving training dataset results to {cfg.dataset_output_path}")
@@ -256,11 +266,6 @@ def compute_features_entry_point(
     logger.info(f"Compute-features configuration: {cfg}")
 
     labelled = bool(cfg.labelled)
-    if not labelled and cfg.calibrator.features.retention_time_feature is not None:
-        raise ValueError(
-            f"Compute-features config setting labelled={labelled}, but standalone feature computation for RetentionTimeFeature is not supported for unlabelled datasets.\n"
-            f"Please remove RetentionTimeFeature from the calibration feature set or use a labelled dataset with labelled=True."
-        )
 
     logger.info("Loading dataset.")
     data_loader = instantiate(cfg.data_loader)
@@ -360,6 +365,16 @@ def predict_entry_point(
         pretrained_model_name_or_path=cfg.calibrator.pretrained_model_name_or_path,
         cache_dir=cfg.calibrator.cache_dir,
     )
+
+    # Load pre-fitted iRT regressors if configured
+    irt_regressor_path = cfg.calibrator.get("irt_regressor_path")
+    if irt_regressor_path:
+        from winnow.calibration.calibration_features import RetentionTimeFeature
+
+        rt_feature = calibrator.feature_dict.get("iRT Feature")
+        if isinstance(rt_feature, RetentionTimeFeature):
+            logger.info(f"Loading iRT regressors from {irt_regressor_path}")
+            rt_feature.load_regressors(irt_regressor_path)
 
     # Calibrate scores
     logger.info("Calibrating scores.")
