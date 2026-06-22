@@ -12,11 +12,29 @@ import numpy as np
 import pandas as pd
 
 from winnow.datasets.calibration_dataset import CalibrationDataset
-from winnow.calibration.features.constants import CARBON_ISOTOPE_MASS_SHIFT
+from winnow.calibration.features.constants import (
+    CARBON_ISOTOPE_MASS_SHIFT,
+    VALID_INTENSITY_MODEL_PROVIDERS,
+)
 
 ########################################################
 # Helper functions
 ########################################################
+
+
+def validate_intensity_model_name(intensity_model_name: str) -> None:
+    """Validate the intensity model name.
+
+    Supported model providers are Prosit, MS2PIP and AlphaPeptDeep.
+
+    Args:
+        intensity_model_name: Name of the intensity model.
+    """
+    name_lower = intensity_model_name.lower()
+    if not any(provider in name_lower for provider in VALID_INTENSITY_MODEL_PROVIDERS):
+        raise ValueError(
+            f"Invalid intensity model name: {intensity_model_name}. Supported model providers are {VALID_INTENSITY_MODEL_PROVIDERS}."
+        )
 
 
 def require_beam_predictions(dataset: CalibrationDataset, feature_name: str) -> None:
@@ -358,7 +376,7 @@ def compute_ion_identifications(
         Tuple[float, float, int, int, int, float, float, float]
     ] = []
 
-    for _, row in dataset.iterrows():
+    for row_idx, (_, row) in enumerate(dataset.iterrows()):
         (
             ion_match,
             ion_match_intensity,
@@ -378,9 +396,14 @@ def compute_ion_identifications(
         longest_b_series = compute_longest_ion_series(matched_ion_annotations, "b")
         longest_y_series = compute_longest_ion_series(matched_ion_annotations, "y")
         # Compute the number of bond positions where both b and y ions are matched
+        peptide_length = (
+            len(predictions[row_idx])
+            if predictions is not None
+            else len(row["prediction"])
+        )
         complementary_ion_count = compute_complementary_ion_count(
             matched_ion_annotations,
-            len(predictions) if predictions is not None else len(row["prediction"]),
+            peptide_length,
         )
         # Compute the largest gap between consecutive matched fragment ions
         max_ion_gap = compute_max_ion_gap(matched_ion_mz)

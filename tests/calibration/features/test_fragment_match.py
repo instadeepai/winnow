@@ -588,12 +588,12 @@ class TestFragmentMatchFeatures:
             assert not pd.isna(ion_match_intensity)
             assert isinstance(ion_matches, (int, float))
             assert isinstance(ion_match_intensity, (int, float))
-            assert (
-                ion_matches > 0.0
-            ), f"Expected non-zero ion_matches for spectrum {sid}"
-            assert (
-                ion_match_intensity > 0.0
-            ), f"Expected non-zero ion_match_intensity for spectrum {sid}"
+            assert ion_matches > 0.0, (
+                f"Expected non-zero ion_matches for spectrum {sid}"
+            )
+            assert ion_match_intensity > 0.0, (
+                f"Expected non-zero ion_match_intensity for spectrum {sid}"
+            )
 
         # Invalid entries
         for sid in [20]:

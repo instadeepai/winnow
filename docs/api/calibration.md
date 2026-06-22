@@ -11,16 +11,30 @@ The main calibration model that transforms raw confidence scores into calibrated
 ```python
 from winnow.calibration import ProbabilityCalibrator
 from winnow.calibration.calibration_features import (
-    MassErrorFeature, FragmentMatchFeatures, BeamFeatures
+    MassErrorDaFeature, FragmentMatchFeatures, BeamFeatures
 )
 from winnow.datasets.calibration_dataset import CalibrationDataset
-from winnow.constants import RESIDUE_MASSES
+residue_masses = {
+            "G": 57.021464,
+            "A": 71.037114,
+            "P": 97.052764,
+            "E": 129.042593,
+            "T": 101.047670,
+            "I": 113.084064,
+            "D": 115.026943,
+            "R": 156.101111,
+            "O": 237.147727,
+            "N": 114.042927,
+            "S": 87.032028,
+            "M": 131.040485,
+            "L": 113.084064,
+        }
 
 # Create and configure calibrator
 calibrator = ProbabilityCalibrator(seed=42)
 
 # Add features for calibration
-calibrator.add_feature(MassErrorFeature(residue_masses=RESIDUE_MASSES))
+calibrator.add_feature(MassErrorDaFeature(residue_masses=residue_masses))
 calibrator.add_feature(FragmentMatchFeatures(mz_tolerance=0.02))
 calibrator.add_feature(BeamFeatures())
 
@@ -70,7 +84,7 @@ loaded_calibrator = ProbabilityCalibrator.load("calibrator_checkpoint")
 The calibrator uses a feature-based approach where multiple feature extractors compute signals from the peptide-spectrum match data. See the [Calibration Features](features/index.md) documentation for:
 
 - The `CalibrationFeatures` base class for creating custom features
-- Built-in features: [MassErrorFeature](features/mass_error.md), [BeamFeatures](features/beam.md), [FragmentMatchFeatures](features/fragment_match.md), [ChimericFeatures](features/chimeric.md), [RetentionTimeFeature](features/retention_time.md), [SequenceFeatures](features/sequence.md), [TokenScoreFeatures](features/token_score.md)
+- Built-in features: [Mass Error Features](features/mass_error.md), [Beam Features](features/beam.md), [Fragment Match Features](features/fragment_match.md), [Chimeric Features](features/chimeric.md), [Retention Time Feature](features/retention_time.md), [Sequence Features](features/sequence.md), [Token Score Features](features/token_score.md)
 - Feature dependencies and how they work
 - Handling missing features (learn vs filter strategies)
 
