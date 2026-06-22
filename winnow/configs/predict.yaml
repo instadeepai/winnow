@@ -23,6 +23,12 @@ calibrator:
   pretrained_model_name_or_path: InstaDeepAI/winnow-general-model
   # Directory to cache the HuggingFace model.
   cache_dir: null  # can be set to `null` if using local model or for the default cache directory from HuggingFace.
+  # Optional: path to pre-fitted iRT regressors saved during training.
+  # When set, loaded regressors are used instead of re-fitting from inference data.
+  # Leave as null for the general pretrained model workflow (regressors re-fit automatically).
+  # Useful for within-experiment use cases where the unlabelled data has an unreliable confidence distribution
+  # for training a new RT->iRT regressor.
+  irt_regressor_path: null
 
 fdr_control:
   # FDR settings:

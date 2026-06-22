@@ -6,13 +6,13 @@ The `winnow.calibration.features` module provides a modular feature extraction s
 
 | Feature | Description | Requires |
 | --------- | ------------- | ---------- |
-| [MassErrorFeature](mass_error.md) | Precursor mass accuracy | `precursor_mz`, `precursor_charge` |
-| [BeamFeatures](beam.md) | Beam search diversity metrics | Beam predictions |
-| [FragmentMatchFeatures](fragment_match.md) | Theoretical vs observed spectrum agreement | `precursor_charge`, spectrum data |
-| [ChimericFeatures](chimeric.md) | Runner-up peptide spectrum match | Beam predictions, spectrum data |
-| [RetentionTimeFeature](retention_time.md) | Chromatographic retention time error | `retention_time` |
-| [SequenceFeatures](sequence.md) | Peptide sequence properties | `prediction`, `precursor_charge` |
-| [TokenScoreFeatures](token_score.md) | Position-level confidence metrics | Beam predictions with token log-probs |
+| [Mass Error Features](mass_error.md) | Precursor mass accuracy | `precursor_mz`, `precursor_charge` |
+| [Beam Features](beam.md) | Beam search diversity metrics | Beam predictions |
+| [Fragment Match Features](fragment_match.md) | Theoretical vs observed spectrum agreement | `precursor_charge`, spectrum data |
+| [Chimeric Features](chimeric.md) | Runner-up peptide spectrum match | Beam predictions, spectrum data |
+| [Retention Time Feature](retention_time.md) | Chromatographic retention time error | `retention_time` |
+| [Sequence Features](sequence.md) | Peptide sequence properties | `prediction`, `precursor_charge` |
+| [Token Score Features](token_score.md) | Position-level confidence metrics | Beam predictions with token log-probs |
 
 ## CalibrationFeatures Base Class
 

@@ -12,11 +12,29 @@ import numpy as np
 import pandas as pd
 
 from winnow.datasets.calibration_dataset import CalibrationDataset
-from winnow.calibration.features.constants import CARBON_ISOTOPE_MASS_SHIFT
+from winnow.calibration.features.constants import (
+    CARBON_ISOTOPE_MASS_SHIFT,
+    VALID_INTENSITY_MODEL_PROVIDERS,
+)
 
 ########################################################
 # Helper functions
 ########################################################
+
+
+def validate_intensity_model_name(intensity_model_name: str) -> None:
+    """Validate the intensity model name.
+
+    Supported model providers are Prosit, MS2PIP and AlphaPeptDeep.
+
+    Args:
+        intensity_model_name: Name of the intensity model.
+    """
+    name_lower = intensity_model_name.lower()
+    if not any(provider in name_lower for provider in VALID_INTENSITY_MODEL_PROVIDERS):
+        raise ValueError(
+            f"Invalid intensity model name: {intensity_model_name}. Supported model providers are {VALID_INTENSITY_MODEL_PROVIDERS}."
+        )
 
 
 def require_beam_predictions(dataset: CalibrationDataset, feature_name: str) -> None:
@@ -171,6 +189,26 @@ def format_intensity_prediction_outputs(predictions: pd.DataFrame) -> pd.DataFra
 ########################################################
 
 
+def _iter_candidates_by_distance(
+    target_mz: List[float], query_mz: float, insertion_point: int
+) -> Iterator[Tuple[int, float]]:
+    """Yield (index, distance) pairs outward from insertion point, closest first."""
+    left = insertion_point - 1
+    right = insertion_point
+    n = len(target_mz)
+
+    while left >= 0 or right < n:
+        left_dist = abs(target_mz[left] - query_mz) if left >= 0 else float("inf")
+        right_dist = abs(target_mz[right] - query_mz) if right < n else float("inf")
+
+        if left_dist <= right_dist:
+            yield left, left_dist  # left neighbour is closer
+            left -= 1
+        else:
+            yield right, right_dist  # right neighbour is closer
+            right += 1
+
+
 def _validate_mz_tolerance(
     mz_tolerance_ppm: Optional[float],
     mz_tolerance_da: Optional[float],
@@ -216,31 +254,38 @@ def _resolve_tolerance(
 
 
 def _find_peak_index(
-    target_mz: List[float], query_mz: float, mz_tolerance: float
+    target_mz: List[float],
+    query_mz: float,
+    mz_tolerance: float,
+    excluded_indices: set[int] | None = None,
 ) -> int | None:
-    """Find index of peak in sorted target_mz within tolerance of query_mz.
+    """Find index of nearest unmatched peak in sorted target_mz within tolerance.
+
+    Searches outward from the binary search insertion point to find the closest
+    peak within tolerance that is not in the excluded set.
 
     Args:
         target_mz: Sorted list of m/z values.
         query_mz: The m/z value to search for.
         mz_tolerance: Tolerance for matching (Daltons).
+        excluded_indices: Set of indices to skip (already matched peaks).
 
     Returns:
         Index of matching peak, or None if no match found.
     """
-    nearest = bisect.bisect_left(target_mz, query_mz)
+    if excluded_indices is None:
+        excluded_indices = set()
 
-    # Check right neighbour
-    if nearest < len(target_mz):
-        if target_mz[nearest] - query_mz < mz_tolerance:
-            return nearest
+    insertion_point = bisect.bisect_left(target_mz, query_mz)
 
-    # Check left neighbour
-    if nearest > 0:
-        if query_mz - target_mz[nearest - 1] < mz_tolerance:
-            return nearest - 1
+    # Search outward from insertion point, checking candidates by distance
+    for idx, dist in _iter_candidates_by_distance(target_mz, query_mz, insertion_point):
+        if dist >= mz_tolerance:
+            return None  # out of tolerance and next candidates are further
+        if idx not in excluded_indices:
+            return idx  # valid match (within tolerance and not already matched)
 
-    return None
+    return None  # no valid match found
 
 
 def find_matching_ions(
@@ -262,6 +307,10 @@ def find_matching_ions(
          Isotopic peaks are searched at spacing of 1.00335/charge Da.
       3. The list of matched theoretical ion annotations.
       4. The list of matched theoretical ion m/z values.
+
+    Each observed peak can only be matched once. Once an observed peak is assigned to a
+    theoretical ion (either as M0 or as part of its isotopic envelope), it is excluded
+    from matching subsequent theoretical ions.
 
     Exactly one of ``mz_tolerance_ppm`` or ``mz_tolerance_da`` must be provided.
 
@@ -290,6 +339,9 @@ def find_matching_ions(
     matched_ion_mz = []
     total_target_intensity = sum(target_intensities)
 
+    # Track matched observed peak indices
+    matched_indices: set[int] = set()
+
     # Decode the ion annotations to strings if they are bytes
     source_annotations = [
         ion_annotation.decode() if isinstance(ion_annotation, bytes) else ion_annotation
@@ -297,16 +349,17 @@ def find_matching_ions(
     ]
 
     for ion_mz, ion_annotation in zip(source_mz, source_annotations):
-        # Find monoisotopic peak (M0)
+        # Find monoisotopic peak (M0), excluding already-matched peaks
         source_ion_charge = extract_fragment_ion_charge(ion_annotation)
         isotope_spacing = CARBON_ISOTOPE_MASS_SHIFT / source_ion_charge
 
         tol = _resolve_tolerance(ion_mz, mz_tolerance_ppm, mz_tolerance_da)
-        m0_idx = _find_peak_index(target_mz, ion_mz, tol)
+        m0_idx = _find_peak_index(target_mz, ion_mz, tol, matched_indices)
 
         if m0_idx is not None:
             # Count match only for M0 (avoids noise inflation)
             num_matches += 1
+            matched_indices.add(m0_idx)
 
             # Add the ion annotation to the list of matched ion annotations
             matched_ion_annotations.append(ion_annotation)
@@ -322,8 +375,11 @@ def find_matching_ions(
                 isotope_tol = _resolve_tolerance(
                     isotope_mz, mz_tolerance_ppm, mz_tolerance_da
                 )
-                iso_idx = _find_peak_index(target_mz, isotope_mz, isotope_tol)
+                iso_idx = _find_peak_index(
+                    target_mz, isotope_mz, isotope_tol, matched_indices
+                )
                 if iso_idx is not None:
+                    matched_indices.add(iso_idx)
                     match_intensity += target_intensities[iso_idx]
 
     return (
@@ -342,7 +398,7 @@ def compute_ion_identifications(
     mz_tolerance_ppm: Optional[float] = None,
     mz_tolerance_da: Optional[float] = None,
     predictions: Optional[List[str]] = None,
-) -> Iterator[Tuple[List[float], List[float]]]:
+) -> Iterator[Tuple[float, float, int, int, int, float]]:
     """Computes the ion match rate and match intensity for each spectrum in the dataset.
 
     Exactly one of ``mz_tolerance_ppm`` or ``mz_tolerance_da`` must be provided.
@@ -365,7 +421,7 @@ def compute_ion_identifications(
 
     per_row_match_results: List[Tuple[float, float, int, int, int, float]] = []
 
-    for _, row in dataset.iterrows():
+    for row_idx, (_, row) in enumerate(dataset.iterrows()):
         ion_match, ion_match_intensity, matched_ion_annotations, matched_ion_mz = (
             find_matching_ions(
                 source_mz=row[source_column],
@@ -381,9 +437,14 @@ def compute_ion_identifications(
         longest_b_series = compute_longest_ion_series(matched_ion_annotations, "b")
         longest_y_series = compute_longest_ion_series(matched_ion_annotations, "y")
         # Compute the number of bond positions where both b and y ions are matched
+        peptide_length = (
+            len(predictions[row_idx])
+            if predictions is not None
+            else len(row["prediction"])
+        )
         complementary_ion_count = compute_complementary_ion_count(
             matched_ion_annotations,
-            len(predictions) if predictions is not None else len(row["prediction"]),
+            peptide_length,
         )
         # Compute the largest gap between consecutive matched fragment ions
         max_ion_gap = compute_max_ion_gap(matched_ion_mz)

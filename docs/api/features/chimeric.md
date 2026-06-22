@@ -1,4 +1,4 @@
-# ChimericFeatures
+# Chimeric Features
 
 Computes spectrum match quality features for the runner-up (second-best) peptide prediction, helping to detect chimeric spectra where multiple peptides co-elute.
 
