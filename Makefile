@@ -3121,18 +3121,28 @@ FIGSHARE_DEPOSITION_CONFIG ?= configs/figshare_deposition.yaml
 FIGSHARE_AWS_PROFILE ?= winnow
 FIGSHARE_RESUME_STATE ?= figshare_upload_state.json
 FIGSHARE_PREFLIGHT_STATE ?= figshare_upload_state_preflight.json
+# Set to 1 to include general_results/**/metadata.csv (large; exceeds 20 GiB limit).
+FIGSHARE_INCLUDE_GENERAL_RESULTS_METADATA ?=
+FIGSHARE_METADATA_FLAG = $(if $(FIGSHARE_INCLUDE_GENERAL_RESULTS_METADATA),--include-general-results-metadata,)
+# Set to 1 for a tqdm byte progress bar with ETA during upload.
+FIGSHARE_UPLOAD_PROGRESS ?=
+FIGSHARE_PROGRESS_FLAG = $(if $(FIGSHARE_UPLOAD_PROGRESS),--progress,)
 FIGSHARE_PREFLIGHT_ONLY ?= feature_importance/PXD014877/perm_importance.pkl
+FIGSHARE_GENERAL_METADATA_ONLY ?= general_results/**/metadata.csv
+FIGSHARE_GENERAL_METADATA_STATE ?= figshare_upload_state_general_metadata.json
 
 .PHONY: stage-figshare-deposition download-figshare-staging figshare-dry-run \
 	discover-figshare-ids figshare-preflight-upload upload-figshare-project \
-	cluster-upload-figshare
+	figshare-upload-general-metadata figshare-dry-run-general-metadata \
+	figshare-update-description cluster-upload-figshare
 
 ## Build local figshare_staging/ from S3 sources in configs/figshare_deposition.yaml
 ## and sync to $(FIGSHARE_STAGING_S3).
 stage-figshare-deposition:
 	uv run python scripts/stage_figshare_deposition.py \
 		--manifest $(FIGSHARE_DEPOSITION_CONFIG) \
-		--staging-dir $(FIGSHARE_STAGING_DIR)
+		--staging-dir $(FIGSHARE_STAGING_DIR) \
+		$(FIGSHARE_METADATA_FLAG)
 	aws s3 sync $(FIGSHARE_STAGING_DIR)/ $(FIGSHARE_STAGING_S3)/ \
 		--profile $(FIGSHARE_AWS_PROFILE)
 
@@ -3141,23 +3151,43 @@ download-figshare-staging:
 	aws s3 sync $(FIGSHARE_STAGING_S3)/ $(FIGSHARE_STAGING_DIR)/ \
 		--profile $(FIGSHARE_AWS_PROFILE)
 
-## List articles in a Figshare project (requires FIGSHARE_TOKEN + FIGSHARE_PROJECT_ID).
+## List articles in a Figshare project (requires FIGSHARE_PAT + FIGSHARE_PROJECT_ID).
 discover-figshare-ids:
-	@test -n "$$FIGSHARE_TOKEN" || (echo "Set FIGSHARE_TOKEN" && exit 1)
+	@test -n "$$FIGSHARE_PAT" || (echo "Set FIGSHARE_PAT" && exit 1)
 	@test -n "$(FIGSHARE_PROJECT_ID)" || (echo "Set FIGSHARE_PROJECT_ID" && exit 1)
-	curl -s -H "Authorization: token $$FIGSHARE_TOKEN" \
+	curl -s -H "Authorization: token $$FIGSHARE_PAT" \
 		"https://api.figshare.com/v2/account/projects/$(FIGSHARE_PROJECT_ID)/articles?page_size=100" \
 		| python3 -m json.tool
 
-## Print matched files and sizes without contacting Figshare upload endpoints.
+## List files under figshare_staging/ that would be uploaded (local tree only).
 figshare-dry-run:
 	uv run python scripts/upload_figshare.py \
 		--manifest $(FIGSHARE_DEPOSITION_CONFIG) \
 		--staging-dir $(FIGSHARE_STAGING_DIR) \
-		--dry-run
+		--dry-run \
+		$(FIGSHARE_METADATA_FLAG)
+
+## Dry-run upload of stripped general_results/**/metadata.csv only (~6 GiB).
+figshare-dry-run-general-metadata:
+	uv run python scripts/upload_figshare.py \
+		--manifest $(FIGSHARE_DEPOSITION_CONFIG) \
+		--staging-dir $(FIGSHARE_STAGING_DIR) \
+		--dry-run \
+		--include-general-results-metadata \
+		--only $(FIGSHARE_GENERAL_METADATA_ONLY)
+
+## Upload stripped general_results/**/metadata.csv only (no --replace).
+figshare-upload-general-metadata:
+	uv run python scripts/upload_figshare.py \
+		--manifest $(FIGSHARE_DEPOSITION_CONFIG) \
+		--staging-dir $(FIGSHARE_STAGING_DIR) \
+		--include-general-results-metadata \
+		--only $(FIGSHARE_GENERAL_METADATA_ONLY) \
+		--resume-state $(FIGSHARE_GENERAL_METADATA_STATE) \
+		$(FIGSHARE_PROGRESS_FLAG)
 
 ## Upload one nested-path file to verify folder rendering in the Figshare UI.
-figshare-preflight-upload: download-figshare-staging
+figshare-preflight-upload:
 	uv run python scripts/upload_figshare.py \
 		--manifest $(FIGSHARE_DEPOSITION_CONFIG) \
 		--staging-dir $(FIGSHARE_STAGING_DIR) \
@@ -3166,12 +3196,22 @@ figshare-preflight-upload: download-figshare-staging
 		--resume-state $(FIGSHARE_PREFLIGHT_STATE)
 
 ## Replace all files in the Analysis outputs article (does not publish by default).
-upload-figshare-project: download-figshare-staging
+upload-figshare-project:
 	uv run python scripts/upload_figshare.py \
 		--manifest $(FIGSHARE_DEPOSITION_CONFIG) \
 		--staging-dir $(FIGSHARE_STAGING_DIR) \
 		--replace \
-		--resume-state $(FIGSHARE_RESUME_STATE)
+		--resume-state $(FIGSHARE_RESUME_STATE) \
+		$(FIGSHARE_METADATA_FLAG) \
+		$(FIGSHARE_PROGRESS_FLAG)
+
+## Refresh the Figshare article description (HTML) without re-uploading files.
+figshare-update-description:
+	uv run python scripts/upload_figshare.py \
+		--manifest $(FIGSHARE_DEPOSITION_CONFIG) \
+		--staging-dir $(FIGSHARE_STAGING_DIR) \
+		--update-description-only \
+		$(FIGSHARE_METADATA_FLAG)
 
 ## AIchor CPU job entrypoint: download staging from S3 then upload to Figshare.
 cluster-upload-figshare: upload-figshare-project
