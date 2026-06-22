@@ -346,18 +346,8 @@ def compute_ion_identifications(
     source_annotation_column: str,
     mz_tolerance: float = 0.02,
     predictions: Optional[List[str]] = None,
-) -> Iterator[
-    Tuple[
-        List[float],
-        List[float],
-        List[int],
-        List[int],
-        List[int],
-        List[float],
-        List[float],
-    ]
-]:
-    """Computes the ion match rate and match intensity for each spectrum in the dataset.
+) -> Iterator[Tuple[float, float, int, int, int, float, float]]:
+    """Computes the ion match rate, match intensity, longest b series, longest y series, complementary ion count, max ion gap and b/y intensity ratio for each spectrum in the dataset.
 
     Args:
         dataset: DataFrame containing the mass spectrum data.
