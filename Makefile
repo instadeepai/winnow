@@ -132,11 +132,12 @@ train-sample:
 	dataset.spectrum_path_or_directory=examples/example_data/spectra.mgf \
 	dataset.predictions_path=examples/example_data/predictions.csv \
 	model_output_dir=models/new_model \
-	dataset_output_path=results/metadata.csv \
+	dataset_output_path=results/calibrated_dataset.csv \
 	calibrator.features.retention_time_feature.train_fraction=0.3 \
+	calibrator.features.retention_time_feature.min_train_points=2 \
 	calibrator.hidden_layer_sizes="[32, 16]" \
 	calibrator.early_stopping=false \
-	calibrator.max_iter=100 \
+	calibrator.max_iter=100
 
 ## Run winnow predict with sample data (uses locally trained model from models/new_model)
 predict-sample:
