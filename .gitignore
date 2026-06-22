@@ -21,6 +21,8 @@ docs_public
 *.pdf
 *.png
 *.ipynb
+*.pkl
+*.tex
 
 examples/winnow-general-model
 examples/winnow-ms-datasets
