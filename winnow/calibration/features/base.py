@@ -78,7 +78,9 @@ class CalibrationFeatures(metaclass=ABCMeta):
 
     @staticmethod
     def _to_plain(value: Any) -> Any:
-        """Convert OmegaConf containers to plain Python types."""
+        """Convert values to plain JSON-serialisable Python types."""
+        if isinstance(value, set):
+            return sorted(value)
         try:
             from omegaconf import DictConfig, ListConfig, OmegaConf
 

@@ -114,3 +114,37 @@ class TestFeatureDataset:
         """Test that empty directory raises FileNotFoundError."""
         with pytest.raises(FileNotFoundError, match="No .parquet"):
             FeatureDataset.from_parquet(tmp_path)
+
+    def test_from_parquet_feature_columns(self, tmp_path):
+        """Test explicit feature column selection."""
+        import polars as pl
+
+        df = pl.DataFrame(
+            {
+                "confidence": [0.9, 0.8],
+                "feature_a": [1.0, 2.0],
+                "spectrum_id": [0, 1],
+                "correct": [1.0, 0.0],
+            }
+        )
+        path = tmp_path / "data.parquet"
+        df.write_parquet(path)
+
+        ds = FeatureDataset.from_parquet(
+            path, feature_columns=["confidence", "feature_a"]
+        )
+        assert ds.features.shape == (2, 2)
+        torch.testing.assert_close(
+            ds.features[0], torch.tensor([0.9, 1.0], dtype=torch.float32)
+        )
+
+    def test_from_parquet_missing_feature_column_raises(self, tmp_path):
+        """Test that missing feature_columns raises ValueError."""
+        import polars as pl
+
+        df = pl.DataFrame({"feature_a": [1.0], "correct": [1.0]})
+        path = tmp_path / "data.parquet"
+        df.write_parquet(path)
+
+        with pytest.raises(ValueError, match="missing from Parquet"):
+            FeatureDataset.from_parquet(path, feature_columns=["confidence"])

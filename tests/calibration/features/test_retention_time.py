@@ -228,8 +228,8 @@ class TestRetentionTimeFeature:
         assert reg_after_b.coef_[0] != coef_a
 
     @patch("winnow.calibration.features.retention_time.koinapy.Koina")
-    def test_prepare_raises_on_insufficient_data(self, mock_koina):
-        """Test that prepare raises ValueError when min_train_points is not met."""
+    def test_prepare_skips_on_insufficient_data(self, mock_koina):
+        """Test that prepare skips experiments when min_train_points is not met."""
         mock_model_instance = Mock()
         mock_koina.return_value = mock_model_instance
         mock_model_instance.model_inputs = ["peptide_sequences"]
@@ -247,8 +247,10 @@ class TestRetentionTimeFeature:
 
         feature = RetentionTimeFeature(train_fraction=0.1, min_train_points=10)
 
-        with pytest.raises(ValueError, match="insufficient data for iRT"):
+        with pytest.warns(UserWarning, match="Skipping experiment 'exp_a'"):
             feature.prepare(dataset)
+
+        assert "exp_a" not in feature.irt_predictors
 
     @patch("winnow.calibration.features.retention_time.koinapy.Koina")
     def test_compute_with_mock(
@@ -439,16 +441,112 @@ class TestRetentionTimeFeature:
 
         metadata = pd.DataFrame(
             {
-                "confidence": [0.95 - (idx * 0.01) for idx in range(10)],
-                "prediction": [["A", "G"] for _ in range(10)],
-                "retention_time": [float(idx) for idx in range(10)],
-                "spectrum_id": list(range(10)),
+                "confidence": [
+                    0.95,
+                    0.93,
+                    0.91,
+                    0.89,
+                    0.87,
+                    0.85,
+                    0.83,
+                    0.81,
+                    0.79,
+                    0.77,
+                ],
+                "prediction": [
+                    ["P", "E", "P", "T", "I", "D", "E"],
+                    ["G", "L", "Y", "G", "A", "T"],
+                    ["K", "V", "L", "V", "A", "P"],
+                    ["A", "I", "V", "E", "G"],
+                    ["S", "T", "D", "K"],
+                    ["L", "L", "G", "E"],
+                    ["H", "G", "K", "T"],
+                    ["Q", "F", "S", "R"],
+                    ["M", "D", "P", "S"],
+                    ["N", "F", "Y", "R"],
+                ],
+                "retention_time": [
+                    12.5,
+                    15.2,
+                    18.1,
+                    21.0,
+                    24.3,
+                    26.8,
+                    29.1,
+                    31.5,
+                    34.0,
+                    36.2,
+                ],
+                "spectrum_id": [100, 101, 102, 103, 104, 105, 106, 107, 108, 109],
                 "experiment_name": ["exp_a"] * 10,
             }
         )
         dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
         feature.prepare(dataset)
+
+        assert "exp_a" in feature.irt_predictors
+
+    @patch("winnow.calibration.features.retention_time.koinapy.Koina")
+    def test_prepare_warns_on_low_peptide_diversity(self, mock_koina):
+        """Test warning when unique peptides are below min_train_points but PSM count is not."""
+        mock_model_instance = Mock()
+        mock_koina.return_value = mock_model_instance
+        mock_model_instance.model_inputs = ["peptide_sequences"]
+        mock_model_instance.predict.return_value = pd.DataFrame({"irt": range(10)})
+
+        # Five distinct peptides, each observed twice (10 PSMs total).
+        repeated_peptides = [
+            ["P", "E", "P", "T", "I", "D", "E"],
+            ["G", "L", "Y", "G", "A", "T"],
+            ["K", "V", "L", "V", "A", "P"],
+            ["A", "I", "V", "E", "G"],
+            ["S", "T", "D", "K"],
+        ]
+
+        metadata = pd.DataFrame(
+            {
+                "confidence": [
+                    0.95,
+                    0.93,
+                    0.91,
+                    0.89,
+                    0.87,
+                    0.85,
+                    0.83,
+                    0.81,
+                    0.79,
+                    0.77,
+                ],
+                "prediction": repeated_peptides + repeated_peptides,
+                "retention_time": [
+                    12.5,
+                    15.2,
+                    18.1,
+                    21.0,
+                    24.3,
+                    26.8,
+                    29.1,
+                    31.5,
+                    34.0,
+                    36.2,
+                ],
+                "spectrum_id": [100, 101, 102, 103, 104, 105, 106, 107, 108, 109],
+                "experiment_name": ["exp_a"] * 10,
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
+
+        feature = RetentionTimeFeature(train_fraction=1.0, min_train_points=10)
+
+        with pytest.warns(
+            UserWarning,
+            match=(
+                r"Experiment 'exp_a': iRT calibration pool \(top 100%, 10 PSMs\):\n"
+                r"  Only 5 unique peptide\(s\), below min_train_points=10\."
+            ),
+        ):
+            feature.prepare(dataset)
 
         assert "exp_a" in feature.irt_predictors
 
