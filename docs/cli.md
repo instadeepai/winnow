@@ -92,7 +92,7 @@ You can customise the calibrator architecture and features using nested paramete
 winnow train calibrator.hidden_dims=[128,64,32]
 
 # Adjust training hyperparameters
-winnow train calibrator.learning_rate=0.01 calibrator.max_epochs=200 calibrator.patience=15
+winnow train calibrator.learning_rate=0.01 calibrator.max_epochs=200 calibrator.n_iter_no_change=15
 
 # Configure individual features
 winnow train calibrator.features.fragment_match_features.mz_tolerance=0.01
@@ -127,7 +127,6 @@ winnow compute-features labelled=false '~calibrator.features.retention_time_feat
 - `data_loader`, `dataset.*`: Same as `winnow train`
 - `metadata_output_path`: Full metadata CSV for EDA (all columns)
 - `training_matrix_output_path`: Optional lean numeric Parquet containing only features and labels for model training (used with two-phase `features_path` workflow)
-- `filter_empty_predictions`: Drop empty or invalid predictions (default: true)
 - `labelled`: If true (default), spectrum data must include a `sequence` column; runs each feature's `prepare()` (e.g. iRT calibrator).
 
 Feature selection matches training: override `calibrator.features` or use `~calibrator.features.<name>` to drop entries. See [Configuration guide](configuration.md#compute-features-configuration).

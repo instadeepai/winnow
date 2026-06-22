@@ -42,6 +42,7 @@ configs/
 ├── train.yaml                 # Main training config
 ├── compute_features.yaml      # Feature-only export (no calibrator fit)
 ├── calibrator.yaml            # Model architecture and features
+├── koina.yaml                 # Koina model names, inputs, and constraints
 ├── predict.yaml               # Main prediction config
 └── diagnose_calibration.yaml  # Tail calibration diagnostic (sTECE / TECE)
 ```
@@ -165,7 +166,6 @@ dataset:
 
 metadata_output_path: results/metadata.csv
 # training_matrix_output_path: results/training_matrix.parquet
-filter_empty_predictions: true
 labelled: true
 ```
 
@@ -174,7 +174,6 @@ labelled: true
 - `dataset.*`, `data_loader`: Same meaning as in training config
 - `metadata_output_path`: Full metadata CSV for EDA
 - `training_matrix_output_path`: Optional lean numeric Parquet for model training (used with two-phase `features_path` workflow)
-- `filter_empty_predictions`: If true, apply the same empty-prediction filter as train/predict
 - `labelled`: If true, spectrum data must include `sequence` (ground truth).
 
 The feature set is the `calibrator.features` block from `calibrator.yaml` (shared with training). Override or drop features with Hydra the same way as for `winnow train`.
@@ -196,7 +195,10 @@ calibrator:
   weight_decay: 0.0001  # L2 regularisation (weight decay) parameter.
   max_epochs: 100  # Maximum number of training epochs.
   batch_size: 1024  # Mini-batch size for DataLoader.
-  patience: 10  # Early stopping patience (epochs without validation improvement).
+  n_iter_no_change: 10  # Early stopping: epochs without validation improvement by at least tol.
+  tol: 0.0001  # Minimum validation loss improvement to reset the early-stopping counter.
+  val_early_stopping_max_psms: null  # Subsample large validation sets during early stopping only.
+  val_subsample_seed: null  # RNG seed for validation subsampling (defaults to seed).
   seed: 42  # Random seed for reproducibility.
 
   features:
@@ -218,7 +220,7 @@ calibrator:
     retention_time_feature:
       _target_: winnow.calibration.calibration_features.RetentionTimeFeature
       train_fraction: 0.1  # Top fraction of spectra (by confidence, descending) used to train the per-experiment RT->iRT regressor.
-      min_train_points: 10  # Minimum high-confidence spectra needed per experiment. Raises an error if fewer are available.
+      min_train_points: 10  # Minimum high-confidence spectra needed per experiment. Experiments below this are skipped with a warning.
       learn_from_missing: false  # If True, impute missing features and add an indicator column. If False, filter invalid entries with a warning.
       seed: 42  # Random seed for reproducibility.
       irt_model_name: ${koina.irt_model}  # The name of the Koina iRT model to use.
@@ -238,40 +240,11 @@ calibrator:
 
     beam_features:
       _target_: winnow.calibration.calibration_features.BeamFeatures
-
-
-# Koina model configuration — shared settings for all intensity- and iRT-based features.
-koina:
-  # Model names
-  intensity_model: Prosit_2025_intensity_22PTM
-  irt_model: Prosit_2025_irt_22PTM
-
-  # Model inputs — applied to FragmentMatchFeatures and ChimericFeatures.
-  # To use a constant value tiled across all rows, specify it under input_constants.
-  # To use per-row values from a metadata column, add the column mapping under input_columns.
-  # Each input key must appear in at most one of these two dicts.
-  input_constants:
-    collision_energies: 27
-    fragmentation_types: HCD
-  input_columns: {}
-
-  # Model constraints — adjust to match the capabilities of your Koina models.
-  # See docs/configuration.md for guidance on choosing these values.
-  constraints:
-    max_precursor_charge: 6   # Maximum precursor charge accepted by the intensity models.
-    max_peptide_length: 30    # Maximum peptide length (residue token count) accepted by the intensity/iRT models.
-    # Residues unsupported by the configured Koina models.
-    # These residues must be specified using UNIMOD PTM IDs.
-    # Check that all PTMs unsupported by your selected Koina models but supported by Winnow are included.
-    unsupported_residues:
-      # Residue modifications (amino acid + modification)
-      - "N[UNIMOD:7]"   # Deamidated asparagine
-      - "Q[UNIMOD:7]"   # Deamidated glutamine
-      # ...
-      # N-terminal modifications (standalone tokens)
-      - "[UNIMOD:1]"    # N-terminal acetylation
-      # ...
 ```
+
+Koina model names, collision-energy / fragmentation inputs, and validity constraints
+live in [`configs/koina.yaml`](configs/koina.yaml) (composed via `defaults: - koina` in
+`calibrator.yaml` and inference configs). Feature blocks reference `${koina.*}` as shown above.
 
 **Key parameters:**
 
@@ -282,8 +255,37 @@ koina:
 - `weight_decay`: L2 regularisation (weight decay) parameter
 - `max_epochs`: Maximum number of training epochs
 - `batch_size`: Mini-batch size for DataLoader
-- `patience`: Early stopping patience (epochs without validation improvement)
+- `n_iter_no_change`: Early stopping — stop after this many epochs without validation loss improving by at least `tol`
+- `tol`: Minimum validation loss improvement (absolute) to count as progress
+- `val_early_stopping_max_psms`: When set, subsample validation PSMs for per-epoch early stopping (full validation metrics recorded after training)
+- `val_subsample_seed`: RNG seed for validation subsampling (defaults to `seed`)
 - `features.*`: Individual calibration feature configurations
+
+### Koina config (`configs/koina.yaml`)
+
+Shared Koina settings for intensity- and iRT-based features. Composed automatically when
+training (`calibrator.yaml` includes `defaults: - koina`) and explicitly for inference
+(`predict.yaml`, `diagnose_calibration.yaml`).
+
+```yaml
+koina:
+  intensity_model: Prosit_2025_intensity_22PTM
+  irt_model: Prosit_2025_irt_22PTM
+  input_constants:
+    collision_energies: 27
+    fragmentation_types: HCD
+  input_columns: {}
+  constraints:
+    max_precursor_charge: 6
+    max_peptide_length: 30
+    unsupported_residues: [...]
+```
+
+**Key parameters:**
+
+- `intensity_model` / `irt_model`: Koina model identifiers (used when instantiating features at train time; saved in the checkpoint)
+- `input_constants` / `input_columns`: Collision energy and fragmentation type — **required at predict time** (not persisted in the checkpoint). Override with e.g. `koina.input_constants.collision_energies=30`
+- `constraints.*`: Validity filters interpolated into feature configs at train time
 
 ### Koina model input validation
 
@@ -374,23 +376,22 @@ Controls dataset loading, FDR estimation and output:
 defaults:
   - _self_
   - residues
+  - koina
   - data_loader: instanovo  # Options: instanovo, mztab, pointnovo, winnow
   - fdr_method: nonparametric  # Options: nonparametric, database_grounded
 
 dataset:
-  # Path to the spectrum data file or to folder containing saved internal Winnow dataset
   spectrum_path_or_directory: data/spectra.ipc
-  # Path to the beam predictions file
-  # Leave as null if data source is winnow, or loading will fail
   predictions_path: data/predictions.csv
 
 calibrator:
-  # Path to the local calibrator directory or the Hugging Face model identifier
-  # If the path is a local directory path, it will be used directly
-  # If it is a Hugging Face repository identifier, it will be downloaded from Hugging Face
   pretrained_model_name_or_path: InstaDeepAI/winnow-general-model
-  # Directory to cache the Hugging Face model
-  cache_dir: null  # can be set to null if using local model or for the default cache directory
+  cache_dir: null
+  irt_regressor_path: null
+  # Optional RT->iRT regressor fitting overrides (when irt_regressor_path is null):
+  # irt_calibration:
+  #   train_fraction: 0.3
+  #   min_train_points: 10
 
 fdr_control:
   # Target FDR threshold (e.g. 0.01 for 1%, 0.05 for 5% etc.)
@@ -409,6 +410,9 @@ output_folder: results/predictions
 - `dataset.predictions_path`: Path to predictions file
 - `calibrator.pretrained_model_name_or_path`: Hugging Face model identifier or local model directory path
 - `calibrator.cache_dir`: Directory to cache Hugging Face models (null for default)
+- `calibrator.irt_regressor_path`: Optional pre-fitted iRT regressors from training
+- `calibrator.irt_calibration.*`: Optional RT→iRT regressor fitting overrides at predict time
+- `koina.input_constants.*` / `koina.input_columns.*`: Koina collision energy and fragmentation (predict-time; match training overrides)
 - `fdr_method`: FDR estimation method (via defaults: `nonparametric` or `database_grounded`)
 - `fdr_control.fdr_threshold`: Target FDR threshold (e.g. 0.01 for 1%, 0.05 for 5%)
 - `fdr_control.confidence_column`: Column name with confidence scores
@@ -453,6 +457,7 @@ Runs tail calibration diagnostics on a labelled holdout set: loads data like `wi
 defaults:
   - _self_
   - residues
+  - koina
   - data_loader: instanovo
 
 dataset:
@@ -481,6 +486,8 @@ diagnostics:
 **Key parameters:**
 
 - `data_loader`, `dataset.*`: Same meaning as in `predict.yaml` (holdout spectra + predictions)
+- `koina.*`: Koina collision energy / fragmentation inputs (same as predict)
+- `calibrator.pretrained_model_name_or_path`, `calibrator.cache_dir`: Model loading
 - `calibrator.pretrained_model_name_or_path`, `calibrator.cache_dir`: Calibrator checkpoint to score the holdout (same as predict)
 - `fdr_control.fdr_threshold`: Nominal FDR target $\alpha$ used to set $\tau$ via `NonParametricFDRControl.get_confidence_cutoff`
 - `fdr_control.confidence_column`: Column used for scores $S$ after calibration (default `calibrated_confidence`)
@@ -742,6 +749,7 @@ Your custom config directory should mirror the structure of the package configs:
 ```text
 my_configs/
 ├── residues.yaml              # Override residue masses/modifications
+├── koina.yaml                 # Override Koina models, inputs, constraints
 ├── calibrator.yaml            # Override calibrator features
 ├── train.yaml                 # Override training config (if needed)
 ├── compute_features.yaml      # Override compute-features config (if needed)
@@ -813,7 +821,8 @@ calibrator:
   weight_decay: 0.0001
   max_epochs: 100
   batch_size: 1024
-  patience: 10
+  n_iter_no_change: 10
+  tol: 0.0001
   features:
     mass_error:
       _target_: winnow.calibration.calibration_features.MassErrorDaFeature
