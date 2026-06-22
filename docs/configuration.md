@@ -787,7 +787,7 @@ When you use `--config-dir`, Winnow will:
 **What this means:**
 
 - ✅ **Partial configs at file level**: You only need to include the files you want to override (e.g., just `residues.yaml` and `calibrator.yaml`). Files not in your custom directory use package defaults.
-- ❌ **Partial configs at key level don't work**: If you provide `calibrator.yaml` with only `seed: 999`, the other settings (`hidden_layer_sizes`, `features`, etc.) will be **missing**, not using package defaults. This will cause errors.
+- ❌ **Partial configs at key level don't work**: If you provide `calibrator.yaml` with only `seed: 999`, the other settings (`hidden_dims`, `features`, etc.) will be **missing**, not using package defaults. This will cause errors.
 
 **Example - What happens with minimal config:**
 

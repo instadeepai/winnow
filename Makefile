@@ -148,9 +148,9 @@ train-sample:
 	model_output_dir=models/new_model \
 	dataset_output_path=results/metadata.csv \
 	calibrator.features.retention_time_feature.train_fraction=0.3 \
-	calibrator.hidden_layer_sizes="[32, 16]" \
-	calibrator.early_stopping=false \
-	calibrator.max_iter=100 \
+	calibrator.hidden_dims="[32, 16]" \
+	calibrator.patience=100 \
+	calibrator.max_epochs=100 \
 
 ## Run winnow predict with sample data (uses locally trained model from models/new_model)
 predict-sample:
