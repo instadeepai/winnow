@@ -1,4 +1,6 @@
 # --- Calibrator configuration ---
+defaults:
+  - koina
 
 calibrator:
   _target_: winnow.calibration.calibrator.ProbabilityCalibrator
@@ -12,8 +14,17 @@ calibrator:
   weight_decay: 0.0001
   max_epochs: 100
   batch_size: 1024
-  patience: 10
+  # Early stopping: stop after this many epochs in a row where
+  # validation loss did not improve by at least `tol` over the best so far.
+  n_iter_no_change: 10
+  tol: 0.0001
   seed: 42
+  # If the validation set is larger than this, randomly subsample (with
+  # val_subsample_seed, defaulting to seed) for per-epoch early stopping only.
+  # After training, loss/accuracy are reported on the full validation set.
+  # Set to null to disable subsampling (use all validation PSMs each epoch).
+  val_early_stopping_max_psms: null
+  val_subsample_seed: null
 
   features:
     mass_error:
@@ -40,46 +51,3 @@ calibrator:
       irt_model_name: ${koina.irt_model}  # The name of the Koina iRT model to use.
       max_peptide_length: ${koina.constraints.max_peptide_length}      # Maximum peptide length accepted by the Koina iRT model.
       unsupported_residues: ${koina.constraints.unsupported_residues}  # Residues unsupported by the configured Koina iRT model.
-
-# Koina model configuration — shared settings for all intensity- and iRT-based features.
-koina:
-  # Model names
-  intensity_model: Prosit_2025_intensity_22PTM
-  irt_model: Prosit_2025_irt_22PTM
-
-  # Model inputs — applied to FragmentMatchFeatures and ChimericFeatures.
-  # To use a constant value tiled across all rows, specify it under input_constants.
-  # To use per-row values from a metadata column, add the column mapping under input_columns.
-  # Each input key must appear in at most one of these two dicts.
-  input_constants:
-    collision_energies: 27
-    fragmentation_types: HCD
-  input_columns: {}
-
-  # Model constraints — adjust to match the capabilities of your Koina models.
-  # See docs/configuration.md for guidance on choosing these values.
-  constraints:
-    max_precursor_charge: 6   # Maximum precursor charge accepted by the intensity models.
-    max_peptide_length: 30    # Maximum peptide length (residue token count) accepted by the intensity/iRT models.
-    # Residues unsupported by the configured Koina models.
-    # These residues must be specified using UNIMOD PTM IDs.
-    # Check that all PTMs unsupported by your selected Koina models but supported by Winnow are included.
-    unsupported_residues:
-      # Residue modifications (amino acid + modification)
-      # - "N[UNIMOD:7]"   # Deamidated asparagine
-      # - "Q[UNIMOD:7]"   # Deamidated glutamine
-      # - "R[UNIMOD:7]"   # Arginine citrullination
-      # - "P[UNIMOD:35]"  # Proline hydroxylation
-      # - "S[UNIMOD:21]"  # Phosphorylated serine
-      # - "T[UNIMOD:21]"  # Phosphorylated threonine
-      # - "Y[UNIMOD:21]"  # Phosphorylated tyrosine
-      # - "C[UNIMOD:312]"  # Cysteinylation
-      # - "E[UNIMOD:27]"  # Pyro-glutamine
-      # - "Q[UNIMOD:28]"  # Pyro-glutamine
-      # N-terminal modifications (standalone tokens)
-      # - "[UNIMOD:1]"    # N-terminal acetylation
-      - "[UNIMOD:5]"    # N-terminal carbamylation
-      - "[UNIMOD:385]"  # N-terminal ammonia loss
-      - "(+25.98)"      # Carbamylation & NH3 loss (legacy notation)
-      # Unsupported residues
-      # - "C"  # Unmodified cysteine (must be explicitly carbamidomethylated for some Koina models)
