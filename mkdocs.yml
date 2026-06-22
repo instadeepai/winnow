@@ -54,6 +54,8 @@ markdown_extensions:
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.details
+  - pymdownx.arithmatex:
+      generic: true
   - markdown_include.include:
       base_path: '.'
   - toc:
@@ -83,6 +85,10 @@ nav:
     - FDR: api/fdr.md
   - Contributing: contributing.md
   - License: license.md
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
 
 extra:
   social:

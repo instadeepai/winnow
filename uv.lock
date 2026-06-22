@@ -5596,6 +5596,9 @@ dependencies = [
     { name = "instanovo" },
     { name = "koinapy" },
     { name = "matchms" },
+    { name = "matplotlib" },
+    { name = "scikit-learn", version = "1.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scikit-learn", version = "1.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "tomli" },
     { name = "typer" },
 ]
@@ -5628,6 +5631,8 @@ requires-dist = [
     { name = "instanovo", specifier = ">=1.1.4" },
     { name = "koinapy", specifier = ">=0.0.10" },
     { name = "matchms", specifier = ">=0.31.0" },
+    { name = "matplotlib", specifier = ">=3.7.0" },
+    { name = "scikit-learn", specifier = ">=1.3.0" },
     { name = "tomli", specifier = ">=2.2.1" },
     { name = "typer", specifier = ">=0.15.2" },
 ]
