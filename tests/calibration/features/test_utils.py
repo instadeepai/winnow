@@ -548,6 +548,7 @@ class TestSpectrumMatchQualityFunctions:
         dataset = pd.DataFrame(
             {
                 "prosit_mz": [[100.0, 200.0], [300.0, 400.0]],
+                "prosit_intensity": [[50.0, 50.0], [25.0, 75.0]],
                 "annotation": [["b1+1", "y3+1"], ["b1+1", "y3+1"]],
                 "mz_array": [[100.0, 200.0], [300.0, 400.0]],
                 "intensity_array": [[50.0, 50.0], [25.0, 75.0]],
@@ -559,10 +560,11 @@ class TestSpectrumMatchQualityFunctions:
             ["P", "E", "P", "T"],
         ]
 
-        _, _, _, _, complementary_counts, _, _ = compute_ion_identifications(
+        _, _, _, _, complementary_counts, _, _, _ = compute_ion_identifications(
             dataset,
-            source_column="prosit_mz",
+            source_mz_column="prosit_mz",
             source_annotation_column="annotation",
+            source_intensity_column="prosit_intensity",
             mz_tolerance=0.02,
             predictions=runner_up_predictions,
         )
