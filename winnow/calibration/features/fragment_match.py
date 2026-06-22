@@ -11,6 +11,7 @@ from winnow.calibration.features.utils import (
     resolve_model_inputs,
     format_intensity_prediction_outputs,
     compute_ion_identifications,
+    validate_intensity_model_name,
 )
 from winnow.utils.peptide import tokens_to_proforma
 
@@ -64,6 +65,7 @@ class FragmentMatchFeatures(CalibrationFeatures):
         Raises:
             ValueError: If the same key appears in both model_input_constants and model_input_columns.
         """
+        validate_intensity_model_name(intensity_model_name)
         validate_model_input_params(model_input_constants, model_input_columns)
         self.mz_tolerance = mz_tolerance
         self.unsupported_residues = (
@@ -146,12 +148,14 @@ class FragmentMatchFeatures(CalibrationFeatures):
         """
         filtered_dataset = (
             dataset.filter_entries(
-                metadata_predicate=lambda row: row["precursor_charge"]
-                > self.max_precursor_charge
+                metadata_predicate=lambda row: (
+                    row["precursor_charge"] > self.max_precursor_charge
+                )
             )
             .filter_entries(
-                metadata_predicate=lambda row: len(row["prediction"])
-                > self.max_peptide_length
+                metadata_predicate=lambda row: (
+                    len(row["prediction"]) > self.max_peptide_length
+                )
             )
             .filter_entries(
                 metadata_predicate=lambda row: any(

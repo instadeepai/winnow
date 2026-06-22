@@ -527,12 +527,12 @@ class TestChimericFeatures:
         assert not pd.isna(ion_match_intensity_10)
         assert isinstance(ion_matches_10, (int, float))
         assert isinstance(ion_match_intensity_10, (int, float))
-        assert (
-            ion_matches_10 > 0.0
-        ), f"Expected non-zero chimeric_ion_matches for spectrum 10, got {ion_matches_10}"
-        assert (
-            ion_match_intensity_10 > 0.0
-        ), f"Expected non-zero chimeric_ion_match_intensity for spectrum 10, got {ion_match_intensity_10}"
+        assert ion_matches_10 > 0.0, (
+            f"Expected non-zero chimeric_ion_matches for spectrum 10, got {ion_matches_10}"
+        )
+        assert ion_match_intensity_10 > 0.0, (
+            f"Expected non-zero chimeric_ion_match_intensity for spectrum 10, got {ion_match_intensity_10}"
+        )
 
         # Invalid entries
         for sid in [30, 40]:

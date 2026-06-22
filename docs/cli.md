@@ -16,20 +16,17 @@ uv pip install winnow-fdr
 
 ## Quick Start
 
-Get started immediately with the included sample data:
+Use the example HeLa single-shot subset in `examples/example_data/` (`spectra.ipc`, `predictions.csv`) which represents real instrument data and InstaNovo predictions.
 
 ```bash
-# Generate sample data (if not already present)
-make sample-data
-
-# Train a calibrator on the sample data
+# Train a calibrator on the example subset
 make train-sample
 
 # Run prediction with the trained model
 make predict-sample
 ```
 
-**Note:** The sample data is minimal (100 spectra) and intended for testing only. When using the sample data, it's **recommended to use the `make` commands** (e.g., `make predict-sample`) as they include necessary configuration adjustments. Specifically, `make predict-sample` sets `fdr_control.fdr_threshold=1.0` because the sample data contains artificial PSMs with relatively high error rates, and using the default threshold (0.05) would filter out all predictions, resulting in empty output. In addition, we increase the validation fraction for the retention time feature in the calibrator's configuration, because with such a small training dataset, a higher validation fraction ensures that the validation set will contain enough samples for stable training and early stopping. For use with real datasets, use the standard FDR threshold (default 0.05) and default validation fractions, or adjust as appropriate for your application.
+**Note:** For this small dataset, the `make` helpers apply settings suited to a quick local demo (smaller network, no early stopping, capped iterations, higher retention-time validation fraction, and `fdr_control.fdr_threshold=1.0` on predict so the walkthrough does not end with an empty filtered table). On a full experiment, use `winnow train` / `winnow predict` with the usual defaults (e.g. FDR `0.05`) and tune validation fractions and model size for your dataset.
 
 ## Commands
 
@@ -46,6 +43,9 @@ winnow config predict
 
 # Show compute-features configuration
 winnow config compute-features
+
+# Show calibration diagnostic configuration
+winnow config diagnose-calibration diagnostics.label_source=sequence
 
 # Check configuration with overrides
 winnow config train data_loader=mztab model_output_dir=models/my_model
@@ -152,6 +152,43 @@ winnow predict calibrator.pretrained_model_name_or_path=models/my_model
 
 By default, `winnow predict` uses the pretrained model `InstaDeepAI/winnow-general-model` from Hugging Face Hub. To use a different model, override the calibrator settings (see [Configuration guide](configuration.md#prediction-configuration) for details).
 
+### `winnow diagnose-calibration`
+
+Assess tail calibration on a labelled holdout set before trusting non-parametric FDR at your operating threshold. The command applies a trained calibrator, derives the confidence cutoff $\tau$ at `fdr_control.fdr_threshold`, estimates signed tail expected calibration error (sTECE) and TECE on $\{S \ge \tau\}$ using isotonic regression, writes a reliability diagram, and warns when $|\widehat{\mathrm{sTECE}}(\tau)|$ exceeds `diagnostics.tolerance` (default `0.005`, i.e. 0.5 percentage points on the FDR scale, which is about 10% of a 5% FDR target).
+
+**Configuration:** see [Calibration diagnostic configuration](configuration.md#calibration-diagnostic-configuration) for the full parameter reference.
+
+**Label configuration rules:**
+
+| `label_source` | `label_column` | Behaviour |
+| --- | --- | --- |
+| `sequence` | must be unset (`null`) | Derives `correct` from `sequence` and `prediction`. Do not pass `label_column`. |
+| `precomputed` | required (e.g. `proteome_hit`, `correct`) | Uses the given boolean column from predictions/metadata. |
+
+Setting `label_column` while `label_source=sequence` (or omitting `label_column` for `precomputed`) raises an error.
+
+```bash
+# Sequence-derived labels (full match of sequence vs prediction)
+winnow diagnose-calibration diagnostics.label_source=sequence \
+  dataset.spectrum_path_or_directory=holdout/spectra.ipc \
+  dataset.predictions_path=holdout/preds.csv
+
+# Pre-computed labels (e.g. proteome mapping done offline)
+winnow diagnose-calibration \
+  diagnostics.label_source=precomputed diagnostics.label_column=proteome_hit \
+  dataset.predictions_path=holdout/preds_with_hits.csv
+
+# Stricter tolerance for 1% FDR workflows
+winnow diagnose-calibration diagnostics.label_source=sequence diagnostics.tolerance=0.002
+```
+
+**Outputs** (under `diagnostics.output_dir`, default `results/calibration_diagnostic`):
+
+- `diagnostic_report.json` — `conf_cutoff`, `n_tail`, sTECE, TECE, tolerance check, interpretation
+- `reliability_diagram.png` — empirical calibration curve on the operating tail ($S \ge \text{conf\_cutoff}$) vs the identity line
+
+Set `diagnostics.fail_on_warning=true` to exit with code 1 when $|\widehat{\mathrm{sTECE}}| >$ `diagnostics.tolerance` at the operating cutoff (useful in CI).
+
 ## Configuration system
 
 Winnow uses [Hydra](https://hydra.cc/) for configuration management. All parameters can be configured via:
@@ -178,7 +215,7 @@ For training (`winnow train`), you need:
 - **Labelled dataset**: Ground truth peptide sequences for evaluation
 - **Predictions**: Model predictions with confidence scores
 - **Spectral data**: MS/MS spectra and metadata
-- **Unique identifiers**: Each PSM must have a unique `spectrum_id` in both input files
+- **Aligned identifiers**: Spectrum and prediction rows must refer to the same spectra
 
 ### Feature export (`winnow compute-features`)
 
@@ -191,14 +228,14 @@ For prediction (`winnow predict`), you need:
 - **Unlabelled dataset**: Predictions and spectra (no ground truth required for non-parametric FDR)
 - **Trained model**: Pretrained model from Hugging Face or output from `winnow train`
 - **Confidence scores**: Raw confidence values to calibrate
-- **Unique identifiers**: Each PSM must have a unique `spectrum_id` in both input files
+- **Aligned identifiers**: Same matching rules as training
 
 ### Data formats
 
 Winnow supports multiple input formats:
 
 - **InstaNovo**: Parquet, IPC, or MGF spectra + CSV predictions (beam search format)
-- **MZTab**: Parquet or IPC spectra + MZTab predictions
+- **MZTab**: Parquet, IPC or MGF spectra + MZTab predictions
 - **PointNovo**: Similar to InstaNovo format
 - **Winnow**: Internal format (directory with metadata.csv and predictions.pkl)
 

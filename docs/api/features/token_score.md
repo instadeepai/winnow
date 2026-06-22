@@ -1,4 +1,4 @@
-# TokenScoreFeatures
+# Token Score Features
 
 Extracts position-level confidence metrics from the top beam prediction's token log-probabilities, identifying "weak link" residues within otherwise confident predictions.
 
