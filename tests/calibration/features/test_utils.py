@@ -561,7 +561,7 @@ class TestSpectrumMatchQualityFunctions:
 
         _, _, _, _, complementary_counts, _, _ = compute_ion_identifications(
             dataset,
-            source_column="prosit_mz",
+            source_mz_column="prosit_mz",
             source_annotation_column="annotation",
             mz_tolerance=0.02,
             predictions=runner_up_predictions,
