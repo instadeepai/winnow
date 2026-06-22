@@ -9,7 +9,7 @@ from winnow.datasets.calibration_dataset import CalibrationDataset
 class MockScoredSequence:
     """Mock class for ScoredSequence used in beam search results."""
 
-    def __init__(self, sequence, log_prob=0.0):
+    def __init__(self, sequence, log_prob):
         self.sequence = sequence
         self.sequence_log_probability = log_prob
 

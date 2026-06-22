@@ -20,11 +20,13 @@ If you have ideas for enhancements, you can:
     git clone https://github.com/instadeepai/winnow.git
     cd winnow
     ```
+
 2. **Create a feature branch**
 
     ```bash
     git checkout -b feat-amazing-feature
     ```
+
 3. **Set up development environment**
 
     ```bash
@@ -34,11 +36,13 @@ If you have ideas for enhancements, you can:
     # Set up pre-commit hooks
     pre-commit install
     ```
+
 4. **Make your changes**
 
     - Follow the existing code style
     - Add tests for new functionality
     - Update documentation as needed
+
 5. **Test your changes**
 
     ```bash
@@ -48,16 +52,19 @@ If you have ideas for enhancements, you can:
     # Check code formatting
     pre-commit run --all-files
     ```
+
 6. **Commit your changes**
 
     ```bash
     git commit -m 'feat: add some amazing feature'
     ```
+
 7. **Push to your branch**
 
     ```bash
     git push origin feat-amazing-feature
     ```
+
 8. **Open a Pull Request**
 
     - Provide a clear description of your changes

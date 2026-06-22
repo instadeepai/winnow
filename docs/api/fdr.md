@@ -103,9 +103,9 @@ dataset_with_q_values = fdr_control.add_psm_q_value(dataset, "confidence")
 
 - **Non-parametric estimation**: Estimates FDR directly by assuming PSM confidences are calibrated
 - **Multiple Metrics**: Computes FDR, q-values, posterior error probability
-    - **FDR**: `compute_fdr(score)` - False discovery rate at cutoff
-    - **PEP**: `compute_posterior_probability(score)` - Posterior error probability
-    - **Q-value**: `compute_q_value(score)` - Minimum FDR for significance
+  - **FDR**: `compute_fdr(score)` - False discovery rate at cutoff
+  - **PEP**: `compute_posterior_probability(score)` - Posterior error probability
+  - **Q-value**: `compute_q_value(score)` - Minimum FDR for significance
 - **No Ground Truth Required**: Works with confidence scores alone
 
 ## Additional features

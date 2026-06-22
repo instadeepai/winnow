@@ -91,7 +91,7 @@ winnow train calibrator.features.fragment_match_features.mz_tolerance=0.01
 For comprehensive calibrator configuration options, see:
 
 - [Configuration guide](configuration.md) - Complete parameter reference
-- [Calibration API](api/calibration.md#handling-missing-features) - Feature implementation details
+- [Calibration API](api/features/index.md#handling-missing-features) - Feature implementation details
 
 ### `winnow compute-features`
 
@@ -156,7 +156,6 @@ Winnow uses [Hydra](https://hydra.cc/) for configuration management. All paramet
 - **YAML config files** in the `configs/` directory (defines defaults)
 - **Command-line overrides** using `key=value` syntax
 - **Nested parameters** using dot notation (e.g., `calibrator.seed=42`)
-
 
 For comprehensive configuration documentation, including:
 
@@ -374,7 +373,7 @@ winnow config predict   # View resolved prediction configuration
 This CLI guide focuses on **practical command-line usage**. For other information, see:
 
 | Topic | Documentation |
-|-------|---------------|
+| ------- | --------------- |
 | Configuration system, YAML structure, advanced patterns | [Configuration guide](configuration.md) |
 | Python API, feature implementation, programmatic usage | [API reference](api/calibration.md) |
 | Interactive tutorials and examples | [Examples notebook](https://github.com/instadeepai/winnow/blob/main/examples/getting_started_with_winnow.ipynb) |
