@@ -54,6 +54,8 @@ markdown_extensions:
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.details
+  - pymdownx.arithmatex:
+      generic: true
   - markdown_include.include:
       base_path: '.'
   - toc:
@@ -71,9 +73,22 @@ nav:
   - API reference:
     - Datasets: api/datasets.md
     - Calibration: api/calibration.md
+    - Calibration Features:
+      - Overview: api/features/index.md
+      - Mass Error Features: api/features/mass_error.md
+      - Beam Features: api/features/beam.md
+      - Fragment Match Features: api/features/fragment_match.md
+      - Chimeric Features: api/features/chimeric.md
+      - Retention Time Feature: api/features/retention_time.md
+      - Sequence Features: api/features/sequence.md
+      - Token Score Features: api/features/token_score.md
     - FDR: api/fdr.md
   - Contributing: contributing.md
   - License: license.md
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
 
 extra:
   social:

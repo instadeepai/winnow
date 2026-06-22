@@ -25,7 +25,7 @@ class CalibrationDataset:
 
     It holds metadata and prediction results and provides various utility methods for filtering,
     saving, and evaluating data. For loading datasets from various file formats, see the
-    concrete implementations of the DatasetLoader interface in data_loaders.py.
+    concrete implementations of the DatasetLoader interface in the data_loaders package.
 
     Attributes:
         metadata (pd.DataFrame): DataFrame containing metadata and predictions.

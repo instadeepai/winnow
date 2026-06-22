@@ -44,6 +44,9 @@ winnow config predict
 # Show compute-features configuration
 winnow config compute-features
 
+# Show calibration diagnostic configuration
+winnow config diagnose-calibration diagnostics.label_source=sequence
+
 # Check configuration with overrides
 winnow config train data_loader=mztab model_output_dir=models/my_model
 winnow config predict fdr_method=database_grounded fdr_control.fdr_threshold=0.01
@@ -91,7 +94,7 @@ winnow train calibrator.features.fragment_match_features.mz_tolerance=0.01
 For comprehensive calibrator configuration options, see:
 
 - [Configuration guide](configuration.md) - Complete parameter reference
-- [Calibration API](api/calibration.md#handling-missing-features) - Feature implementation details
+- [Calibration API](api/features/index.md#handling-missing-features) - Feature implementation details
 
 ### `winnow compute-features`
 
@@ -149,6 +152,43 @@ winnow predict calibrator.pretrained_model_name_or_path=models/my_model
 
 By default, `winnow predict` uses the pretrained model `InstaDeepAI/winnow-general-model` from Hugging Face Hub. To use a different model, override the calibrator settings (see [Configuration guide](configuration.md#prediction-configuration) for details).
 
+### `winnow diagnose-calibration`
+
+Assess tail calibration on a labelled holdout set before trusting non-parametric FDR at your operating threshold. The command applies a trained calibrator, derives the confidence cutoff $\tau$ at `fdr_control.fdr_threshold`, estimates signed tail expected calibration error (sTECE) and TECE on $\{S \ge \tau\}$ using isotonic regression, writes a reliability diagram, and warns when $|\widehat{\mathrm{sTECE}}(\tau)|$ exceeds `diagnostics.tolerance` (default `0.005`, i.e. 0.5 percentage points on the FDR scale, which is about 10% of a 5% FDR target).
+
+**Configuration:** see [Calibration diagnostic configuration](configuration.md#calibration-diagnostic-configuration) for the full parameter reference.
+
+**Label configuration rules:**
+
+| `label_source` | `label_column` | Behaviour |
+| --- | --- | --- |
+| `sequence` | must be unset (`null`) | Derives `correct` from `sequence` and `prediction`. Do not pass `label_column`. |
+| `precomputed` | required (e.g. `proteome_hit`, `correct`) | Uses the given boolean column from predictions/metadata. |
+
+Setting `label_column` while `label_source=sequence` (or omitting `label_column` for `precomputed`) raises an error.
+
+```bash
+# Sequence-derived labels (full match of sequence vs prediction)
+winnow diagnose-calibration diagnostics.label_source=sequence \
+  dataset.spectrum_path_or_directory=holdout/spectra.ipc \
+  dataset.predictions_path=holdout/preds.csv
+
+# Pre-computed labels (e.g. proteome mapping done offline)
+winnow diagnose-calibration \
+  diagnostics.label_source=precomputed diagnostics.label_column=proteome_hit \
+  dataset.predictions_path=holdout/preds_with_hits.csv
+
+# Stricter tolerance for 1% FDR workflows
+winnow diagnose-calibration diagnostics.label_source=sequence diagnostics.tolerance=0.002
+```
+
+**Outputs** (under `diagnostics.output_dir`, default `results/calibration_diagnostic`):
+
+- `diagnostic_report.json` — `conf_cutoff`, `n_tail`, sTECE, TECE, tolerance check, interpretation
+- `reliability_diagram.png` — empirical calibration curve on the operating tail ($S \ge \text{conf\_cutoff}$) vs the identity line
+
+Set `diagnostics.fail_on_warning=true` to exit with code 1 when $|\widehat{\mathrm{sTECE}}| >$ `diagnostics.tolerance` at the operating cutoff (useful in CI).
+
 ## Configuration system
 
 Winnow uses [Hydra](https://hydra.cc/) for configuration management. All parameters can be configured via:
@@ -156,7 +196,6 @@ Winnow uses [Hydra](https://hydra.cc/) for configuration management. All paramet
 - **YAML config files** in the `configs/` directory (defines defaults)
 - **Command-line overrides** using `key=value` syntax
 - **Nested parameters** using dot notation (e.g., `calibrator.seed=42`)
-
 
 For comprehensive configuration documentation, including:
 
@@ -176,7 +215,7 @@ For training (`winnow train`), you need:
 - **Labelled dataset**: Ground truth peptide sequences for evaluation
 - **Predictions**: Model predictions with confidence scores
 - **Spectral data**: MS/MS spectra and metadata
-- **Unique identifiers**: Each PSM must have a unique `spectrum_id` in both input files
+- **Aligned identifiers**: Spectrum and prediction rows must refer to the same spectra
 
 ### Feature export (`winnow compute-features`)
 
@@ -189,14 +228,14 @@ For prediction (`winnow predict`), you need:
 - **Unlabelled dataset**: Predictions and spectra (no ground truth required for non-parametric FDR)
 - **Trained model**: Pretrained model from Hugging Face or output from `winnow train`
 - **Confidence scores**: Raw confidence values to calibrate
-- **Unique identifiers**: Each PSM must have a unique `spectrum_id` in both input files
+- **Aligned identifiers**: Same matching rules as training
 
 ### Data formats
 
 Winnow supports multiple input formats:
 
 - **InstaNovo**: Parquet, IPC, or MGF spectra + CSV predictions (beam search format)
-- **MZTab**: Parquet or IPC spectra + MZTab predictions
+- **MZTab**: Parquet, IPC or MGF spectra + MZTab predictions
 - **PointNovo**: Similar to InstaNovo format
 - **Winnow**: Internal format (directory with metadata.csv and predictions.pkl)
 
@@ -374,7 +413,7 @@ winnow config predict   # View resolved prediction configuration
 This CLI guide focuses on **practical command-line usage**. For other information, see:
 
 | Topic | Documentation |
-|-------|---------------|
+| ------- | --------------- |
 | Configuration system, YAML structure, advanced patterns | [Configuration guide](configuration.md) |
 | Python API, feature implementation, programmatic usage | [API reference](api/calibration.md) |
 | Interactive tutorials and examples | [Examples notebook](https://github.com/instadeepai/winnow/blob/main/examples/getting_started_with_winnow.ipynb) |
