@@ -228,6 +228,30 @@ class TestIonMatchFunctions:
         # matched_intensities_isotopic should include M0 + isotope
         assert matched_intensities_isotopic[0] == 1500.0  # 1000 + 500
 
+    def test_find_matching_ions_preserves_public_return_arity(self):
+        """Direct callers should still be able to unpack the original five values."""
+        result = find_matching_ions(
+            source_mz=[100.0],
+            target_mz=[100.0],
+            target_intensities=[1000.0],
+            source_annotations=["b1+1"],
+            mz_tolerance=0.02,
+        )
+
+        assert len(result) == 5
+        (
+            match_fraction,
+            average_intensity,
+            matched_annotations,
+            matched_mz,
+            matched_intensities,
+        ) = result
+        assert match_fraction == 1.0
+        assert average_intensity == 1.0
+        assert matched_annotations == ["b1+1"]
+        assert matched_mz == [100.0]
+        assert matched_intensities == [1000.0]
+
 
 class TestModelInputHelpers:
     """Tests for validate_model_input_params and resolve_model_inputs utility functions."""
