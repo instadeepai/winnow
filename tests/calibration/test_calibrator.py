@@ -8,6 +8,7 @@ from winnow.calibration.calibrator import ProbabilityCalibrator
 from winnow.calibration.calibration_features import (
     CalibrationFeatures,
     FeatureDependency,
+    FragmentMatchFeatures,
 )
 from winnow.datasets.calibration_dataset import CalibrationDataset
 
@@ -107,6 +108,23 @@ class TestProbabilityCalibrator:
     def test_columns_property_empty(self, calibrator):
         """Test columns property when no features are added."""
         assert calibrator.columns == []
+
+    def test_fragment_match_columns_preserve_saved_calibrator_width(self):
+        """Default fragment match columns should not expand legacy calibrator inputs."""
+        calibrator = ProbabilityCalibrator(
+            features=[FragmentMatchFeatures(mz_tolerance=0.02)]
+        )
+
+        assert calibrator.columns == [
+            "ion_matches",
+            "ion_match_intensity",
+            "longest_b_series",
+            "longest_y_series",
+            "complementary_ion_count",
+            "max_ion_gap",
+            "b_y_intensity_ratio",
+            "is_missing_fragment_match_features",
+        ]
 
     def test_features_property_empty(self, calibrator):
         """Test features property when no features are added."""
