@@ -595,6 +595,43 @@ class TestSpectrumMatchQualityFunctions:
 
         assert list(complementary_counts) == [1, 1]
 
+    def test_compute_ion_identifications_preserves_public_api_without_spectral_angle(
+        self,
+    ):
+        """Direct callers should still be able to use the pre-spectral-angle API."""
+        dataset = pd.DataFrame(
+            {
+                "prosit_mz": [[100.0, 200.0]],
+                "annotation": [["b1+1", "y2+1"]],
+                "mz_array": [[100.0, 200.0]],
+                "intensity_array": [[50.0, 75.0]],
+                "prediction": [["P", "E", "P"]],
+            }
+        )
+
+        (
+            ion_matches,
+            match_intensity,
+            longest_b_series,
+            longest_y_series,
+            complementary_ion_count,
+            max_ion_gap,
+            b_y_intensity_ratio,
+        ) = compute_ion_identifications(
+            dataset,
+            source_column="prosit_mz",
+            source_annotation_column="annotation",
+            mz_tolerance=0.02,
+        )
+
+        assert list(ion_matches) == [1.0]
+        assert list(match_intensity) == [1.0]
+        assert list(longest_b_series) == [1]
+        assert list(longest_y_series) == [1]
+        assert list(complementary_ion_count) == [1]
+        assert list(max_ion_gap) == [100.0]
+        assert list(b_y_intensity_ratio) == [pytest.approx(50.0 / 75.0)]
+
     def test_compute_max_ion_gap_basic(self):
         """Test max ion gap calculation."""
         matched_mz = [100.0, 150.0, 300.0]
