@@ -771,6 +771,21 @@ class TestXcorr:
         )
         assert score_4_matches > score_2_matches
 
+    def test_observed_preprocessing_independent_of_out_of_range_theoretical_ions(self):
+        """Unmatched high-m/z theoretical ions must not change observed normalization."""
+        observed_mz = [166.51, 239.26, 280.07, 391.08, 429.99]
+        observed_intensities = [416.6, 13651.9, 163.4, 806.1, 2155.4]
+        theoretical_mz = [239.26, 429.99, 391.08]
+
+        score = compute_xcorr(observed_mz, observed_intensities, theoretical_mz)
+        score_with_unmatched_ion = compute_xcorr(
+            observed_mz,
+            observed_intensities,
+            theoretical_mz + [2000.0],
+        )
+
+        assert score_with_unmatched_ion == pytest.approx(score)
+
     def test_single_peak_positive(self):
         """A single observed peak matching a single theoretical ion should score positive."""
         score = compute_xcorr([300.0], [5000.0], [300.0])
