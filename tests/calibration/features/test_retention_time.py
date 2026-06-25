@@ -253,6 +253,43 @@ class TestRetentionTimeFeature:
         assert "exp_a" not in feature.irt_predictors
 
     @patch("winnow.calibration.features.retention_time.koinapy.Koina")
+    def test_compute_imputes_skipped_global_regressor(self, mock_koina):
+        """Test global skipped iRT fits are imputed when experiment_name is absent."""
+        mock_model_instance = Mock()
+        mock_koina.return_value = mock_model_instance
+        mock_model_instance.model_inputs = ["peptide_sequences"]
+        mock_model_instance.predict.return_value = pd.DataFrame({"irt": [10.0, 20.0]})
+
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.95, 0.90],
+                "prediction": [["A", "G"], ["G", "A"]],
+                "retention_time": [10.5, 15.2],
+                "spectrum_id": [0, 1],
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
+
+        feature = RetentionTimeFeature(
+            train_fraction=1.0,
+            min_train_points=10,
+            learn_from_missing=True,
+        )
+
+        with pytest.warns(UserWarning, match="Skipping experiment '__global__'"):
+            feature.prepare(dataset)
+
+        assert "__global__" not in feature.irt_predictors
+        assert feature._skipped_experiments == ["__global__"]
+
+        feature.compute(dataset)
+
+        assert dataset.metadata["is_missing_irt_error"].tolist() == [True, True]
+        assert dataset.metadata["irt_error"].tolist() == [0.0, 0.0]
+        assert dataset.metadata["iRT"].isna().all()
+        assert dataset.metadata["predicted iRT"].isna().all()
+
+    @patch("winnow.calibration.features.retention_time.koinapy.Koina")
     def test_compute_with_mock(
         self, mock_koina, retention_time_feature, sample_dataset_with_rt
     ):
