@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from winnow.calibration.features.utils import (
     IonMatchResult,
+    IonIdentificationResult,
     find_matching_ions,
     compute_ion_identifications,
     validate_model_input_params,
@@ -41,9 +42,9 @@ class TestIonMatchFunctions:
         assert result.matched_ion_mz == [100.0]
         assert result.matched_ion_intensities == [1000.0]
 
-    def test_find_matching_ions_star_unpack(self):
-        """Star-unpacking remains forward-compatible when fields are added."""
-        match_rate, match_intensity, annotations, mz, *_ = find_matching_ions(
+    def test_find_matching_ions_positional_unpack_raises_upgrade_error(self):
+        """Positional unpacking is no longer supported."""
+        result = find_matching_ions(
             [100.0, 200.0],
             [100.0, 200.0],
             [1000.0, 2000.0],
@@ -51,10 +52,8 @@ class TestIonMatchFunctions:
             mz_tolerance=0.01,
         )
 
-        assert match_rate == 1.0
-        assert match_intensity == 1.0
-        assert annotations == ["b1+1", "b2+1"]
-        assert mz == [100.0, 200.0]
+        with pytest.raises(TypeError, match="Upgrade to the latest API"):
+            match_rate, match_intensity, annotations, mz = result
 
     def test_find_matching_ions_exact_match(self):
         """Test find_matching_ions with exact m/z matches."""
@@ -536,7 +535,7 @@ class TestSpectrumMatchQualityFunctions:
             ["P", "E", "P", "T"],
         ]
 
-        _, _, _, _, complementary_counts, _, _ = compute_ion_identifications(
+        result = compute_ion_identifications(
             dataset,
             source_column="prosit_mz",
             source_annotation_column="annotation",
@@ -544,7 +543,37 @@ class TestSpectrumMatchQualityFunctions:
             predictions=runner_up_predictions,
         )
 
-        assert list(complementary_counts) == [1, 1]
+        assert isinstance(result, IonIdentificationResult)
+        assert list(result.complementary_ion_count) == [1, 1]
+
+    def test_compute_ion_identifications_positional_unpack_raises_upgrade_error(self):
+        """Positional unpacking is no longer supported."""
+        dataset = pd.DataFrame(
+            {
+                "prosit_mz": [[100.0]],
+                "annotation": [["b1+1"]],
+                "mz_array": [[100.0]],
+                "intensity_array": [[50.0]],
+                "prediction": [["A"]],
+            }
+        )
+
+        result = compute_ion_identifications(
+            dataset,
+            source_column="prosit_mz",
+            source_annotation_column="annotation",
+            mz_tolerance=0.02,
+        )
+
+        with pytest.raises(TypeError, match="Upgrade to the latest API"):
+            (
+                ion_matches,
+                match_intensity,
+                longest_b_series,
+                longest_y_series,
+                complementary_ion_count,
+                max_ion_gap,
+            ) = result
 
     def test_compute_max_ion_gap_basic(self):
         """Test max ion gap calculation."""

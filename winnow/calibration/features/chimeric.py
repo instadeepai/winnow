@@ -304,15 +304,7 @@ class ChimericFeatures(CalibrationFeatures):
 
         # Compute ion matches and match intensity
         # Zeros are returned for rows with missing Prosit-predicted spectra
-        (
-            ion_matches,
-            match_intensity,
-            longest_b_series,
-            longest_y_series,
-            complementary_ion_count,
-            max_ion_gap,
-            b_y_intensity_ratio,
-        ) = compute_ion_identifications(
+        ion_identifications = compute_ion_identifications(
             dataset=dataset.metadata,
             source_column="runner_up_prosit_mz",
             source_annotation_column="runner_up_annotation",
@@ -320,10 +312,20 @@ class ChimericFeatures(CalibrationFeatures):
             predictions=runner_up_predictions,
         )
 
-        dataset.metadata["chimeric_ion_matches"] = ion_matches
-        dataset.metadata["chimeric_ion_match_intensity"] = match_intensity
-        dataset.metadata["chimeric_longest_b_series"] = longest_b_series
-        dataset.metadata["chimeric_longest_y_series"] = longest_y_series
-        dataset.metadata["chimeric_complementary_ion_count"] = complementary_ion_count
-        dataset.metadata["chimeric_max_ion_gap"] = max_ion_gap
-        dataset.metadata["chimeric_b_y_intensity_ratio"] = b_y_intensity_ratio
+        dataset.metadata["chimeric_ion_matches"] = ion_identifications.ion_match_rate
+        dataset.metadata["chimeric_ion_match_intensity"] = (
+            ion_identifications.ion_match_intensity
+        )
+        dataset.metadata["chimeric_longest_b_series"] = (
+            ion_identifications.longest_b_series
+        )
+        dataset.metadata["chimeric_longest_y_series"] = (
+            ion_identifications.longest_y_series
+        )
+        dataset.metadata["chimeric_complementary_ion_count"] = (
+            ion_identifications.complementary_ion_count
+        )
+        dataset.metadata["chimeric_max_ion_gap"] = ion_identifications.max_ion_gap
+        dataset.metadata["chimeric_b_y_intensity_ratio"] = (
+            ion_identifications.b_y_intensity_ratio
+        )

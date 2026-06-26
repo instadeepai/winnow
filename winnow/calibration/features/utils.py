@@ -31,6 +31,37 @@ class IonMatchResult(NamedTuple):
     matched_ion_mz: List[float]
     matched_ion_intensities: List[float]
 
+    def __iter__(self):
+        raise TypeError(
+            "Positional unpacking of IonMatchResult is no longer compatible with "
+            "this version of winnow. Upgrade to the latest API by accessing result "
+            "fields by name, e.g. result.match_rate, result.match_intensity, "
+            "result.matched_ion_annotations, result.matched_ion_mz, and "
+            "result.matched_ion_intensities."
+        )
+
+
+class IonIdentificationResult(NamedTuple):
+    """Per-spectrum ion identification feature columns."""
+
+    ion_match_rate: Tuple[float, ...]
+    ion_match_intensity: Tuple[float, ...]
+    longest_b_series: Tuple[int, ...]
+    longest_y_series: Tuple[int, ...]
+    complementary_ion_count: Tuple[int, ...]
+    max_ion_gap: Tuple[float, ...]
+    b_y_intensity_ratio: Tuple[float, ...]
+
+    def __iter__(self):
+        raise TypeError(
+            "Positional unpacking of IonIdentificationResult is no longer "
+            "compatible with this version of winnow. Upgrade to the latest API "
+            "by accessing result fields by name, e.g. result.ion_match_rate, "
+            "result.ion_match_intensity, result.longest_b_series, "
+            "result.longest_y_series, result.complementary_ion_count, "
+            "result.max_ion_gap, and result.b_y_intensity_ratio."
+        )
+
 
 def validate_intensity_model_name(intensity_model_name: str) -> None:
     """Validate the intensity model name.
@@ -286,9 +317,7 @@ def find_matching_ions(
 
     Returns:
         :class:`IonMatchResult` with match statistics and per-ion match details.
-        Prefer attribute access (e.g. ``result.match_rate``) so new fields can be added
-        without breaking callers. For positional access, use star-unpacking:
-        ``rate, intensity, annotations, mz, *_ = find_matching_ions(...)``.
+        Access fields by name; positional unpacking is no longer supported.
     """
     if isinstance(source_mz, float) and isnan(source_mz):
         return IonMatchResult(0.0, 0.0, [], [], [])
@@ -357,7 +386,7 @@ def compute_ion_identifications(
     source_annotation_column: str,
     mz_tolerance: float = 0.02,
     predictions: Optional[List[str]] = None,
-) -> Iterator[Tuple[float, float, int, int, int, float, float]]:
+) -> IonIdentificationResult:
     """Computes the ion match rate, match intensity, longest b series, longest y series, complementary ion count, max ion gap and b/y intensity ratio for each spectrum in the dataset.
 
     Args:
@@ -368,7 +397,8 @@ def compute_ion_identifications(
         predictions: Optional list of tokenised predictions for each spectrum. If not provided, the peptide length will be inferred from the column "predictions" in the metadata.
 
     Returns:
-        Iterator of (ion_match_rate, ion_match_intensity, longest_b_series, longest_y_series, complementary_ion_count, max_ion_gap, b_y_intensity_ratio) tuples.
+        :class:`IonIdentificationResult` with one tuple per feature column.
+        Access fields by name; positional unpacking is no longer supported.
     """
     per_row_match_results: List[Tuple[float, float, int, int, int, float, float]] = []
 
@@ -417,7 +447,10 @@ def compute_ion_identifications(
             )
         )
 
-    return zip(*per_row_match_results)
+    if not per_row_match_results:
+        return IonIdentificationResult((), (), (), (), (), (), ())
+
+    return IonIdentificationResult(*zip(*per_row_match_results))
 
 
 def extract_fragment_ion_charge(annotation: Union[bytes, str]) -> int:

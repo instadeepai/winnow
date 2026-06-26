@@ -6,6 +6,7 @@ import numpy as np
 from unittest.mock import Mock, patch
 
 from winnow.calibration.features.chimeric import ChimericFeatures
+from winnow.calibration.features.utils import IonIdentificationResult
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from tests.calibration.features.conftest import MockScoredSequence, make_intensity_mock
 
@@ -210,7 +211,7 @@ class TestChimericFeatures:
         mock_complementary_ion_count = 1
         mock_max_ion_gap = 1
         mock_b_y_intensity_ratio = 0.5
-        mock_compute_ions.return_value = (
+        mock_compute_ions.return_value = IonIdentificationResult(
             mock_match_rate,
             mock_match_intensity,
             mock_longest_b_series,
