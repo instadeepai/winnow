@@ -28,6 +28,7 @@ from winnow.calibration.features.utils import (
     validate_model_input_params,
     resolve_model_inputs,
     # Peak matching
+    IonMatchResult,
     find_matching_ions,
     compute_ion_identifications,
     # Ion coverage features
@@ -54,6 +55,7 @@ __all__ = [
     "validate_model_input_params",
     "resolve_model_inputs",
     # Peak matching
+    "IonMatchResult",
     "find_matching_ions",
     "compute_ion_identifications",
     # Ion coverage features
