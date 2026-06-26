@@ -16,7 +16,7 @@ uv pip install winnow-fdr
 
 ## Quick Start
 
-Use the example HeLa single-shot subset in `examples/example_data/` (`spectra.ipc`, `predictions.csv`) which represents real instrument data and InstaNovo predictions.
+Use the example HeLa single-shot subset in `examples/example_data/` (`spectra.mgf`, `predictions.csv`) which represents real instrument data and InstaNovo predictions.
 
 ```bash
 # Train a calibrator on the example subset
@@ -170,7 +170,7 @@ Setting `label_column` while `label_source=sequence` (or omitting `label_column`
 ```bash
 # Sequence-derived labels (full match of sequence vs prediction)
 winnow diagnose-calibration diagnostics.label_source=sequence \
-  dataset.spectrum_path_or_directory=holdout/spectra.ipc \
+  dataset.spectrum_path_or_directory=holdout/spectra.mgf \
   dataset.predictions_path=holdout/preds.csv
 
 # Pre-computed labels (e.g. proteome mapping done offline)

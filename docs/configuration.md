@@ -438,7 +438,7 @@ defaults:
   - data_loader: instanovo
 
 dataset:
-  spectrum_path_or_directory: examples/example_data/spectra.ipc
+  spectrum_path_or_directory: examples/example_data/spectra.mgf
   predictions_path: examples/example_data/predictions.csv
 
 calibrator:
