@@ -6,6 +6,7 @@ from typing import Optional
 from unittest.mock import patch
 
 from winnow.calibration.features.utils import (
+    IonMatchResult,
     find_matching_ions,
     compute_ion_identifications,
     validate_model_input_params,
@@ -23,6 +24,38 @@ from winnow.datasets.calibration_dataset import CalibrationDataset
 class TestIonMatchFunctions:
     """Test utility functions used by calibration features for ion matching."""
 
+    def test_find_matching_ions_returns_ion_match_result(self):
+        """Test find_matching_ions returns an IonMatchResult with named fields."""
+        result = find_matching_ions(
+            [100.0],
+            [100.0],
+            [1000.0],
+            source_annotations=["b1+1"],
+            mz_tolerance=0.01,
+        )
+
+        assert isinstance(result, IonMatchResult)
+        assert result.match_rate == 1.0
+        assert result.match_intensity == 1.0
+        assert result.matched_ion_annotations == ["b1+1"]
+        assert result.matched_ion_mz == [100.0]
+        assert result.matched_ion_intensities == [1000.0]
+
+    def test_find_matching_ions_star_unpack(self):
+        """Star-unpacking remains forward-compatible when fields are added."""
+        match_rate, match_intensity, annotations, mz, *_ = find_matching_ions(
+            [100.0, 200.0],
+            [100.0, 200.0],
+            [1000.0, 2000.0],
+            source_annotations=["b1+1", "b2+1"],
+            mz_tolerance=0.01,
+        )
+
+        assert match_rate == 1.0
+        assert match_intensity == 1.0
+        assert annotations == ["b1+1", "b2+1"]
+        assert mz == [100.0, 200.0]
+
     def test_find_matching_ions_exact_match(self):
         """Test find_matching_ions with exact m/z matches."""
         source_mz = [100.0, 200.0, 300.0]
@@ -30,7 +63,7 @@ class TestIonMatchFunctions:
         target_intensities = [1000.0, 2000.0, 4000.0]
         tolerance = 0.01
 
-        match_fraction, average_intensity, *_ = find_matching_ions(
+        result = find_matching_ions(
             source_mz,
             target_mz,
             target_intensities,
@@ -39,13 +72,13 @@ class TestIonMatchFunctions:
         )
 
         # Function returns fraction of matched ions (2/3) and normalised intensity
-        assert match_fraction == pytest.approx(
+        assert result.match_rate == pytest.approx(
             2 / 3, rel=1e-10, abs=1e-10
         )  # 2 matches out of 3 source ions
         total_intensity = sum(target_intensities)  # 7000.0
         match_intensity = 1000.0 + 2000.0  # 3000.0
         expected_intensity = match_intensity / total_intensity  # 3000/7000
-        assert average_intensity == pytest.approx(
+        assert result.match_intensity == pytest.approx(
             expected_intensity, rel=1e-10, abs=1e-10
         )
 
@@ -56,7 +89,7 @@ class TestIonMatchFunctions:
         target_intensities = [1000.0, 2000.0]
         tolerance = 0.02
 
-        match_fraction, average_intensity, *_ = find_matching_ions(
+        result = find_matching_ions(
             source_mz,
             target_mz,
             target_intensities,
@@ -65,9 +98,9 @@ class TestIonMatchFunctions:
         )
 
         # All source ions match, so fraction = 1.0
-        assert match_fraction == 1.0  # 2/2 matches
+        assert result.match_rate == 1.0  # 2/2 matches
         # All target intensity is matched, so normalised intensity = 1.0
-        assert average_intensity == 1.0  # 3000/3000
+        assert result.match_intensity == 1.0  # 3000/3000
 
     def test_find_matching_ions_outside_tolerance(self):
         """Test find_matching_ions with m/z values outside tolerance."""
@@ -76,7 +109,7 @@ class TestIonMatchFunctions:
         target_intensities = [1000.0, 2000.0]
         tolerance = 0.01
 
-        match_fraction, average_intensity, *_ = find_matching_ions(
+        result = find_matching_ions(
             source_mz,
             target_mz,
             target_intensities,
@@ -84,8 +117,8 @@ class TestIonMatchFunctions:
             mz_tolerance=tolerance,
         )
 
-        assert match_fraction == 0
-        assert average_intensity == 0.0
+        assert result.match_rate == 0
+        assert result.match_intensity == 0.0
 
     def test_find_matching_ions_no_matches(self):
         """Test find_matching_ions with no matches."""
@@ -93,15 +126,15 @@ class TestIonMatchFunctions:
         target_mz = [200.0]  # No match within tolerance
         target_intensities = [1000.0]
 
-        match_fraction, average_intensity, *_ = find_matching_ions(
+        result = find_matching_ions(
             source_mz,
             target_mz,
             target_intensities,
             source_annotations=["b1+1"],
             mz_tolerance=0.01,
         )
-        assert match_fraction == 0.0  # 0 matches / 1 source ion
-        assert average_intensity == 0.0  # 0 match intensity / 1000 total intensity
+        assert result.match_rate == 0.0  # 0 matches / 1 source ion
+        assert result.match_intensity == 0.0  # 0 match intensity / 1000 total intensity
 
     def test_find_matching_ions_prevents_double_matching(self):
         """Test that each observed peak can only be matched once."""
@@ -111,7 +144,7 @@ class TestIonMatchFunctions:
         target_intensities = [1000.0]
         tolerance = 0.02
 
-        match_fraction, average_intensity, matched_annotations, *_ = find_matching_ions(
+        result = find_matching_ions(
             source_mz,
             target_mz,
             target_intensities,
@@ -120,9 +153,9 @@ class TestIonMatchFunctions:
         )
 
         # Only one source ion should match (the first one gets the peak)
-        assert match_fraction == pytest.approx(0.5)  # 1 match / 2 source ions
-        assert len(matched_annotations) == 1
-        assert matched_annotations[0] == "b1+1"
+        assert result.match_rate == pytest.approx(0.5)  # 1 match / 2 source ions
+        assert len(result.matched_ion_annotations) == 1
+        assert result.matched_ion_annotations[0] == "b1+1"
 
     def test_find_matching_ions_fallback_to_second_best(self):
         """Test fallback to next nearest peak when closest is already matched."""
@@ -132,7 +165,7 @@ class TestIonMatchFunctions:
         target_intensities = [1000.0, 2000.0]
         tolerance = 0.02
 
-        match_fraction, average_intensity, matched_annotations, *_ = find_matching_ions(
+        result = find_matching_ions(
             source_mz,
             target_mz,
             target_intensities,
@@ -141,8 +174,8 @@ class TestIonMatchFunctions:
         )
 
         # Both source ions should match (to different observed peaks)
-        assert match_fraction == 1.0  # 2 matches / 2 source ions
-        assert len(matched_annotations) == 2
+        assert result.match_rate == 1.0  # 2 matches / 2 source ions
+        assert len(result.matched_ion_annotations) == 2
 
     def test_find_matching_ions_isotope_masking(self):
         """Test that isotope peaks are masked and not available for subsequent M0 matches."""
@@ -154,7 +187,7 @@ class TestIonMatchFunctions:
         target_intensities = [1000.0, 500.0, 2000.0]
         tolerance = 0.02
 
-        match_fraction, average_intensity, matched_annotations, *_ = find_matching_ions(
+        result = find_matching_ions(
             source_mz,
             target_mz,
             target_intensities,
@@ -164,11 +197,13 @@ class TestIonMatchFunctions:
 
         # First ion matches (M0 at 100.0, isotope at 101.003)
         # Second ion at 101.0 should NOT match 101.003 (already claimed as isotope)
-        assert match_fraction == pytest.approx(0.5)  # Only 1 M0 match / 2 source ions
-        assert len(matched_annotations) == 1
-        assert matched_annotations[0] == "b1+1"
+        assert result.match_rate == pytest.approx(
+            0.5
+        )  # Only 1 M0 match / 2 source ions
+        assert len(result.matched_ion_annotations) == 1
+        assert result.matched_ion_annotations[0] == "b1+1"
         # Intensity should include M0 (1000) + isotope (500) = 1500 / 3500 total
-        assert average_intensity == pytest.approx(1500.0 / 3500.0)
+        assert result.match_intensity == pytest.approx(1500.0 / 3500.0)
 
 
 class TestModelInputHelpers:
