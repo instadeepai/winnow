@@ -247,7 +247,9 @@ class TestRetentionTimeFeature:
 
         feature = RetentionTimeFeature(train_fraction=0.1, min_train_points=10)
 
-        with pytest.warns(UserWarning, match="Skipping experiment 'exp_a'"):
+        with pytest.warns(
+            UserWarning, match="Skipping RT->iRT regressor fit for experiment 'exp_a'"
+        ):
             feature.prepare(dataset)
 
         assert "exp_a" not in feature.irt_predictors
@@ -276,7 +278,7 @@ class TestRetentionTimeFeature:
             learn_from_missing=True,
         )
 
-        with pytest.warns(UserWarning, match="Skipping experiment '__global__'"):
+        with pytest.warns(UserWarning, match="Skipping global RT->iRT regressor fit"):
             feature.prepare(dataset)
 
         assert "__global__" not in feature.irt_predictors

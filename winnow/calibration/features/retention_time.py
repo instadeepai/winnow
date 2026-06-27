@@ -228,6 +228,16 @@ class RetentionTimeFeature(CalibrationFeatures):
         if not per_exp_train:
             return
 
+        if "__global__" in per_exp_train:
+            warnings.warn(
+                "No 'experiment_name' column found. Fitting one global "
+                "RT->iRT regressor shared by all spectra.\n"
+                "For multi-experiment data, add an 'experiment_name' column or "
+                "use MGF format (experiment name derived from the filename) so "
+                "each run can have its own mapper.",
+                stacklevel=2,
+            )
+
         all_train = pd.concat(per_exp_train.values(), ignore_index=True)
 
         inputs = pd.DataFrame()
@@ -323,14 +333,6 @@ class RetentionTimeFeature(CalibrationFeatures):
             if "__global__" in self._loaded_experiment_names:
                 return None
             if "__global__" not in self.irt_predictors:
-                warnings.warn(
-                    "No 'experiment_name' column found. Fitting a single global "
-                    "RT->iRT regressor.\n"
-                    "For multi-experiment data, ensure each spectrum file includes an "
-                    "'experiment_name' column or use MGF format (which derives it from "
-                    "the filename).",
-                    stacklevel=2,
-                )
                 return {"__global__": dataset.metadata}
             return None
 
@@ -353,9 +355,16 @@ class RetentionTimeFeature(CalibrationFeatures):
                 outcome = (
                     "dropped" if not self.learn_from_missing else "imputed as zero"
                 )
+                if exp_name == "__global__":
+                    header = "Skipping global RT->iRT regressor fit:"
+                else:
+                    header = (
+                        f"Skipping RT->iRT regressor fit for experiment '{exp_name}':"
+                    )
                 warnings.warn(
-                    f"Skipping experiment '{exp_name}':\n{e}\n"
-                    f"Spectra from this experiment will be {outcome}.",
+                    f"{header}\n{e}\n"
+                    f"Affected spectra will be {outcome} "
+                    f"(learn_from_missing={self.learn_from_missing}).",
                     stacklevel=2,
                 )
                 self._skipped_experiments.append(exp_name)
@@ -372,11 +381,14 @@ class RetentionTimeFeature(CalibrationFeatures):
         is_valid = self.check_valid_irt_prediction(dataset)
         dataset.metadata["is_missing_irt_error"] = ~is_valid
 
-        if self._skipped_experiments and "experiment_name" in dataset.metadata.columns:
-            skipped_mask = dataset.metadata["experiment_name"].isin(
-                self._skipped_experiments
-            )
-            dataset.metadata.loc[skipped_mask, "is_missing_irt_error"] = True
+        if self._skipped_experiments:
+            if "experiment_name" in dataset.metadata.columns:
+                skipped_mask = dataset.metadata["experiment_name"].isin(
+                    self._skipped_experiments
+                )
+                dataset.metadata.loc[skipped_mask, "is_missing_irt_error"] = True
+            elif "__global__" in self._skipped_experiments:
+                dataset.metadata["is_missing_irt_error"] = True
 
         if not self.learn_from_missing:
             n_invalid = dataset.metadata["is_missing_irt_error"].sum()
