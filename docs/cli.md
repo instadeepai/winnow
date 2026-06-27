@@ -16,7 +16,7 @@ uv pip install winnow-fdr
 
 ## Quick Start
 
-Use the example HeLa single-shot subset in `examples/example_data/` (`spectra.ipc`, `predictions.csv`) which represents real instrument data and InstaNovo predictions.
+Use the example HeLa single-shot subset in `examples/example_data/` (`spectra.mgf`, `predictions.csv`) which represents real instrument data and InstaNovo predictions.
 
 ```bash
 # Train a calibrator on the example subset
@@ -94,8 +94,8 @@ winnow train calibrator.hidden_dims=[128,64,32]
 # Adjust training hyperparameters
 winnow train calibrator.learning_rate=0.01 calibrator.max_epochs=200 calibrator.n_iter_no_change=15
 
-# Configure individual features
-winnow train calibrator.features.fragment_match_features.mz_tolerance=0.01
+winnow train calibrator.features.fragment_match_features.mz_tolerance=0.01 \
+  calibrator.features.fragment_match_features.mz_tolerance_unit=da
 ```
 
 For comprehensive calibrator configuration options, see:
@@ -113,7 +113,7 @@ winnow compute-features
 
 # Paths and output files
 winnow compute-features \
-    dataset.spectrum_path_or_directory=data/spectra.ipc \
+    dataset.spectrum_path_or_directory=data/spectra.mgf \
     dataset.predictions_path=data/preds.csv \
     metadata_output_path=results/metadata.csv \
     training_matrix_output_path=results/features.parquet
@@ -181,7 +181,7 @@ Setting `label_column` while `label_source=sequence` (or omitting `label_column`
 ```bash
 # Sequence-derived labels (full match of sequence vs prediction)
 winnow diagnose-calibration diagnostics.label_source=sequence \
-  dataset.spectrum_path_or_directory=holdout/spectra.ipc \
+  dataset.spectrum_path_or_directory=holdout/spectra.mgf \
   dataset.predictions_path=holdout/preds.csv
 
 # Pre-computed labels (e.g. proteome mapping done offline)
@@ -406,7 +406,8 @@ winnow train \
     calibrator.hidden_dims=[128,64,32] \
     calibrator.learning_rate=0.01 \
     calibrator.max_epochs=200 \
-    calibrator.features.fragment_match_features.mz_tolerance=0.01
+    calibrator.features.fragment_match_features.mz_tolerance=0.01 \
+    calibrator.features.fragment_match_features.mz_tolerance_unit="da"
 
 # Predict with database-grounded FDR
 winnow predict \

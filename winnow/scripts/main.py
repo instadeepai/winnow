@@ -671,6 +671,11 @@ def _compute_features_batched_metadata(
     if not spectrum_path.exists():
         raise FileNotFoundError(f"Spectrum path does not exist: {spectrum_path}")
     if spectrum_path.is_dir():
+        # Catch Winnow dataset directory
+        if (spectrum_path / "metadata.csv").is_file():
+            return _compute_features_single_file(
+                spectrum_path, predictions_path, data_loader, calibrator, labelled
+            )
         return _compute_features_directory(
             spectrum_path,
             predictions_path,

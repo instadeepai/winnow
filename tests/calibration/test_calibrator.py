@@ -242,6 +242,7 @@ class TestProbabilityCalibrator:
         calibrator.add_feature(
             FragmentMatchFeatures(
                 mz_tolerance=0.02,
+                mz_tolerance_unit="da",
                 model_input_columns={
                     "collision_energies": "collision_energy",
                     "fragmentation_types": "frag_type",
@@ -268,6 +269,32 @@ class TestProbabilityCalibrator:
     def test_columns_property_empty(self, calibrator):
         """Test columns property when no features are added."""
         assert calibrator.columns == []
+
+    def test_load_rejects_feature_column_shift(self, tmp_path, labelled_dataset):
+        """Loading a checkpoint whose feature columns drift from training raises."""
+        calibrator = ProbabilityCalibrator(seed=42)
+        feature = MockCalibrationFeature("test_feature", ["test_col"])
+        calibrator.add_feature(feature)
+        calibrator.fit(labelled_dataset)
+
+        calibrator.feature_dict["test_feature"]._columns = ["test_col", "extra_col"]
+        ProbabilityCalibrator.save(calibrator, tmp_path)
+
+        with pytest.raises(ValueError, match="feature dimension mismatch"):
+            ProbabilityCalibrator.load(tmp_path)
+
+    def test_predict_rejects_feature_column_shift(
+        self, calibrator, labelled_dataset, sample_dataset
+    ):
+        """Prediction raises when the live feature set no longer matches training."""
+        feature = MockCalibrationFeature("test_feature", ["test_col"])
+        calibrator.add_feature(feature)
+        calibrator.fit(labelled_dataset)
+
+        calibrator.feature_dict["test_feature"]._columns = ["test_col", "extra_col"]
+
+        with pytest.raises(ValueError, match="feature dimension mismatch"):
+            calibrator.predict(sample_dataset)
 
     def test_feature_names_empty(self, calibrator):
         """Test feature_names property when no features are added."""
@@ -523,6 +550,7 @@ class TestProbabilityCalibrator:
         calibrator.add_feature(
             FragmentMatchFeatures(
                 mz_tolerance=0.02,
+                mz_tolerance_unit="da",
                 model_input_constants={"collision_energies": 27},
                 model_input_columns={"fragmentation_types": "frag_type"},
             )
@@ -543,6 +571,7 @@ class TestProbabilityCalibrator:
         calibrator.add_feature(
             FragmentMatchFeatures(
                 mz_tolerance=0.02,
+                mz_tolerance_unit="da",
                 model_input_columns={
                     "collision_energies": "collision_energy",
                     "fragmentation_types": "frag_type",

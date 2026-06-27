@@ -87,8 +87,8 @@ winnow train calibrator.seed=123
 # Change network architecture
 winnow train calibrator.hidden_dims=[128,64,32]
 
-# Change feature parameters
-winnow train calibrator.features.fragment_match_features.mz_tolerance=0.01
+winnow train calibrator.features.fragment_match_features.mz_tolerance=0.01 \
+  calibrator.features.fragment_match_features.mz_tolerance_unit=da
 ```
 
 ### Dataset configuration
@@ -124,7 +124,10 @@ validation_fraction: 0.1
 
 # Single-phase dataset config (ignored when features_path is set):
 dataset:
-  spectrum_path_or_directory: data/spectra.ipc
+  # Path to the spectrum data file or to folder containing saved internal Winnow dataset
+  spectrum_path_or_directory: data/spectra.mgf
+  # Path to the beam predictions file
+  # Leave as null if data source is winnow, or loading will fail
   predictions_path: data/predictions.csv
 
 # Output paths
@@ -161,7 +164,7 @@ defaults:
   - data_loader: instanovo
 
 dataset:
-  spectrum_path_or_directory: data/spectra.ipc
+  spectrum_path_or_directory: data/spectra.mgf
   predictions_path: data/predictions.csv
 
 metadata_output_path: results/metadata.csv
@@ -208,7 +211,8 @@ calibrator:
 
     fragment_match_features:
       _target_: winnow.calibration.calibration_features.FragmentMatchFeatures
-      mz_tolerance: 0.02
+      mz_tolerance: 20
+      mz_tolerance_unit: ppm
       learn_from_missing: false  # If True, impute missing features and add an indicator column. If False, filter invalid entries with a warning.
       intensity_model_name: ${koina.intensity_model}  # The name of the Koina intensity model to use.
       max_precursor_charge: ${koina.constraints.max_precursor_charge}  # Maximum precursor charge accepted by the Koina intensity model.
@@ -229,7 +233,8 @@ calibrator:
 
     chimeric_features:
       _target_: winnow.calibration.calibration_features.ChimericFeatures
-      mz_tolerance: 0.02
+      mz_tolerance: 20
+      mz_tolerance_unit: ppm
       learn_from_missing: false  # If True, impute missing features and add an indicator column. If False, filter invalid entries with a warning.
       intensity_model_name: ${koina.intensity_model}  # The name of the Koina intensity model to use.
       max_precursor_charge: ${koina.constraints.max_precursor_charge}  # Maximum precursor charge accepted by the Koina intensity model. Applied to the runner-up sequence.
@@ -381,7 +386,10 @@ defaults:
   - fdr_method: nonparametric  # Options: nonparametric, database_grounded
 
 dataset:
-  spectrum_path_or_directory: data/spectra.ipc
+  # Path to the spectrum data file or to folder containing saved internal Winnow dataset
+  spectrum_path_or_directory: data/spectra.mgf
+  # Path to the beam predictions file
+  # Leave as null if data source is winnow, or loading will fail
   predictions_path: data/predictions.csv
 
 calibrator:
@@ -461,7 +469,7 @@ defaults:
   - data_loader: instanovo
 
 dataset:
-  spectrum_path_or_directory: examples/example_data/spectra.ipc
+  spectrum_path_or_directory: examples/example_data/spectra.mgf
   predictions_path: examples/example_data/predictions.csv
 
 calibrator:

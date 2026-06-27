@@ -469,6 +469,7 @@ class ProbabilityCalibrator:
             calibrator.hidden_dims,
             list(calibrator.feature_dict.keys()),
         )
+        calibrator._validate_loaded_checkpoint(input_dim)
         return calibrator
 
     def apply_koina_model_input_overrides(
@@ -649,6 +650,7 @@ class ProbabilityCalibrator:
                 "learn_from_missing settings."
             )
 
+        self._validate_fitted_feature_dimensions()
         features = self._extract_feature_matrix(dataset, labelled=False)
         device = next(self.network.parameters()).device
         x = torch.as_tensor(features, dtype=torch.float32, device=device)
@@ -872,6 +874,11 @@ class ProbabilityCalibrator:
             device,
         )
 
+        if self._feature_input_dim() != input_dim:
+            self._active_feature_columns = [
+                f"feature_{i}" for i in range(input_dim - 1)
+            ]
+
         return history
 
     @torch.no_grad()
@@ -976,3 +983,57 @@ class ProbabilityCalibrator:
             return True, best_val_loss, best_state, epochs_without_improvement
 
         return False, best_val_loss, best_state, epochs_without_improvement
+
+    def _feature_input_dim(self) -> int:
+        """Return the number of model inputs (confidence plus feature columns)."""
+        return 1 + len(self.columns)
+
+    def _validate_loaded_checkpoint(self, input_dim: int) -> None:
+        """Raise if saved weights and config feature metadata are inconsistent."""
+        if self.feature_mean is None:
+            return
+
+        trained_dim = int(self.feature_mean.shape[0])
+        if trained_dim != input_dim:
+            raise ValueError(
+                "Calibrator checkpoint is corrupt: config input_dim "
+                f"({input_dim}) does not match saved normalisation stats "
+                f"({trained_dim} feature(s))."
+            )
+
+        if self._active_feature_columns is None:
+            return
+
+        expected_dim = 1 + len(self._active_feature_columns)
+        if trained_dim == expected_dim:
+            return
+
+        raise ValueError(
+            "Calibrator feature dimension mismatch: the saved model was trained "
+            f"with {trained_dim} input feature(s) but the checkpoint lists "
+            f"{len(self._active_feature_columns)} feature column(s) "
+            f"({self._active_feature_columns}). "
+            "This usually means the calibrator checkpoint is incompatible with "
+            "the installed version of winnow. Retrain the calibrator or use a "
+            "checkpoint published for this version."
+        )
+
+    def _validate_fitted_feature_dimensions(self) -> None:
+        """Raise if the current feature set does not match the fitted network."""
+        if self.feature_mean is None:
+            return
+
+        trained_dim = int(self.feature_mean.shape[0])
+        expected_dim = self._feature_input_dim()
+        if trained_dim == expected_dim:
+            return
+
+        raise ValueError(
+            "Calibrator feature dimension mismatch: the saved model was trained "
+            f"with {trained_dim} input feature(s) but the current feature set "
+            f"produces {expected_dim} (confidence plus {len(self.columns)} "
+            f"feature column(s): {self.columns}). "
+            "This usually means the calibrator checkpoint is incompatible with "
+            "the installed version of winnow. Retrain the calibrator or use a "
+            "checkpoint published for this version."
+        )

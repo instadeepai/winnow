@@ -143,21 +143,22 @@ set-gcp-credentials:
 ## Run winnow train with sample data
 train-sample:
 	uv run winnow train \
-	dataset.spectrum_path_or_directory=examples/example_data/spectra.ipc \
+	dataset.spectrum_path_or_directory=examples/example_data/spectra.mgf \
 	dataset.predictions_path=examples/example_data/predictions.csv \
 	model_output_dir=models/new_model \
-	dataset_output_path=results/metadata.csv \
+	dataset_output_path=results/calibrated_dataset.csv \
 	calibrator.features.retention_time_feature.train_fraction=0.3 \
+	calibrator.features.retention_time_feature.min_train_points=2 \
 	calibrator.hidden_dims="[32, 16]" \
 	calibrator.n_iter_no_change=100 \
-	calibrator.max_epochs=100 \
+	calibrator.max_epochs=100
 
 ## Run winnow predict with sample data (uses locally trained model from models/new_model)
 predict-sample:
 	uv run winnow predict \
 	calibrator.pretrained_model_name_or_path=models/new_model \
 	fdr_control.fdr_threshold=1.0 \
-	dataset.spectrum_path_or_directory=examples/example_data/spectra.ipc \
+	dataset.spectrum_path_or_directory=examples/example_data/spectra.mgf \
 	dataset.predictions_path=examples/example_data/predictions.csv
 
 ## Clean output directories (does not delete sample data)

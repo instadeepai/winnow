@@ -6,7 +6,18 @@ are used by the calibrator to distinguish high-quality PSMs from low-quality one
 """
 
 from math import isnan
-from typing import Dict, List, Optional, Any, Set, Tuple, Iterator, Union
+from typing import (
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Any,
+    Set,
+    Tuple,
+    Iterator,
+    Union,
+    Literal,
+)
 import bisect
 import numpy as np
 import pandas as pd
@@ -20,6 +31,49 @@ from winnow.calibration.features.constants import (
 ########################################################
 # Helper functions
 ########################################################
+
+
+class IonMatchResult(NamedTuple):
+    """Result of matching theoretical fragment ions to an observed spectrum."""
+
+    match_rate: float
+    match_intensity: float
+    matched_ion_annotations: List[str]
+    matched_ion_mz: List[float]
+    matched_ion_intensities_incl_isotopic_env: List[float]
+    aligned_m0_intensities: List[float]
+
+    def __iter__(self):
+        raise TypeError(
+            "Positional unpacking of IonMatchResult is no longer compatible with "
+            "this version of winnow. Upgrade to the latest API by accessing result "
+            "fields by name, e.g. result.match_rate, result.match_intensity, "
+            "result.matched_ion_annotations, result.matched_ion_mz, and "
+            "result.matched_ion_intensities_incl_isotopic_env, and result.aligned_m0_intensities."
+        )
+
+
+class IonIdentificationResult(NamedTuple):
+    """Per-spectrum ion identification feature columns."""
+
+    ion_match_rate: Tuple[float, ...]
+    ion_match_intensity: Tuple[float, ...]
+    longest_b_series: Tuple[int, ...]
+    longest_y_series: Tuple[int, ...]
+    complementary_ion_count: Tuple[int, ...]
+    max_ion_gap: Tuple[float, ...]
+    b_y_intensity_ratio: Tuple[float, ...]
+    spectral_angle: Tuple[float, ...]
+
+    def __iter__(self):
+        raise TypeError(
+            "Positional unpacking of IonIdentificationResult is no longer "
+            "compatible with this version of winnow. Upgrade to the latest API "
+            "by accessing result fields by name, e.g. result.ion_match_rate, "
+            "result.ion_match_intensity, result.longest_b_series, "
+            "result.longest_y_series, result.complementary_ion_count, "
+            "result.max_ion_gap, result.b_y_intensity_ratio, and result.spectral_angle."
+        )
 
 
 def validate_intensity_model_name(intensity_model_name: str) -> None:
@@ -209,6 +263,80 @@ def _iter_candidates_by_distance(
             right += 1
 
 
+def parse_mz_tolerance_unit(unit: str) -> Literal["ppm", "da"]:
+    """Normalize and validate an m/z tolerance unit string.
+
+    Args:
+        unit: Tolerance unit; must be ``"ppm"`` or ``"da"`` (case-insensitive).
+
+    Returns:
+        The normalized unit, either ``"ppm"`` or ``"da"``.
+
+    Raises:
+        ValueError: If ``unit`` is not a string or is not a recognised tolerance unit.
+    """
+    if not isinstance(unit, str):
+        raise ValueError(
+            f"mz_tolerance_unit must be a string, got {type(unit).__name__}. "
+            "Use 'ppm' or 'da'."
+        )
+    normalized = unit.strip().lower()
+    if normalized in {"ppm", "da"}:
+        return normalized  # type: ignore[return-value]
+    raise ValueError(
+        f"Invalid mz_tolerance_unit {unit!r}. Must be 'ppm' or 'da' (case-insensitive)."
+    )
+
+
+def _validate_mz_tolerance_value(mz_tolerance: float) -> float:
+    """Raise ValueError unless ``mz_tolerance`` is a numeric value."""
+    if isinstance(mz_tolerance, bool) or not isinstance(mz_tolerance, (int, float)):
+        raise ValueError(
+            f"mz_tolerance must be a number, got {type(mz_tolerance).__name__}."
+        )
+    return float(mz_tolerance)
+
+
+def _validate_mz_tolerance(
+    mz_tolerance: float,
+    mz_tolerance_unit: str,
+) -> Literal["ppm", "da"]:
+    """Validate m/z tolerance configuration.
+
+    Args:
+        mz_tolerance: Tolerance magnitude.
+        mz_tolerance_unit: Unit for ``mz_tolerance``; ``"ppm"`` or ``"da"``.
+
+    Returns:
+        The normalized tolerance unit.
+
+    Raises:
+        ValueError: If ``mz_tolerance`` is not numeric or ``mz_tolerance_unit`` is invalid.
+    """
+    _validate_mz_tolerance_value(mz_tolerance)
+    return parse_mz_tolerance_unit(mz_tolerance_unit)
+
+
+def _resolve_tolerance(
+    query_mz: float,
+    mz_tolerance: float,
+    mz_tolerance_unit: Literal["ppm", "da"],
+) -> float:
+    """Return the absolute Da tolerance for a given query m/z.
+
+    Args:
+        query_mz: The m/z value of the query ion.
+        mz_tolerance: Tolerance magnitude.
+        mz_tolerance_unit: Unit for ``mz_tolerance``; ``"ppm"`` or ``"da"``.
+
+    Returns:
+        Absolute tolerance in Daltons.
+    """
+    if mz_tolerance_unit == "da":
+        return mz_tolerance
+    return query_mz * mz_tolerance / 1e6
+
+
 def _find_peak_index(
     target_mz: List[float],
     query_mz: float,
@@ -249,8 +377,10 @@ def find_matching_ions(
     target_mz: List[float],
     target_intensities: List[float],
     source_annotations: Union[List[bytes], List[str]],
-    mz_tolerance: float = 0.02,
-) -> Tuple[float, float, List[str], List[float]]:
+    *,
+    mz_tolerance: float,
+    mz_tolerance_unit: str,
+) -> IonMatchResult:
     """Finds the matching ions between source and target spectra based on m/z.
 
     Computes:
@@ -261,6 +391,8 @@ def find_matching_ions(
          Isotopic peaks are searched at spacing of 1.00335/charge Da.
       3. The list of matched theoretical ion annotations.
       4. The list of matched theoretical ion m/z values.
+      5. The list of matched ion intensities (M0 + isotopic envelope per ion).
+      6. The list of aligned M0 intensities (same length as source_mz, 0.0 for unmatched).
 
     Each observed peak can only be matched once. Once an observed peak is assigned to a
     theoretical ion (either as M0 or as part of its isotopic envelope), it is excluded
@@ -271,17 +403,26 @@ def find_matching_ions(
         target_mz: List of m/z values from the target (observed) spectrum.
         target_intensities: List of intensities corresponding to target m/z values.
         source_annotations: List of ion annotations from Koina (e.g., "b1+3", "y2+2").
-        mz_tolerance: Tolerance for matching m/z values (Daltons). Defaults to 0.02 Daltons.
+        mz_tolerance: Tolerance magnitude.
+        mz_tolerance_unit: Unit for ``mz_tolerance``; ``"ppm"`` or ``"da"`` (case-insensitive).
 
     Returns:
-        Tuple of (fraction of matched ions, normalised intensity of matched ions, list of matched ion annotations, list of matched ion m/z values).
-    """
-    if isinstance(source_mz, float) and isnan(source_mz):
-        return 0.0, 0.0, [], []
+        :class:`IonMatchResult` with match statistics and per-ion match details.
+        Access fields by name; positional unpacking is no longer supported.
 
-    num_matches, match_intensity = 0, 0.0
+    Raises:
+        ValueError: If ``mz_tolerance`` is not numeric or ``mz_tolerance_unit`` is invalid.
+    """
+    normalized_unit = _validate_mz_tolerance(mz_tolerance, mz_tolerance_unit)
+
+    if isinstance(source_mz, float) and isnan(source_mz):
+        return IonMatchResult(0.0, 0.0, [], [], [], [])
+
+    num_matches, matched_target_intensity = 0, 0.0
     matched_ion_annotations = []
     matched_ion_mz = []
+    matched_ion_intensities_incl_isotopic_env = []
+    aligned_m0_intensities: List[float] = []
     total_target_intensity = sum(target_intensities)
 
     # Track matched observed peak indices
@@ -297,7 +438,9 @@ def find_matching_ions(
         # Find monoisotopic peak (M0), excluding already-matched peaks
         source_ion_charge = extract_fragment_ion_charge(ion_annotation)
         isotope_spacing = CARBON_ISOTOPE_MASS_SHIFT / source_ion_charge
-        m0_idx = _find_peak_index(target_mz, ion_mz, mz_tolerance, matched_indices)
+
+        tol = _resolve_tolerance(ion_mz, mz_tolerance, normalized_unit)
+        m0_idx = _find_peak_index(target_mz, ion_mz, tol, matched_indices)
 
         if m0_idx is not None:
             # Count match only for M0 (avoids noise inflation)
@@ -309,64 +452,95 @@ def find_matching_ions(
             # Add the ion m/z to the list of matched ion m/z values
             matched_ion_mz.append(ion_mz)
 
-            # Sum M0 intensity
-            match_intensity += target_intensities[m0_idx]
+            # Record M0 intensity for aligned list (used for normalised spectral angle)
+            m0_intensity = target_intensities[m0_idx]
+            aligned_m0_intensities.append(m0_intensity)
+
+            # Sum M0 intensity for total match intensity calculation
+            ion_intensity = m0_intensity
+            matched_target_intensity += ion_intensity
 
             # Sum isotopic envelope intensities (M+1, M+2, M+3, M+4)
             for i in range(1, 5):
                 isotope_mz = ion_mz + i * isotope_spacing
+                isotope_tol = _resolve_tolerance(
+                    isotope_mz, mz_tolerance, normalized_unit
+                )
                 iso_idx = _find_peak_index(
-                    target_mz, isotope_mz, mz_tolerance, matched_indices
+                    target_mz, isotope_mz, isotope_tol, matched_indices
                 )
                 if iso_idx is not None:
                     matched_indices.add(iso_idx)
-                    match_intensity += target_intensities[iso_idx]
+                    ion_intensity += target_intensities[iso_idx]
+                    matched_target_intensity += target_intensities[iso_idx]
 
-    return (
+            # Record total intensity for this ion (M0 + isotopes)
+            matched_ion_intensities_incl_isotopic_env.append(ion_intensity)
+        else:
+            # No match - record 0.0 for aligned list
+            aligned_m0_intensities.append(0.0)
+
+    return IonMatchResult(
         num_matches / len(source_mz),
-        match_intensity / total_target_intensity,
+        matched_target_intensity / total_target_intensity,
         matched_ion_annotations,
         matched_ion_mz,
+        matched_ion_intensities_incl_isotopic_env,
+        aligned_m0_intensities,
     )
 
 
 def compute_ion_identifications(
     dataset: pd.DataFrame,
-    source_column: str,
+    source_mz_column: str,
     source_annotation_column: str,
-    mz_tolerance: float = 0.02,
+    source_intensity_column: str,
+    *,
+    mz_tolerance: float,
+    mz_tolerance_unit: str,
     predictions: Optional[List[str]] = None,
-) -> Iterator[
-    Tuple[List[float], List[float], List[int], List[int], List[int], List[float]]
-]:
-    """Computes the ion match rate and match intensity for each spectrum in the dataset.
+) -> IonIdentificationResult:
+    """Computes the ion match rate, match intensity, longest b series, longest y series, complementary ion count, max ion gap and b/y intensity ratio and normalised spectral angle for each spectrum in the dataset.
 
     Args:
         dataset: DataFrame containing the mass spectrum data.
-        source_column: Column name containing the theoretical m/z values.
+        source_mz_column: Column name containing the theoretical m/z values.
         source_annotation_column: Column name containing the ion annotations.
-        mz_tolerance: Mass tolerance used to match ions (Daltons). Defaults to 0.02 Daltons.
+        source_intensity_column: Column name containing the theoretical intensities.
+        mz_tolerance: Tolerance magnitude.
+        mz_tolerance_unit: Unit for ``mz_tolerance``; ``"ppm"`` or ``"da"`` (case-insensitive).
         predictions: Optional list of tokenised predictions for each spectrum. If not provided, the peptide length will be inferred from the column "predictions" in the metadata.
 
     Returns:
-        Iterator of (ion_match_rate, ion_match_intensity, longest_b_series, longest_y_series, complementary_ion_count, max_ion_gap) tuples.
+        :class:`IonIdentificationResult` with one tuple per feature column.
+        Access fields by name; positional unpacking is no longer supported.
+
+    Raises:
+        ValueError: If ``mz_tolerance`` is not numeric or ``mz_tolerance_unit`` is invalid.
     """
-    per_row_match_results: List[Tuple[float, float, int, int, int, float]] = []
+    _validate_mz_tolerance(mz_tolerance, mz_tolerance_unit)
+
+    per_row_match_results: List[
+        Tuple[float, float, int, int, int, float, float, float]
+    ] = []
 
     for row_idx, (_, row) in enumerate(dataset.iterrows()):
-        ion_match, ion_match_intensity, matched_ion_annotations, matched_ion_mz = (
-            find_matching_ions(
-                source_mz=row[source_column],
-                target_mz=row["mz_array"],
-                target_intensities=row["intensity_array"],
-                source_annotations=row[source_annotation_column],
-                mz_tolerance=mz_tolerance,
-            )
+        match = find_matching_ions(
+            source_mz=row[source_mz_column],
+            target_mz=row["mz_array"],
+            target_intensities=row["intensity_array"],
+            source_annotations=row[source_annotation_column],
+            mz_tolerance=mz_tolerance,
+            mz_tolerance_unit=mz_tolerance_unit,
         )
 
         # Compute the longest consecutive run of matched fragment ions
-        longest_b_series = compute_longest_ion_series(matched_ion_annotations, "b")
-        longest_y_series = compute_longest_ion_series(matched_ion_annotations, "y")
+        longest_b_series = compute_longest_ion_series(
+            match.matched_ion_annotations, "b"
+        )
+        longest_y_series = compute_longest_ion_series(
+            match.matched_ion_annotations, "y"
+        )
         # Compute the number of bond positions where both b and y ions are matched
         peptide_length = (
             len(predictions[row_idx])
@@ -374,24 +548,38 @@ def compute_ion_identifications(
             else len(row["prediction"])
         )
         complementary_ion_count = compute_complementary_ion_count(
-            matched_ion_annotations,
+            match.matched_ion_annotations,
             peptide_length,
         )
         # Compute the largest gap between consecutive matched fragment ions
-        max_ion_gap = compute_max_ion_gap(matched_ion_mz)
+        max_ion_gap = compute_max_ion_gap(match.matched_ion_mz)
+        # Compute the ratio of b-ion to y-ion intensities
+        b_y_intensity_ratio = compute_b_y_intensity_ratio(
+            match.matched_ion_annotations,
+            match.matched_ion_intensities_incl_isotopic_env,
+        )
+        # Compute the normalised spectral angle between theoretical and aligned matched observed intensities
+        spectral_angle = compute_spectral_angle(
+            row[source_intensity_column], match.aligned_m0_intensities
+        )
 
         per_row_match_results.append(
             (
-                ion_match,
-                ion_match_intensity,
+                match.match_rate,
+                match.match_intensity,
                 longest_b_series,
                 longest_y_series,
                 complementary_ion_count,
                 max_ion_gap,
+                b_y_intensity_ratio,
+                spectral_angle,
             )
         )
 
-    return zip(*per_row_match_results)
+    if not per_row_match_results:
+        return IonIdentificationResult((), (), (), (), (), (), (), ())
+
+    return IonIdentificationResult(*zip(*per_row_match_results))
 
 
 def extract_fragment_ion_charge(annotation: Union[bytes, str]) -> int:
@@ -501,3 +689,104 @@ def compute_max_ion_gap(matched_mz: List[float]) -> float:
 
     sorted_mz = sorted(matched_mz)
     return max(sorted_mz[i + 1] - sorted_mz[i] for i in range(len(sorted_mz) - 1))
+
+
+########################################################
+# Intensity-based Features
+########################################################
+
+
+def compute_b_y_intensity_ratio(
+    matched_ion_annotations: List[str],
+    matched_ion_intensities_incl_isotopic_env: List[float],
+    epsilon: float = 1e-8,
+) -> float:
+    """Compute the ratio of b-ion to y-ion intensities.
+
+    Sums intensities for all b-ions and y-ions separately (including their isotopic
+    envelopes), then returns b_total / (y_total + epsilon). The epsilon ensures
+    numerical stability when no y-ions are matched, while still producing a high
+    ratio that indicates the absence of y-ions.
+
+    Args:
+        matched_ion_annotations: Ion annotations for matched peaks (e.g. "b1+1", "y2+2").
+        matched_ion_intensities_incl_isotopic_env: Intensity for each matched ion (including isotopic envelope).
+        epsilon: Small value added to y-ion intensity for numerical stability.
+            Defaults to 1e-8.
+
+    Returns:
+        Ratio of b-ion to y-ion intensities. Returns 0.0 if no ions are matched.
+    """
+    if not matched_ion_annotations:
+        return 0.0
+
+    b_intensity = 0.0
+    y_intensity = 0.0
+
+    for annotation, intensity in zip(
+        matched_ion_annotations, matched_ion_intensities_incl_isotopic_env
+    ):
+        if annotation.startswith("b"):
+            b_intensity += intensity
+        elif annotation.startswith("y"):
+            y_intensity += intensity
+
+    return b_intensity / (y_intensity + epsilon)
+
+
+def compute_spectral_angle(
+    theoretical_ion_intensities: Union[List[float], float],
+    aligned_observed_ion_intensities: List[float],
+) -> float:
+    """Compute the normalised spectral angle similarity score between the theoretical and aligned observed spectra.
+
+    The intensity lists must align by m/z values (same length, with zeros for unmatched
+    observed ions).
+
+    Args:
+        theoretical_ion_intensities: Intensity for each theoretical ion. May be NaN/float
+            for missing data rows.
+        aligned_observed_ion_intensities: Aligned observed intensities (same length as
+            theoretical, with 0.0 for unmatched ions).
+
+    Returns:
+        Normalised spectral angle similarity score. 1.0 indicates perfect correlation, 0.0 indicates perfect anti-correlation.
+        Returns 0.0 for missing data or no matches.
+    """
+    # Handle missing data (NaN theoretical intensities)
+    if isinstance(theoretical_ion_intensities, float) and isnan(
+        theoretical_ion_intensities
+    ):
+        return 0.0
+
+    # Handle edge cases: empty lists or all zeros in observed
+    if not theoretical_ion_intensities or not aligned_observed_ion_intensities:
+        return 0.0
+
+    theoretical_arr = np.array(theoretical_ion_intensities)
+    observed_arr = np.array(aligned_observed_ion_intensities)
+
+    if len(theoretical_arr) != len(observed_arr):
+        raise ValueError(
+            "The intensity lists must align by m/z values.\n"
+            "This means every theoretical ion must have an observed intensity "
+            "or a zero intensity in the aligned observed intensity list."
+        )
+
+    # Compute L2 norms
+    theoretical_norm = np.linalg.norm(theoretical_arr)
+    observed_norm = np.linalg.norm(observed_arr)
+
+    # Handle edge case: no observed matches (all zeros) or zero theoretical intensities
+    if theoretical_norm == 0.0 or observed_norm == 0.0:
+        return 0.0
+
+    # Compute normalized dot product
+    dot_product = np.dot(theoretical_arr, observed_arr) / (
+        theoretical_norm * observed_norm
+    )
+
+    # Clamp to [-1, 1] to handle floating point errors
+    dot_product = np.clip(dot_product, -1.0, 1.0)
+
+    return 1 - (2 * np.arccos(dot_product) / np.pi)

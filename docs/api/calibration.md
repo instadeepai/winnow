@@ -35,7 +35,7 @@ calibrator = ProbabilityCalibrator(seed=42, hidden_dims=[128, 64])
 
 # Add features for calibration
 calibrator.add_feature(MassErrorDaFeature(residue_masses=residue_masses))
-calibrator.add_feature(FragmentMatchFeatures(mz_tolerance=0.02))
+calibrator.add_feature(FragmentMatchFeatures(mz_tolerance=0.02, mz_tolerance_unit="da"))
 calibrator.add_feature(BeamFeatures())
 
 # Train directly from a labelled CalibrationDataset

@@ -6,6 +6,7 @@ import pandas as pd
 from unittest.mock import Mock, patch
 
 from winnow.calibration.features.fragment_match import FragmentMatchFeatures
+from winnow.calibration.features.utils import IonIdentificationResult
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from tests.calibration.features.conftest import make_intensity_mock
 
@@ -18,6 +19,7 @@ class TestFragmentMatchFeatures:
         """Create a FragmentMatchFeatures instance for testing."""
         return FragmentMatchFeatures(
             mz_tolerance=0.02,
+            mz_tolerance_unit="da",
             unsupported_residues=["U", "O", "X"],
             model_input_constants={"collision_energies": 25},
         )
@@ -62,23 +64,39 @@ class TestFragmentMatchFeatures:
             "longest_y_series",
             "complementary_ion_count",
             "max_ion_gap",
+            "b_y_intensity_ratio",
+            "spectral_angle",
             # Missing indicator (learn_from_missing=True by default)
             "is_missing_fragment_match_features",
         ]
         assert prosit_features.dependencies == []
         assert prosit_features.mz_tolerance == 0.02
+        assert prosit_features.mz_tolerance_unit == "da"
 
-    def test_initialization_with_tolerance(self):
-        """Test initialization with custom tolerance."""
+    def test_initialization_with_da_tolerance(self):
+        """Test initialization with Da tolerance."""
         feature = FragmentMatchFeatures(
             mz_tolerance=0.01,
+            mz_tolerance_unit="da",
             unsupported_residues=["U", "O", "X"],
             model_input_constants={"collision_energies": 25},
         )
         assert feature.mz_tolerance == 0.01
+        assert feature.mz_tolerance_unit == "da"
         assert feature.intensity_model_name == "Prosit_2020_intensity_HCD"
         assert feature.model_input_constants == {"collision_energies": 25}
         assert feature.model_input_columns is None
+
+    def test_initialization_with_ppm_tolerance(self):
+        """Test initialization with ppm tolerance."""
+        feature = FragmentMatchFeatures(
+            mz_tolerance=20,
+            mz_tolerance_unit="ppm",
+            unsupported_residues=["U", "O", "X"],
+            model_input_constants={"collision_energies": 25},
+        )
+        assert feature.mz_tolerance == 20
+        assert feature.mz_tolerance_unit == "ppm"
 
     def test_prepare_does_nothing(self, prosit_features, sample_dataset_with_spectra):
         """Test that prepare method does nothing."""
@@ -94,7 +112,9 @@ class TestFragmentMatchFeatures:
 
     def test_columns_include_ion_coverage_features(self):
         """Verify columns include all ion coverage features."""
-        feature = FragmentMatchFeatures(mz_tolerance=0.02, learn_from_missing=True)
+        feature = FragmentMatchFeatures(
+            mz_tolerance=0.02, mz_tolerance_unit="da", learn_from_missing=True
+        )
         columns = feature.columns
 
         ion_coverage_features = [
@@ -110,6 +130,7 @@ class TestFragmentMatchFeatures:
         """learn_from_missing=False: is_missing_fragment_match_features not in columns."""
         feature = FragmentMatchFeatures(
             mz_tolerance=0.02,
+            mz_tolerance_unit="da",
             learn_from_missing=False,
         )
         assert "is_missing_fragment_match_features" not in feature.columns
@@ -120,12 +141,15 @@ class TestFragmentMatchFeatures:
             "longest_y_series",
             "complementary_ion_count",
             "max_ion_gap",
+            "b_y_intensity_ratio",
+            "spectral_angle",
         ]
 
     def test_learn_from_missing_true_columns_includes_indicator(self):
         """learn_from_missing=True: is_missing_fragment_match_features in columns."""
         feature = FragmentMatchFeatures(
             mz_tolerance=0.02,
+            mz_tolerance_unit="da",
             learn_from_missing=True,
         )
         assert "is_missing_fragment_match_features" in feature.columns
@@ -230,13 +254,17 @@ class TestFragmentMatchFeatures:
         mock_longest_y_series = 1
         mock_complementary_ion_count = 1
         mock_max_ion_gap = 1
-        mock_compute_ions.return_value = (
+        mock_b_y_intensity_ratio = 0.5
+        mock_spectral_angle = 0.8
+        mock_compute_ions.return_value = IonIdentificationResult(
             mock_match_rate,
             mock_match_intensity,
             mock_longest_b_series,
             mock_longest_y_series,
             mock_complementary_ion_count,
             mock_max_ion_gap,
+            mock_b_y_intensity_ratio,
+            mock_spectral_angle,
         )
 
         prosit_features.compute(sample_dataset_with_spectra)
@@ -320,6 +348,7 @@ class TestFragmentMatchFeatures:
         """learn_from_missing=False: invalid rows are removed and a warning is emitted."""
         feature = FragmentMatchFeatures(
             mz_tolerance=0.02,
+            mz_tolerance_unit="da",
             learn_from_missing=False,
             max_peptide_length=5,  # short limit so row 1 (len 6) is invalid
             model_input_constants={"collision_energies": 25},
@@ -361,6 +390,7 @@ class TestFragmentMatchFeatures:
         """learn_from_missing=False: no warning when all entries are valid."""
         feature = FragmentMatchFeatures(
             mz_tolerance=0.02,
+            mz_tolerance_unit="da",
             learn_from_missing=False,
             model_input_constants={"collision_energies": 25},
         )
@@ -402,6 +432,7 @@ class TestFragmentMatchFeatures:
         """learn_from_missing=True: invalid rows kept with zero values and indicator set."""
         feature = FragmentMatchFeatures(
             mz_tolerance=0.02,
+            mz_tolerance_unit="da",
             learn_from_missing=True,
             max_peptide_length=5,
             model_input_constants={"collision_energies": 25},
