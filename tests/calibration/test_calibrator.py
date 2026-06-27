@@ -8,7 +8,6 @@ from winnow.calibration.calibrator import ProbabilityCalibrator
 from winnow.calibration.calibration_features import (
     CalibrationFeatures,
     FeatureDependency,
-    FragmentMatchFeatures,
 )
 from winnow.datasets.calibration_dataset import CalibrationDataset
 
@@ -109,23 +108,31 @@ class TestProbabilityCalibrator:
         """Test columns property when no features are added."""
         assert calibrator.columns == []
 
-    def test_fragment_match_columns_preserve_saved_calibrator_width(self):
-        """Default fragment match columns should not expand legacy calibrator inputs."""
-        calibrator = ProbabilityCalibrator(
-            features=[FragmentMatchFeatures(mz_tolerance=0.02, mz_tolerance_unit="da")]
-        )
+    def test_load_rejects_feature_column_shift(self, tmp_path, labelled_dataset):
+        """Loading a checkpoint whose feature columns drift from training raises."""
+        calibrator = ProbabilityCalibrator(seed=42)
+        feature = MockCalibrationFeature("test_feature", ["test_col"])
+        calibrator.add_feature(feature)
+        calibrator.fit(labelled_dataset)
 
-        assert calibrator.columns == [
-            "ion_matches",
-            "ion_match_intensity",
-            "longest_b_series",
-            "longest_y_series",
-            "complementary_ion_count",
-            "max_ion_gap",
-            "b_y_intensity_ratio",
-            "spectral_angle",
-            "is_missing_fragment_match_features",
-        ]
+        calibrator.feature_dict["test_feature"]._columns = ["test_col", "extra_col"]
+        ProbabilityCalibrator.save(calibrator, tmp_path)
+
+        with pytest.raises(ValueError, match="feature dimension mismatch"):
+            ProbabilityCalibrator.load(tmp_path)
+
+    def test_predict_rejects_feature_column_shift(
+        self, calibrator, labelled_dataset, sample_dataset
+    ):
+        """Prediction raises when the live feature set no longer matches training."""
+        feature = MockCalibrationFeature("test_feature", ["test_col"])
+        calibrator.add_feature(feature)
+        calibrator.fit(labelled_dataset)
+
+        calibrator.feature_dict["test_feature"]._columns = ["test_col", "extra_col"]
+
+        with pytest.raises(ValueError, match="feature dimension mismatch"):
+            calibrator.predict(sample_dataset)
 
     def test_features_property_empty(self, calibrator):
         """Test features property when no features are added."""
