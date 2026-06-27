@@ -6,6 +6,7 @@ import pandas as pd
 from unittest.mock import Mock, patch
 
 from winnow.calibration.features.fragment_match import FragmentMatchFeatures
+from winnow.calibration.features.utils import IonIdentificationResult
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from tests.calibration.features.conftest import make_intensity_mock
 
@@ -63,6 +64,7 @@ class TestFragmentMatchFeatures:
             "longest_y_series",
             "complementary_ion_count",
             "max_ion_gap",
+            "b_y_intensity_ratio",
             # Missing indicator (learn_from_missing=True by default)
             "is_missing_fragment_match_features",
         ]
@@ -138,6 +140,7 @@ class TestFragmentMatchFeatures:
             "longest_y_series",
             "complementary_ion_count",
             "max_ion_gap",
+            "b_y_intensity_ratio",
         ]
 
     def test_learn_from_missing_true_columns_includes_indicator(self):
@@ -249,13 +252,15 @@ class TestFragmentMatchFeatures:
         mock_longest_y_series = 1
         mock_complementary_ion_count = 1
         mock_max_ion_gap = 1
-        mock_compute_ions.return_value = (
+        mock_b_y_intensity_ratio = 0.5
+        mock_compute_ions.return_value = IonIdentificationResult(
             mock_match_rate,
             mock_match_intensity,
             mock_longest_b_series,
             mock_longest_y_series,
             mock_complementary_ion_count,
             mock_max_ion_gap,
+            mock_b_y_intensity_ratio,
         )
 
         prosit_features.compute(sample_dataset_with_spectra)
