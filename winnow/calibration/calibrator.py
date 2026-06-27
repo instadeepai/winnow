@@ -331,6 +331,20 @@ class ProbabilityCalibrator:
             device = torch.device("cpu")
         return device
 
+    @staticmethod
+    def _reject_legacy_pickle_checkpoint(dir_path: Path) -> None:
+        """Raise if ``dir_path`` contains a pre-PyTorch pickle checkpoint."""
+        legacy_pickle = dir_path / "calibrator.pkl"
+        config_path = dir_path / "config.json"
+        if legacy_pickle.exists() and not config_path.exists():
+            raise ValueError(
+                "Legacy pickle checkpoint format is no longer supported. "
+                "The directory contains calibrator.pkl from a pre-PyTorch "
+                "version of winnow, but this version expects model.safetensors "
+                "and config.json. Retrain the calibrator with the current "
+                "version to produce a compatible checkpoint."
+            )
+
     # ------------------------------------------------------------------
     # Class methods (persistence)
     # ------------------------------------------------------------------
@@ -414,6 +428,7 @@ class ProbabilityCalibrator:
 
         Raises:
             FileNotFoundError: If the path cannot be resolved.
+            ValueError: If the directory contains a legacy pickle checkpoint.
         """
         dir_path = resolve_data_path(
             str(pretrained_model_name_or_path),
@@ -421,7 +436,10 @@ class ProbabilityCalibrator:
             cache_dir=cache_dir,
         )
 
-        with open(dir_path / "config.json") as f:
+        cls._reject_legacy_pickle_checkpoint(dir_path)
+
+        config_path = dir_path / "config.json"
+        with open(config_path) as f:
             config = json.load(f)
 
         calibrator = cls(

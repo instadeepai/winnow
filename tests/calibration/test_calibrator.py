@@ -744,6 +744,18 @@ class TestProbabilityCalibrator:
         with pytest.raises(FileNotFoundError):
             ProbabilityCalibrator.load("/nonexistent/path/to/model")
 
+    def test_load_legacy_pickle_checkpoint_raises(self, tmp_path):
+        """Pre-PyTorch calibrator.pkl directories raise a clear error."""
+        legacy_dir = tmp_path / "legacy_checkpoint"
+        legacy_dir.mkdir()
+        (legacy_dir / "calibrator.pkl").write_bytes(b"fake pickle")
+
+        with pytest.raises(
+            ValueError,
+            match="Legacy pickle checkpoint format is no longer supported",
+        ):
+            ProbabilityCalibrator.load(legacy_dir)
+
     def test_empty_dataset_handling(self, calibrator):
         """Test handling of empty datasets."""
         empty_metadata = pd.DataFrame({"confidence": []})
