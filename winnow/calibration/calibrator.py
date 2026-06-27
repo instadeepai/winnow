@@ -268,6 +268,8 @@ class ProbabilityCalibrator:
         self.dropout = dropout
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
+        if max_epochs < 1:
+            raise ValueError(f"max_epochs must be at least 1, got {max_epochs}.")
         self.max_epochs = max_epochs
         self.batch_size = batch_size
         self.n_iter_no_change = n_iter_no_change
@@ -860,7 +862,7 @@ class ProbabilityCalibrator:
             if should_stop:
                 break
 
-        history.epochs_trained = epoch + 1  # noqa: F821 — loop always runs
+        history.epochs_trained = len(history.train_losses)
 
         if best_state is not None:
             self.network.load_state_dict(best_state)

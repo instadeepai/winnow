@@ -425,6 +425,11 @@ class TestProbabilityCalibrator:
 
         assert f"{dependency.name}_data" in sample_dataset.metadata.columns
 
+    def test_max_epochs_must_be_positive(self):
+        """max_epochs=0 is rejected at construction time."""
+        with pytest.raises(ValueError, match="max_epochs must be at least 1"):
+            ProbabilityCalibrator(max_epochs=0)
+
     def test_fit_from_features_returns_history(self, feature_dataset):
         """Test that fit_from_features returns a TrainingHistory."""
         calibrator = ProbabilityCalibrator(
