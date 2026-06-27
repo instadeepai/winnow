@@ -131,6 +131,7 @@ class ChimericFeatures(CalibrationFeatures):
             "chimeric_max_ion_gap",
             "chimeric_b_y_intensity_ratio",
             "chimeric_spectral_angle",
+            "chimeric_xcorr",
         ]
         if self.learn_from_missing:
             columns.append("is_missing_chimeric_features")
@@ -338,3 +339,4 @@ class ChimericFeatures(CalibrationFeatures):
             ion_identifications.b_y_intensity_ratio
         )
         dataset.metadata["chimeric_spectral_angle"] = ion_identifications.spectral_angle
+        dataset.metadata["chimeric_xcorr"] = ion_identifications.xcorr
