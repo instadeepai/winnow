@@ -255,6 +255,101 @@ class TestRetentionTimeFeature:
         assert "exp_a" not in feature.irt_predictors
 
     @patch("winnow.calibration.features.retention_time.koinapy.Koina")
+    def test_skipped_experiments_reset_between_prepare_calls(self, mock_koina):
+        """Stale skipped experiments must not affect a later file with the same name."""
+        mock_model_instance = Mock()
+        mock_koina.return_value = mock_model_instance
+        mock_model_instance.model_inputs = ["peptide_sequences"]
+        mock_model_instance.predict.side_effect = lambda inputs: pd.DataFrame(
+            {"irt": range(len(inputs))}
+        )
+
+        feature = RetentionTimeFeature(
+            train_fraction=1.0,
+            min_train_points=10,
+            learn_from_missing=True,
+        )
+
+        insufficient_metadata = pd.DataFrame(
+            {
+                "confidence": [0.95, 0.90],
+                "prediction": [["A", "G"], ["G", "A"]],
+                "retention_time": [10.5, 15.2],
+                "spectrum_id": [0, 1],
+                "experiment_name": ["exp_a", "exp_a"],
+            }
+        )
+        insufficient_dataset = CalibrationDataset(
+            metadata=insufficient_metadata, predictions=None
+        )
+
+        with pytest.warns(
+            UserWarning, match="Skipping RT->iRT regressor fit for experiment 'exp_a'"
+        ):
+            feature.prepare(insufficient_dataset)
+        assert feature._skipped_experiments == ["exp_a"]
+        assert "exp_a" not in feature.irt_predictors
+
+        feature.compute(insufficient_dataset)
+        assert insufficient_dataset.metadata["is_missing_irt_error"].tolist() == [
+            True,
+            True,
+        ]
+
+        repeated_peptides = [
+            ["P", "E", "P", "T", "I", "D", "E"],
+            ["G", "L", "Y", "G", "A", "T"],
+            ["K", "V", "L", "V", "A", "P"],
+            ["A", "I", "V", "E", "G"],
+            ["S", "T", "D", "K"],
+        ]
+        sufficient_metadata = pd.DataFrame(
+            {
+                "confidence": [
+                    0.95,
+                    0.93,
+                    0.91,
+                    0.89,
+                    0.87,
+                    0.85,
+                    0.83,
+                    0.81,
+                    0.79,
+                    0.77,
+                ],
+                "prediction": repeated_peptides + repeated_peptides,
+                "retention_time": [
+                    12.5,
+                    15.2,
+                    18.1,
+                    21.0,
+                    24.3,
+                    26.8,
+                    29.1,
+                    31.5,
+                    34.0,
+                    36.2,
+                ],
+                "spectrum_id": [100, 101, 102, 103, 104, 105, 106, 107, 108, 109],
+                "experiment_name": ["exp_a"] * 10,
+            }
+        )
+        sufficient_dataset = CalibrationDataset(
+            metadata=sufficient_metadata, predictions=None
+        )
+
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            feature.prepare(sufficient_dataset)
+        assert feature._skipped_experiments == []
+        assert "exp_a" in feature.irt_predictors
+
+        feature.compute(sufficient_dataset)
+        assert not sufficient_dataset.metadata["is_missing_irt_error"].any()
+        assert sufficient_dataset.metadata["irt_error"].notna().all()
+        assert sufficient_dataset.metadata["predicted iRT"].notna().all()
+
+    @patch("winnow.calibration.features.retention_time.koinapy.Koina")
     def test_compute_imputes_skipped_global_regressor(self, mock_koina):
         """Test global skipped iRT fits are imputed when experiment_name is absent."""
         mock_model_instance = Mock()

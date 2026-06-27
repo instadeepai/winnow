@@ -220,6 +220,10 @@ class RetentionTimeFeature(CalibrationFeatures):
                 "This is required for iRT features computation."
             )
 
+        # Reset per dataset so directory-mode reuse does not carry stale skips
+        # from an earlier file into a later file with the same experiment_name.
+        self._skipped_experiments = []
+
         experiments_to_fit = self._resolve_experiments_to_fit(dataset)
         if not experiments_to_fit:
             return
