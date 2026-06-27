@@ -13,6 +13,7 @@ from winnow.calibration.features.utils import (
     format_intensity_prediction_outputs,
     compute_ion_identifications,
     validate_intensity_model_name,
+    _validate_mz_tolerance,
 )
 from winnow.utils.peptide import tokens_to_proforma
 
@@ -26,7 +27,9 @@ class ChimericFeatures(CalibrationFeatures):
 
     def __init__(
         self,
+        *,
         mz_tolerance: float,
+        mz_tolerance_unit: str,
         learn_from_missing: bool = True,
         prosit_intensity_model_name: str = "Prosit_2020_intensity_HCD",
         max_precursor_charge: int = 6,
@@ -38,7 +41,8 @@ class ChimericFeatures(CalibrationFeatures):
         """Initialize ChimericFeatures.
 
         Args:
-            mz_tolerance (float): The mass-to-charge tolerance for ion matching.
+            mz_tolerance: Tolerance magnitude for matching fragment ions.
+            mz_tolerance_unit: Unit for ``mz_tolerance``; ``"ppm"`` or ``"da"`` (case-insensitive).
             learn_from_missing (bool): When True, invalid runner-up predictions are recorded
                 in an ``is_missing_chimeric_features`` indicator column and imputed with
                 zeros, allowing the calibrator to learn from missingness. When False,
@@ -62,11 +66,13 @@ class ChimericFeatures(CalibrationFeatures):
                 (e.g. {"collision_energies": "nce_col"}). Defaults to None.
 
         Raises:
-            ValueError: If the same key appears in both model_input_constants and model_input_columns.
+            ValueError: If ``mz_tolerance`` is not numeric, ``mz_tolerance_unit`` is invalid,
+                or the same key appears in both model_input_constants and model_input_columns.
         """
         validate_intensity_model_name(prosit_intensity_model_name)
+        self.mz_tolerance_unit = _validate_mz_tolerance(mz_tolerance, mz_tolerance_unit)
+        self.mz_tolerance = float(mz_tolerance)
         validate_model_input_params(model_input_constants, model_input_columns)
-        self.mz_tolerance = mz_tolerance
         self.learn_from_missing = learn_from_missing
         self.unsupported_residues = (
             unsupported_residues if unsupported_residues is not None else []
@@ -304,29 +310,31 @@ class ChimericFeatures(CalibrationFeatures):
 
         # Compute ion matches and match intensity
         # Zeros are returned for rows with missing Prosit-predicted spectra
-        (
-            ion_matches,
-            match_intensity,
-            longest_b_series,
-            longest_y_series,
-            complementary_ion_count,
-            max_ion_gap,
-            b_y_intensity_ratio,
-            spectral_angle,
-        ) = compute_ion_identifications(
+        ion_identifications = compute_ion_identifications(
             dataset=dataset.metadata,
             source_mz_column="runner_up_prosit_mz",
             source_annotation_column="runner_up_annotation",
             source_intensity_column="runner_up_prosit_intensity",
             mz_tolerance=self.mz_tolerance,
+            mz_tolerance_unit=self.mz_tolerance_unit,
             predictions=runner_up_predictions,
         )
 
-        dataset.metadata["chimeric_ion_matches"] = ion_matches
-        dataset.metadata["chimeric_ion_match_intensity"] = match_intensity
-        dataset.metadata["chimeric_longest_b_series"] = longest_b_series
-        dataset.metadata["chimeric_longest_y_series"] = longest_y_series
-        dataset.metadata["chimeric_complementary_ion_count"] = complementary_ion_count
-        dataset.metadata["chimeric_max_ion_gap"] = max_ion_gap
-        dataset.metadata["chimeric_b_y_intensity_ratio"] = b_y_intensity_ratio
-        dataset.metadata["chimeric_spectral_angle"] = spectral_angle
+        dataset.metadata["chimeric_ion_matches"] = ion_identifications.ion_match_rate
+        dataset.metadata["chimeric_ion_match_intensity"] = (
+            ion_identifications.ion_match_intensity
+        )
+        dataset.metadata["chimeric_longest_b_series"] = (
+            ion_identifications.longest_b_series
+        )
+        dataset.metadata["chimeric_longest_y_series"] = (
+            ion_identifications.longest_y_series
+        )
+        dataset.metadata["chimeric_complementary_ion_count"] = (
+            ion_identifications.complementary_ion_count
+        )
+        dataset.metadata["chimeric_max_ion_gap"] = ion_identifications.max_ion_gap
+        dataset.metadata["chimeric_b_y_intensity_ratio"] = (
+            ion_identifications.b_y_intensity_ratio
+        )
+        dataset.metadata["chimeric_spectral_angle"] = ion_identifications.spectral_angle

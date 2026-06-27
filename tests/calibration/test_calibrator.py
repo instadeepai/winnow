@@ -112,7 +112,7 @@ class TestProbabilityCalibrator:
     def test_fragment_match_columns_preserve_saved_calibrator_width(self):
         """Default fragment match columns should not expand legacy calibrator inputs."""
         calibrator = ProbabilityCalibrator(
-            features=[FragmentMatchFeatures(mz_tolerance=0.02)]
+            features=[FragmentMatchFeatures(mz_tolerance=0.02, mz_tolerance_unit="da")]
         )
 
         assert calibrator.columns == [
@@ -123,6 +123,7 @@ class TestProbabilityCalibrator:
             "complementary_ion_count",
             "max_ion_gap",
             "b_y_intensity_ratio",
+            "spectral_angle",
             "is_missing_fragment_match_features",
         ]
 
