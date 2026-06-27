@@ -2,7 +2,7 @@
 
 ## Quick start with example data
 
-Try `winnow` in minutes using the bundled example subset under `examples/example_data/`: spectra (`spectra.ipc`) and de novo predictions (`predictions.csv`) from a real HeLa single-shot run, reduced for repository size.
+Try `winnow` in minutes using the bundled example subset under `examples/example_data/`: spectra (`spectra.mgf`) and de novo predictions (`predictions.csv`) from a real HeLa single-shot run, reduced for repository size.
 
 ```bash
 # Train a calibrator
