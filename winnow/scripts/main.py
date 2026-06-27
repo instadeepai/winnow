@@ -16,6 +16,7 @@ from winnow.utils.rich_console import STDERR_CONSOLE, notebook_safe_rich_handler
 
 import polars as pl
 import pandas as pd
+import numpy as np
 
 # Lazy imports for heavy dependencies - only imported when actually needed
 if TYPE_CHECKING:
@@ -417,6 +418,16 @@ def _load_and_prepare_dataset(cfg, instantiate):
     return annotated_dataset, dataset_output_path
 
 
+def _random_validation_indices(
+    n: int, validation_fraction: float, seed: int
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Return shuffled (train_indices, val_indices) for a validation split."""
+    n_val = max(1, int(n * validation_fraction))
+    rng = np.random.default_rng(seed)
+    indices = rng.permutation(n)
+    return indices[: n - n_val], indices[n - n_val :]
+
+
 def _maybe_split_validation(cfg, train_dataset):
     """Optionally split a random validation set from the training data.
 
@@ -428,7 +439,6 @@ def _maybe_split_validation(cfg, train_dataset):
         Tuple of (train_dataset, val_dataset). val_dataset is ``None`` when
         ``validation_fraction`` is 0 or absent.
     """
-    import torch
     from winnow.datasets.feature_dataset import FeatureDataset
 
     validation_fraction = cfg.get("validation_fraction", 0.1)
@@ -445,13 +455,8 @@ def _maybe_split_validation(cfg, train_dataset):
     )
 
     n = len(train_dataset)
-    n_val = max(1, int(n * validation_fraction))
-    n_train = n - n_val
-
-    generator = torch.Generator().manual_seed(cfg.get("calibrator", {}).get("seed", 42))
-    indices = torch.randperm(n, generator=generator)
-    train_idx = indices[:n_train]
-    val_idx = indices[n_train:]
+    seed = cfg.get("calibrator", {}).get("seed", 42)
+    train_idx, val_idx = _random_validation_indices(n, validation_fraction, seed)
 
     train_split = FeatureDataset(
         features=train_dataset.features[train_idx].numpy(),
@@ -476,7 +481,6 @@ def _maybe_split_calibration_dataset(cfg, dataset):
         Tuple of (train_dataset, val_dataset). val_dataset is ``None`` when
         ``validation_fraction`` is 0 or absent.
     """
-    import numpy as np
     from winnow.datasets.calibration_dataset import CalibrationDataset
 
     validation_fraction = cfg.get("validation_fraction", 0.1)
@@ -493,12 +497,8 @@ def _maybe_split_calibration_dataset(cfg, dataset):
     )
 
     n = len(dataset)
-    n_val = max(1, int(n * validation_fraction))
-
-    rng = np.random.default_rng(cfg.get("calibrator", {}).get("seed", 42))
-    indices = rng.permutation(n)
-    train_idx = indices[: n - n_val]
-    val_idx = indices[n - n_val :]
+    seed = cfg.get("calibrator", {}).get("seed", 42)
+    train_idx, val_idx = _random_validation_indices(n, validation_fraction, seed)
 
     train_meta = dataset.metadata.iloc[train_idx].reset_index(drop=True)
     val_meta = dataset.metadata.iloc[val_idx].reset_index(drop=True)
