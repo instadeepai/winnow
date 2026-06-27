@@ -164,6 +164,7 @@ class ProbabilityCalibrator:
                 f"Loaded object is of type {type(loaded_obj).__name__}, expected ProbabilityCalibrator."
             )
         else:
+            loaded_obj._validate_fitted_feature_dimensions()
             return loaded_obj
 
     def add_feature(self, feature: CalibrationFeatures) -> None:
@@ -269,8 +270,33 @@ class ProbabilityCalibrator:
         Args:
             dataset (CalibrationDataset): The dataset for which predictions are made.
         """
+        self._validate_fitted_feature_dimensions()
         features = self.compute_features(dataset=dataset, labelled=False)
         # Transform features with scaler
         features_scaled = self.scaler.transform(features)
         correct_probs = self.classifier.predict_proba(features_scaled)
         dataset.metadata["calibrated_confidence"] = correct_probs[:, 1].tolist()
+
+    def _feature_input_dim(self) -> int:
+        """Return the number of model inputs (confidence plus feature columns)."""
+        return 1 + len(self.columns)
+
+    def _validate_fitted_feature_dimensions(self) -> None:
+        """Raise if the current feature set does not match the fitted scaler/classifier."""
+        if not hasattr(self.scaler, "n_features_in_"):
+            return
+
+        trained_dim = self.scaler.n_features_in_
+        expected_dim = self._feature_input_dim()
+        if trained_dim == expected_dim:
+            return
+
+        raise ValueError(
+            "Calibrator feature dimension mismatch: the saved model was trained "
+            f"with {trained_dim} input feature(s) but the current feature set "
+            f"produces {expected_dim} (confidence plus {len(self.columns)} "
+            f"feature column(s): {self.columns}). "
+            "This usually means the calibrator checkpoint is incompatible with "
+            "the installed version of winnow. Retrain the calibrator or use a "
+            "checkpoint published for this version."
+        )

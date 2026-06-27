@@ -27,4 +27,5 @@ class TestFindMatchingIonsBackwardsCompat:
         assert result.match_intensity == 1.0
         assert result.matched_ion_annotations == ["b1+1"]
         assert result.matched_ion_mz == [100.0]
-        assert result.matched_ion_intensities == [1000.0]
+        assert result.matched_ion_intensities_incl_isotopic_env == [1000.0]
+        assert result.aligned_m0_intensities == [1000.0]

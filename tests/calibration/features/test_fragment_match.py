@@ -65,6 +65,7 @@ class TestFragmentMatchFeatures:
             "complementary_ion_count",
             "max_ion_gap",
             "b_y_intensity_ratio",
+            "spectral_angle",
             # Missing indicator (learn_from_missing=True by default)
             "is_missing_fragment_match_features",
         ]
@@ -141,6 +142,7 @@ class TestFragmentMatchFeatures:
             "complementary_ion_count",
             "max_ion_gap",
             "b_y_intensity_ratio",
+            "spectral_angle",
         ]
 
     def test_learn_from_missing_true_columns_includes_indicator(self):
@@ -253,6 +255,7 @@ class TestFragmentMatchFeatures:
         mock_complementary_ion_count = 1
         mock_max_ion_gap = 1
         mock_b_y_intensity_ratio = 0.5
+        mock_spectral_angle = 0.8
         mock_compute_ions.return_value = IonIdentificationResult(
             mock_match_rate,
             mock_match_intensity,
@@ -261,6 +264,7 @@ class TestFragmentMatchFeatures:
             mock_complementary_ion_count,
             mock_max_ion_gap,
             mock_b_y_intensity_ratio,
+            mock_spectral_angle,
         )
 
         prosit_features.compute(sample_dataset_with_spectra)

@@ -16,6 +16,7 @@ from winnow.calibration.features.utils import (
     compute_complementary_ion_count,
     compute_max_ion_gap,
     compute_b_y_intensity_ratio,
+    compute_spectral_angle,
     parse_mz_tolerance_unit,
     _validate_mz_tolerance,
 )
@@ -43,7 +44,8 @@ class TestIonMatchFunctions:
         assert result.match_intensity == 1.0
         assert result.matched_ion_annotations == ["b1+1"]
         assert result.matched_ion_mz == [100.0]
-        assert result.matched_ion_intensities == [1000.0]
+        assert result.matched_ion_intensities_incl_isotopic_env == [1000.0]
+        assert result.aligned_m0_intensities == [1000.0]
 
     def test_find_matching_ions_positional_unpack_raises_upgrade_error(self):
         """Positional unpacking is no longer supported."""
@@ -371,6 +373,72 @@ class TestValidateMzTolerance:
                 mz_tolerance_unit="da",
             )
 
+    def test_find_matching_ions_returns_aligned_m0_intensities(self):
+        """Test that aligned_m0_intensities has same length as source_mz."""
+        source_mz = [100.0, 200.0, 300.0]
+        target_mz = [100.0, 200.0, 400.0]  # 300.0 has no match
+        target_intensities = [1000.0, 2000.0, 4000.0]
+        tolerance = 0.01
+
+        result = find_matching_ions(
+            source_mz,
+            target_mz,
+            target_intensities,
+            source_annotations=["b1+1", "b2+1", "b3+1"],
+            mz_tolerance=tolerance,
+            mz_tolerance_unit="da",
+        )
+
+        # aligned_m0_intensities should have same length as source_mz
+        assert len(result.aligned_m0_intensities) == len(source_mz)
+        # First two should have M0 intensities, third should be 0.0 (no match)
+        assert result.aligned_m0_intensities[0] == 1000.0  # M0 intensity for 100.0
+        assert result.aligned_m0_intensities[1] == 2000.0  # M0 intensity for 200.0
+        assert result.aligned_m0_intensities[2] == 0.0  # No match for 300.0
+
+    def test_find_matching_ions_aligned_intensities_are_m0_only(self):
+        """Test that aligned_m0_intensities contains only M0, not isotope intensities."""
+        source_mz = [100.0]
+        # Observed: M0 at 100.0 and M+1 isotope at ~101.003
+        target_mz = [100.0, 101.003]
+        target_intensities = [1000.0, 500.0]
+        tolerance = 0.02
+
+        result = find_matching_ions(
+            source_mz,
+            target_mz,
+            target_intensities,
+            source_annotations=["b1+1"],  # +1 charge
+            mz_tolerance=tolerance,
+            mz_tolerance_unit="da",
+        )
+
+        # aligned_m0_intensities should only have M0 intensity
+        assert result.aligned_m0_intensities[0] == 1000.0
+        # matched_intensities_isotopic should include M0 + isotope
+        assert (
+            result.matched_ion_intensities_incl_isotopic_env[0] == 1500.0
+        )  # 1000 + 500
+
+    def test_find_matching_ions_preserves_public_return_arity(self):
+        """Direct callers should still be able to unpack the original five values."""
+        result = find_matching_ions(
+            source_mz=[100.0],
+            target_mz=[100.0],
+            target_intensities=[1000.0],
+            source_annotations=["b1+1"],
+            mz_tolerance=0.02,
+            mz_tolerance_unit="da",
+        )
+
+        assert isinstance(result, IonMatchResult)
+        assert result.match_rate == 1.0
+        assert result.match_intensity == 1.0
+        assert result.matched_ion_annotations == ["b1+1"]
+        assert result.matched_ion_mz == [100.0]
+        assert result.matched_ion_intensities_incl_isotopic_env == [1000.0]
+        assert result.aligned_m0_intensities == [1000.0]
+
 
 class TestModelInputHelpers:
     """Tests for validate_model_input_params and resolve_model_inputs utility functions."""
@@ -695,6 +763,7 @@ class TestSpectrumMatchQualityFunctions:
         dataset = pd.DataFrame(
             {
                 "prosit_mz": [[100.0, 200.0], [300.0, 400.0]],
+                "prosit_intensity": [[50.0, 50.0], [25.0, 75.0]],
                 "annotation": [["b1+1", "y3+1"], ["b1+1", "y3+1"]],
                 "mz_array": [[100.0, 200.0], [300.0, 400.0]],
                 "intensity_array": [[50.0, 50.0], [25.0, 75.0]],
@@ -708,8 +777,9 @@ class TestSpectrumMatchQualityFunctions:
 
         result = compute_ion_identifications(
             dataset,
-            source_column="prosit_mz",
+            source_mz_column="prosit_mz",
             source_annotation_column="annotation",
+            source_intensity_column="prosit_intensity",
             mz_tolerance=0.02,
             mz_tolerance_unit="da",
             predictions=runner_up_predictions,
@@ -723,6 +793,7 @@ class TestSpectrumMatchQualityFunctions:
         dataset = pd.DataFrame(
             {
                 "prosit_mz": [[100.0]],
+                "prosit_intensity": [[50.0]],
                 "annotation": [["b1+1"]],
                 "mz_array": [[100.0]],
                 "intensity_array": [[50.0]],
@@ -732,8 +803,9 @@ class TestSpectrumMatchQualityFunctions:
 
         result = compute_ion_identifications(
             dataset,
-            source_column="prosit_mz",
+            source_mz_column="prosit_mz",
             source_annotation_column="annotation",
+            source_intensity_column="prosit_intensity",
             mz_tolerance=0.02,
             mz_tolerance_unit="da",
         )
@@ -746,6 +818,49 @@ class TestSpectrumMatchQualityFunctions:
                 longest_y_series,
                 complementary_ion_count,
                 max_ion_gap,
+                b_y_intensity_ratio,
+                spectral_angle,
+            ) = result
+
+    def test_compute_ion_identifications_old_api_is_no_longer_supported(self):
+        """Pre-spectral-angle call patterns fail with a clear TypeError."""
+        dataset = pd.DataFrame(
+            {
+                "prosit_mz": [[100.0, 200.0]],
+                "annotation": [["b1+1", "y2+1"]],
+                "mz_array": [[100.0, 200.0]],
+                "intensity_array": [[50.0, 75.0]],
+                "prediction": [["P", "E", "P"]],
+            }
+        )
+
+        with pytest.raises(TypeError, match="source_column"):
+            compute_ion_identifications(
+                dataset,
+                source_column="prosit_mz",
+                source_annotation_column="annotation",
+                mz_tolerance=0.02,
+            )
+
+        # Add intensity column back in to make the call valid
+        result = compute_ion_identifications(
+            dataset.assign(prosit_intensity=[[50.0, 75.0]]),
+            source_mz_column="prosit_mz",
+            source_annotation_column="annotation",
+            source_intensity_column="prosit_intensity",
+            mz_tolerance=0.02,
+            mz_tolerance_unit="da",
+        )
+
+        with pytest.raises(TypeError, match="Upgrade to the latest API"):
+            (
+                ion_matches,
+                match_intensity,
+                longest_b_series,
+                longest_y_series,
+                complementary_ion_count,
+                max_ion_gap,
+                b_y_intensity_ratio,
             ) = result
 
     def test_compute_max_ion_gap_basic(self):
@@ -792,3 +907,65 @@ class TestSpectrumMatchQualityFunctions:
         """Test b/y ratio when no ions are matched."""
         ratio = compute_b_y_intensity_ratio([], [])
         assert ratio == 0.0
+
+    # --- Spectral Angle ---
+
+    def test_compute_spectral_angle_perfect_match(self):
+        """Test normalised spectral angle with identical intensity vectors."""
+        theoretical = [1.0, 2.0, 3.0]
+        observed = [1.0, 2.0, 3.0]
+        angle = compute_spectral_angle(theoretical, observed)
+        # Perfect match should give 1.0
+        assert angle == pytest.approx(1.0, abs=1e-10)
+
+    def test_compute_spectral_angle_scaled_match(self):
+        """Test normalised spectral angle with proportionally scaled intensities."""
+        theoretical = [1.0, 2.0, 3.0]
+        observed = [2.0, 4.0, 6.0]  # Scaled by 2x
+        angle = compute_spectral_angle(theoretical, observed)
+        # Proportional vectors should give 1.0 (same direction)
+        assert angle == pytest.approx(1.0, abs=1e-10)
+
+    def test_compute_spectral_angle_orthogonal(self):
+        """Test normalised spectral angle with orthogonal vectors."""
+        theoretical = [1.0, 0.0]
+        observed = [0.0, 1.0]
+        angle = compute_spectral_angle(theoretical, observed)
+        # Orthogonal vectors should give 0.0
+        assert angle == pytest.approx(0.0, abs=1e-10)
+
+    def test_compute_spectral_angle_partial_match(self):
+        """Test normalised spectral angle with partial match."""
+        theoretical = [1.0, 1.0, 1.0]
+        observed = [1.0, 0.0, 0.0]  # Only first ion matched
+        angle = compute_spectral_angle(theoretical, observed)
+        # Should be between 0 and 1
+        assert 0.0 < angle < 1.0
+
+    def test_compute_spectral_angle_no_observed_matches(self):
+        """Test normalised spectral angle when no ions are observed (all zeros)."""
+        theoretical = [1.0, 2.0, 3.0]
+        observed = [0.0, 0.0, 0.0]
+        angle = compute_spectral_angle(theoretical, observed)
+        # No matches should give 0.0
+        assert angle == 0.0
+
+    def test_compute_spectral_angle_missing_data(self):
+        """Test normalised spectral angle with NaN theoretical intensities."""
+        import math
+
+        angle = compute_spectral_angle(math.nan, [1.0, 2.0])
+        # Missing data should return 0.0
+        assert angle == 0.0
+
+    def test_compute_spectral_angle_empty_lists(self):
+        """Test normalised spectral angle with empty lists."""
+        angle = compute_spectral_angle([], [])
+        assert angle == 0.0
+
+    def test_compute_spectral_angle_length_mismatch_raises(self):
+        """Test that normalised spectral angle mismatched lengths raise ValueError."""
+        theoretical = [1.0, 2.0, 3.0]
+        observed = [1.0, 2.0]  # Different length
+        with pytest.raises(ValueError, match="must align"):
+            compute_spectral_angle(theoretical, observed)
