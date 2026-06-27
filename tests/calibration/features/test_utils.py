@@ -822,14 +822,11 @@ class TestSpectrumMatchQualityFunctions:
                 spectral_angle,
             ) = result
 
-    def test_compute_ion_identifications_preserves_public_api_without_spectral_angle(
-        self,
-    ):
-        """Direct callers should still be able to use the pre-spectral-angle API."""
+    def test_compute_ion_identifications_old_api_is_no_longer_supported(self):
+        """Pre-spectral-angle call patterns fail with a clear TypeError."""
         dataset = pd.DataFrame(
             {
                 "prosit_mz": [[100.0, 200.0]],
-                "prosit_intensity": [[50.0, 75.0]],
                 "annotation": [["b1+1", "y2+1"]],
                 "mz_array": [[100.0, 200.0]],
                 "intensity_array": [[50.0, 75.0]],
@@ -837,8 +834,17 @@ class TestSpectrumMatchQualityFunctions:
             }
         )
 
+        with pytest.raises(TypeError, match="source_column"):
+            compute_ion_identifications(
+                dataset,
+                source_column="prosit_mz",
+                source_annotation_column="annotation",
+                mz_tolerance=0.02,
+            )
+
+        # Add intensity column back in to make the call valid
         result = compute_ion_identifications(
-            dataset,
+            dataset.assign(prosit_intensity=[[50.0, 75.0]]),
             source_mz_column="prosit_mz",
             source_annotation_column="annotation",
             source_intensity_column="prosit_intensity",
@@ -846,15 +852,16 @@ class TestSpectrumMatchQualityFunctions:
             mz_tolerance_unit="da",
         )
 
-        assert isinstance(result, IonIdentificationResult)
-        assert list(result.ion_match_rate) == [1.0]
-        assert list(result.ion_match_intensity) == [1.0]
-        assert list(result.longest_b_series) == [1]
-        assert list(result.longest_y_series) == [1]
-        assert list(result.complementary_ion_count) == [1]
-        assert list(result.max_ion_gap) == [100.0]
-        assert list(result.b_y_intensity_ratio) == [pytest.approx(50.0 / 75.0)]
-        assert list(result.spectral_angle) == [pytest.approx(1.0)]
+        with pytest.raises(TypeError, match="Upgrade to the latest API"):
+            (
+                ion_matches,
+                match_intensity,
+                longest_b_series,
+                longest_y_series,
+                complementary_ion_count,
+                max_ion_gap,
+                b_y_intensity_ratio,
+            ) = result
 
     def test_compute_max_ion_gap_basic(self):
         """Test max ion gap calculation."""
