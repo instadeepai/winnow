@@ -6,7 +6,18 @@ are used by the calibrator to distinguish high-quality PSMs from low-quality one
 """
 
 from math import isnan
-from typing import Dict, List, NamedTuple, Optional, Any, Set, Tuple, Iterator, Union
+from typing import (
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Any,
+    Set,
+    Tuple,
+    Iterator,
+    Union,
+    Literal,
+)
 import bisect
 import numpy as np
 import pandas as pd
@@ -250,6 +261,80 @@ def _iter_candidates_by_distance(
             right += 1
 
 
+def parse_mz_tolerance_unit(unit: str) -> Literal["ppm", "da"]:
+    """Normalize and validate an m/z tolerance unit string.
+
+    Args:
+        unit: Tolerance unit; must be ``"ppm"`` or ``"da"`` (case-insensitive).
+
+    Returns:
+        The normalized unit, either ``"ppm"`` or ``"da"``.
+
+    Raises:
+        ValueError: If ``unit`` is not a string or is not a recognised tolerance unit.
+    """
+    if not isinstance(unit, str):
+        raise ValueError(
+            f"mz_tolerance_unit must be a string, got {type(unit).__name__}. "
+            "Use 'ppm' or 'da'."
+        )
+    normalized = unit.strip().lower()
+    if normalized in {"ppm", "da"}:
+        return normalized  # type: ignore[return-value]
+    raise ValueError(
+        f"Invalid mz_tolerance_unit {unit!r}. Must be 'ppm' or 'da' (case-insensitive)."
+    )
+
+
+def _validate_mz_tolerance_value(mz_tolerance: float) -> float:
+    """Raise ValueError unless ``mz_tolerance`` is a numeric value."""
+    if isinstance(mz_tolerance, bool) or not isinstance(mz_tolerance, (int, float)):
+        raise ValueError(
+            f"mz_tolerance must be a number, got {type(mz_tolerance).__name__}."
+        )
+    return float(mz_tolerance)
+
+
+def _validate_mz_tolerance(
+    mz_tolerance: float,
+    mz_tolerance_unit: str,
+) -> Literal["ppm", "da"]:
+    """Validate m/z tolerance configuration.
+
+    Args:
+        mz_tolerance: Tolerance magnitude.
+        mz_tolerance_unit: Unit for ``mz_tolerance``; ``"ppm"`` or ``"da"``.
+
+    Returns:
+        The normalized tolerance unit.
+
+    Raises:
+        ValueError: If ``mz_tolerance`` is not numeric or ``mz_tolerance_unit`` is invalid.
+    """
+    _validate_mz_tolerance_value(mz_tolerance)
+    return parse_mz_tolerance_unit(mz_tolerance_unit)
+
+
+def _resolve_tolerance(
+    query_mz: float,
+    mz_tolerance: float,
+    mz_tolerance_unit: Literal["ppm", "da"],
+) -> float:
+    """Return the absolute Da tolerance for a given query m/z.
+
+    Args:
+        query_mz: The m/z value of the query ion.
+        mz_tolerance: Tolerance magnitude.
+        mz_tolerance_unit: Unit for ``mz_tolerance``; ``"ppm"`` or ``"da"``.
+
+    Returns:
+        Absolute tolerance in Daltons.
+    """
+    if mz_tolerance_unit == "da":
+        return mz_tolerance
+    return query_mz * mz_tolerance / 1e6
+
+
 def _find_peak_index(
     target_mz: List[float],
     query_mz: float,
@@ -290,7 +375,9 @@ def find_matching_ions(
     target_mz: List[float],
     target_intensities: List[float],
     source_annotations: Union[List[bytes], List[str]],
-    mz_tolerance: float = 0.02,
+    *,
+    mz_tolerance: float,
+    mz_tolerance_unit: str,
 ) -> IonMatchResult:
     """Finds the matching ions between source and target spectra based on m/z.
 
@@ -313,12 +400,18 @@ def find_matching_ions(
         target_mz: List of m/z values from the target (observed) spectrum.
         target_intensities: List of intensities corresponding to target m/z values.
         source_annotations: List of ion annotations from Koina (e.g., "b1+3", "y2+2").
-        mz_tolerance: Tolerance for matching m/z values (Daltons). Defaults to 0.02 Daltons.
+        mz_tolerance: Tolerance magnitude.
+        mz_tolerance_unit: Unit for ``mz_tolerance``; ``"ppm"`` or ``"da"`` (case-insensitive).
 
     Returns:
         :class:`IonMatchResult` with match statistics and per-ion match details.
         Access fields by name; positional unpacking is no longer supported.
+
+    Raises:
+        ValueError: If ``mz_tolerance`` is not numeric or ``mz_tolerance_unit`` is invalid.
     """
+    normalized_unit = _validate_mz_tolerance(mz_tolerance, mz_tolerance_unit)
+
     if isinstance(source_mz, float) and isnan(source_mz):
         return IonMatchResult(0.0, 0.0, [], [], [])
 
@@ -341,7 +434,9 @@ def find_matching_ions(
         # Find monoisotopic peak (M0), excluding already-matched peaks
         source_ion_charge = extract_fragment_ion_charge(ion_annotation)
         isotope_spacing = CARBON_ISOTOPE_MASS_SHIFT / source_ion_charge
-        m0_idx = _find_peak_index(target_mz, ion_mz, mz_tolerance, matched_indices)
+
+        tol = _resolve_tolerance(ion_mz, mz_tolerance, normalized_unit)
+        m0_idx = _find_peak_index(target_mz, ion_mz, tol, matched_indices)
 
         if m0_idx is not None:
             # Count match only for M0 (avoids noise inflation)
@@ -360,8 +455,11 @@ def find_matching_ions(
             # Sum isotopic envelope intensities (M+1, M+2, M+3, M+4)
             for i in range(1, 5):
                 isotope_mz = ion_mz + i * isotope_spacing
+                isotope_tol = _resolve_tolerance(
+                    isotope_mz, mz_tolerance, normalized_unit
+                )
                 iso_idx = _find_peak_index(
-                    target_mz, isotope_mz, mz_tolerance, matched_indices
+                    target_mz, isotope_mz, isotope_tol, matched_indices
                 )
                 if iso_idx is not None:
                     matched_indices.add(iso_idx)
@@ -384,7 +482,9 @@ def compute_ion_identifications(
     dataset: pd.DataFrame,
     source_column: str,
     source_annotation_column: str,
-    mz_tolerance: float = 0.02,
+    *,
+    mz_tolerance: float,
+    mz_tolerance_unit: str,
     predictions: Optional[List[str]] = None,
 ) -> IonIdentificationResult:
     """Computes the ion match rate, match intensity, longest b series, longest y series, complementary ion count, max ion gap and b/y intensity ratio for each spectrum in the dataset.
@@ -393,13 +493,19 @@ def compute_ion_identifications(
         dataset: DataFrame containing the mass spectrum data.
         source_column: Column name containing the theoretical m/z values.
         source_annotation_column: Column name containing the ion annotations.
-        mz_tolerance: Mass tolerance used to match ions (Daltons). Defaults to 0.02 Daltons.
+        mz_tolerance: Tolerance magnitude.
+        mz_tolerance_unit: Unit for ``mz_tolerance``; ``"ppm"`` or ``"da"`` (case-insensitive).
         predictions: Optional list of tokenised predictions for each spectrum. If not provided, the peptide length will be inferred from the column "predictions" in the metadata.
 
     Returns:
         :class:`IonIdentificationResult` with one tuple per feature column.
         Access fields by name; positional unpacking is no longer supported.
+
+    Raises:
+        ValueError: If ``mz_tolerance`` is not numeric or ``mz_tolerance_unit`` is invalid.
     """
+    _validate_mz_tolerance(mz_tolerance, mz_tolerance_unit)
+
     per_row_match_results: List[Tuple[float, float, int, int, int, float, float]] = []
 
     for row_idx, (_, row) in enumerate(dataset.iterrows()):
@@ -409,6 +515,7 @@ def compute_ion_identifications(
             target_intensities=row["intensity_array"],
             source_annotations=row[source_annotation_column],
             mz_tolerance=mz_tolerance,
+            mz_tolerance_unit=mz_tolerance_unit,
         )
 
         # Compute the longest consecutive run of matched fragment ions

@@ -18,7 +18,8 @@ calibrator:
 
     fragment_match_features:
       _target_: winnow.calibration.calibration_features.FragmentMatchFeatures
-      mz_tolerance: 0.02
+      mz_tolerance: 20
+      mz_tolerance_unit: ppm
       learn_from_missing: false  # If True, impute missing features and add an indicator column. If False, filter invalid entries with a warning.
       intensity_model_name: ${koina.intensity_model}  # The name of the Koina intensity model to use.
       max_precursor_charge: ${koina.constraints.max_precursor_charge}  # Maximum precursor charge accepted by the Koina intensity model.
@@ -30,7 +31,7 @@ calibrator:
     retention_time_feature:
       _target_: winnow.calibration.calibration_features.RetentionTimeFeature
       train_fraction: 0.1  # Top fraction of spectra (by confidence, descending) used to train the per-experiment RT->iRT regressor.
-      min_train_points: 10  # Minimum high-confidence spectra needed per experiment. Raises an error if fewer are available.
+      min_train_points: 5  # Minimum high-confidence spectra needed per experiment. Raises an error if fewer are available.
       learn_from_missing: false  # If True, impute missing features and add an indicator column. If False, filter invalid entries with a warning.
       seed: 42  # Random seed for reproducibility.
       irt_model_name: ${koina.irt_model}  # The name of the Koina iRT model to use.

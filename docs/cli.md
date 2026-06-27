@@ -16,7 +16,7 @@ uv pip install winnow-fdr
 
 ## Quick Start
 
-Use the example HeLa single-shot subset in `examples/example_data/` (`spectra.ipc`, `predictions.csv`) which represents real instrument data and InstaNovo predictions.
+Use the example HeLa single-shot subset in `examples/example_data/` (`spectra.mgf`, `predictions.csv`) which represents real instrument data and InstaNovo predictions.
 
 ```bash
 # Train a calibrator on the example subset
@@ -87,8 +87,8 @@ You can customise the calibrator architecture and features using nested paramete
 # Change MLP architecture
 winnow train calibrator.hidden_layer_sizes=[100,50,25]
 
-# Configure individual features
-winnow train calibrator.features.fragment_match_features.mz_tolerance=0.01
+winnow train calibrator.features.fragment_match_features.mz_tolerance=0.01 \
+  calibrator.features.fragment_match_features.mz_tolerance_unit=da
 ```
 
 For comprehensive calibrator configuration options, see:
@@ -105,7 +105,7 @@ Compute calibration features and write one enriched metadata CSV. Uses the same 
 winnow compute-features
 
 # Paths and output file
-winnow compute-features dataset.spectrum_path_or_directory=data/spectra.ipc dataset.predictions_path=data/preds.csv dataset_output_path=results/features.csv
+winnow compute-features dataset.spectrum_path_or_directory=data/spectra.parquet dataset.predictions_path=data/preds.csv dataset_output_path=results/features.csv
 
 # De novo spectra (no ground truth): labelled=false; remove retention_time_feature if present
 winnow compute-features labelled=false '~calibrator.features.retention_time_feature'
@@ -170,7 +170,7 @@ Setting `label_column` while `label_source=sequence` (or omitting `label_column`
 ```bash
 # Sequence-derived labels (full match of sequence vs prediction)
 winnow diagnose-calibration diagnostics.label_source=sequence \
-  dataset.spectrum_path_or_directory=holdout/spectra.ipc \
+  dataset.spectrum_path_or_directory=holdout/spectra.mgf \
   dataset.predictions_path=holdout/preds.csv
 
 # Pre-computed labels (e.g. proteome mapping done offline)
@@ -370,7 +370,7 @@ winnow train \
     calibrator.hidden_layer_sizes=[100,50,25] \
     calibrator.learning_rate_init=0.01 \
     calibrator.max_iter=500 \
-    calibrator.features.fragment_match_features.mz_tolerance=0.01
+    calibrator.features.fragment_match_features.mz_tolerance=10
 
 # Predict with database-grounded FDR
 winnow predict \
