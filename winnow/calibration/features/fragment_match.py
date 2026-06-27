@@ -130,6 +130,7 @@ class FragmentMatchFeatures(CalibrationFeatures):
             "max_ion_gap",
             "b_y_intensity_ratio",
             "spectral_angle",
+            "xcorr",
         ]
         if self.learn_from_missing:
             columns.append("is_missing_fragment_match_features")
@@ -313,3 +314,4 @@ class FragmentMatchFeatures(CalibrationFeatures):
             ion_identifications.b_y_intensity_ratio
         )
         dataset.metadata["spectral_angle"] = ion_identifications.spectral_angle
+        dataset.metadata["xcorr"] = ion_identifications.xcorr
