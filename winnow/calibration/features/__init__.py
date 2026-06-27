@@ -27,6 +27,7 @@ from winnow.calibration.features.utils import (
     require_beam_predictions,
     validate_model_input_params,
     resolve_model_inputs,
+    parse_mz_tolerance_unit,
     # Peak matching
     find_matching_ions,
     compute_ion_identifications,
@@ -53,6 +54,7 @@ __all__ = [
     "require_beam_predictions",
     "validate_model_input_params",
     "resolve_model_inputs",
+    "parse_mz_tolerance_unit",
     # Peak matching
     "find_matching_ions",
     "compute_ion_identifications",

@@ -52,7 +52,8 @@ All columns from `FragmentMatchFeatures` with `chimeric_` prefix:
 from winnow.calibration.features import ChimericFeatures
 
 feature = ChimericFeatures(
-    mz_tolerance=0.02,
+    mz_tolerance=20,
+    mz_tolerance_unit="ppm",
     unsupported_residues=["N[UNIMOD:7]", "Q[UNIMOD:7]"],
     max_precursor_charge=6,
     max_peptide_length=30,
@@ -66,7 +67,8 @@ calibrator.add_feature(feature)
 
 | Parameter | Type | Default | Description |
 | ----------- | ------ | --------- | ------------- |
-| `mz_tolerance` | `float` | Required | Mass tolerance for peak matching in Daltons |
+| `mz_tolerance` | `float` | (required) | Tolerance magnitude for matching fragment ions. |
+| `mz_tolerance_unit` | `str` | (required) | Unit for `mz_tolerance`: `"ppm"` or `"da"` (case-insensitive). |
 | `unsupported_residues` | `List[str]` | `[]` | Residue tokens not supported by the Koina model |
 | `intensity_model_name` | `str` | `"Prosit_2020_intensity_HCD"` | Name of the Koina intensity model |
 | `max_precursor_charge` | `int` | `6` | Maximum charge state supported by the model |

@@ -18,6 +18,7 @@ class TestChimericFeatures:
         """Create a ChimericFeatures instance for testing."""
         return ChimericFeatures(
             mz_tolerance=0.02,
+            mz_tolerance_unit="da",
             unsupported_residues=["U", "O", "X"],
             model_input_constants={"collision_energies": 25},
         )
@@ -81,17 +82,31 @@ class TestChimericFeatures:
         ]
         assert chimeric_features.dependencies == []
         assert chimeric_features.mz_tolerance == 0.02
+        assert chimeric_features.mz_tolerance_unit == "da"
 
-    def test_initialization_with_tolerance(self):
-        """Test initialization with custom tolerance."""
+    def test_initialization_with_da_tolerance(self):
+        """Test initialization with Da tolerance."""
         feature = ChimericFeatures(
             mz_tolerance=0.01,
+            mz_tolerance_unit="da",
             unsupported_residues=["U", "O", "X"],
             model_input_constants={"collision_energies": 25},
         )
         assert feature.mz_tolerance == 0.01
+        assert feature.mz_tolerance_unit == "da"
         assert feature.model_input_constants == {"collision_energies": 25}
         assert feature.model_input_columns is None
+
+    def test_initialization_with_ppm_tolerance(self):
+        """Test initialization with ppm tolerance."""
+        feature = ChimericFeatures(
+            mz_tolerance=20,
+            mz_tolerance_unit="ppm",
+            unsupported_residues=["U", "O", "X"],
+            model_input_constants={"collision_energies": 25},
+        )
+        assert feature.mz_tolerance == 20
+        assert feature.mz_tolerance_unit == "ppm"
 
     def test_prepare_does_nothing(
         self, chimeric_features, sample_dataset_with_beam_predictions
@@ -109,7 +124,9 @@ class TestChimericFeatures:
 
     def test_columns_include_ion_coverage_features(self):
         """Verify columns include all ion coverage features with chimeric_ prefix."""
-        feature = ChimericFeatures(mz_tolerance=0.02, learn_from_missing=True)
+        feature = ChimericFeatures(
+            mz_tolerance=0.02, mz_tolerance_unit="da", learn_from_missing=True
+        )
         columns = feature.columns
 
         ion_coverage_features = [
@@ -125,6 +142,7 @@ class TestChimericFeatures:
         """learn_from_missing=False: is_missing_chimeric_features not in columns."""
         feature = ChimericFeatures(
             mz_tolerance=0.02,
+            mz_tolerance_unit="da",
             learn_from_missing=False,
         )
         assert "is_missing_chimeric_features" not in feature.columns
@@ -335,6 +353,7 @@ class TestChimericFeatures:
         """learn_from_missing=False: spectra without runner-up are removed with warning."""
         feature = ChimericFeatures(
             mz_tolerance=0.02,
+            mz_tolerance_unit="da",
             learn_from_missing=False,
             model_input_constants={"collision_energies": 25},
         )
