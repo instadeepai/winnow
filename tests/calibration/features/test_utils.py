@@ -35,6 +35,7 @@ class TestIonMatchFunctions:
             [1000.0],
             source_annotations=["b1+1"],
             mz_tolerance=0.01,
+            mz_tolerance_unit="da",
         )
 
         assert isinstance(result, IonMatchResult)
@@ -52,6 +53,7 @@ class TestIonMatchFunctions:
             [1000.0, 2000.0],
             source_annotations=["b1+1", "b2+1"],
             mz_tolerance=0.01,
+            mz_tolerance_unit="da",
         )
 
         with pytest.raises(TypeError, match="Upgrade to the latest API"):
@@ -217,7 +219,7 @@ class TestIonMatchFunctions:
         target_mz = [500.009, 1000.019]  # Within 20 ppm
         target_intensities = [1000.0, 2000.0]
 
-        match_fraction, _, _, _ = find_matching_ions(
+        result = find_matching_ions(
             source_mz,
             target_mz,
             target_intensities,
@@ -225,7 +227,7 @@ class TestIonMatchFunctions:
             mz_tolerance=20,
             mz_tolerance_unit="ppm",
         )
-        assert match_fraction == 1.0
+        assert result.match_rate == 1.0
 
     def test_find_matching_ions_ppm_scales_with_mz(self):
         """Test that ppm tolerance scales: same Da offset matches at high m/z but not at low m/z."""
@@ -233,7 +235,7 @@ class TestIonMatchFunctions:
         source_mz_high = [1000.0]
         offset = 0.015  # 150 ppm at m/z 100, 15 ppm at m/z 1000
 
-        match_low, _, _, _ = find_matching_ions(
+        result_low = find_matching_ions(
             source_mz_low,
             [100.0 + offset],
             [1000.0],
@@ -241,7 +243,7 @@ class TestIonMatchFunctions:
             mz_tolerance=20,
             mz_tolerance_unit="ppm",
         )
-        match_high, _, _, _ = find_matching_ions(
+        result_high = find_matching_ions(
             source_mz_high,
             [1000.0 + offset],
             [1000.0],
@@ -249,8 +251,8 @@ class TestIonMatchFunctions:
             mz_tolerance=20,
             mz_tolerance_unit="ppm",
         )
-        assert match_low == 0.0  # 150 ppm > 20 ppm, no match
-        assert match_high == 1.0  # 15 ppm < 20 ppm, match
+        assert result_low.match_rate == 0.0  # 150 ppm > 20 ppm, no match
+        assert result_high.match_rate == 1.0  # 15 ppm < 20 ppm, match
 
     def test_find_matching_ions_invalid_unit_raises(self):
         """Invalid mz_tolerance_unit raises ValueError."""
@@ -310,7 +312,7 @@ class TestValidateMzTolerance:
         target_mz = [500.009, 1000.019]  # Within 20 ppm
         target_intensities = [1000.0, 2000.0]
 
-        match_fraction, _, _, _ = find_matching_ions(
+        result = find_matching_ions(
             source_mz,
             target_mz,
             target_intensities,
@@ -318,7 +320,7 @@ class TestValidateMzTolerance:
             mz_tolerance=20,
             mz_tolerance_unit="ppm",
         )
-        assert match_fraction == 1.0
+        assert result.match_rate == 1.0
 
     def test_find_matching_ions_ppm_scales_with_mz(self):
         """Test that ppm tolerance scales: same Da offset matches at high m/z but not at low m/z."""
@@ -326,7 +328,7 @@ class TestValidateMzTolerance:
         source_mz_high = [1000.0]
         offset = 0.015  # 150 ppm at m/z 100, 15 ppm at m/z 1000
 
-        match_low, _, _, _ = find_matching_ions(
+        result_low = find_matching_ions(
             source_mz_low,
             [100.0 + offset],
             [1000.0],
@@ -334,7 +336,7 @@ class TestValidateMzTolerance:
             mz_tolerance=20,
             mz_tolerance_unit="ppm",
         )
-        match_high, _, _, _ = find_matching_ions(
+        result_high = find_matching_ions(
             source_mz_high,
             [1000.0 + offset],
             [1000.0],
@@ -342,8 +344,8 @@ class TestValidateMzTolerance:
             mz_tolerance=20,
             mz_tolerance_unit="ppm",
         )
-        assert match_low == 0.0  # 150 ppm > 20 ppm, no match
-        assert match_high == 1.0  # 15 ppm < 20 ppm, match
+        assert result_low.match_rate == 0.0  # 150 ppm > 20 ppm, no match
+        assert result_high.match_rate == 1.0  # 15 ppm < 20 ppm, match
 
     def test_find_matching_ions_invalid_unit_raises(self):
         """Invalid mz_tolerance_unit raises ValueError."""
@@ -733,6 +735,7 @@ class TestSpectrumMatchQualityFunctions:
             source_column="prosit_mz",
             source_annotation_column="annotation",
             mz_tolerance=0.02,
+            mz_tolerance_unit="da",
         )
 
         with pytest.raises(TypeError, match="Upgrade to the latest API"):

@@ -14,7 +14,9 @@ class TestFindMatchingIonsBackwardsCompat:
                 [100.0],
                 [100.0],
                 [1000.0],
-                ["b1+1"],
+                source_annotations=["b1+1"],
+                mz_tolerance=0.01,
+                mz_tolerance_unit="da",
             )
 
         assert len(caught) == 1
