@@ -32,7 +32,7 @@ The model returns:
 
 ### Step 2: Peak Matching
 
-For each theoretical peak, we search for the nearest observed peak using binary search. A match is recorded if the m/z difference is within the configured tolerance (default: 0.02 Da). This produces a set of matched peaks containing:
+For each theoretical peak, we search for the nearest observed peak using binary search. A match is recorded if the m/z difference is within the configured tolerance (default: 20 ppm). This produces a set of matched peaks containing:
 
 - Theoretical m/z and intensity
 - Observed intensity
@@ -56,7 +56,7 @@ For each theoretical peak, we search for the nearest observed peak using binary 
 | `complementary_ion_count` | Count (integer) | Number of peptide bond positions where **both** the b-ion and complementary y-ion are matched. For a peptide of length n, bond position i produces b_i and y_(n-i). Finding both provides stronger evidence of a correct identification. |
 | `max_ion_gap` | Daltons (Da) | Largest m/z difference between two consecutive matched theoretical peaks when sorted by m/z. Large gaps may indicate missing fragmentation coverage. |
 | `b_y_intensity_ratio` | Ratio | Ratio of total matched b-ion intensity to total matched y-ion intensity (including isotopic envelopes). |
-| `spectral_angle` | Score (0-1) | Normalized spectral angle similarity between theoretical and matched observed intensity vectors. A value of 1 indicates perfect correlation, 0 indicates orthogonal vectors. |
+| `spectral_angle` | Score (0-1) | Normalised spectral angle similarity between theoretical and matched observed intensity vectors. A value of 1 indicates perfect correlation, 0 indicates orthogonal vectors. |
 | `xcorr` | Score | SEQUEST fast cross-correlation score. Measures overall agreement between the observed and theoretical spectra with local background correction. Higher values indicate better matches. |
 
 ### Cross-correlation Score
@@ -79,7 +79,8 @@ The score is then computed as the dot product of the preprocessed observed spect
 from winnow.calibration.features import FragmentMatchFeatures
 
 feature = FragmentMatchFeatures(
-    mz_tolerance=0.02,
+    mz_tolerance=20,
+    mz_tolerance_unit="ppm",
     unsupported_residues=["N[UNIMOD:7]", "Q[UNIMOD:7]"],
     intensity_model_name="Prosit_2020_intensity_HCD",
     max_precursor_charge=6,
@@ -94,7 +95,8 @@ calibrator.add_feature(feature)
 
 | Parameter | Type | Default | Description |
 | ----------- | ------ | --------- | ------------- |
-| `mz_tolerance` | `float` | Required | Mass tolerance for peak matching in Daltons |
+| `mz_tolerance` | `float` | (required) | Tolerance magnitude for matching fragment ions. |
+| `mz_tolerance_unit` | `str` | (required) | Unit for `mz_tolerance`: `"ppm"` or `"da"` (case-insensitive). |
 | `unsupported_residues` | `List[str]` | `[]` | Residue tokens not supported by the Koina model |
 | `intensity_model_name` | `str` | `"Prosit_2020_intensity_HCD"` | Name of the Koina intensity model |
 | `max_precursor_charge` | `int` | `6` | Maximum charge state supported by the model |

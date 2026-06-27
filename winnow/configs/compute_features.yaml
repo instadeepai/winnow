@@ -7,7 +7,7 @@ defaults:
 
 dataset:
   # Dataset paths (same as train):
-  spectrum_path_or_directory: examples/example_data/spectra.ipc
+  spectrum_path_or_directory: examples/example_data/spectra.mgf
   predictions_path: examples/example_data/predictions.csv
 
 dataset_output_path: results/metadata.csv
