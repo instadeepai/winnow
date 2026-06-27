@@ -1,5 +1,6 @@
 from abc import ABCMeta, abstractmethod
-from typing import Dict, List, Optional
+import inspect
+from typing import Any, Dict, List, Optional
 import pandas as pd
 from sklearn.neural_network import MLPRegressor
 
@@ -75,6 +76,20 @@ class CalibrationFeatures(metaclass=ABCMeta):
             str: The feature identifier
         """
 
+    @staticmethod
+    def _to_plain(value: Any) -> Any:
+        """Convert values to plain JSON-serialisable Python types."""
+        if isinstance(value, set):
+            return sorted(value)
+        try:
+            from omegaconf import DictConfig, ListConfig, OmegaConf
+
+            if isinstance(value, (DictConfig, ListConfig)):
+                return OmegaConf.to_container(value, resolve=True)
+        except ImportError:
+            pass
+        return value
+
     @abstractmethod
     def prepare(self, dataset: CalibrationDataset) -> None:
         """Prepare the dataset for feature computation.
@@ -96,3 +111,27 @@ class CalibrationFeatures(metaclass=ABCMeta):
             dataset (CalibrationDataset): The dataset on which to compute the feature.
         """
         pass
+
+    def get_config(self) -> Dict[str, Any]:
+        """Return a serialisable dict of constructor parameters.
+
+        The returned dict includes a ``_target_`` key with the fully-qualified
+        class path, plus every ``__init__`` parameter and its current value.
+        This is sufficient to reconstruct the feature instance.
+
+        OmegaConf containers (``DictConfig``, ``ListConfig``) are resolved to
+        plain Python types so that the result is always JSON-serialisable.
+
+        Returns:
+            Dict whose values are JSON-serialisable.
+        """
+        sig = inspect.signature(self.__class__.__init__)
+        config: Dict[str, Any] = {
+            "_target_": (f"{self.__class__.__module__}.{self.__class__.__qualname__}"),
+        }
+        for param_name in sig.parameters:
+            if param_name == "self":
+                continue
+            if hasattr(self, param_name):
+                config[param_name] = self._to_plain(getattr(self, param_name))
+        return config

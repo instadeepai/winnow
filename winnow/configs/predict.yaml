@@ -2,6 +2,7 @@
 defaults:
   - _self_
   - residues
+  - koina
   - data_loader: instanovo  # Options: instanovo, mztab, pointnovo, winnow
   - fdr_method: nonparametric  # Options: nonparametric, database_grounded
 
@@ -29,6 +30,10 @@ calibrator:
   # Useful for within-experiment use cases where the unlabelled data has an unreliable confidence distribution
   # for training a new RT->iRT regressor.
   irt_regressor_path: null
+  # Optional predict-time RT->iRT regressor fitting overrides (when irt_regressor_path is null):
+  # irt_calibration:
+  #   train_fraction: 0.3
+  #   min_train_points: 10
 
 fdr_control:
   # FDR settings:

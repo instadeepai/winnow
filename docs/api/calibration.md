@@ -6,7 +6,7 @@ The `winnow.calibration` module implements confidence calibration for peptide-sp
 
 ### ProbabilityCalibrator
 
-The main calibration model that transforms raw confidence scores into calibrated probabilities using a multi-layer perceptron classifier with various peptide and spectral features.
+The main calibration model that transforms raw confidence scores into calibrated probabilities using a PyTorch neural network (`CalibratorNetwork`) with various peptide and spectral features.
 
 ```python
 from winnow.calibration import ProbabilityCalibrator
@@ -31,20 +31,20 @@ residue_masses = {
         }
 
 # Create and configure calibrator
-calibrator = ProbabilityCalibrator(seed=42)
+calibrator = ProbabilityCalibrator(seed=42, hidden_dims=[128, 64])
 
 # Add features for calibration
 calibrator.add_feature(MassErrorDaFeature(residue_masses=residue_masses))
 calibrator.add_feature(FragmentMatchFeatures(mz_tolerance=0.02, mz_tolerance_unit="da"))
 calibrator.add_feature(BeamFeatures())
 
-# Train the calibrator
-calibrator.fit(training_dataset)
+# Train directly from a labelled CalibrationDataset
+calibrator.fit(train_dataset)
 
-# Make predictions
+# Make predictions on new data
 calibrator.predict(test_dataset)
 
-# Save/load trained models
+# Save/load trained models (safetensors + config.json)
 ProbabilityCalibrator.save(calibrator, Path("calibrator_checkpoint"))
 
 # Load models - supports multiple sources
@@ -60,18 +60,21 @@ loaded_calibrator = ProbabilityCalibrator.load("calibrator_checkpoint")
 
 **Key Features:**
 
-- **Neural Network Classifier**: Uses MLPClassifier with standardised feature scaling
+- **PyTorch Neural Network**: Uses a custom `CalibratorNetwork` (`nn.Module`) with feature normalisation
 - **Feature Management**: Add, remove and track multiple calibration features
 - **Dependency Handling**: Automatic computation of feature dependencies
-- **Model Persistence**: Save and load trained calibrators
-- **Feature Extraction**: Computes features and handles both labelled and unlabelled data
+- **Model Persistence**: Save/load using `safetensors` (weights) and `config.json` (architecture, normalisation stats, feature definitions)
+- **Two-phase Training**: Supports training from pre-computed Parquet feature matrices via `FeatureDataset.from_parquet()` and `fit_from_features()`
+- **GPU Support**: Automatic GPU detection with CPU fallback
 
 **Main Methods:**
 
 - `add_feature(feature)`: Add a calibration feature
-- `fit(dataset)`: Train the calibrator on a labelled dataset
+- `compute_features(dataset)`: Run feature computation on a `CalibrationDataset`, mutating its metadata in place
+- `fit(dataset, val_dataset)`: Compute features and train the calibrator from a `CalibrationDataset`
+- `fit_from_features(dataset, val_dataset)`: Train from a pre-computed `FeatureDataset` (two-phase workflow)
 - `predict(dataset)`: Generate calibrated confidence scores
-- `save(calibrator, path)`: Save trained model to disk
+- `save(calibrator, path)`: Save trained model to disk (`model.safetensors` + `config.json`)
 - `load(pretrained_model_name_or_path, cache_dir)`: Load trained model from Hugging Face Hub or local directory
 
     - Default: Loads `"InstaDeepAI/winnow-general-model"` from Hugging Face
@@ -94,8 +97,15 @@ The calibrator uses a feature-based approach where multiple feature extractors c
 
 1. **Create Calibrator**: Initialise `ProbabilityCalibrator`
 2. **Add Features**: Use `add_feature()` to include desired calibration features
-3. **Fit Model**: Call `fit()` with labelled `CalibrationDataset`
+3. **Fit Model**: Call `fit()` with a labelled `CalibrationDataset` — feature computation and training happen in one step
 4. **Save Model**: Use `save()` to persist trained calibrator
+
+For the two-phase workflow (compute features once, save to Parquet, train later):
+
+1. Call `compute_features(dataset)` to populate metadata columns
+2. Export to Parquet via `dataset.to_parquet()`
+3. Reload with `FeatureDataset.from_parquet()`
+4. Train with `fit_from_features(train_ds, val_dataset=val_ds)`
 
 ### Prediction workflow
 
