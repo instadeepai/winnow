@@ -248,7 +248,7 @@ calibrator:
 ```
 
 Koina model names, collision-energy / fragmentation inputs, and validity constraints
-live in [`configs/koina.yaml`](configs/koina.yaml) (composed via `defaults: - koina` in
+live in [`winnow/configs/koina.yaml`](https://github.com/instadeepai/winnow/blob/main/winnow/configs/koina.yaml) (composed via `defaults: - koina` in
 `calibrator.yaml` and inference configs). Feature blocks reference `${koina.*}` as shown above.
 
 **Key parameters:**
