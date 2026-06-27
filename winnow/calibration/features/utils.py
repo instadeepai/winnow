@@ -937,7 +937,7 @@ def compute_xcorr(
     if len(observed_mz) == 0 or len(theoretical_mz) == 0:
         return 0.0
 
-    max_mz = max(max(observed_mz), max(theoretical_mz))
+    max_mz = max(observed_mz)
     num_bins = int(max_mz / bin_size + bin_offset) + 1
 
     observed_binned = _bin_observed_spectrum(
