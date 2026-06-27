@@ -56,7 +56,7 @@ For each theoretical peak, we search for the nearest observed peak using binary 
 | `complementary_ion_count` | Count (integer) | Number of peptide bond positions where **both** the b-ion and complementary y-ion are matched. For a peptide of length n, bond position i produces b_i and y_(n-i). Finding both provides stronger evidence of a correct identification. |
 | `max_ion_gap` | Daltons (Da) | Largest m/z difference between two consecutive matched theoretical peaks when sorted by m/z. Large gaps may indicate missing fragmentation coverage. |
 | `b_y_intensity_ratio` | Ratio | Ratio of total matched b-ion intensity to total matched y-ion intensity (including isotopic envelopes). |
-| `spectral_angle` | Score (0-1) | Normalized spectral angle similarity between theoretical and matched observed intensity vectors. A value of 1 indicates perfect correlation, 0 indicates orthogonal vectors. |
+| `spectral_angle` | Score (0-1) | Normalised spectral angle similarity between theoretical and matched observed intensity vectors. A value of 1 indicates perfect correlation, 0 indicates orthogonal vectors. |
 
 ## Usage
 

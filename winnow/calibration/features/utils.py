@@ -452,7 +452,7 @@ def find_matching_ions(
             # Add the ion m/z to the list of matched ion m/z values
             matched_ion_mz.append(ion_mz)
 
-            # Record M0 intensity for aligned list (used for spectral angle)
+            # Record M0 intensity for aligned list (used for normalised spectral angle)
             m0_intensity = target_intensities[m0_idx]
             aligned_m0_intensities.append(m0_intensity)
 
@@ -558,7 +558,7 @@ def compute_ion_identifications(
             match.matched_ion_annotations,
             match.matched_ion_intensities_incl_isotopic_env,
         )
-        # Compute the spectral angle between theoretical and aligned matched observed intensities
+        # Compute the normalised spectral angle between theoretical and aligned matched observed intensities
         spectral_angle = compute_spectral_angle(
             row[source_intensity_column], match.aligned_m0_intensities
         )
@@ -738,7 +738,7 @@ def compute_spectral_angle(
     theoretical_ion_intensities: Union[List[float], float],
     aligned_observed_ion_intensities: List[float],
 ) -> float:
-    """Compute the spectral angle between the theoretical and aligned observed spectra.
+    """Compute the normalised spectral angle similarity score between the theoretical and aligned observed spectra.
 
     The intensity lists must align by m/z values (same length, with zeros for unmatched
     observed ions).
@@ -750,7 +750,7 @@ def compute_spectral_angle(
             theoretical, with 0.0 for unmatched ions).
 
     Returns:
-        Spectral angle in radians. 1.0 indicates perfect correlation, 0.0 indicates perfect anti-correlation.
+        Normalised spectral angle similarity score. 1.0 indicates perfect correlation, 0.0 indicates perfect anti-correlation.
         Returns 0.0 for missing data or no matches.
     """
     # Handle missing data (NaN theoretical intensities)

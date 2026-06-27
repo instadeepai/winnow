@@ -904,7 +904,7 @@ class TestSpectrumMatchQualityFunctions:
     # --- Spectral Angle ---
 
     def test_compute_spectral_angle_perfect_match(self):
-        """Test spectral angle with identical intensity vectors."""
+        """Test normalised spectral angle with identical intensity vectors."""
         theoretical = [1.0, 2.0, 3.0]
         observed = [1.0, 2.0, 3.0]
         angle = compute_spectral_angle(theoretical, observed)
@@ -912,7 +912,7 @@ class TestSpectrumMatchQualityFunctions:
         assert angle == pytest.approx(1.0, abs=1e-10)
 
     def test_compute_spectral_angle_scaled_match(self):
-        """Test spectral angle with proportionally scaled intensities."""
+        """Test normalised spectral angle with proportionally scaled intensities."""
         theoretical = [1.0, 2.0, 3.0]
         observed = [2.0, 4.0, 6.0]  # Scaled by 2x
         angle = compute_spectral_angle(theoretical, observed)
@@ -920,7 +920,7 @@ class TestSpectrumMatchQualityFunctions:
         assert angle == pytest.approx(1.0, abs=1e-10)
 
     def test_compute_spectral_angle_orthogonal(self):
-        """Test spectral angle with orthogonal vectors."""
+        """Test normalised spectral angle with orthogonal vectors."""
         theoretical = [1.0, 0.0]
         observed = [0.0, 1.0]
         angle = compute_spectral_angle(theoretical, observed)
@@ -928,7 +928,7 @@ class TestSpectrumMatchQualityFunctions:
         assert angle == pytest.approx(0.0, abs=1e-10)
 
     def test_compute_spectral_angle_partial_match(self):
-        """Test spectral angle with partial match."""
+        """Test normalised spectral angle with partial match."""
         theoretical = [1.0, 1.0, 1.0]
         observed = [1.0, 0.0, 0.0]  # Only first ion matched
         angle = compute_spectral_angle(theoretical, observed)
@@ -936,7 +936,7 @@ class TestSpectrumMatchQualityFunctions:
         assert 0.0 < angle < 1.0
 
     def test_compute_spectral_angle_no_observed_matches(self):
-        """Test spectral angle when no ions are observed (all zeros)."""
+        """Test normalised spectral angle when no ions are observed (all zeros)."""
         theoretical = [1.0, 2.0, 3.0]
         observed = [0.0, 0.0, 0.0]
         angle = compute_spectral_angle(theoretical, observed)
@@ -944,7 +944,7 @@ class TestSpectrumMatchQualityFunctions:
         assert angle == 0.0
 
     def test_compute_spectral_angle_missing_data(self):
-        """Test spectral angle with NaN theoretical intensities."""
+        """Test normalised spectral angle with NaN theoretical intensities."""
         import math
 
         angle = compute_spectral_angle(math.nan, [1.0, 2.0])
@@ -952,12 +952,12 @@ class TestSpectrumMatchQualityFunctions:
         assert angle == 0.0
 
     def test_compute_spectral_angle_empty_lists(self):
-        """Test spectral angle with empty lists."""
+        """Test normalised spectral angle with empty lists."""
         angle = compute_spectral_angle([], [])
         assert angle == 0.0
 
     def test_compute_spectral_angle_length_mismatch_raises(self):
-        """Test that mismatched lengths raise ValueError."""
+        """Test that normalised spectral angle mismatched lengths raise ValueError."""
         theoretical = [1.0, 2.0, 3.0]
         observed = [1.0, 2.0]  # Different length
         with pytest.raises(ValueError, match="must align"):
