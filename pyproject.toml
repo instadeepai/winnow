@@ -24,6 +24,13 @@ dependencies = [
     "matplotlib>=3.7.0",
 ]
 
+[project.optional-dependencies]
+plm = [
+    "torch>=2.0.0",
+    "transformers>=4.30.0",
+    "tokenizers>=0.13.0",
+]
+
 [project.urls]
 Homepage = "https://github.com/instadeepai/winnow"
 Issues = "https://github.com/instadeepai/winnow/issues"

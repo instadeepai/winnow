@@ -38,6 +38,15 @@ calibrator:
       max_peptide_length: ${koina.constraints.max_peptide_length}      # Maximum peptide length accepted by the Koina iRT model.
       unsupported_residues: ${koina.constraints.unsupported_residues}  # Residues unsupported by the configured Koina iRT model.
 
+    # Optional experimental peptide language model feature. Keep disabled by default:
+    # it requires either precomputed PLM scores in metadata or optional local PLM dependencies.
+    # peptide_language_model_feature:
+    #   _target_: winnow.calibration.calibration_features.PeptideLanguageModelFeature
+    #   backend: precomputed  # Options: precomputed, pepbert, esm2, esmc
+    #   feature_mode: pseudo_likelihood  # Options: pseudo_likelihood, embedding_summary, embedding_diagnostics
+    #   precomputed_column: plm_mean_log_probability
+    #   learn_from_missing: false
+
 # Koina model configuration — shared settings for all intensity- and iRT-based features.
 koina:
   # Model names

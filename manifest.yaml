@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://instadeep.aichor.ai/schema/latest/manifest.schema.json
 kind: AIchorManifest
-apiVersion: 0.2.1
+apiVersion: 0.2.3
 builder:
   image: winnow
   dockerfile: ./Dockerfile
@@ -9,18 +9,23 @@ builder:
     USE_CUDA: "true"
 
 spec:
-  debug:
-      vscode:
-        enabled: true # required
-        path: "/aichor/code" # Optional, defaults to "code". Refer the absolute path of the binary if not findable in $PATH
-        provider: "github" # Optional, vscode tunnel provider. Options are "github" or "microsoft", defaults to "github"
   operator: jobset
   image: winnow
-  command: make tests
+  command: >-
+    HF_HOME=/runs/huggingface
+    uv run python scripts/plm_manuscript_validation.py
+    --validation-mode in_domain_split
+    --datasets celegans,immuno2
+    --max-eval-rows 0
+    --split-train-fraction 0.5
+    --plm-feature-mode embedding_diagnostics
+    --plm-batch-size 128
+    --output-dir /runs/plm-validation-indomain-diagnostics
+  timeout: "1d"
 
   types:
     worker:
       count: 1
       resources:
-        cpus: 4
-        ramRatio: 2 # >= 2
+        cpus: 8
+        ramRatio: 4 # >= 2

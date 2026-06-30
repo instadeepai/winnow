@@ -1,0 +1,29 @@
+# Local environments and caches
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.uv-cache/
+__pycache__/
+*.py[cod]
+
+# Local benchmark/data artifacts
+examples/winnow-ms-datasets/
+results/
+models/
+docs_public/
+
+# Build and packaging outputs
+build/
+dist/
+*.egg-info/
+
+# Test/report outputs
+.coverage
+coverage.xml
+pytest.xml
+
+# Editor and OS noise
+.idea/
+.vscode/
+.DS_Store

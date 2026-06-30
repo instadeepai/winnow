@@ -13,6 +13,7 @@ The `winnow.calibration.features` module provides a modular feature extraction s
 | [Retention Time Feature](retention_time.md) | Chromatographic retention time error | `retention_time` |
 | [Sequence Features](sequence.md) | Peptide sequence properties | `prediction`, `precursor_charge` |
 | [Token Score Features](token_score.md) | Position-level confidence metrics | Beam predictions with token log-probs |
+| [Peptide Language Model Feature](peptide_language_model.md) | Experimental peptide sequence prior | Precomputed PLM column or optional PLM backend |
 
 ## CalibrationFeatures Base Class
 

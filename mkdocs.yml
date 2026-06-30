@@ -82,6 +82,7 @@ nav:
       - Retention Time Feature: api/features/retention_time.md
       - Sequence Features: api/features/sequence.md
       - Token Score Features: api/features/token_score.md
+      - Peptide Language Model Feature: api/features/peptide_language_model.md
     - FDR: api/fdr.md
   - Contributing: contributing.md
   - License: license.md

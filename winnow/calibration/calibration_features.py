@@ -28,6 +28,10 @@ from winnow.calibration.features import (
     RetentionTimeFeature,
     SequenceFeatures,
     TokenScoreFeatures,
+    PeptideLanguageModelBackend,
+    PeptideLanguageModelFeature,
+    PeptideLanguageModelResult,
+    normalize_peptide_for_plm,
     # Helper functions
     require_beam_predictions,
     validate_model_input_params,
@@ -74,6 +78,10 @@ __all__ = [
     "RetentionTimeFeature",
     "SequenceFeatures",
     "TokenScoreFeatures",
+    "PeptideLanguageModelBackend",
+    "PeptideLanguageModelFeature",
+    "PeptideLanguageModelResult",
+    "normalize_peptide_for_plm",
     # Helper functions
     "require_beam_predictions",
     "validate_model_input_params",

@@ -269,6 +269,23 @@ koina:
 - `validation_fraction`: Proportion of data for validation
 - `features.*`: Individual calibration feature configurations
 
+### Experimental peptide language model feature
+
+`PeptideLanguageModelFeature` is opt-in and intended for ablation experiments. The
+safest workflow is to precompute PLM scores externally and load them as metadata:
+
+```bash
+winnow train '+calibrator.features.peptide_language_model_feature._target_=winnow.calibration.calibration_features.PeptideLanguageModelFeature' \
+  calibrator.features.peptide_language_model_feature.backend=precomputed \
+  calibrator.features.peptide_language_model_feature.feature_mode=pseudo_likelihood \
+  calibrator.features.peptide_language_model_feature.precomputed_column=plm_mean_log_probability
+```
+
+Local PepBERT/ESM backends require optional PLM dependencies and model access. PepBERT
+currently provides compact embedding summaries and a richer `embedding_diagnostics` mode
+with length, embedding-norm, residue-level variation, and missing-by-length interaction
+columns. ESM-style masked language models can provide pseudo-likelihood scores.
+
 ### Koina model input validation
 
 `FragmentMatchFeatures`, `ChimericFeatures`, and `RetentionTimeFeature` all call external
