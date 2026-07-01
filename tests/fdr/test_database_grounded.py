@@ -78,6 +78,21 @@ class TestDatabaseGroundedFDRControl:
         assert len(db_fdr_control.preds) == 1
         assert db_fdr_control.preds.iloc[0]["confidence"] == 0.9
 
+    def test_fit_uses_custom_correct_column(self, db_fdr_control):
+        """Test that fit() stores correctness under a custom column name."""
+        sample_df = pd.DataFrame(
+            {
+                "sequence": ["PEPTIDE", "PROTEIN"],
+                "prediction": [list("PEPTIDE"), list("PROTIEN")],
+                "confidence": [0.9, 0.8],
+            }
+        )
+
+        db_fdr_control.fit(sample_df, correct_column="proteome_hit")
+
+        assert list(db_fdr_control.preds.columns) == ["proteome_hit", "confidence"]
+        assert db_fdr_control.preds["proteome_hit"].tolist() == [True, False]
+
     def test_fit_with_empty_data(self, db_fdr_control):
         """Test that fit method handles empty data."""
         empty_data = pd.DataFrame()
