@@ -84,6 +84,56 @@ class TestDatabaseGroundedFDRControl:
         with pytest.raises(AssertionError, match="Fit method requires non-empty data"):
             db_fdr_control.fit(empty_data)
 
+    def test_fit_imputes_valid_sequence_correct_and_num_matches(self, db_fdr_control):
+        """Sequence-derived fit imputes validity and per-row labels on all rows."""
+        dataset = pd.DataFrame(
+            {
+                "sequence": [list("PEPTIDE"), None, []],
+                "prediction": [list("PEPTIDE"), list("AG"), list("AG")],
+                "confidence": [0.9, 0.8, 0.7],
+            }
+        )
+        db_fdr_control.fit(dataset)
+
+        assert dataset["valid_sequence"].tolist() == [True, False, False]
+        assert db_fdr_control.preds["correct"].tolist() == [True, False, False]
+        assert dataset["num_matches"].tolist() == [7, 0, 0]
+
+    def test_fit_excludes_invalid_sequence_rows_from_fdr_curve(self):
+        """Rows with valid_sequence=False must not enter the precision curve."""
+        ctrl = DatabaseGroundedFDRControl(
+            confidence_feature="confidence",
+            residue_masses={
+                "P": 97.052764,
+                "E": 129.042593,
+                "T": 101.047670,
+                "I": 113.084064,
+                "D": 115.026943,
+            },
+            drop=0,
+        )
+        dataset = pd.DataFrame(
+            {
+                "sequence": [list("PEPTIDE"), None],
+                "prediction": [list("PEPTIDE"), list("WRONG")],
+                "confidence": [0.9, 0.99],
+            }
+        )
+        ctrl.fit(dataset)
+        assert ctrl._fdr_values.tolist() == [0.0]
+        assert ctrl._confidence_scores.tolist() == [0.9]
+
+    def test_fit_raises_when_no_valid_ground_truth_sequences(self, db_fdr_control):
+        dataset = pd.DataFrame(
+            {
+                "sequence": [None, []],
+                "prediction": [list("AG"), list("AG")],
+                "confidence": [0.9, 0.8],
+            }
+        )
+        with pytest.raises(ValueError, match="valid_sequence=True"):
+            db_fdr_control.fit(dataset)
+
     def test_get_confidence_cutoff_requires_fitting(self, db_fdr_control):
         """Test that get_confidence_cutoff requires fitting first."""
         # Should raise AttributeError if not fitted
