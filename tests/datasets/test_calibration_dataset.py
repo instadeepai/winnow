@@ -312,6 +312,18 @@ class TestCalibrationDataset:
         saved_df = pd.read_parquet(parquet_path)
         assert len(saved_df) == len(calibration_dataset.metadata)
 
+    def test_save_metadata_parquet(self, calibration_dataset, tmp_path):
+        """Test save_metadata writes processed metadata to parquet."""
+        parquet_path = tmp_path / "processed_metadata.parquet"
+
+        calibration_dataset.save_metadata(parquet_path)
+
+        assert parquet_path.exists()
+        saved_df = pd.read_parquet(parquet_path)
+        assert len(saved_df) == len(calibration_dataset.metadata)
+        assert "valid_sequence" not in saved_df.columns
+        assert "valid_prediction" not in saved_df.columns
+
     def test_length_consistency(self, calibration_dataset):
         """Test that length is consistent between metadata and predictions."""
         # This should not raise an assertion error
