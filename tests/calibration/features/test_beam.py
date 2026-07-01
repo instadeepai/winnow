@@ -1,12 +1,91 @@
 """Unit tests for winnow calibration feature BeamFeatures."""
 
+from __future__ import annotations
 import pytest
 import pandas as pd
 import numpy as np
 
-from winnow.calibration.features.beam import BeamFeatures
+from winnow.calibration.features.beam import (
+    BeamFeatures,
+    _beam_edit_distance,
+    _normalised_levenshtein,
+    _normalised_levenshtein_ints,
+)
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from tests.calibration.features.conftest import MockScoredSequence
+
+
+class TestNormalisedLevenshtein:
+    """Unit tests for edit distance denominator and non-trivial alignments."""
+
+    def test_both_empty_returns_zero(self):
+        assert _normalised_levenshtein([], []) == pytest.approx(0.0)
+        assert _normalised_levenshtein_ints([], []) == pytest.approx(0.0)
+
+    def test_identical_sequences_zero(self):
+        seq = ["G", "L", "V", "G", "S", "D", "K"]
+        assert _normalised_levenshtein(seq, seq) == pytest.approx(0.0)
+
+    def test_denominator_uses_max_length_short_vs_long(self):
+        # One token vs three: 2 insertions, max(len)=3 -> 2/3
+        assert _normalised_levenshtein(["A"], ["A", "B", "C"]) == pytest.approx(2 / 3)
+        assert _normalised_levenshtein(["A", "B", "C"], ["A"]) == pytest.approx(2 / 3)
+
+    def test_denominator_empty_vs_nonempty(self):
+        # All insertions: distance = len(longer), ratio = 1.0
+        assert _normalised_levenshtein([], ["X", "Y", "Z"]) == pytest.approx(1.0)
+        assert _normalised_levenshtein(["P", "Q"], []) == pytest.approx(1.0)
+
+    def test_denominator_asymmetric_peptide_lengths(self):
+        # KE (2) vs KELEV (5): align K,K and E,E then insert L,E,V -> 3 edits / max(2,5)=5
+        top = ["K", "E"]
+        second = ["K", "E", "L", "E", "V"]
+        assert _normalised_levenshtein(top, second) == pytest.approx(3 / 5)
+
+    def test_multi_edit_alignment(self):
+        """Several subs/ins/dels: exercise full DP (not only single substitution)."""
+        # G L V A vs G L L A: one substitution at position 3 (V vs L)
+        assert _normalised_levenshtein(
+            ["G", "L", "V", "A"], ["G", "L", "L", "A"]
+        ) == pytest.approx(0.25)
+
+        # 7-mer with two substitutions (T↔S, D↔T); raw distance 2 → 2/7
+        a = ["P", "E", "P", "T", "I", "D", "E"]
+        b = ["P", "E", "P", "S", "I", "T", "E"]
+        assert _normalised_levenshtein(a, b) == pytest.approx(2 / 7)
+
+        # Three substitutions on a 7-mer → 3/7 (prefix differs, suffix matches)
+        left = ["A", "A", "A", "D", "E", "F", "G"]
+        right = ["B", "B", "B", "D", "E", "F", "G"]
+        assert _normalised_levenshtein(left, right) == pytest.approx(3 / 7)
+
+
+class TestBeamEditDistance:
+    """Edit distance sentinels for missing or empty beam inputs."""
+
+    def test_both_empty_sequences_use_max_distance(self):
+        beam = [
+            MockScoredSequence([], np.log(0.8)),
+            MockScoredSequence([], np.log(0.6)),
+        ]
+        assert _beam_edit_distance(beam) == pytest.approx(1.0)
+
+    def test_one_empty_sequence_uses_max_distance(self):
+        beam = [
+            MockScoredSequence([], np.log(0.8)),
+            MockScoredSequence(["A"], np.log(0.6)),
+        ]
+        assert _beam_edit_distance(beam) == pytest.approx(1.0)
+
+    def test_none_beam_row_uses_max_distance(self):
+        assert _beam_edit_distance(None) == pytest.approx(1.0)
+
+    def test_empty_beam_list_uses_max_distance(self):
+        assert _beam_edit_distance([]) == pytest.approx(1.0)
+
+    def test_single_beam_uses_max_distance(self):
+        beam = [MockScoredSequence(["A"], np.log(0.8))]
+        assert _beam_edit_distance(beam) == pytest.approx(1.0)
 
 
 class TestBeamFeatures:
@@ -48,6 +127,7 @@ class TestBeamFeatures:
             "median_margin",
             "entropy",
             "z-score",
+            "edit_distance",
         ]
         assert beam_features.dependencies == []
 
@@ -70,15 +150,24 @@ class TestBeamFeatures:
             beam_features.compute(sample_dataset_with_predictions)
 
         # Check that all expected columns were added
-        expected_columns = ["margin", "median_margin", "entropy", "z-score"]
+        expected_columns = [
+            "margin",
+            "median_margin",
+            "entropy",
+            "z-score",
+            "edit_distance",
+        ]
         for col in expected_columns:
             assert col in sample_dataset_with_predictions.metadata.columns
 
         # Check that we have the right number of rows
         assert len(sample_dataset_with_predictions.metadata) == 3
 
-    def test_compute_with_none_predictions(self, beam_features):
-        """Test that compute raises error when predictions is None."""
+        # Third spectrum has only one beam sequence: edit distance is 1.0
+        assert sample_dataset_with_predictions.metadata.iloc[2]["edit_distance"] == 1.0
+
+    def test_compute_raises_when_beam_predictions_not_loaded(self, beam_features):
+        """BeamFeatures requires a predictions list; None means beams were not loaded."""
         metadata = pd.DataFrame({"confidence": [0.9]})
         dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
@@ -87,6 +176,69 @@ class TestBeamFeatures:
             match="requires beam predictions, but dataset.predictions is None",
         ):
             beam_features.compute(dataset)
+
+    def test_compute_with_none_beam_row(self, beam_features):
+        """Database-search rows without beam candidates use max edit distance."""
+        metadata = pd.DataFrame({"confidence": [0.9, 0.8]})
+        predictions = [
+            None,
+            [
+                MockScoredSequence(["A"], np.log(0.8)),
+                MockScoredSequence(["G"], np.log(0.6)),
+            ],
+        ]
+        dataset = CalibrationDataset(metadata=metadata, predictions=predictions)
+
+        with pytest.warns(
+            UserWarning,
+            match="1 beam search results have fewer than two sequences",
+        ):
+            beam_features.compute(dataset)
+
+        assert dataset.metadata.iloc[0]["edit_distance"] == pytest.approx(1.0)
+        assert dataset.metadata.iloc[0]["margin"] == pytest.approx(0.0)
+        assert dataset.metadata.iloc[1]["edit_distance"] == pytest.approx(1.0)
+
+    def test_compute_with_empty_beam_list(self, beam_features):
+        """An empty beam list is treated like a missing runner-up."""
+        metadata = pd.DataFrame({"confidence": [0.9]})
+        dataset = CalibrationDataset(metadata=metadata, predictions=[[]])
+
+        with pytest.warns(
+            UserWarning,
+            match="1 beam search results have fewer than two sequences",
+        ):
+            beam_features.compute(dataset)
+
+        assert dataset.metadata.iloc[0]["edit_distance"] == pytest.approx(1.0)
+
+    def test_compute_edit_distance_both_empty_sequences(self, beam_features):
+        """Two present beam slots with empty token lists use max edit distance."""
+        metadata = pd.DataFrame({"confidence": [0.9]})
+        predictions = [
+            [
+                MockScoredSequence([], np.log(0.8)),
+                MockScoredSequence([], np.log(0.6)),
+            ]
+        ]
+        dataset = CalibrationDataset(metadata=metadata, predictions=predictions)
+        beam_features.compute(dataset)
+
+        assert dataset.metadata.iloc[0]["edit_distance"] == pytest.approx(1.0)
+
+    def test_compute_edit_distance_one_empty_sequence(self, beam_features):
+        """One empty and one non-empty sequence uses max edit distance."""
+        metadata = pd.DataFrame({"confidence": [0.9]})
+        predictions = [
+            [
+                MockScoredSequence([], np.log(0.8)),
+                MockScoredSequence(["A", "G"], np.log(0.6)),
+            ]
+        ]
+        dataset = CalibrationDataset(metadata=metadata, predictions=predictions)
+        beam_features.compute(dataset)
+
+        assert dataset.metadata.iloc[0]["edit_distance"] == pytest.approx(1.0)
 
     def test_compute_with_insufficient_sequences_warning(self, beam_features):
         """Test that warning is issued for beam results with < 2 sequences."""
@@ -105,6 +257,8 @@ class TestBeamFeatures:
             match="1 beam search results have fewer than two sequences. This may affect the efficacy of computed beam features.",
         ):
             beam_features.compute(dataset)
+
+        assert dataset.metadata.iloc[0]["edit_distance"] == 1.0
 
     def test_margin_calculation(self, beam_features):
         """Test specific margin calculation."""
@@ -162,6 +316,9 @@ class TestBeamFeatures:
             0.0, rel=1e-10, abs=1e-10
         )  # std_prob = 0, so z-score = 0
 
+        # No second sequence: edit distance is undefined
+        assert dataset.metadata.iloc[0]["edit_distance"] == 1.0
+
     def test_beam_features_with_two_sequences(self, beam_features):
         """Test beam feature calculations with two sequences."""
         metadata = pd.DataFrame({"confidence": [0.9]})
@@ -203,6 +360,9 @@ class TestBeamFeatures:
             expected_z_score, rel=1e-10, abs=1e-10
         )
 
+        # edit_distance: ["A"] vs ["G"] = 1 substitution / max(1,1) = 1.0
+        assert dataset.metadata.iloc[0]["edit_distance"] == pytest.approx(1.0)
+
     def test_beam_features_with_three_sequences(self, beam_features):
         """Test beam feature calculations with three sequences."""
         metadata = pd.DataFrame({"confidence": [0.9]})
@@ -243,6 +403,38 @@ class TestBeamFeatures:
         z_score = dataset.metadata.iloc[0]["z-score"]
         assert z_score == pytest.approx(1.3970013970020956, rel=1e-10, abs=1e-10)
 
+        # edit_distance: ["A"] vs ["G"] = 1 substitution / max(1,1) = 1.0
+        assert dataset.metadata.iloc[0]["edit_distance"] == pytest.approx(1.0)
+
+    def test_beam_features_edit_distance_ignores_li(self, beam_features):
+        """Test that edit distance treats L and I as identical."""
+        metadata = pd.DataFrame({"confidence": [0.9]})
+        predictions = [
+            [
+                MockScoredSequence(["L", "A", "G"], np.log(0.8)),
+                MockScoredSequence(["I", "A", "G"], np.log(0.6)),
+            ]
+        ]
+        dataset = CalibrationDataset(metadata=metadata, predictions=predictions)
+        beam_features.compute(dataset)
+
+        assert dataset.metadata.iloc[0]["edit_distance"] == pytest.approx(0.0)
+
+    def test_beam_features_edit_distance_mixed(self, beam_features):
+        """Test edit distance with L/I equivalence and real differences."""
+        metadata = pd.DataFrame({"confidence": [0.9]})
+        predictions = [
+            [
+                MockScoredSequence(["L", "A", "K"], np.log(0.8)),
+                MockScoredSequence(["I", "G", "K"], np.log(0.6)),
+            ]
+        ]
+        dataset = CalibrationDataset(metadata=metadata, predictions=predictions)
+        beam_features.compute(dataset)
+
+        # L->I is free (both normalised to L), A->G is 1 substitution / max(3,3) = 1/3
+        assert dataset.metadata.iloc[0]["edit_distance"] == pytest.approx(1 / 3)
+
     def test_beam_features_edge_case_equal_probabilities(self, beam_features):
         """Test beam features when all sequences have equal probabilities."""
         metadata = pd.DataFrame({"confidence": [0.9]})
@@ -273,11 +465,3 @@ class TestBeamFeatures:
         assert dataset.metadata.iloc[0]["z-score"] == pytest.approx(
             0.0, rel=1e-10, abs=1e-10
         )
-
-    def test_beam_features_raises_for_none_predictions(self, beam_features):
-        """BeamFeatures.compute should raise ValueError when predictions is None."""
-        metadata = pd.DataFrame({"confidence": [0.9]})
-        dataset = CalibrationDataset(metadata=metadata, predictions=None)
-
-        with pytest.raises(ValueError, match="BeamFeatures requires beam predictions"):
-            beam_features.compute(dataset)
