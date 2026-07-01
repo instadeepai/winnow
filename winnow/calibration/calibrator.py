@@ -36,6 +36,7 @@ class ProbabilityCalibrator:
         max_iter: int = 1000,
         early_stopping: bool = True,
         validation_fraction: float = 0.1,
+        active_feature_columns: Optional[List[str]] = None,
     ) -> None:
         """Initialise the probability calibrator.
 
@@ -50,6 +51,8 @@ class ProbabilityCalibrator:
             max_iter (int): Maximum number of training iterations. Defaults to 1000.
             early_stopping (bool): Whether to use early stopping to terminate training. Defaults to True.
             validation_fraction (float): Proportion of training data to use for early stopping validation. Defaults to 0.1.
+            active_feature_columns (Optional[List[str]]): Metadata column names fed to the classifier
+                (excluding confidence). When omitted, all columns from registered features are used.
         """
         self.feature_dict: Dict[str, CalibrationFeatures] = {}
         self.dependencies: Dict[str, FeatureDependency] = {}
@@ -64,6 +67,9 @@ class ProbabilityCalibrator:
             validation_fraction=validation_fraction,
         )
         self.scaler = StandardScaler()
+        self.active_feature_columns = (
+            list(active_feature_columns) if active_feature_columns is not None else None
+        )
 
         # Add features if provided
         if features is not None:
@@ -79,6 +85,8 @@ class ProbabilityCalibrator:
         Returns:
             List[str]: A list of column names representing the features used for calibration.
         """
+        if self.active_feature_columns is not None:
+            return list(self.active_feature_columns)
         return [
             column
             for feature in self.feature_dict.values()
