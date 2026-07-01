@@ -101,6 +101,18 @@ class RetentionTimeFeature(CalibrationFeatures):
             columns.append("is_missing_irt_error")
         return columns
 
+    @staticmethod
+    def _sequence_key(row: pd.Series) -> tuple:
+        """Hashable key for a predicted peptide sequence."""
+        prediction = row["prediction"]
+        if isinstance(prediction, list):
+            return tuple(prediction)
+        if "prediction_untokenised" in row.index and pd.notna(
+            row.get("prediction_untokenised")
+        ):
+            return (str(row["prediction_untokenised"]),)
+        return (str(prediction),)
+
     def check_valid_irt_prediction(self, dataset: CalibrationDataset) -> pd.Series:
         """Check which predictions are valid for iRT prediction.
 
@@ -274,12 +286,22 @@ class RetentionTimeFeature(CalibrationFeatures):
             # All remaining rows are valid — the reindex below will find every spectrum_id
             # in predictions with no NaN fill needed.
 
+        if dataset.metadata.empty:
+            dataset.metadata["irt_error"] = pd.Series(dtype=float)
+            return
+
         original_indices = dataset.metadata.index
 
         # Filter out invalid spectra for iRT prediction
         valid_irt_input = dataset.filter_entries(
             metadata_predicate=lambda row: row["is_missing_irt_error"]
         )
+
+        if valid_irt_input.metadata.empty:
+            dataset.metadata["iRT"] = np.nan
+            dataset.metadata["predicted iRT"] = np.nan
+            dataset.metadata["irt_error"] = 0.0
+            return
 
         # Prepare input data
         inputs = pd.DataFrame()
@@ -359,6 +381,22 @@ class RetentionTimeFeature(CalibrationFeatures):
         n_train = max(1, int(self.train_fraction * len(train_data)))
         train_data = train_data.iloc[:n_train]
 
+        n_unique_peptides = self._count_unique_sequences(train_data)
+        if n_unique_peptides < 2:
+            raise ValueError(
+                f"Experiment '{experiment_name}': Cannot fit iRT calibration regressor.\n"
+                f" Training pool has only {n_unique_peptides} unique peptide(s) after applying train_fraction={self.train_fraction}.\n"
+                "  Koina iRT prediction models output one iRT per peptide sequence, so RT->iRT regression requires at least 2 distinct training peptides.\n"
+                "  Increase calibrator.irt_calibration.train_fraction or provide more peptide diversity."
+            )
+
+        if train_data["retention_time"].nunique() < 2:
+            raise ValueError(
+                f"Experiment '{experiment_name}': Cannot fit iRT calibration regressor.\n"
+                f"  training pool has only {train_data['retention_time'].nunique()} unique retention time value(s) after applying train_fraction={self.train_fraction}.\n"
+                "  Increase calibrator.irt_calibration.train_fraction."
+            )
+
         if len(train_data) < self.min_train_points:
             raise ValueError(
                 f"Experiment '{experiment_name}': insufficient data for iRT "
@@ -369,7 +407,20 @@ class RetentionTimeFeature(CalibrationFeatures):
                 f"Adjust train_fraction, min_train_points, or provide more data."
             )
 
+        if 2 <= n_unique_peptides < self.min_train_points:
+            warnings.warn(
+                f"Experiment '{experiment_name}': iRT calibration pool (top {self.train_fraction:.0%}, {len(train_data)} PSMs):\n"
+                f"  Only {n_unique_peptides} unique peptide(s), below min_train_points={self.min_train_points}.\n"
+                f"  The RT->iRT regressor fit may be unreliable.\n"
+                f"  Consider increasing calibrator.irt_calibration.train_fraction or de-duplicating peptides.",
+                stacklevel=2,
+            )
+
         return train_data
+
+    def _count_unique_sequences(self, metadata: pd.DataFrame) -> int:
+        """Count distinct predicted sequences in a metadata subset."""
+        return len({self._sequence_key(row) for _, row in metadata.iterrows()})
 
     def __getstate__(self) -> dict:
         """Exclude transient regressor state from pickle serialisation."""

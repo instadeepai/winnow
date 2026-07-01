@@ -11,6 +11,25 @@ from winnow.datasets.data_loaders import utils
 EXPERIMENT_NAME = "test"
 
 
+def _finalize(loader, metadata, *, has_labels: bool = True):
+    """Run shared peptide finalization with loader metrics/remapping."""
+    return utils.finalize_peptide_metadata(
+        metadata,
+        loader.metrics,
+        has_labels=has_labels,
+        residue_remapping=loader.metrics.residue_set.residue_remapping,
+    )
+
+
+def _normalize_peptide(loader, value: object) -> list[str] | None:
+    """Normalize a peptide cell using loader metrics (string or token list)."""
+    return utils.normalize_peptide_cell(
+        value,
+        loader.metrics,
+        residue_remapping=loader.metrics.residue_set.residue_remapping,
+    )
+
+
 class TestMZTabDatasetLoader:
     """Unit tests for MZTabDatasetLoader."""
 
@@ -108,46 +127,36 @@ class TestMZTabDatasetLoader:
         ]
 
     # ------------------------------------------------------------------
-    # _remap_tokens – notation remapping
+    # Token remapping via utils.normalize_peptide_cell
     # ------------------------------------------------------------------
 
     def test_remap_tokens_residue_modifications(self, mztab_loader):
         """Test token-level remapping of residue modifications."""
-        # Test mass-based notation
         tokens = ["M+15.995", "P", "E", "P", "T", "I", "D", "E"]
         expected = ["M[UNIMOD:35]", "P", "E", "P", "T", "I", "D", "E"]
-        assert mztab_loader._remap_tokens(tokens) == expected
+        assert _normalize_peptide(mztab_loader, tokens) == expected
 
-        # Test named notation
         tokens = ["M[Oxidation]", "P", "E", "P", "T", "I", "D", "E"]
-        expected = ["M[UNIMOD:35]", "P", "E", "P", "T", "I", "D", "E"]
-        assert mztab_loader._remap_tokens(tokens) == expected
+        assert _normalize_peptide(mztab_loader, tokens) == expected
 
     def test_remap_tokens_terminal_modifications(self, mztab_loader):
-        """Test token-level remapping of N-terminal modifications.
-
-        Note: Hyphens are stripped by the tokenizer, so we only need to
-        match the modification token without the hyphen.
-        """
-        # Test mass-based notation (tokenizer captures "+42.011" as standalone token)
+        """Test token-level remapping of N-terminal modifications."""
         tokens = ["+42.011", "P", "E", "P", "T", "I", "D", "E"]
         expected = ["[UNIMOD:1]", "P", "E", "P", "T", "I", "D", "E"]
-        assert mztab_loader._remap_tokens(tokens) == expected
+        assert _normalize_peptide(mztab_loader, tokens) == expected
 
-        # Test named notation (tokenizer captures "[Acetyl]" without the hyphen)
         tokens = ["[Acetyl]", "P", "E", "P", "T", "I", "D", "E"]
-        expected = ["[UNIMOD:1]", "P", "E", "P", "T", "I", "D", "E"]
-        assert mztab_loader._remap_tokens(tokens) == expected
+        assert _normalize_peptide(mztab_loader, tokens) == expected
 
     def test_remap_tokens_no_modifications(self, mztab_loader):
         """Test that unmodified tokens pass through unchanged."""
         tokens = ["P", "E", "P", "T", "I", "D", "E"]
-        assert mztab_loader._remap_tokens(tokens) == tokens
+        assert _normalize_peptide(mztab_loader, tokens) == tokens
 
     def test_remap_tokens_already_unimod(self, mztab_loader):
         """Test that tokens already in Proforma format are unchanged."""
         tokens = ["M[UNIMOD:35]", "P", "E", "P", "T", "I", "D", "E"]
-        assert mztab_loader._remap_tokens(tokens) == tokens
+        assert _normalize_peptide(mztab_loader, tokens) == tokens
 
     # ------------------------------------------------------------------
     # Token remapping integration – Casanovo ↔ invalid residue detection
@@ -196,9 +205,7 @@ class TestMZTabDatasetLoader:
         for casanovo_seq, expected_token in casanovo_sequences:
             # Tokenize first (regex strips hyphens from N-terminal mods)
             tokens = loader.metrics._split_peptide(casanovo_seq)
-
-            # Then remap tokens
-            remapped_tokens = loader._remap_tokens(tokens)
+            remapped_tokens = _normalize_peptide(loader, tokens)
 
             # Verify that the remapped tokens contain the expected invalid token
             assert expected_token in remapped_tokens, (
@@ -421,10 +428,9 @@ class TestMZTabDatasetLoader:
         )
         assert result["prediction_untokenised"][0] == "PEPTC[Carbamidomethyl]DE"
 
-    def test_tokenize_replaces_leucine_at_token_level(self, loader):
-        df = pl.DataFrame({"seq": ["PEPTLDE"]})
-        result = loader._tokenize(df, "seq", "tokens")
-        tokens = result["tokens"][0].to_list()
+    def test_normalize_replaces_leucine_at_token_level(self, loader):
+        tokens = _normalize_peptide(loader, "PEPTLDE")
+        assert tokens is not None
         assert "L" not in tokens
         assert "I" in tokens
 
@@ -475,44 +481,34 @@ class TestMZTabDatasetLoader:
         assert idx1_rows["confidence"][0] > idx1_rows["confidence"][1]
 
     # ------------------------------------------------------------------
-    # _tokenize
+    # normalize_peptide_cell (string inputs)
     # ------------------------------------------------------------------
 
-    def test_tokenize_splits_simple_sequence(self, loader):
-        df = pl.DataFrame({"seq": ["PEPTIDE"]})
-        result = loader._tokenize(df, "seq", "tokens")
-        tokens = result["tokens"][0].to_list()
+    def test_normalize_splits_simple_sequence(self, loader):
+        tokens = _normalize_peptide(loader, "PEPTIDE")
         assert tokens == ["P", "E", "P", "T", "I", "D", "E"]
 
-    def test_tokenize_strips_hyphen_from_nterm_modification(self, loader):
-        """[Acetyl]-PEPTIDE: hyphen should be stripped by tokenizer, then remapped."""
-        df = pl.DataFrame({"seq": ["[Acetyl]-PEPTIDE"]})
-        result = loader._tokenize(df, "seq", "tokens")
-        tokens = result["tokens"][0].to_list()
+    def test_normalize_strips_hyphen_from_nterm_modification(self, loader):
+        tokens = _normalize_peptide(loader, "[Acetyl]-PEPTIDE")
+        assert tokens is not None
         assert "[UNIMOD:1]" in tokens
         assert "-" not in tokens
 
-    def test_tokenize_remaps_modification_tokens(self, loader):
-        """M[Oxidation] should be remapped to M[UNIMOD:35] after tokenization."""
-        df = pl.DataFrame({"seq": ["M[Oxidation]PEPTIDE"]})
-        result = loader._tokenize(df, "seq", "tokens")
-        tokens = result["tokens"][0].to_list()
+    def test_normalize_remaps_modification_tokens(self, loader):
+        tokens = _normalize_peptide(loader, "M[Oxidation]PEPTIDE")
+        assert tokens is not None
         assert "M[UNIMOD:35]" in tokens
         assert "M[Oxidation]" not in tokens
 
-    def test_tokenize_remaps_carbamidomethyl_without_corrupting_name(self, loader):
-        df = pl.DataFrame({"seq": ["GEEHC[Carbamidomethyl]GHLLQAHK"]})
-        result = loader._tokenize(df, "seq", "tokens")
-        tokens = result["tokens"][0].to_list()
+    def test_normalize_remaps_carbamidomethyl_without_corrupting_name(self, loader):
+        tokens = _normalize_peptide(loader, "GEEHC[Carbamidomethyl]GHLLQAHK")
+        assert tokens is not None
         assert "C[UNIMOD:4]" in tokens
         assert "L" not in tokens
         assert tokens.count("I") == 2
 
-    def test_tokenize_unmodified_sequence_passes_through(self, loader):
-        df = pl.DataFrame({"seq": ["ACGM"]})
-        result = loader._tokenize(df, "seq", "tokens")
-        tokens = result["tokens"][0].to_list()
-        assert tokens == ["A", "C", "G", "M"]
+    def test_normalize_unmodified_sequence_passes_through(self, loader):
+        assert _normalize_peptide(loader, "ACGM") == ["A", "C", "G", "M"]
 
     # ------------------------------------------------------------------
     # _get_top_predictions
@@ -760,9 +756,10 @@ class TestMZTabDatasetLoader:
         processed = db_loader._process_predictions(
             raw, [], is_casanovo=False, experiment_name=EXPERIMENT_NAME
         )
-        processed = db_loader._tokenize(
-            processed, "prediction_untokenised", "prediction"
+        processed = processed.with_columns(
+            pl.col("prediction_untokenised").alias("prediction")
         )
+        processed = _finalize(db_loader, processed, has_labels=False)
         top = db_loader._get_top_predictions(processed, is_casanovo=False)
         merged = db_loader._merge_data(spectrum, top)
 
@@ -794,3 +791,88 @@ class TestMZTabDatasetLoader:
             db_loader._process_predictions(
                 df, [], is_casanovo=False, experiment_name=EXPERIMENT_NAME
             )
+
+
+class TestMZTabEvaluatePredictions:
+    """Tests for finalize_peptide_metadata on mzTab-style frames (parity with InstaNovo)."""
+
+    @pytest.fixture()
+    def loader(self, full_residue_masses, standard_remapping):
+        return MZTabDatasetLoader(
+            residue_masses=full_residue_masses,
+            residue_remapping=standard_remapping,
+        )
+
+    def test_evaluate_valid_prediction_true_for_list(self, loader):
+        metadata = pl.DataFrame({"prediction": [["A", "G"]]})
+        result = _finalize(loader, metadata, has_labels=False)
+        assert result["valid_prediction"][0]
+
+    def test_evaluate_valid_prediction_false_for_empty(self, loader):
+        metadata = pl.DataFrame({"prediction": [[]]})
+        result = _finalize(loader, metadata, has_labels=False)
+        assert not result["valid_prediction"][0]
+
+    def test_evaluate_no_label_columns_when_no_labels(self, loader):
+        metadata = pl.DataFrame({"prediction": [["A", "G"]]})
+        result = _finalize(loader, metadata, has_labels=False)
+        assert "correct" not in result.columns
+        assert "valid_sequence" not in result.columns
+        assert "num_matches" not in result.columns
+
+    def test_evaluate_correct_flag_true_on_full_match(self, loader):
+        seq = ["P", "E", "P"]
+        metadata = pl.DataFrame({"sequence": [seq], "prediction": [seq]})
+        result = _finalize(loader, metadata, has_labels=True)
+        assert result["correct"][0]
+
+    def test_evaluate_correct_flag_false_on_different_sequence(self, loader):
+        metadata = pl.DataFrame(
+            {"sequence": [["P", "E", "P"]], "prediction": [["A", "E", "P"]]}
+        )
+        result = _finalize(loader, metadata, has_labels=True)
+        assert not result["correct"][0]
+
+    def test_evaluate_correct_flag_false_on_length_mismatch(self, loader):
+        metadata = pl.DataFrame(
+            {"sequence": [["P", "E", "P"]], "prediction": [["P", "E"]]}
+        )
+        result = _finalize(loader, metadata, has_labels=True)
+        assert not result["correct"][0]
+
+    def test_evaluate_num_matches_full_match(self, loader):
+        seq = ["P", "E", "P"]
+        metadata = pl.DataFrame({"sequence": [seq], "prediction": [seq]})
+        result = _finalize(loader, metadata, has_labels=True)
+        assert result["num_matches"][0] == len(seq)
+
+    def test_evaluate_num_matches_zero_on_invalid_prediction(self, loader):
+        metadata = pl.DataFrame({"sequence": [["P", "E", "P"]], "prediction": [None]})
+        result = _finalize(loader, metadata, has_labels=True)
+        assert result["num_matches"][0] == 0
+
+    def test_evaluate_empty_sequence_list_sets_valid_sequence_false(self, loader):
+        metadata = pl.DataFrame({"sequence": [[]], "prediction": [["P", "E", "P"]]})
+        result = _finalize(loader, metadata, has_labels=True)
+        assert not result["valid_sequence"][0]
+        assert result["num_matches"][0] == 0
+        assert not result["correct"][0]
+
+    def test_evaluate_empty_prediction_list_sets_valid_prediction_false(self, loader):
+        metadata = pl.DataFrame({"sequence": [["P", "E", "P"]], "prediction": [[]]})
+        result = _finalize(loader, metadata, has_labels=True)
+        assert not result["valid_prediction"][0]
+
+    def test_evaluate_imputes_valid_sequence_and_correct_for_partial_labels(
+        self, loader
+    ):
+        metadata = pl.DataFrame(
+            {
+                "sequence": [["P", "E", "P"], None, []],
+                "prediction": [["P", "E", "P"], ["A", "G"], ["A", "G"]],
+            }
+        )
+        result = _finalize(loader, metadata, has_labels=True)
+        assert result["valid_sequence"].to_list() == [True, False, False]
+        assert result["correct"].to_list() == [True, False, False]
+        assert result["num_matches"].to_list() == [3, 0, 0]

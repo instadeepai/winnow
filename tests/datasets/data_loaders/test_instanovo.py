@@ -8,6 +8,16 @@ import polars as pl
 import pytest
 
 from winnow.datasets.data_loaders import InstaNovoDatasetLoader
+from winnow.datasets.data_loaders import utils
+
+
+def _finalize(loader, metadata, *, has_labels: bool = True):
+    return utils.finalize_peptide_metadata(
+        metadata,
+        loader.metrics,
+        has_labels=has_labels,
+        residue_remapping=loader.metrics.residue_set.residue_remapping,
+    )
 
 
 class TestInstaNovoDatasetLoader:
@@ -728,7 +738,7 @@ class TestInstaNovoDatasetLoader:
         result = loader._process_predictions(preds_df, ["spectrum_id"])
         assert result["prediction"].iloc[0] == ["P", "E", "P", "T", "I", "D", "E"]
 
-    def test_process_predictions_replaces_l_with_i_in_prediction_list(self, loader):
+    def test_finalize_replaces_l_with_i_in_prediction_list(self, loader):
         preds_df = pd.DataFrame(
             {
                 "spectrum_id": [1],
@@ -737,8 +747,9 @@ class TestInstaNovoDatasetLoader:
                 "log_probs": [-0.5],
             }
         )
-        result = loader._process_predictions(preds_df, ["spectrum_id"])
-        assert "L" not in result["prediction"].iloc[0]
+        processed = loader._process_predictions(preds_df, ["spectrum_id"])
+        finalized = _finalize(loader, processed, has_labels=False)
+        assert "L" not in finalized["prediction"].iloc[0]
 
     def test_process_predictions_replaces_l_with_i_in_prediction_untokenised(
         self, loader
@@ -773,22 +784,22 @@ class TestInstaNovoDatasetLoader:
         assert "precursor_mz" not in result.columns
 
     # ------------------------------------------------------------------
-    # _evaluate_predictions
+    # finalize_peptide_metadata (via loader metrics)
     # ------------------------------------------------------------------
 
     def test_evaluate_valid_prediction_true_for_list(self, loader):
         dataset = pd.DataFrame({"prediction": [["A", "G"]]})
-        result = loader._evaluate_predictions(dataset, has_labels=False)
+        result = _finalize(loader, dataset, has_labels=False)
         assert result["valid_prediction"].iloc[0]
 
-    def test_evaluate_valid_prediction_false_for_non_list(self, loader):
-        dataset = pd.DataFrame({"prediction": ["bad_string"]})
-        result = loader._evaluate_predictions(dataset, has_labels=False)
+    def test_evaluate_valid_prediction_false_for_empty_list(self, loader):
+        dataset = pd.DataFrame({"prediction": [[]]})
+        result = _finalize(loader, dataset, has_labels=False)
         assert not result["valid_prediction"].iloc[0]
 
     def test_evaluate_no_label_columns_when_no_labels(self, loader):
         dataset = pd.DataFrame({"prediction": [["A", "G"]]})
-        result = loader._evaluate_predictions(dataset, has_labels=False)
+        result = _finalize(loader, dataset, has_labels=False)
         assert "correct" not in result.columns
         assert "valid_sequence" not in result.columns
         assert "num_matches" not in result.columns
@@ -796,34 +807,47 @@ class TestInstaNovoDatasetLoader:
     def test_evaluate_correct_flag_true_on_full_match(self, loader):
         seq = ["P", "E", "P"]
         dataset = pd.DataFrame({"sequence": [seq], "prediction": [seq]})
-        result = loader._evaluate_predictions(dataset, has_labels=True)
+        result = _finalize(loader, dataset, has_labels=True)
         assert result["correct"].iloc[0]
 
     def test_evaluate_correct_flag_false_on_different_sequence(self, loader):
         dataset = pd.DataFrame(
             {"sequence": [["P", "E", "P"]], "prediction": [["A", "E", "P"]]}
         )
-        result = loader._evaluate_predictions(dataset, has_labels=True)
+        result = _finalize(loader, dataset, has_labels=True)
         assert not result["correct"].iloc[0]
 
     def test_evaluate_correct_flag_false_on_length_mismatch(self, loader):
         dataset = pd.DataFrame(
             {"sequence": [["P", "E", "P"]], "prediction": [["P", "E"]]}
         )
-        result = loader._evaluate_predictions(dataset, has_labels=True)
+        result = _finalize(loader, dataset, has_labels=True)
         assert not result["correct"].iloc[0]
 
     def test_evaluate_num_matches_full_match(self, loader):
         seq = ["P", "E", "P"]
         dataset = pd.DataFrame({"sequence": [seq], "prediction": [seq]})
-        result = loader._evaluate_predictions(dataset, has_labels=True)
+        result = _finalize(loader, dataset, has_labels=True)
         assert result["num_matches"].iloc[0] == len(seq)
 
     def test_evaluate_num_matches_zero_on_invalid_prediction(self, loader):
-        """Non-list prediction should give 0 matches."""
         dataset = pd.DataFrame({"sequence": [["P", "E", "P"]], "prediction": [None]})
-        result = loader._evaluate_predictions(dataset, has_labels=True)
+        result = _finalize(loader, dataset, has_labels=True)
         assert result["num_matches"].iloc[0] == 0
+
+    def test_evaluate_imputes_valid_sequence_and_correct_for_partial_labels(
+        self, loader
+    ):
+        dataset = pd.DataFrame(
+            {
+                "sequence": [["P", "E", "P"], None, []],
+                "prediction": [["P", "E", "P"], ["A", "G"], ["A", "G"]],
+            }
+        )
+        result = _finalize(loader, dataset, has_labels=True)
+        assert result["valid_sequence"].tolist() == [True, False, False]
+        assert result["correct"].tolist() == [True, False, False]
+        assert result["num_matches"].tolist() == [3, 0, 0]
 
     # ------------------------------------------------------------------
     # load() – error handling

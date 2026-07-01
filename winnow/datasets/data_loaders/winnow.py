@@ -13,6 +13,7 @@ from instanovo.utils.metrics import Metrics
 from instanovo.utils.residues import ResidueSet
 
 from winnow.datasets.calibration_dataset import CalibrationDataset
+from winnow.datasets.data_loaders import utils
 from winnow.datasets.interfaces import DatasetLoader
 
 
@@ -82,6 +83,15 @@ class WinnowDatasetLoader(DatasetLoader):
                 )
             )
         )
+
+        if "valid_prediction" not in metadata.columns:
+            metadata["valid_prediction"] = metadata["prediction"].apply(
+                utils.is_valid_peptide_tokens
+            )
+        if "sequence" in metadata.columns and "valid_sequence" not in metadata.columns:
+            metadata["valid_sequence"] = metadata["sequence"].apply(
+                utils.is_valid_peptide_tokens
+            )
 
         predictions_pkl_path = data_path / Path("predictions.pkl")
         if predictions_pkl_path.exists():
