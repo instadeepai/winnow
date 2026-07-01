@@ -231,25 +231,6 @@ class MZTabDatasetLoader(DatasetLoader):
             )
 
     @staticmethod
-    def _as_aa_list(value: Any) -> Optional[list[str]]:
-        """Return amino-acid token lists from polars list cells."""
-        if isinstance(value, list):
-            return value
-        if isinstance(value, pl.Series):
-            return value.to_list()
-        return None
-
-    @staticmethod
-    def _normalize_leucine_tokens(tokens: list[str]) -> list[str]:
-        """Map leucine to isoleucine at the token level.
-
-        String-level ``L`` -> ``I`` replacement must not be applied before
-        tokenization because it corrupts modification names such as
-        ``Carbamidomethyl``.
-        """
-        return ["I" if token == "L" else token for token in tokens]
-
-    @staticmethod
     def _parse_spectra_ref(
         predictions: pl.DataFrame, experiment_name: str
     ) -> pl.DataFrame:
@@ -314,7 +295,7 @@ class MZTabDatasetLoader(DatasetLoader):
 
         experiment_name = Path(data_path).stem
         spectrum_data, has_labels = self._load_spectrum_data(data_path)
-        spectrum_data = self._process_spectrum_data(spectrum_data, has_labels)
+        spectrum_data = self._process_spectrum_data(spectrum_data)
 
         raw_predictions = self._load_dataset(predictions_path)
         is_casanovo = self._is_casanovo_mztab(raw_predictions)
@@ -327,18 +308,27 @@ class MZTabDatasetLoader(DatasetLoader):
             is_casanovo,
             experiment_name,
         )
-        predictions = self._tokenize(
-            predictions, "prediction_untokenised", "prediction"
+        predictions = predictions.with_columns(
+            pl.col("prediction_untokenised").alias("prediction")
+        )
+        residue_remapping = self.metrics.residue_set.residue_remapping
+        predictions = utils.finalize_peptide_metadata(
+            predictions,
+            self.metrics,
+            has_labels=False,
+            residue_remapping=residue_remapping,
         )
 
         top_predictions = self._get_top_predictions(predictions, is_casanovo)
         metadata = self._merge_data(spectrum_data, top_predictions)
-        metadata = self._evaluate_predictions(metadata, has_labels)
+        metadata = utils.finalize_peptide_metadata(
+            metadata,
+            self.metrics,
+            has_labels=has_labels,
+            residue_remapping=residue_remapping,
+        )
 
         metadata_pd = metadata.to_pandas()
-        metadata_pd["prediction"] = metadata_pd["prediction"].apply(
-            lambda x: x.tolist() if isinstance(x, np.ndarray) else x
-        )
 
         beam_predictions: Optional[List[Optional[List[ScoredSequence]]]] = None
         if is_casanovo and self.load_beams:
@@ -477,47 +467,8 @@ class MZTabDatasetLoader(DatasetLoader):
             beam_predictions.append(scored_sequences or None)
         return beam_predictions
 
-    def _tokenize(
-        self,
-        predictions: pl.DataFrame,
-        untokenised_column: str,
-        tokenised_column: str,
-    ) -> pl.DataFrame:
-        """Tokenize peptide strings and remap modifications to ProForma."""
-        return predictions.with_columns(
-            pl.col(untokenised_column)
-            .map_elements(self.metrics._split_peptide, return_dtype=pl.List(pl.Utf8))
-            .alias(tokenised_column)
-        ).with_columns(
-            pl.col(tokenised_column)
-            .map_elements(self._remap_tokens, return_dtype=pl.List(pl.Utf8))
-            .alias(tokenised_column)
-        )
-
-    def _remap_tokens(self, tokens: list[str]) -> list[str]:
-        """Remap Casanovo tokens to ProForma and normalise leucine.
-
-        Modification remapping runs after tokenization so ``residue_remapping``
-        keys match whole tokens (``M[Oxidation]``, ``[Acetyl]``, etc.). Leucine
-        normalisation is applied here rather than on raw peptide strings.
-        """
-        tokens = self._normalize_leucine_tokens(tokens)
-        return [
-            self.metrics.residue_set.residue_remapping.get(token, token)
-            for token in tokens
-        ]
-
-    def _process_spectrum_data(
-        self, spectrum_data: pl.DataFrame, has_labels: bool
-    ) -> pl.DataFrame:
-        """Tokenize ground-truth sequences when present."""
-        if has_labels:
-            spectrum_data = spectrum_data.with_columns(
-                pl.col("sequence").alias("sequence_untokenised")
-            )
-            spectrum_data = self._tokenize(
-                spectrum_data, "sequence_untokenised", "sequence"
-            )
+    def _process_spectrum_data(self, spectrum_data: pl.DataFrame) -> pl.DataFrame:
+        """Return spectrum data unchanged; tokenization happens in finalize."""
         return spectrum_data
 
     def _merge_data(
@@ -530,70 +481,3 @@ class MZTabDatasetLoader(DatasetLoader):
         return spectrum_data.join(predictions, on="spectrum_id", how="inner").sort(
             "index"
         )
-
-    def _novor_match_row(self, row: dict[str, Any]) -> int:
-        """Count AA matches for one labelled row via :meth:`Metrics._novor_match`.
-
-        Extracted from an inline polars ``map_elements`` lambda so sequence and
-        prediction are normalised to ``list[str]`` before matching, and so the
-        logic is typed/testable. Bound methods cannot be passed directly to
-        polars UDFs; call via ``lambda row: self._novor_match_row(row)``.
-        """
-        sequence = self._as_aa_list(row["sequence"])
-        prediction = self._as_aa_list(row["prediction"])
-        if sequence is None or prediction is None:
-            return 0
-        return self.metrics._novor_match(sequence, prediction)
-
-    def _prediction_is_correct(self, row: dict[str, Any]) -> bool:
-        """Return whether ``num_matches`` equals full peptide length for a row."""
-        sequence = self._as_aa_list(row["sequence"])
-        prediction = self._as_aa_list(row["prediction"])
-        if sequence is None or prediction is None:
-            return False
-        num_matches = row["num_matches"]
-        return num_matches == len(sequence) == len(prediction)
-
-    def _evaluate_predictions(
-        self, metadata: pl.DataFrame, has_labels: bool
-    ) -> pl.DataFrame:
-        """Annotate merged metadata with prediction validity and ground-truth matches."""
-        metadata = metadata.with_columns(
-            pl.col("prediction")
-            .map_elements(
-                lambda x: self._as_aa_list(x) is not None,
-                return_dtype=pl.Boolean,
-            )
-            .alias("valid_prediction"),
-        )
-
-        if not has_labels:
-            return metadata
-
-        metadata = (
-            metadata.with_columns(
-                pl.col("sequence")
-                .map_elements(
-                    lambda x: self._as_aa_list(x) is not None,
-                    return_dtype=pl.Boolean,
-                )
-                .alias("valid_sequence"),
-            )
-            .with_columns(
-                pl.struct(["sequence", "prediction"])
-                .map_elements(
-                    lambda row: self._novor_match_row(row),
-                    return_dtype=pl.Int64,
-                )
-                .alias("num_matches"),
-            )
-            .with_columns(
-                pl.struct(["sequence", "prediction", "num_matches"])
-                .map_elements(
-                    lambda row: self._prediction_is_correct(row),
-                    return_dtype=pl.Boolean,
-                )
-                .alias("correct")
-            )
-        )
-        return metadata

@@ -166,7 +166,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
             raise ValueError("predictions_path is required for InstaNovoDatasetLoader")
 
         inputs, has_labels = self._load_spectrum_data(data_path)
-        inputs = self._process_spectrum_data(inputs, has_labels)
+        inputs = inputs.to_pandas()
 
         # Load beam predictions only if beam_columns is configured
         if self.beam_columns:
@@ -180,7 +180,13 @@ class InstaNovoDatasetLoader(DatasetLoader):
             predictions_df.to_pandas(), inputs.columns
         )
         predictions = self._merge_spectrum_data(predictions, inputs)
-        predictions = self._evaluate_predictions(predictions, has_labels)
+        residue_remapping = self.metrics.residue_set.residue_remapping
+        predictions = utils.finalize_peptide_metadata(
+            predictions,
+            self.metrics,
+            has_labels=has_labels,
+            residue_remapping=residue_remapping,
+        )
 
         return CalibrationDataset(metadata=predictions, predictions=beams)
 
@@ -327,34 +333,6 @@ class InstaNovoDatasetLoader(DatasetLoader):
             for row in beam_df.iter_rows(named=True)
         ]
 
-    def _process_spectrum_data(
-        self, df: pl.DataFrame, has_labels: bool
-    ) -> pd.DataFrame:
-        """Processes the input data from the de novo sequencing model.
-
-        Args:
-            df (pl.DataFrame): The dataframe containing the spectrum data.
-            has_labels (bool): Whether the dataset has ground truth labels.
-
-        Returns:
-            pd.DataFrame: The processed dataframe.
-        """
-        # Convert to pandas for downstream compatibility
-        df = df.to_pandas()
-        if has_labels:
-            df["sequence"] = (
-                df["sequence"]
-                .apply(
-                    lambda peptide: (
-                        peptide.replace("L", "I")
-                        if isinstance(peptide, str)
-                        else peptide
-                    )
-                )
-                .apply(self.metrics._split_peptide)
-            )
-        return df
-
     def _process_predictions(
         self, preds_dataset: pd.DataFrame, input_dataset_columns: List[str]
     ) -> pd.DataFrame:
@@ -397,13 +375,6 @@ class InstaNovoDatasetLoader(DatasetLoader):
         preds_dataset["prediction"] = preds_dataset["prediction"].apply(
             lambda peptide: peptide.split(", ") if isinstance(peptide, str) else peptide
         )
-        preds_dataset["prediction"] = preds_dataset["prediction"].apply(
-            lambda peptide: (
-                ["I" if amino_acid == "L" else amino_acid for amino_acid in peptide]
-                if isinstance(peptide, list)
-                else peptide
-            )
-        )
 
         preds_dataset["prediction_untokenised"] = preds_dataset[
             "prediction_untokenised"
@@ -414,43 +385,3 @@ class InstaNovoDatasetLoader(DatasetLoader):
         )
 
         return preds_dataset
-
-    def _evaluate_predictions(
-        self, dataset: pd.DataFrame, has_labels: bool
-    ) -> pd.DataFrame:
-        """Evaluates predictions in a dataset by checking validity and accuracy.
-
-        Args:
-            dataset (pd.DataFrame): The dataframe containing the predictions.
-            has_labels (bool): Whether the dataset has ground truth labels.
-
-        Returns:
-            pd.DataFrame: The processed dataframe.
-        """
-        if has_labels:
-            dataset["valid_sequence"] = dataset["sequence"].apply(
-                lambda peptide: isinstance(peptide, list)
-            )
-        dataset["valid_prediction"] = dataset["prediction"].apply(
-            lambda peptide: isinstance(peptide, list)
-        )
-        if has_labels:
-            dataset["num_matches"] = dataset.apply(
-                lambda row: (
-                    self.metrics._novor_match(row["sequence"], row["prediction"])
-                    if isinstance(row["sequence"], list)
-                    and isinstance(row["prediction"], list)
-                    else 0
-                ),
-                axis=1,
-            )
-            dataset["correct"] = dataset.apply(
-                lambda row: (
-                    row["num_matches"] == len(row["sequence"]) == len(row["prediction"])
-                    if isinstance(row["sequence"], list)
-                    and isinstance(row["prediction"], list)
-                    else False
-                ),
-                axis=1,
-            )
-        return dataset
