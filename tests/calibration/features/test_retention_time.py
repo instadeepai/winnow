@@ -236,19 +236,128 @@ class TestRetentionTimeFeature:
 
         metadata = pd.DataFrame(
             {
-                "confidence": [0.95, 0.90],
-                "prediction": [["A", "G"], ["G", "A"]],
-                "retention_time": [10.5, 15.2],
-                "spectrum_id": [0, 1],
-                "experiment_name": ["exp_a", "exp_a"],
+                "confidence": [0.95 - 0.01 * i for i in range(20)],
+                "prediction": [
+                    ["A", "G"] if i % 2 == 0 else ["G", "A"] for i in range(20)
+                ],
+                "retention_time": [10.5 + i for i in range(20)],
+                "spectrum_id": list(range(20)),
+                "experiment_name": ["exp_a"] * 20,
             }
         )
         dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
         feature = RetentionTimeFeature(train_fraction=0.1, min_train_points=10)
 
-        with pytest.raises(ValueError, match="insufficient data for iRT"):
+        with pytest.raises(
+            ValueError,
+            match=r"Experiment 'exp_a'.*insufficient data for iRT calibration",
+        ):
             feature.prepare(dataset)
+
+    def test_select_training_data_errors_on_single_unique_peptide(self):
+        """Raise when duplicate peptides yield a single Koina iRT target."""
+        feature = RetentionTimeFeature(
+            train_fraction=1.0,
+            min_train_points=2,
+            learn_from_missing=False,
+        )
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.95, 0.90, 0.85, 0.80, 0.75, 0.70],
+                "prediction": [["A", "G"]] * 6,
+                "retention_time": [10.0, 11.0, 12.0, 13.0, 14.0, 15.0],
+                "spectrum_id": list(range(6)),
+            }
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=(
+                r"(?s)Experiment 'exp_a': Cannot fit iRT calibration regressor\."
+                r".*Training pool has only 1 unique peptide\(s\).*"
+                r"Koina iRT prediction models output one iRT per peptide sequence"
+            ),
+        ):
+            feature._select_training_data(metadata, "exp_a")
+
+    def test_select_training_data_warns_on_partial_sequence_diversity(self):
+        """Warn when unique sequences are above 2 but below min_train_points."""
+        feature = RetentionTimeFeature(
+            train_fraction=1.0,
+            min_train_points=5,
+            learn_from_missing=False,
+        )
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.95, 0.90, 0.85, 0.80, 0.75, 0.70],
+                "prediction": [
+                    ["A", "G"],
+                    ["A", "G"],
+                    ["G", "A"],
+                    ["G", "A"],
+                    ["L", "K"],
+                    ["M", "V"],
+                ],
+                "retention_time": [10.0, 11.0, 12.0, 13.0, 14.0, 15.0],
+                "spectrum_id": list(range(6)),
+            }
+        )
+
+        with pytest.warns(
+            UserWarning, match=r"unique peptide\(s\), below min_train_points"
+        ):
+            train_data = feature._select_training_data(metadata, "exp_a")
+
+        assert len(train_data) == 6
+
+    def test_select_training_data_errors_on_single_retention_time(self):
+        """Raise when the calibration pool has no RT spread for linear regression."""
+        feature = RetentionTimeFeature(
+            train_fraction=1.0,
+            min_train_points=2,
+            learn_from_missing=False,
+        )
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.95, 0.90, 0.85],
+                "prediction": [["A", "G"], ["G", "A"], ["S", "P"]],
+                "retention_time": [10.0, 10.0, 10.0],
+                "spectrum_id": [0, 1, 2],
+            }
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=(
+                r"(?s)Experiment 'exp_a': Cannot fit iRT calibration regressor\."
+                r".*unique retention time value\(s\)"
+            ),
+        ):
+            feature._select_training_data(metadata, "exp_a")
+
+    @patch("winnow.calibration.features.retention_time.koinapy.Koina")
+    def test_compute_skips_koina_when_no_valid_spectra(self, mock_koina):
+        """Do not call Koina when every spectrum is invalid for iRT prediction."""
+        mock_model_instance = Mock()
+        mock_koina.return_value = mock_model_instance
+        mock_model_instance.model_inputs = ["peptide_sequences"]
+
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.95, 0.90],
+                "prediction": [["A"] * 31, ["G"] * 31],
+                "retention_time": [10.5, 15.2],
+                "spectrum_id": [0, 1],
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
+        feature = RetentionTimeFeature(max_peptide_length=30)
+
+        feature.compute(dataset)
+
+        mock_model_instance.predict.assert_not_called()
+        assert dataset.metadata["irt_error"].tolist() == [0.0, 0.0]
 
     @patch("winnow.calibration.features.retention_time.koinapy.Koina")
     def test_compute_with_mock(
@@ -437,10 +546,22 @@ class TestRetentionTimeFeature:
 
         assert feature.min_train_points == 10
 
+        unique_predictions = [
+            ["A", "G"],
+            ["G", "A"],
+            ["S", "P"],
+            ["L", "K"],
+            ["M", "V"],
+            ["F", "W"],
+            ["Y", "H"],
+            ["R", "N"],
+            ["D", "E"],
+            ["Q", "C"],
+        ]
         metadata = pd.DataFrame(
             {
                 "confidence": [0.95 - (idx * 0.01) for idx in range(10)],
-                "prediction": [["A", "G"] for _ in range(10)],
+                "prediction": unique_predictions,
                 "retention_time": [float(idx) for idx in range(10)],
                 "spectrum_id": list(range(10)),
                 "experiment_name": ["exp_a"] * 10,
