@@ -396,3 +396,22 @@ class TestProbabilityCalibrator:
             assert "MLPClassifier" in error_msg
             assert "cannot correctly infer the trained feature set" in error_msg
             assert "retrain" in error_msg.lower() or "retraining" in error_msg.lower()
+
+
+class TestFeatureColumns:
+    """Tests for calibrator-level feature column selection."""
+
+    def test_feature_columns_override(self):
+        beam = MockCalibrationFeature("beam", columns=["margin", "edit_distance"])
+        calibrator = ProbabilityCalibrator(
+            features=[beam],
+            active_feature_columns=["margin"],
+        )
+
+        assert calibrator.columns == ["margin"]
+
+    def test_default_uses_all_feature_columns(self):
+        beam = MockCalibrationFeature("beam", columns=["margin", "edit_distance"])
+        calibrator = ProbabilityCalibrator(features=[beam])
+
+        assert calibrator.columns == ["margin", "edit_distance"]
