@@ -20,6 +20,19 @@ def _is_standalone_modification(token: str) -> bool:
     return bool(token) and not token[0].isalpha()
 
 
+def _normalize_token_list(
+    tokens: list[str] | tuple[str, ...] | None,
+) -> list[str] | None:
+    """Coerce token containers from pandas/numpy into a plain Python list."""
+    if tokens is None:
+        return None
+    if hasattr(tokens, "tolist"):
+        return tokens.tolist()
+    if isinstance(tokens, tuple):
+        return list(tokens)
+    return tokens
+
+
 def tokens_to_proforma(tokens: list[str] | None) -> str:
     """Convert a list of tokens to a ProForma compliant string.
 
@@ -46,7 +59,8 @@ def tokens_to_proforma(tokens: list[str] | None) -> str:
         >>> tokens_to_proforma(["M[UNIMOD:35]", "P", "E", "P", "T", "I", "D", "E"])
         'M[UNIMOD:35]PEPTIDE'
     """
-    if not tokens:
+    tokens = _normalize_token_list(tokens)
+    if tokens is None or len(tokens) == 0:
         return ""
 
     # Work with a mutable copy
