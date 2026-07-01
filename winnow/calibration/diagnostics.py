@@ -16,6 +16,10 @@ from numpy.typing import NDArray
 from sklearn.isotonic import IsotonicRegression
 
 from winnow.datasets.calibration_dataset import CalibrationDataset
+from winnow.datasets.data_loaders.utils import (
+    finalize_peptide_metadata,
+    require_labelled_rows,
+)
 
 LabelSource = Literal["sequence", "precomputed"]
 SEQUENCE_LABEL_COLUMN = "correct"
@@ -90,17 +94,6 @@ def validate_label_config(
         )
 
 
-def _normalize_peptide_tokens(value: object, metrics: Metrics) -> list[str]:
-    """Normalize a sequence or prediction cell to a list of residue tokens."""
-    if isinstance(value, str):
-        return metrics._split_peptide(value)
-    if isinstance(value, (list, tuple)):
-        return list(value)
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    return []
-
-
 def compute_correct_from_sequence(
     metadata: pd.DataFrame,
     residue_masses: dict[str, float],
@@ -123,22 +116,13 @@ def compute_correct_from_sequence(
         )
     )
     df = metadata.copy()
-    df["sequence"] = df["sequence"].apply(
-        lambda value: _normalize_peptide_tokens(value, metrics)
+    finalize_peptide_metadata(
+        df,
+        metrics,
+        has_labels=True,
+        residue_remapping=residue_remapping or {},
     )
-    df["prediction"] = df["prediction"].apply(
-        lambda value: _normalize_peptide_tokens(value, metrics)
-    )
-
-    def _row_correct(row: pd.Series) -> bool:
-        sequence = row["sequence"]
-        prediction = row["prediction"]
-        if not sequence or not prediction:
-            return False
-        num_matches = metrics._novor_match(sequence, prediction)
-        return num_matches == len(sequence) == len(prediction)
-
-    return df.apply(_row_correct, axis=1)
+    return df["correct"]
 
 
 def _coerce_bool_labels(series: pd.Series, column: str) -> pd.Series:
@@ -175,7 +159,12 @@ def resolve_diagnostics_labels(
         labels = _coerce_bool_labels(metadata[label_column], label_column)
         return labels, label_column
 
-    labels = compute_correct_from_sequence(metadata, residue_masses, residue_remapping)
+    if "correct" not in metadata.columns:
+        metadata["correct"] = compute_correct_from_sequence(
+            metadata, residue_masses, residue_remapping
+        )
+    mask = require_labelled_rows(metadata, context="Sequence-derived diagnostics")
+    labels = metadata.loc[mask, "correct"].astype(bool)
     return labels, SEQUENCE_LABEL_COLUMN
 
 

@@ -4,6 +4,7 @@ import pickle
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn.exceptions import ConvergenceWarning
 from winnow.calibration.calibrator import ProbabilityCalibrator
 from winnow.calibration.calibration_features import (
     CalibrationFeatures,
@@ -270,6 +271,52 @@ class TestProbabilityCalibrator:
         # Check that scaler and classifier were fitted (basic smoke test)
         assert hasattr(calibrator.scaler, "mean_")  # Scaler fitted
         assert hasattr(calibrator.classifier, "classes_")  # Classifier fitted
+
+    def test_fit_excludes_rows_without_valid_ground_truth_sequences(self):
+        """Unlabelled rows must not contribute to scaler or classifier fitting."""
+        n_labelled = 50
+        n_unlabelled = 10
+        np.random.seed(0)
+        metadata = pd.DataFrame(
+            {
+                "confidence": np.concatenate(
+                    [
+                        np.random.uniform(0.1, 0.99, n_labelled),
+                        np.random.uniform(0.1, 0.99, n_unlabelled),
+                    ]
+                ),
+                "sequence": [["A", "G"]] * n_labelled + [None] * n_unlabelled,
+                "valid_sequence": [True] * n_labelled + [False] * n_unlabelled,
+                "correct": np.concatenate(
+                    [np.random.choice([0, 1], n_labelled), np.zeros(n_unlabelled)]
+                ),
+            }
+        )
+        dataset = CalibrationDataset(
+            metadata=metadata,
+            predictions=[None] * len(metadata),
+        )
+        calibrator = ProbabilityCalibrator(seed=42, max_iter=10)
+        feature = MockCalibrationFeature("test_feature", ["test_col"])
+        calibrator.add_feature(feature)
+        with pytest.warns(ConvergenceWarning, match="Maximum iterations"):
+            calibrator.fit(dataset)
+
+        assert calibrator.scaler.n_samples_seen_ == n_labelled
+
+    def test_fit_raises_when_no_valid_ground_truth_sequences(self, calibrator):
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.9, 0.8],
+                "sequence": [None, []],
+                "valid_sequence": [False, False],
+                "correct": [0, 0],
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=[None, None])
+        calibrator.add_feature(MockCalibrationFeature("test_feature", ["test_col"]))
+        with pytest.raises(ValueError, match="valid_sequence=True"):
+            calibrator.fit(dataset)
 
     def test_predict_after_fit(self, calibrator, labelled_dataset, sample_dataset):
         """Test prediction after fitting."""

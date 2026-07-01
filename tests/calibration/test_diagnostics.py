@@ -72,6 +72,16 @@ class TestComputeCorrectFromSequence:
         correct = compute_correct_from_sequence(meta, RESIDUE_MASSES)
         assert correct.tolist() == expected
 
+    def test_absent_sequences_marked_incorrect(self) -> None:
+        meta = pd.DataFrame(
+            {
+                "sequence": [["A", "G"], None, []],
+                "prediction": [["A", "G"], ["A", "G"], ["A", "G"]],
+            }
+        )
+        correct = compute_correct_from_sequence(meta, RESIDUE_MASSES)
+        assert correct.tolist() == [True, False, False]
+
 
 class TestResolveDiagnosticsLabels:
     def test_precomputed_reads_column(self) -> None:
@@ -90,7 +100,6 @@ class TestResolveDiagnosticsLabels:
             {
                 "sequence": [["A"], ["A"]],
                 "prediction": [["A"], ["G"]],
-                "correct": [False, True],
             }
         )
         labels, column = resolve_diagnostics_labels(
@@ -101,6 +110,23 @@ class TestResolveDiagnosticsLabels:
         )
         assert column == SEQUENCE_LABEL_COLUMN
         assert labels.tolist() == [True, False]
+
+    def test_sequence_excludes_invalid_sequence_rows(self) -> None:
+        meta = pd.DataFrame(
+            {
+                "sequence": [["A"], None],
+                "prediction": [["A"], ["G"]],
+            }
+        )
+        labels, column = resolve_diagnostics_labels(
+            CalibrationDataset(metadata=meta),
+            "sequence",
+            None,
+            residue_masses=RESIDUE_MASSES,
+        )
+        assert column == SEQUENCE_LABEL_COLUMN
+        assert labels.tolist() == [True]
+        assert labels.index.tolist() == [0]
 
     def test_precomputed_missing_column_raises(self) -> None:
         with pytest.raises(ValueError, match="not found"):

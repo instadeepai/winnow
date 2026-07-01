@@ -15,6 +15,7 @@ from winnow.calibration.calibration_features import (
     FeatureDependency,
 )
 from winnow.datasets.calibration_dataset import CalibrationDataset
+from winnow.datasets.data_loaders.utils import require_labelled_rows
 
 
 class ProbabilityCalibrator:
@@ -215,10 +216,17 @@ class ProbabilityCalibrator:
 
         This method computes the features from the dataset, prepares the labels, and trains an MLP classifier for recalibrating probabilities.
 
+        Only rows with a valid ground-truth sequence (``valid_sequence=True``, derived
+        from ``sequence`` when needed) contribute to scaler and classifier fitting;
+        all rows still receive feature computation and retain their ``correct`` labels.
+
         Args:
             dataset (CalibrationDataset): The dataset used for training the classifier.
         """
         features, labels = self.compute_features(dataset=dataset, labelled=True)
+        mask = require_labelled_rows(dataset.metadata, context="Calibrator fit")
+        features = features[mask]
+        labels = labels[mask]
         # Fit and transform features with scaler
         features_scaled = self.scaler.fit_transform(features)
         self.classifier.fit(features_scaled, labels)

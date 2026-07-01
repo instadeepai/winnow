@@ -65,15 +65,16 @@ def filter_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
     Returns:
         CalibrationDataset: The filtered dataset
     """
-    filtered_dataset = (
-        dataset.filter_entries(
-            # Filter out non-list predictions
-            metadata_predicate=lambda row: not isinstance(row["prediction"], list),
-        )
-        # Filter out empty predictions
-        .filter_entries(metadata_predicate=lambda row: not row["prediction"])
+    from winnow.datasets.data_loaders.utils import is_valid_peptide_tokens
+
+    def row_has_valid_prediction(row: pd.Series) -> bool:
+        if "valid_prediction" in row.index:
+            return bool(row["valid_prediction"])
+        return is_valid_peptide_tokens(row["prediction"])
+
+    return dataset.filter_entries(
+        metadata_predicate=lambda row: not row_has_valid_prediction(row),
     )
-    return filtered_dataset
 
 
 def apply_fdr_control(
@@ -499,7 +500,7 @@ def diagnose_calibration_entry_point(
 
     confidence_col = cfg.fdr_control.confidence_column
     diagnostic_data = DiagnosticArrays.from_raw(
-        dataset.metadata[confidence_col],
+        dataset.metadata.loc[labels.index, confidence_col],
         labels,
     )
 
