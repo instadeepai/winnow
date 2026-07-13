@@ -73,6 +73,66 @@ class MockKoinaFeature(MockCalibrationFeature):
         self.model_input_columns = {"fragmentation_types": "frag_col"}
 
 
+class DeterministicMockFeature(MockCalibrationFeature):
+    """Mock feature with fixed column values for I/O freeze tests."""
+
+    def compute(self, dataset):
+        n = len(dataset.metadata)
+        for i, col in enumerate(self.columns):
+            dataset.metadata[col] = np.full(n, 0.1 * (i + 1), dtype=np.float64)
+
+
+def _hand_wired_freeze_calibrator(*, batch_size: int = 1) -> ProbabilityCalibrator:
+    """Build a fitted-looking calibrator on CPU without calling fit().
+
+    Uses non-identity ``feature_mean`` / ``feature_std`` so predict freezes
+    exercise normalisation. Default ``batch_size=1`` forces multi-chunk
+    predict once batching lands (n=3 rows in freeze metadata).
+    """
+    calibrator = ProbabilityCalibrator(
+        hidden_dims=(4,),
+        dropout=0.0,
+        batch_size=batch_size,
+        seed=0,
+    )
+    calibrator.add_feature(DeterministicMockFeature("mock", ["f1", "f2"]))
+    network = CalibratorNetwork(input_dim=3, hidden_dims=(4,), dropout=0.0).to("cpu")
+    with torch.no_grad():
+        for i, param in enumerate(network.parameters()):
+            param.fill_(0.1 * (i + 1))
+    calibrator.network = network
+    calibrator.feature_mean = torch.tensor([0.5, 1.5, 0.2], dtype=torch.float32)
+    calibrator.feature_std = torch.tensor([0.4, 1.0, 0.1], dtype=torch.float32)
+    return calibrator
+
+
+def _freeze_feature_metadata(*, labelled: bool = False) -> pd.DataFrame:
+    """Literal metadata used by extract / predict I/O freeze tests."""
+    data = {
+        "confidence": [0.9, 0.5, 0.1],
+        "f1": [1.0, 2.0, 3.0],
+        "f2": [0.1, 0.2, 0.3],
+    }
+    if labelled:
+        data["correct"] = [1.0, 0.0, 1.0]
+    return pd.DataFrame(data)
+
+
+# Golden outputs from the current full-tensor CPU predict path with the
+# hand-wired calibrator (non-identity mean/std) and freeze metadata above.
+_FREEZE_PREDICT_PROBS = [
+    0.641067385673523,
+    0.6681877970695496,
+    0.6942363977432251,
+]
+# Raw network forward on unnormalised float32 features (not the predict path).
+_FREEZE_NETWORK_LOGITS = [
+    0.8799999952316284,
+    0.9640001058578491,
+    1.0480000972747803,
+]
+
+
 class TestCalibratorNetwork:
     """Test the CalibratorNetwork nn.Module."""
 
@@ -414,6 +474,97 @@ class TestProbabilityCalibrator:
 
         assert features.shape[0] == len(labelled_dataset.metadata)
         assert labels.shape[0] == len(labelled_dataset.metadata)
+
+    def test_extract_feature_matrix_unlabelled_values(self):
+        """Freeze unlabelled extract values, column order, and dtype."""
+        calibrator = _hand_wired_freeze_calibrator()
+        dataset = CalibrationDataset(
+            metadata=_freeze_feature_metadata(labelled=False),
+            predictions=[None] * 3,
+        )
+        features = calibrator._extract_feature_matrix(dataset, labelled=False)
+
+        expected = np.array(
+            [[0.9, 1.0, 0.1], [0.5, 2.0, 0.2], [0.1, 3.0, 0.3]],
+            dtype=np.float64,
+        )
+        assert features.dtype == np.float64
+        np.testing.assert_allclose(features, expected, rtol=0, atol=1e-6)
+
+    def test_extract_feature_matrix_labelled_values(self):
+        """Freeze labelled extract feature/label values and dtypes."""
+        calibrator = _hand_wired_freeze_calibrator()
+        dataset = CalibrationDataset(
+            metadata=_freeze_feature_metadata(labelled=True),
+            predictions=[None] * 3,
+        )
+        features, labels = calibrator._extract_feature_matrix(dataset, labelled=True)
+
+        expected_features = np.array(
+            [[0.9, 1.0, 0.1], [0.5, 2.0, 0.2], [0.1, 3.0, 0.3]],
+            dtype=np.float64,
+        )
+        expected_labels = np.array([1.0, 0.0, 1.0], dtype=np.float64)
+        assert features.dtype == np.float64
+        assert labels.dtype == np.float64
+        np.testing.assert_allclose(features, expected_features, rtol=0, atol=1e-6)
+        np.testing.assert_allclose(labels, expected_labels, rtol=0, atol=1e-6)
+
+    def test_network_forward_golden_logits(self):
+        """Freeze CalibratorNetwork logits for fixed weights and float32 input."""
+        calibrator = _hand_wired_freeze_calibrator()
+        assert calibrator.network is not None
+        x = torch.tensor(
+            [[0.9, 1.0, 0.1], [0.5, 2.0, 0.2], [0.1, 3.0, 0.3]],
+            dtype=torch.float32,
+        )
+        calibrator.network.eval()
+        with torch.no_grad():
+            logits = calibrator.network(x)
+
+        assert logits.dtype == torch.float32
+        np.testing.assert_allclose(
+            logits.cpu().numpy(),
+            np.asarray(_FREEZE_NETWORK_LOGITS, dtype=np.float32),
+            rtol=0,
+            atol=1e-6,
+        )
+
+    def test_predict_golden_calibrated_confidence(self):
+        """Freeze predict calibrated_confidence values and Python float list type."""
+        calibrator = _hand_wired_freeze_calibrator(batch_size=1)
+        dataset = CalibrationDataset(
+            metadata=_freeze_feature_metadata(labelled=False),
+            predictions=[None] * 3,
+        )
+        calibrator.predict(dataset)
+
+        probs = dataset.metadata["calibrated_confidence"].tolist()
+        assert len(probs) == 3
+        assert all(isinstance(p, float) for p in probs)
+        np.testing.assert_allclose(probs, _FREEZE_PREDICT_PROBS, rtol=0, atol=1e-6)
+
+    def test_predict_batch_size_parity(self):
+        """batch_size=1 and a large batch_size must match the golden probs."""
+        for batch_size in (1, 1024):
+            calibrator = _hand_wired_freeze_calibrator(batch_size=batch_size)
+            dataset = CalibrationDataset(
+                metadata=_freeze_feature_metadata(labelled=False),
+                predictions=[None] * 3,
+            )
+            calibrator.predict(dataset)
+            probs = dataset.metadata["calibrated_confidence"].tolist()
+            np.testing.assert_allclose(probs, _FREEZE_PREDICT_PROBS, rtol=0, atol=1e-6)
+
+    def test_predict_feature_column_order(self):
+        """Metadata column permutation must not change predict output order."""
+        calibrator = _hand_wired_freeze_calibrator(batch_size=1)
+        permuted = _freeze_feature_metadata(labelled=False)[["f2", "confidence", "f1"]]
+        dataset = CalibrationDataset(metadata=permuted, predictions=[None] * 3)
+        calibrator.predict(dataset)
+
+        probs = dataset.metadata["calibrated_confidence"].tolist()
+        np.testing.assert_allclose(probs, _FREEZE_PREDICT_PROBS, rtol=0, atol=1e-6)
 
     def test_compute_features_with_dependencies(self, calibrator, sample_dataset):
         """Test computing features with dependencies."""
