@@ -26,7 +26,7 @@ The RT-to-iRT mapping is inherently experiment-specific because different LC-MS 
 
 1. **Self-supervised training** — High-confidence de novo predictions (top `train_fraction` by confidence score, descending) serve as pseudo-labels. The Koina iRT model is called on these peptide sequences to obtain iRT values, then a `LinearRegression` is fitted from observed RT to iRT. No database labels are needed.
 2. **Per-experiment fitting** — Spectra are grouped by their `experiment_name` column. One regressor is fitted per experiment. If `experiment_name` is absent, a single global regressor is fitted with a warning.
-3. **Always re-fitted** — The regressor is fitted at both training and inference time (in `prepare()`). It is not persisted inside the calibrator pickle. Given the same data and random seed, the same regressor is produced.
+3. **Always re-fitted by default** — The regressor is fitted at both training and inference time (in `prepare()`). It is not stored inside the calibrator checkpoint (`model.safetensors` / `config.json`). Given the same data and random seed, the same regressor is produced. Optional per-experiment regressor checkpoints use a separate safetensors file (see below).
 
 **Prediction phase** (`compute` method):
 
@@ -49,10 +49,10 @@ For within-experiment use cases, especially well-characterised species where the
 
 ```bash
 # Train: saves calibrator AND per-experiment iRT regressors
-winnow train ... irt_regressor_output_path=./irt_regressors.pkl
+winnow train ... irt_regressor_output_path=./irt_regressors.safetensors
 
 # Predict: loads regressors from training; skips re-fitting for known experiments
-winnow predict ... calibrator.irt_regressor_path=./irt_regressors.pkl
+winnow predict ... calibrator.irt_regressor_path=./irt_regressors.safetensors
 ```
 
 When pre-fitted regressors are loaded, `prepare()` skips re-fitting for those experiments. Experiments in the inference data that were not in the training checkpoint are still fitted from scratch.
@@ -64,10 +64,10 @@ Regressors can also be saved and loaded programmatically:
 ```python
 # After fitting (e.g., after calibrator.fit(dataset))
 rt_feature = calibrator.feature_dict["iRT Feature"]
-rt_feature.save_regressors("irt_regressors.pkl")
+rt_feature.save_regressors("irt_regressors.safetensors")
 
 # Before prediction on new data
-rt_feature.load_regressors("irt_regressors.pkl")
+rt_feature.load_regressors("irt_regressors.safetensors")
 ```
 
 ## Columns
@@ -107,7 +107,7 @@ calibrator.add_feature(feature)
 | Parameter | Type | Default | Description |
 | ----------- | ------ | --------- | ------------- |
 | `train_fraction` | `float` | `0.1` | Top fraction of spectra by confidence (descending) used to train the regressor. Only assumes higher confidence is better. |
-| `min_train_points` | `int` | `10` | Minimum training points needed per experiment after applying `train_fraction`. Raises a `ValueError` if fewer are available. |
+| `min_train_points` | `int` | `10` | Minimum training points needed per experiment after applying `train_fraction`. Experiments below this threshold are skipped with a warning; their iRT features are imputed as zero (or filtered when `learn_from_missing=False`). |
 | `seed` | `int` | `42` | Random seed for reproducibility |
 | `unsupported_residues` | `List[str]` | `[]` | Residue tokens not supported by the Koina model |
 | `max_peptide_length` | `int` | `30` | Maximum peptide length supported by the model |
