@@ -964,24 +964,11 @@ def diagnose_calibration_entry_point(
     logger.info("Starting calibration diagnostic pipeline.")
     logger.info(f"Configuration: {cfg}")
 
-    data_loader = instantiate(cfg.data_loader)
-    dataset_params = dict(cfg.dataset)
-    dataset_params["data_path"] = dataset_params.pop("spectrum_path_or_directory")
-    dataset_params["predictions_path"] = dataset_params.pop("predictions_path", None)
+    spectrum_path = _require_spectrum_path(cfg.dataset.spectrum_path_or_directory)
+    predictions_path = cfg.dataset.get("predictions_path")
+    labelled = diagnostics.label_source == "sequence"
 
-    dataset = data_loader.load(**dataset_params)
-    logger.info(f"Loaded: {len(dataset.metadata)} spectra")
-
-    dataset = filter_dataset(dataset)
-    logger.info(f"After filtering: {len(dataset.metadata)} spectra")
-
-    residue_masses = OmegaConf.to_container(cfg.residue_masses, resolve=True)
-    residue_remapping_cfg = getattr(cfg.data_loader, "residue_remapping", None)
-    residue_remapping = (
-        {}
-        if residue_remapping_cfg is None
-        else OmegaConf.to_container(residue_remapping_cfg, resolve=True)
-    )
+    from winnow.datasets.calibration_dataset import CalibrationDataset
 
     logger.info("Loading trained calibrator.")
     calibrator = ProbabilityCalibrator.load(
@@ -994,11 +981,31 @@ def diagnose_calibration_entry_point(
     _handle_irt_calibration_config(
         cfg, calibrator, hydra_overrides=overrides, execute=True
     )
-    logger.info("Computing calibration features.")
-    calibrator.compute_features(dataset)
-    _require_spectra_after_features(len(dataset))
+
+    logger.info("Loading dataset and computing calibration features.")
+    data_loader = instantiate(cfg.data_loader)
+    all_metadata = _compute_features_batched_metadata(
+        spectrum_path,
+        predictions_path,
+        data_loader,
+        calibrator,
+        labelled=labelled,
+    )
+    combined_metadata = pd.concat(all_metadata, ignore_index=True)
+    logger.info(f"Total spectra after feature computation: {len(combined_metadata)}")
+    _require_spectra_after_features(len(combined_metadata))
+
+    dataset = CalibrationDataset(metadata=combined_metadata)
     logger.info("Calibrating scores.")
     calibrator.predict(dataset)
+
+    residue_masses = OmegaConf.to_container(cfg.residue_masses, resolve=True)
+    residue_remapping_cfg = getattr(cfg.data_loader, "residue_remapping", None)
+    residue_remapping = (
+        {}
+        if residue_remapping_cfg is None
+        else OmegaConf.to_container(residue_remapping_cfg, resolve=True)
+    )
 
     # Resolve labels after predict: feature computation may filter invalid PSMs in place.
     labels, resolved_label_column = resolve_diagnostics_labels(
