@@ -285,7 +285,9 @@ class ProbabilityCalibrator:
         self.network: Optional[CalibratorNetwork] = None
         self.feature_mean: Optional[torch.Tensor] = None
         self.feature_std: Optional[torch.Tensor] = None
-        self._active_feature_columns: Optional[List[str]] = None
+        # Frozen schema after a successful fit / load. Predict and save use this
+        # ordered list so column identity matches the trained network.
+        self._fitted_feature_columns: Optional[List[str]] = None
 
         if features is not None:
             if isinstance(features, (dict, DictConfig)):
@@ -299,14 +301,15 @@ class ProbabilityCalibrator:
 
     @property
     def columns(self) -> List[str]:
-        """Column names corresponding to the features added to the calibrator."""
-        if self._active_feature_columns is not None:
-            return list(self._active_feature_columns)
-        return [
-            column
-            for feature in self.feature_dict.values()
-            for column in feature.columns
-        ]
+        """Ordered feature column names for extraction, save, and predict.
+
+        After ``fit`` / ``fit_from_features`` / ``load``, returns the frozen
+        fitted schema. Otherwise returns the live registry order from
+        ``feature_dict``.
+        """
+        if self._fitted_feature_columns is not None:
+            return list(self._fitted_feature_columns)
+        return self._registry_feature_columns()
 
     @property
     def feature_names(self) -> List[str]:
@@ -461,7 +464,7 @@ class ProbabilityCalibrator:
         _load_saved_features_section(calibrator, config.get("features", {}))
         saved_columns = config.get("feature_columns")
         if saved_columns:
-            calibrator._active_feature_columns = list(saved_columns)
+            calibrator._fitted_feature_columns = list(saved_columns)
 
         tensors = load_file(dir_path / "model.safetensors")
 
@@ -579,7 +582,7 @@ class ProbabilityCalibrator:
 
         This is the primary training entry point.  It runs
         :meth:`compute_features` on the supplied datasets, extracts the
-        numeric feature matrix and labels, and trains the calibrator network.
+        registered feature columns and labels, and trains the calibrator network.
 
         Both ``train_dataset`` and ``val_dataset`` are mutated in place
         (feature columns are added, and rows may be dropped when individual
@@ -632,8 +635,13 @@ class ProbabilityCalibrator:
         """Train the calibrator from pre-computed feature arrays.
 
         Use this for the two-phase workflow where features have already been
-        computed and saved to Parquet, then reloaded via
-        :meth:`FeatureDataset.from_parquet`.
+        computed and saved as a lean Parquet matrix, then reloaded via
+        :meth:`FeatureDataset.from_parquet` with
+        ``feature_columns=["confidence", *calibrator.columns]``.
+
+        The feature matrix width must equal ``1 + len(calibrator.columns)``
+        (confidence plus the registered feature schema). A mismatch raises
+        ``ValueError``.
 
         Args:
             train_dataset: Training features and labels.
@@ -642,6 +650,7 @@ class ProbabilityCalibrator:
                 random subset (``val_subsample_seed``, defaulting to ``seed``)
                 is evaluated each epoch; after training, metrics on the full
                 validation set are stored in ``TrainingHistory.final_val_*``.
+                Must have the same feature width as ``train_dataset``.
             progress_bar: Whether to display a progress bar during training.
             epoch_callback: Optional callback invoked after each validation
                 step with ``(epoch, val_loss)``.  Useful for external
@@ -650,6 +659,10 @@ class ProbabilityCalibrator:
 
         Returns:
             Epoch-level training metrics.
+
+        Raises:
+            ValueError: If the train (or validation) matrix width does not
+                match the registered feature schema.
         """
         return self._fit_from_features(
             train_dataset, val_dataset, progress_bar, epoch_callback
@@ -696,14 +709,23 @@ class ProbabilityCalibrator:
     # Private instance methods
     # ------------------------------------------------------------------
 
+    def _registry_feature_columns(self) -> List[str]:
+        """Column names from currently registered features, in registry order."""
+        return [
+            column
+            for feature in self.feature_dict.values()
+            for column in feature.columns
+        ]
+
     def _extract_feature_matrix(
         self, dataset: CalibrationDataset, labelled: bool
     ) -> Union[
         NDArray[np.float64],
         Tuple[NDArray[np.float64], NDArray[np.float64]],
     ]:
-        """Pull numeric feature columns (and optionally labels) from metadata.
+        """Pull registered feature columns (and optionally labels) from metadata.
 
+        Selects ``confidence`` followed by :attr:`columns` by name.
         Must be called *after* :meth:`compute_features` has populated the
         feature columns on ``dataset.metadata``.
 
@@ -825,11 +847,22 @@ class ProbabilityCalibrator:
 
         Returns:
             Epoch-level training metrics.
+
+        Raises:
+            ValueError: If matrix width does not match the feature schema.
         """
         torch.manual_seed(self.seed)
         device = self._resolve_device()
 
         input_dim = train_dataset.features.shape[1]
+        self._validate_feature_matrix_width(input_dim, context="training")
+        if val_dataset is not None:
+            self._validate_feature_matrix_width(
+                val_dataset.features.shape[1],
+                context="validation",
+                expected_dim=input_dim,
+            )
+
         self.network = CalibratorNetwork(
             input_dim=input_dim,
             hidden_dims=self.hidden_dims,
@@ -921,11 +954,9 @@ class ProbabilityCalibrator:
             device,
         )
 
-        if self._feature_input_dim() != input_dim:
-            self._active_feature_columns = [
-                f"feature_{i}" for i in range(input_dim - 1)
-            ]
-
+        # Freeze the schema that matched this successful fit (registry or a
+        # pre-set fitted override).
+        self._fitted_feature_columns = list(self.columns)
         return history
 
     @torch.no_grad()
@@ -1035,6 +1066,35 @@ class ProbabilityCalibrator:
         """Return the number of model inputs (confidence plus feature columns)."""
         return 1 + len(self.columns)
 
+    def _validate_feature_matrix_width(
+        self,
+        input_dim: int,
+        *,
+        context: str,
+        expected_dim: int | None = None,
+    ) -> None:
+        """Raise if a feature matrix width does not match the training schema."""
+        if expected_dim is None:
+            expected_dim = self._feature_input_dim()
+        if input_dim == expected_dim:
+            return
+
+        if context == "validation":
+            raise ValueError(
+                f"Validation feature matrix width ({input_dim}) does not match "
+                f"the training matrix width ({expected_dim})."
+            )
+
+        raise ValueError(
+            f"Feature matrix width ({input_dim}) does not match the registered "
+            f"feature schema (expected {expected_dim}: confidence plus "
+            f"{len(self.columns)} column(s) {self.columns}). "
+            "Load lean Parquet with "
+            "feature_columns=['confidence', *calibrator.columns], or build "
+            "the matrix from those columns only. Placeholder feature_* names "
+            "are not invented on mismatch."
+        )
+
     def _validate_loaded_checkpoint(self, input_dim: int) -> None:
         """Raise if saved weights and config feature metadata are inconsistent."""
         if self.feature_mean is None:
@@ -1048,22 +1108,32 @@ class ProbabilityCalibrator:
                 f"({trained_dim} feature(s))."
             )
 
-        if self._active_feature_columns is None:
-            return
+        if self._fitted_feature_columns is not None:
+            expected_dim = 1 + len(self._fitted_feature_columns)
+            if trained_dim != expected_dim:
+                raise ValueError(
+                    "Calibrator feature dimension mismatch: the saved model "
+                    f"was trained with {trained_dim} input feature(s) but the "
+                    "checkpoint lists "
+                    f"{len(self._fitted_feature_columns)} feature column(s) "
+                    f"({self._fitted_feature_columns}). "
+                    "This usually means the calibrator checkpoint is "
+                    "incompatible with the installed version of winnow. "
+                    "Retrain the calibrator or use a checkpoint published "
+                    "for this version."
+                )
 
-        expected_dim = 1 + len(self._active_feature_columns)
-        if trained_dim == expected_dim:
-            return
-
-        raise ValueError(
-            "Calibrator feature dimension mismatch: the saved model was trained "
-            f"with {trained_dim} input feature(s) but the checkpoint lists "
-            f"{len(self._active_feature_columns)} feature column(s) "
-            f"({self._active_feature_columns}). "
-            "This usually means the calibrator checkpoint is incompatible with "
-            "the installed version of winnow. Retrain the calibrator or use a "
-            "checkpoint published for this version."
-        )
+            registry_columns = self._registry_feature_columns()
+            if (
+                registry_columns
+                and list(self._fitted_feature_columns) != registry_columns
+            ):
+                raise ValueError(
+                    "The calibrator checkpoint is inconsistent. "
+                    "The saved feature_columns "
+                    f"({self._fitted_feature_columns}) do not match the "
+                    f"registered feature columns ({registry_columns}). "
+                )
 
     def _validate_fitted_feature_dimensions(self) -> None:
         """Raise if the current feature set does not match the fitted network."""
@@ -1072,15 +1142,25 @@ class ProbabilityCalibrator:
 
         trained_dim = int(self.feature_mean.shape[0])
         expected_dim = self._feature_input_dim()
-        if trained_dim == expected_dim:
+        if trained_dim != expected_dim:
+            raise ValueError(
+                "Calibrator feature dimension mismatch: the saved model was trained "
+                f"with {trained_dim} input feature(s) but the current feature set "
+                f"produces {expected_dim} (confidence plus {len(self.columns)} "
+                f"feature column(s): {self.columns}). "
+                "This usually means the calibrator checkpoint is incompatible with "
+                "the installed version of winnow. Retrain the calibrator or use a "
+                "checkpoint published for this version."
+            )
+
+        if self._fitted_feature_columns is None:
             return
 
-        raise ValueError(
-            "Calibrator feature dimension mismatch: the saved model was trained "
-            f"with {trained_dim} input feature(s) but the current feature set "
-            f"produces {expected_dim} (confidence plus {len(self.columns)} "
-            f"feature column(s): {self.columns}). "
-            "This usually means the calibrator checkpoint is incompatible with "
-            "the installed version of winnow. Retrain the calibrator or use a "
-            "checkpoint published for this version."
-        )
+        registry_columns = self._registry_feature_columns()
+        if registry_columns and list(self._fitted_feature_columns) != registry_columns:
+            raise ValueError(
+                "Calibrator feature dimension mismatch: the fitted feature "
+                f"columns ({self._fitted_feature_columns}) no longer match the "
+                f"registered feature columns ({registry_columns}). "
+                "Retrain the calibrator after changing the feature set."
+            )

@@ -59,8 +59,10 @@ class FeatureDataset(Dataset):
 
         When ``feature_columns`` is provided, only those columns are used
         as features (in the given order).  Otherwise all numeric columns
-        except ``correct`` are used, which is only appropriate when the
-        Parquet contains exclusively feature columns.
+        except ``correct`` are used. That fallback is only appropriate for
+        lean matrices that already contain exclusively the training schema;
+        for two-phase calibrator training always prefer passing
+        ``feature_columns=["confidence", *calibrator.columns]``.
 
         Args:
             path: A ``.parquet`` file or a directory containing
@@ -112,8 +114,11 @@ class FeatureDataset(Dataset):
             )
             logger.warning(
                 "No feature_columns specified; using all %d numeric columns "
-                "from %s. Pass feature_columns explicitly to avoid including "
-                "metadata columns.",
+                "from %s. For two-phase calibrator training this can silently "
+                "include metadata columns and disagree with "
+                "calibrator.columns; prefer passing "
+                "feature_columns=['confidence', *calibrator.columns] "
+                "(or an equivalent ordered schema) instead.",
                 features.shape[1],
                 path,
             )
