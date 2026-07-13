@@ -532,21 +532,8 @@ def _fit_from_calibration_datasets(calibrator, train_data, val_data):
     Returns:
         TrainingHistory from the calibrator.
     """
-    import numpy as np
-    from winnow.datasets.feature_dataset import FeatureDataset
-
-    features, labels = calibrator._extract_feature_matrix(train_data, labelled=True)
-    train_fd = FeatureDataset(features=np.asarray(features), labels=np.asarray(labels))
-
-    val_fd = None
-    if val_data is not None:
-        val_features, val_labels = calibrator._extract_feature_matrix(
-            val_data, labelled=True
-        )
-        val_fd = FeatureDataset(
-            features=np.asarray(val_features), labels=np.asarray(val_labels)
-        )
-
+    train_fd = calibrator.to_feature_dataset(train_data)
+    val_fd = calibrator.to_feature_dataset(val_data) if val_data is not None else None
     return calibrator.fit_from_features(train_fd, val_fd)
 
 

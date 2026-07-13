@@ -566,6 +566,31 @@ class TestProbabilityCalibrator:
         probs = dataset.metadata["calibrated_confidence"].tolist()
         np.testing.assert_allclose(probs, _FREEZE_PREDICT_PROBS, rtol=0, atol=1e-6)
 
+    def test_to_feature_dataset_matches_extract_column_order(self):
+        """to_feature_dataset uses confidence then registered feature columns."""
+        calibrator = _hand_wired_freeze_calibrator()
+        dataset = CalibrationDataset(
+            metadata=_freeze_feature_metadata(labelled=True),
+            predictions=[None] * 3,
+        )
+        feature_dataset = calibrator.to_feature_dataset(dataset)
+        features, labels = calibrator._extract_feature_matrix(dataset, labelled=True)
+
+        assert feature_dataset.features.dtype == torch.float32
+        assert feature_dataset.labels.dtype == torch.float32
+        np.testing.assert_allclose(
+            feature_dataset.features.numpy(),
+            np.asarray(features, dtype=np.float32),
+            rtol=0,
+            atol=1e-6,
+        )
+        np.testing.assert_allclose(
+            feature_dataset.labels.numpy(),
+            np.asarray(labels, dtype=np.float32),
+            rtol=0,
+            atol=1e-6,
+        )
+
     def test_compute_features_with_dependencies(self, calibrator, sample_dataset):
         """Test computing features with dependencies."""
         dependency = MockFeatureDependency("test_dep")

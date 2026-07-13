@@ -47,18 +47,18 @@ class FakeLoader:
 
 
 class CapturingCalibrator:
-    """Delegates extract to a real calibrator and captures FeatureDatasets."""
+    """Delegates to_feature_dataset to a real calibrator and captures FeatureDatasets."""
 
     def __init__(self, source: ProbabilityCalibrator):
         self._source = source
         self.captured: tuple[FeatureDataset | None, FeatureDataset | None] | None = None
 
+    def to_feature_dataset(self, dataset):
+        return self._source.to_feature_dataset(dataset)
+
     def fit_from_features(self, train_fd, val_fd):
         self.captured = (train_fd, val_fd)
         return TrainingHistory(train_losses=[], epochs_trained=0)
-
-    def _extract_feature_matrix(self, dataset, labelled):
-        return self._source._extract_feature_matrix(dataset, labelled=labelled)
 
 
 class _BridgeFeature(CalibrationFeatures):

@@ -596,23 +596,31 @@ class ProbabilityCalibrator:
             Epoch-level training metrics.
         """
         self.compute_features(train_dataset)
-        features, labels = self._extract_feature_matrix(train_dataset, labelled=True)
-        train_fd = FeatureDataset(
-            features=np.asarray(features), labels=np.asarray(labels)
-        )
+        train_fd = self.to_feature_dataset(train_dataset)
 
         val_fd = None
         if val_dataset is not None:
             self.compute_features(val_dataset)
-            val_features, val_labels = self._extract_feature_matrix(
-                val_dataset, labelled=True
-            )
-            val_fd = FeatureDataset(
-                features=np.asarray(val_features),
-                labels=np.asarray(val_labels),
-            )
+            val_fd = self.to_feature_dataset(val_dataset)
 
         return self._fit_from_features(train_fd, val_fd, progress_bar=progress_bar)
+
+    def to_feature_dataset(self, dataset: CalibrationDataset) -> FeatureDataset:
+        """Build a supervised FeatureDataset from labelled featurised metadata.
+
+        Must be called *after* :meth:`compute_features` has populated the
+        feature columns on ``dataset.metadata`` (or when those columns are
+        already present). Requires a ``correct`` label column.
+
+        Args:
+            dataset: Labelled dataset whose metadata already contains the
+                feature columns and ``correct``.
+
+        Returns:
+            FeatureDataset with float32 feature and label tensors.
+        """
+        features, labels = self._extract_feature_matrix(dataset, labelled=True)
+        return FeatureDataset(features=np.asarray(features), labels=np.asarray(labels))
 
     def fit_from_features(
         self,
