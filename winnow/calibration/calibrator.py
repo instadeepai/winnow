@@ -680,14 +680,7 @@ class ProbabilityCalibrator:
 
         self._validate_fitted_feature_dimensions()
         features = self._extract_feature_matrix(dataset, labelled=False)
-        device = next(self.network.parameters()).device
-        x = torch.as_tensor(features, dtype=torch.float32, device=device)
-        x = (x - self.feature_mean) / self.feature_std
-
-        self.network.eval()
-        logits = self.network(x)
-        probs = torch.sigmoid(logits).cpu().numpy()
-
+        probs = self._predict_feature_matrix(features)
         dataset.metadata["calibrated_confidence"] = probs.tolist()
 
     def remove_feature(self, name: str) -> None:
@@ -732,6 +725,32 @@ class ProbabilityCalibrator:
             labels = dataset.metadata["correct"]
             return features.values, labels.values
         return features.values
+
+    def _predict_feature_matrix(
+        self, features: NDArray[np.float64]
+    ) -> NDArray[np.float32]:
+        """Run batched network inference on a host feature matrix.
+
+        Args:
+            features: Feature matrix of shape ``(n_samples, n_features)``.
+
+        Returns:
+            Calibrated probabilities as a float32 array of shape ``(n_samples,)``.
+        """
+        assert self.network is not None
+        assert self.feature_mean is not None
+        assert self.feature_std is not None
+
+        device = next(self.network.parameters()).device
+        n = len(features)
+        probs = np.empty(n, dtype=np.float32)
+        self.network.eval()
+        for start in range(0, n, self.batch_size):
+            end = min(start + self.batch_size, n)
+            x = torch.as_tensor(features[start:end], dtype=torch.float32, device=device)
+            x = (x - self.feature_mean) / self.feature_std
+            probs[start:end] = torch.sigmoid(self.network(x)).cpu().numpy()
+        return probs
 
     def _early_stopping_validation_split(
         self,
