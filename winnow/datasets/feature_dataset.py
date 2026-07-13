@@ -1,4 +1,10 @@
-"""PyTorch Dataset wrapper for pre-computed calibration features."""
+"""Supervised PyTorch Dataset for calibrator training on pre-computed features.
+
+``FeatureDataset`` is a training-only adapter: labelled feature rows for
+:meth:`~winnow.calibration.calibrator.ProbabilityCalibrator.fit_from_features`.
+For feature computation and inference, use
+:class:`~winnow.datasets.calibration_dataset.CalibrationDataset`.
+"""
 
 from __future__ import annotations
 
@@ -15,11 +21,15 @@ logger = logging.getLogger(__name__)
 
 
 class FeatureDataset(Dataset):
-    """Wraps numpy feature/label arrays as a PyTorch Dataset.
+    """Supervised training Dataset of pre-computed feature rows and labels.
 
-    Each sample is a ``(features_tensor, label_tensor)`` pair.  The
-    dataset can be constructed from in-memory arrays or loaded from
-    Parquet files via :meth:`from_parquet`.
+    Each sample is a ``(features_tensor, label_tensor)`` pair for supervised training.
+    Labels are required; this type is not used for inference
+    (use :class:`~winnow.datasets.calibration_dataset.CalibrationDataset`
+    and :meth:`~winnow.calibration.calibrator.ProbabilityCalibrator.predict`).
+
+    Construct from in-memory arrays or load labelled Parquet via
+    :meth:`from_parquet`.
 
     Args:
         features: 2-D array of shape ``(n_samples, n_features)``.
@@ -41,11 +51,11 @@ class FeatureDataset(Dataset):
         path: str | Path,
         feature_columns: Sequence[str] | None = None,
     ) -> FeatureDataset:
-        """Load features from a single Parquet file or a directory of Parquets.
+        """Load a labelled feature matrix from Parquet for training.
 
         If ``path`` is a directory, all ``*.parquet`` files inside it are
-        read and concatenated.  The ``correct`` column is used as the
-        label.
+        read and concatenated.  The ``correct`` column is required and used
+        as the label.
 
         When ``feature_columns`` is provided, only those columns are used
         as features (in the given order).  Otherwise all numeric columns
@@ -64,6 +74,7 @@ class FeatureDataset(Dataset):
 
         Raises:
             FileNotFoundError: If no Parquet files are found at ``path``.
+            ValueError: If the ``correct`` label column is missing.
         """
         path = Path(path)
         if path.is_dir():
