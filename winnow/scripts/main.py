@@ -373,17 +373,15 @@ def _load_feature_datasets(cfg, features_path, calibrator):
     from winnow.datasets.feature_dataset import FeatureDataset
     from winnow.utils.paths import resolve_data_path
 
-    feature_columns = ["confidence"] + calibrator.columns
-
     resolved = resolve_data_path(str(features_path))
     logger.info(f"Loading pre-computed features from {resolved}")
-    train_dataset = FeatureDataset.from_parquet(resolved, feature_columns)
+    train_dataset = FeatureDataset.from_parquet(resolved).select_for(calibrator)
 
     val_features_path = cfg.get("val_features_path")
     if val_features_path is not None:
         val_resolved = resolve_data_path(str(val_features_path))
         logger.info(f"Loading validation features from {val_resolved}")
-        val_dataset = FeatureDataset.from_parquet(val_resolved, feature_columns)
+        val_dataset = FeatureDataset.from_parquet(val_resolved).select_for(calibrator)
         return train_dataset, val_dataset
 
     return _maybe_split_validation(cfg, train_dataset)
@@ -461,10 +459,12 @@ def _maybe_split_validation(cfg, train_dataset):
     train_split = FeatureDataset(
         features=train_dataset.features[train_idx].numpy(),
         labels=train_dataset.labels[train_idx].numpy(),
+        columns=train_dataset.columns,
     )
     val_split = FeatureDataset(
         features=train_dataset.features[val_idx].numpy(),
         labels=train_dataset.labels[val_idx].numpy(),
+        columns=train_dataset.columns,
     )
 
     return train_split, val_split

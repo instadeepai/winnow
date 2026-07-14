@@ -64,7 +64,7 @@ loaded_calibrator = ProbabilityCalibrator.load("calibrator_checkpoint")
 - **Feature Management**: Add, remove and track multiple calibration features
 - **Dependency Handling**: Automatic computation of feature dependencies
 - **Model Persistence**: Save/load using `safetensors` (weights) and `config.json` (architecture, normalisation stats, feature definitions)
-- **Two-phase Training**: Supports training from pre-computed Parquet feature matrices via `FeatureDataset.from_parquet()` and `fit_from_features()`
+- **Two-phase Training**: Supports training from pre-computed Parquet via `FeatureDataset.from_parquet()`, `select_for(calibrator)`, and `fit_from_features()`
 - **GPU Support**: Automatic GPU detection with CPU fallback during training; inference runs on CPU.
 
 **Main Methods:**
@@ -72,7 +72,7 @@ loaded_calibrator = ProbabilityCalibrator.load("calibrator_checkpoint")
 - `add_feature(feature)`: Add a calibration feature
 - `compute_features(dataset)`: Run feature computation on a `CalibrationDataset`, mutating its metadata in place
 - `fit(dataset, val_dataset)`: Compute features and train the calibrator from a `CalibrationDataset`
-- `fit_from_features(dataset, val_dataset)`: Train from a pre-computed `FeatureDataset` (two-phase workflow)
+- `fit_from_features(dataset, val_dataset)`: Train from a `FeatureDataset` whose `.columns` match `calibrator.columns`
 - `predict(dataset)`: Generate calibrated confidence scores
 - `save(calibrator, path)`: Save trained model to disk (`model.safetensors` + `config.json`)
 - `load(pretrained_model_name_or_path, cache_dir)`: Load trained model from Hugging Face Hub or local directory
@@ -100,12 +100,13 @@ The calibrator uses a feature-based approach where multiple feature extractors c
 3. **Fit Model**: Call `fit()` with a labelled `CalibrationDataset` — feature computation and training happen in one step
 4. **Save Model**: Use `save()` to persist trained calibrator
 
-For the two-phase workflow (compute features once, save a lean matrix, train later):
+For the two-phase workflow (compute features once, save a matrix, train later):
 
 1. Call `compute_features(dataset)` to populate metadata columns
-2. Export a lean training matrix that contains only `confidence`, the registered feature columns (`calibrator.columns`), and `correct` — for example via the CLI `training_matrix_output_path`, or by selecting those columns before writing Parquet. Do not pass a full metadata dump from `dataset.to_parquet()` into `FeatureDataset.from_parquet()` without an explicit column list: that path includes extra numeric metadata and will disagree with the registered feature set.
-3. Reload with `FeatureDataset.from_parquet(path, feature_columns=["confidence", *calibrator.columns])` so column identity and order match what `predict()` will extract later
-4. Train with `fit_from_features(train_ds, val_dataset=val_ds)`
+2. Export labelled Parquet containing at least `confidence`, the feature columns you may train on, and `correct` via the CLI `training_matrix_output_path` (lean) or a full metadata export (wide).
+3. Reload with `FeatureDataset.from_parquet(path)` (loads all numeric/boolean feature columns; `confidence` is required and placed at index 0; `FeatureDataset.columns` lists the non-confidence names)
+4. Align to the calibrator with `train_ds = wide.select_for(calibrator)` so `train_ds.columns == list(calibrator.columns)`
+5. Train with `fit_from_features(train_ds, val_dataset=val_ds)`
 
 ### Prediction workflow
 
