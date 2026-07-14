@@ -14,10 +14,21 @@ from typing import Sequence
 
 import numpy as np
 import polars as pl
+import polars.selectors
 import torch
 from torch.utils.data import Dataset
 
 logger = logging.getLogger(__name__)
+
+
+def _non_float_castable_columns(df: pl.DataFrame, columns: Sequence[str]) -> list[str]:
+    """Return columns that cannot be cast to float32 (not numeric or boolean)."""
+    castable = set(
+        df.select(columns)
+        .select(polars.selectors.numeric() | polars.selectors.boolean())
+        .columns
+    )
+    return [name for name in columns if name not in castable]
 
 
 class FeatureDataset(Dataset):
@@ -76,7 +87,9 @@ class FeatureDataset(Dataset):
 
         Raises:
             FileNotFoundError: If no Parquet files are found at ``path``.
-            ValueError: If the ``correct`` label column is missing.
+            ValueError: If the ``correct`` label column is missing, or if
+                ``correct`` / requested feature columns are not numeric or
+                boolean (and so cannot be cast to float32).
         """
         path = Path(path)
         if path.is_dir():
@@ -93,6 +106,12 @@ class FeatureDataset(Dataset):
                 f"for labels. Found columns: {df.columns}"
             )
 
+        invalid_label = _non_float_castable_columns(df, ["correct"])
+        if invalid_label:
+            raise ValueError(
+                f"Label column 'correct' must be numeric or boolean to cast "
+                f"to float32, got dtype {df.schema['correct']!r}."
+            )
         labels = df["correct"].to_numpy().astype(np.float32)
 
         if feature_columns is not None:
@@ -102,20 +121,25 @@ class FeatureDataset(Dataset):
                     f"Feature columns missing from Parquet: {missing}. "
                     f"Available: {df.columns}"
                 )
+            invalid = _non_float_castable_columns(df, feature_columns)
+            if invalid:
+                detail = ", ".join(f"{name} ({df.schema[name]})" for name in invalid)
+                raise ValueError(
+                    f"Feature column(s) must be numeric or boolean to cast "
+                    f"to float32; got non-castable column(s): {detail}."
+                )
             features = df.select(feature_columns).to_numpy().astype(np.float32)
         else:
-            import polars.selectors
-
             features = (
                 df.drop("correct")
-                .select(polars.selectors.numeric())
+                .select(polars.selectors.numeric() | polars.selectors.boolean())
                 .to_numpy()
                 .astype(np.float32)
             )
             logger.warning(
-                "No feature_columns specified; using all %d numeric columns "
+                "No feature_columns specified; using all %d numeric and boolean columns "
                 "from %s. For two-phase calibrator training this can silently "
-                "include metadata columns and disagree with "
+                "include extra metadata columns and disagree with "
                 "calibrator.columns; prefer passing "
                 "feature_columns=['confidence', *calibrator.columns] "
                 "(or an equivalent ordered schema) instead.",

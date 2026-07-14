@@ -148,3 +148,61 @@ class TestFeatureDataset:
 
         with pytest.raises(ValueError, match="missing from Parquet"):
             FeatureDataset.from_parquet(path, feature_columns=["confidence"])
+
+    def test_from_parquet_boolean_feature_columns(self, tmp_path):
+        """Test that boolean feature and label columns cast to float32."""
+        import polars as pl
+
+        df = pl.DataFrame(
+            {
+                "confidence": [0.9, 0.1],
+                "is_missing": [True, False],
+                "correct": [True, False],
+            }
+        )
+        path = tmp_path / "data.parquet"
+        df.write_parquet(path)
+
+        ds = FeatureDataset.from_parquet(
+            path, feature_columns=["confidence", "is_missing"]
+        )
+        assert ds.features.shape == (2, 2)
+        torch.testing.assert_close(
+            ds.features[0], torch.tensor([0.9, 1.0], dtype=torch.float32)
+        )
+        torch.testing.assert_close(
+            ds.labels, torch.tensor([1.0, 0.0], dtype=torch.float32)
+        )
+
+    def test_from_parquet_non_numeric_feature_column_raises(self, tmp_path):
+        """Test that string feature columns raise a schema ValueError."""
+        import polars as pl
+
+        df = pl.DataFrame(
+            {
+                "confidence": [0.9, 0.8],
+                "peptide": ["PEPTIDE", "OTHER"],
+                "correct": [1.0, 0.0],
+            }
+        )
+        path = tmp_path / "data.parquet"
+        df.write_parquet(path)
+
+        with pytest.raises(ValueError, match="must be numeric or boolean.*peptide"):
+            FeatureDataset.from_parquet(path, feature_columns=["confidence", "peptide"])
+
+    def test_from_parquet_non_numeric_label_raises(self, tmp_path):
+        """Test that a non-castable correct column raises ValueError."""
+        import polars as pl
+
+        df = pl.DataFrame(
+            {
+                "feature_a": [1.0, 2.0],
+                "correct": ["yes", "no"],
+            }
+        )
+        path = tmp_path / "data.parquet"
+        df.write_parquet(path)
+
+        with pytest.raises(ValueError, match="Label column 'correct'"):
+            FeatureDataset.from_parquet(path, feature_columns=["feature_a"])
