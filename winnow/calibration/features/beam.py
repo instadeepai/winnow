@@ -8,16 +8,12 @@ from numpy import median
 from winnow.calibration.features.base import CalibrationFeatures, FeatureDependency
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.calibration.features.utils import require_beam_predictions
+from winnow.datasets.data_loaders.utils import _normalize_leucine_tokens
 
 
 def _beam_len(beam: Optional[List]) -> int:
     """Return the number of scored sequences in a beam row (0 for ``None``)."""
     return 0 if beam is None else len(beam)
-
-
-def _normalise_li(tokens: List[str]) -> List[str]:
-    """Replace every 'I' token with 'L' so leucine/isoleucine are treated identically."""
-    return ["L" if t == "I" else t for t in tokens]
 
 
 def _normalised_levenshtein(sequence_a: List[str], sequence_b: List[str]) -> float:
@@ -74,16 +70,18 @@ def _beam_edit_distance(beam: Optional[List]) -> float:
     assert beam is not None
     top_seq = beam[0].sequence or []
     second_seq = beam[1].sequence or []
+    # Treat both-empty as undefined (same as missing runner-up), not raw
+    # Levenshtein 0.0 which would look spuriously confident.
     if not top_seq and not second_seq:
         return 1.0
     return _normalised_levenshtein(
-        _normalise_li(top_seq),
-        _normalise_li(second_seq),
+        _normalize_leucine_tokens(top_seq),
+        _normalize_leucine_tokens(second_seq),
     )
 
 
 class BeamFeatures(CalibrationFeatures):
-    """Calculates the margin, median margin and entropy of beam runners-up."""
+    """Calculates margin, median margin, entropy, z-score and edit distance of beam runners-up."""
 
     @property
     def dependencies(self) -> List[FeatureDependency]:
@@ -133,7 +131,7 @@ class BeamFeatures(CalibrationFeatures):
         return
 
     def compute(self, dataset: CalibrationDataset) -> None:
-        """Computes margin, median margin and entropy for beam search runners-up.
+        """Computes margin, median margin, entropy, z-score and edit distance for beam search runners-up.
 
         - Margin: Difference between the highest probability sequence and the second-best sequence.
         - Median Margin: Difference between the highest probability sequence and the median probability of the runner-ups.
