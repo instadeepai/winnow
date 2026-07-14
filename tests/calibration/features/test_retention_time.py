@@ -254,6 +254,60 @@ class TestRetentionTimeFeature:
 
         assert "exp_a" not in feature.irt_predictors
 
+    @pytest.mark.parametrize("learn_from_missing", [True, False])
+    @patch("winnow.calibration.features.retention_time.koinapy.Koina")
+    def test_skipped_integer_experiment_name_is_marked(
+        self, mock_koina, learn_from_missing
+    ):
+        """Skipped experiments match even when experiment_name is non-string.
+
+        Group keys are stored as str; marking must compare on a string view so
+        integer IDs are still flagged missing / dropped.
+        """
+        mock_model_instance = Mock()
+        mock_koina.return_value = mock_model_instance
+        mock_model_instance.model_inputs = ["peptide_sequences"]
+
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.95, 0.90],
+                "prediction": [["A", "G"], ["G", "A"]],
+                "retention_time": [10.5, 15.2],
+                "spectrum_id": [0, 1],
+                "experiment_name": [101, 101],
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
+        feature = RetentionTimeFeature(
+            train_fraction=0.1,
+            min_train_points=10,
+            learn_from_missing=learn_from_missing,
+        )
+
+        with pytest.warns(
+            UserWarning, match="Skipping RT->iRT regressor fit for experiment '101'"
+        ):
+            feature.prepare(dataset)
+
+        assert feature._skipped_experiments == ["101"]
+        assert "101" not in feature.irt_predictors
+
+        if learn_from_missing:
+            feature.compute(dataset)
+            assert len(dataset) == 2
+            assert dataset.metadata["is_missing_irt_error"].tolist() == [True, True]
+            assert dataset.metadata["irt_error"].tolist() == [0.0, 0.0]
+        else:
+            with pytest.warns(
+                UserWarning,
+                match=(
+                    r"Filtered 2 spectra that do not satisfy the validity "
+                    r"constraints for the Koina iRT model"
+                ),
+            ):
+                feature.compute(dataset)
+            assert len(dataset) == 0
+
     @patch("winnow.calibration.features.retention_time.koinapy.Koina")
     def test_skipped_experiments_reset_between_prepare_calls(self, mock_koina):
         """Stale skipped experiments must not affect a later file with the same name."""

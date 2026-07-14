@@ -198,11 +198,11 @@ class RetentionTimeFeature(CalibrationFeatures):
 
         For each experiment in the dataset (identified by the ``experiment_name`` column),
         fits a ``LinearRegression`` on the top ``train_fraction`` of spectra by confidence.
-        Experiments that already have a regressor (e.g., loaded via ``load_regressors``)
-        are skipped.
+        Only experiments in ``_loaded_experiment_names`` (from ``load_regressors``) are skipped;
+        earlier ``prepare`` results are re-fitted. Without ``experiment_name``,
+        fits a single global regressor (unless already loaded or present).
 
-        If ``experiment_name`` is absent, a single global regressor is fitted with a
-        warning.
+        Clears ``_skipped_experiments`` at the start of each call.
 
         Args:
             dataset: The dataset containing peptide sequences and retention times.
@@ -212,7 +212,8 @@ class RetentionTimeFeature(CalibrationFeatures):
 
         Note:
             Experiments with fewer than ``min_train_points`` valid training spectra
-            are skipped with a warning. Their iRT features will be imputed as zero.
+            are skipped with a warning. Affected spectra are imputed as zero
+            when ``learn_from_missing=True``, otherwise dropped.
         """
         if "retention_time" not in dataset.metadata.columns:
             raise ValueError(
@@ -329,6 +330,10 @@ class RetentionTimeFeature(CalibrationFeatures):
     ) -> Optional[Dict[str, pd.DataFrame]]:
         """Determine which experiments need a regressor fitted.
 
+        Skips names in ``_loaded_experiment_names``. For global mode (no
+        ``experiment_name``), also skips if ``__global__`` is already in
+        ``irt_predictors``.
+
         Returns:
             A dict mapping experiment name to its metadata subset, or None if
             there is nothing to fit.
@@ -387,8 +392,10 @@ class RetentionTimeFeature(CalibrationFeatures):
 
         if self._skipped_experiments:
             if "experiment_name" in dataset.metadata.columns:
-                skipped_mask = dataset.metadata["experiment_name"].isin(
-                    self._skipped_experiments
+                skipped_mask = (
+                    dataset.metadata["experiment_name"]
+                    .astype(str)
+                    .isin(self._skipped_experiments)
                 )
                 dataset.metadata.loc[skipped_mask, "is_missing_irt_error"] = True
             elif "__global__" in self._skipped_experiments:
