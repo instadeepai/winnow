@@ -96,6 +96,9 @@ winnow train calibrator.learning_rate=0.01 calibrator.max_epochs=200 calibrator.
 
 winnow train calibrator.features.fragment_match_features.mz_tolerance=0.01 \
   calibrator.features.fragment_match_features.mz_tolerance_unit=da
+
+# Train on a subset of feature columns (included feature sets still compute fully)
+winnow train 'calibrator.training_feature_columns=[ion_matches,ion_match_intensity]'
 ```
 
 For comprehensive calibrator configuration options, see:

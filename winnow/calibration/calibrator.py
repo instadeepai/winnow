@@ -7,7 +7,7 @@ import json
 import logging
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 from tqdm import tqdm
@@ -263,6 +263,7 @@ class ProbabilityCalibrator:
         seed: int = 42,
         val_early_stopping_max_psms: Optional[int] = None,
         val_subsample_seed: Optional[int] = None,
+        training_feature_columns: Optional[List[str]] = None,
     ) -> None:
         self.hidden_dims = tuple(hidden_dims)
         self.dropout = dropout
@@ -288,6 +289,9 @@ class ProbabilityCalibrator:
         # Frozen schema after a successful fit / load. Predict and save use this
         # ordered list so column identity matches the trained network.
         self._fitted_feature_columns: Optional[List[str]] = None
+        # Optional pre-fit override: ordered subset of registry columns used for
+        # training / extract. Cleared when fitted; restored from checkpoints.
+        self._training_feature_columns: Optional[List[str]] = None
 
         if features is not None:
             if isinstance(features, (dict, DictConfig)):
@@ -295,21 +299,38 @@ class ProbabilityCalibrator:
             else:
                 self.add_features(list(features))
 
+        if training_feature_columns is not None:
+            self.set_training_feature_columns(training_feature_columns)
+
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
 
     @property
     def columns(self) -> List[str]:
-        """Ordered feature column names for extraction, save, and predict.
+        """Ordered non-confidence feature columns for the MLP input schema.
 
-        After ``fit`` / ``fit_from_features`` / ``load``, returns the frozen
-        fitted schema. Otherwise returns the live registry order from
-        ``feature_dict``.
+        Resolution order:
+
+        1. Frozen fitted schema after ``fit`` / ``fit_from_features`` / ``load``.
+        2. Else ``training_feature_columns`` when set (pre-fit subset).
+        3. Else the full registry flatten of
+           :attr:`~winnow.calibration.features.base.CalibrationFeatures.columns`.
+
+        Confidence is never included; callers prepend it when building matrices.
         """
         if self._fitted_feature_columns is not None:
             return list(self._fitted_feature_columns)
+        if self._training_feature_columns is not None:
+            return list(self._training_feature_columns)
         return self._registry_feature_columns()
+
+    @property
+    def training_feature_columns(self) -> Optional[List[str]]:
+        """Pre-fit training column override, or ``None`` for the full registry."""
+        if self._training_feature_columns is None:
+            return None
+        return list(self._training_feature_columns)
 
     @property
     def feature_names(self) -> List[str]:
@@ -397,6 +418,7 @@ class ProbabilityCalibrator:
             "val_early_stopping_max_psms": calibrator.val_early_stopping_max_psms,
             "val_subsample_seed": calibrator.val_subsample_seed,
             "feature_columns": calibrator.columns,
+            "training_feature_columns": calibrator.training_feature_columns,
             "feature_names": calibrator.feature_names,
             "features": {
                 name: _feature_config_for_save(feature)
@@ -463,6 +485,10 @@ class ProbabilityCalibrator:
         saved_columns = config.get("feature_columns")
         if saved_columns:
             calibrator._fitted_feature_columns = list(saved_columns)
+            # Mirror fitted schema for round-trip readability of the training override.
+            calibrator._training_feature_columns = list(saved_columns)
+        elif config.get("training_feature_columns") is not None:
+            calibrator.set_training_feature_columns(config["training_feature_columns"])
 
         tensors = load_file(dir_path / "model.safetensors")
 
@@ -554,6 +580,50 @@ class ProbabilityCalibrator:
         for feature in features:
             self.add_feature(feature)
 
+    def set_training_feature_columns(self, columns: Sequence[str] | None) -> None:
+        """Set or clear the pre-fit MLP training column schema.
+
+        When set, :attr:`columns` returns this ordered list (before fit) instead
+        of the full registry. Registered :class:`CalibrationFeatures` modules
+        still compute every column they declare; only extraction / training
+        use the subset.
+
+        Prefer calling this after all features are registered. If the registry
+        is still empty, names are stored and checked at fit / extract time.
+        If features are already registered, names are validated immediately.
+
+        Args:
+            columns: Non-confidence metadata column names in MLP order, or
+                ``None`` to use the full registry.
+
+        Raises:
+            ValueError: If the calibrator is already fitted, or if ``columns``
+                contains names absent from the current registry (when features
+                are already registered).
+        """
+        if self._fitted_feature_columns is not None:
+            raise ValueError(
+                "Cannot change training_feature_columns after the calibrator "
+                "has been fitted or loaded. Use a new ProbabilityCalibrator "
+                "instance to train another column subset."
+            )
+        if columns is None:
+            self._training_feature_columns = None
+            return
+
+        normalised = [str(name) for name in columns]
+        if "confidence" in normalised:
+            raise ValueError(
+                "training_feature_columns must not include 'confidence'; "
+                "confidence is always prepended when building the feature matrix."
+            )
+        if len(normalised) != len(set(normalised)):
+            raise ValueError(
+                f"training_feature_columns contains duplicates: {normalised}."
+            )
+        self._training_feature_columns = normalised
+        self._validate_training_feature_columns_against_registry()
+
     def compute_features(self, dataset: CalibrationDataset) -> None:
         """Run feature dependencies and feature computation on a dataset.
 
@@ -596,6 +666,7 @@ class ProbabilityCalibrator:
         Returns:
             Epoch-level training metrics.
         """
+        self._validate_training_feature_columns_against_registry()
         self.compute_features(train_dataset)
         train_fd = self.to_feature_dataset(train_dataset)
 
@@ -622,6 +693,7 @@ class ProbabilityCalibrator:
             ``columns=list(self.columns)``. Layout is
             ``[confidence, *self.columns]``.
         """
+        self._validate_training_feature_columns_against_registry()
         features, labels = self._extract_feature_matrix(dataset, labelled=True)
         return FeatureDataset(
             features=np.asarray(features),
@@ -718,6 +790,38 @@ class ProbabilityCalibrator:
             for feature in self.feature_dict.values()
             for column in feature.columns
         ]
+
+    def _validate_training_feature_columns_against_registry(self) -> None:
+        """Raise if the training override lists names absent from the registry."""
+        if self._training_feature_columns is None or not self.feature_dict:
+            return
+        registry = self._registry_feature_columns()
+        registry_set = set(registry)
+        unknown = [
+            name for name in self._training_feature_columns if name not in registry_set
+        ]
+        if unknown:
+            raise ValueError(
+                f"training_feature_columns contains unknown column(s) {unknown}. "
+                f"Available registry columns: {registry}."
+            )
+
+    def _validate_fitted_subset_of_registry(self) -> None:
+        """Raise if fitted columns are not a subset of the live registry."""
+        if self._fitted_feature_columns is None or not self.feature_dict:
+            return
+        registry_set = set(self._registry_feature_columns())
+        missing = [
+            name for name in self._fitted_feature_columns if name not in registry_set
+        ]
+        if missing:
+            raise ValueError(
+                "Calibrator feature schema mismatch: fitted feature column(s) "
+                f"{missing} are not produced by the registered features "
+                f"(registry columns: {self._registry_feature_columns()}). "
+                "Retrain the calibrator or restore the feature modules that "
+                "produced these columns."
+            )
 
     def _extract_feature_matrix(
         self, dataset: CalibrationDataset, labelled: bool
@@ -857,6 +961,7 @@ class ProbabilityCalibrator:
         torch.manual_seed(self.seed)
         device = self._resolve_device()
 
+        self._validate_training_feature_columns_against_registry()
         self._validate_feature_dataset_schema(train_dataset, context="training")
         if val_dataset is not None:
             self._validate_train_val_feature_columns(train_dataset, val_dataset)
@@ -1142,17 +1247,7 @@ class ProbabilityCalibrator:
                     "for this version."
                 )
 
-            registry_columns = self._registry_feature_columns()
-            if (
-                registry_columns
-                and list(self._fitted_feature_columns) != registry_columns
-            ):
-                raise ValueError(
-                    "The calibrator checkpoint is inconsistent. "
-                    "The saved feature_columns "
-                    f"({self._fitted_feature_columns}) do not match the "
-                    f"registered feature columns ({registry_columns}). "
-                )
+            self._validate_fitted_subset_of_registry()
 
     def _validate_fitted_feature_dimensions(self) -> None:
         """Raise if the current feature set does not match the fitted network."""
@@ -1172,14 +1267,4 @@ class ProbabilityCalibrator:
                 "checkpoint published for this version."
             )
 
-        if self._fitted_feature_columns is None:
-            return
-
-        registry_columns = self._registry_feature_columns()
-        if registry_columns and list(self._fitted_feature_columns) != registry_columns:
-            raise ValueError(
-                "Calibrator feature dimension mismatch: the fitted feature "
-                f"columns ({self._fitted_feature_columns}) no longer match the "
-                f"registered feature columns ({registry_columns}). "
-                "Retrain the calibrator after changing the feature set."
-            )
+        self._validate_fitted_subset_of_registry()
