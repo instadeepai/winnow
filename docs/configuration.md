@@ -69,7 +69,8 @@ winnow train model_output_dir=models/my_model
 winnow predict data_loader=mztab fdr_control.fdr_threshold=0.01 fdr_method=database_grounded
 
 # Compute-features overrides
-winnow compute-features dataset_output_path=results/features.csv labelled=false
+winnow compute-features metadata_output_path=results/metadata.csv labelled=false
+winnow compute-features training_matrix_output_path=results/features.parquet
 
 # Calibration diagnostic overrides
 winnow diagnose-calibration diagnostics.label_source=sequence fdr_control.fdr_threshold=0.01
