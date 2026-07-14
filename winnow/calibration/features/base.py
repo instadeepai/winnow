@@ -2,6 +2,7 @@ from abc import ABCMeta, abstractmethod
 import inspect
 from typing import Any, Dict, List, Optional
 import pandas as pd
+from omegaconf import DictConfig, ListConfig, OmegaConf
 from sklearn.neural_network import MLPRegressor
 
 from winnow.datasets.calibration_dataset import CalibrationDataset
@@ -81,13 +82,8 @@ class CalibrationFeatures(metaclass=ABCMeta):
         """Convert values to plain JSON-serialisable Python types."""
         if isinstance(value, set):
             return sorted(value)
-        try:
-            from omegaconf import DictConfig, ListConfig, OmegaConf
-
-            if isinstance(value, (DictConfig, ListConfig)):
-                return OmegaConf.to_container(value, resolve=True)
-        except ImportError:
-            pass
+        if isinstance(value, (DictConfig, ListConfig)):
+            return OmegaConf.to_container(value, resolve=True)
         return value
 
     @abstractmethod

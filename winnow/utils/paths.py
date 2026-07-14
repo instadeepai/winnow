@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 
 from huggingface_hub import snapshot_download
+from huggingface_hub.errors import HFValidationError, HfHubHTTPError
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ def resolve_data_path(
         )
         logger.info("Downloaded to: %s", downloaded)
         return downloaded
-    except Exception as exc:
+    except (HfHubHTTPError, HFValidationError, OSError) as exc:
         raise FileNotFoundError(
             f"Could not resolve '{path_or_repo_id}' as a local path or "
             f"HuggingFace Hub repository (repo_type={repo_type!r}). "

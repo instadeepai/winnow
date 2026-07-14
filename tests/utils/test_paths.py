@@ -61,9 +61,11 @@ class TestResolveDataPath:
 
     def test_hf_download_failure_raises_with_context(self):
         """Test that HF download failure wraps the original error."""
+        from huggingface_hub.errors import HFValidationError
+
         with patch(
             "winnow.utils.paths.snapshot_download",
-            side_effect=Exception("401 Unauthorized"),
+            side_effect=HFValidationError("401 Unauthorized"),
         ):
             with pytest.raises(FileNotFoundError, match="401 Unauthorized"):
                 resolve_data_path("org/nonexistent-model")

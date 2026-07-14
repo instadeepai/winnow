@@ -288,7 +288,7 @@ class TestProbabilityCalibrator:
         assert calibrator.dropout == 0.2
         assert calibrator.learning_rate == 0.01
         assert calibrator.seed == 123
-        assert calibrator.val_early_stopping_max_psms == 10000
+        assert calibrator.val_early_stopping_max_psms is None
         assert calibrator.val_subsample_seed is None
 
     def test_apply_koina_model_input_overrides(self):

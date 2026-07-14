@@ -261,7 +261,7 @@ class ProbabilityCalibrator:
         n_iter_no_change: int = 10,
         tol: float = 1e-4,
         seed: int = 42,
-        val_early_stopping_max_psms: Optional[int] = 10000,
+        val_early_stopping_max_psms: Optional[int] = None,
         val_subsample_seed: Optional[int] = None,
     ) -> None:
         self.hidden_dims = tuple(hidden_dims)
@@ -455,9 +455,7 @@ class ProbabilityCalibrator:
             n_iter_no_change=config.get("n_iter_no_change", config.get("patience", 10)),
             tol=config.get("tol", 1e-4),
             seed=config.get("seed", 42),
-            val_early_stopping_max_psms=config.get(
-                "val_early_stopping_max_psms", 10000
-            ),
+            val_early_stopping_max_psms=config.get("val_early_stopping_max_psms"),
             val_subsample_seed=config.get("val_subsample_seed"),
         )
 
