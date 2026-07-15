@@ -30,33 +30,18 @@ from winnow.fdr.base import FDRControl
 Implements database-grounded FDR control using database search results as ground truth for FDR estimation.
 
 ```python
+from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.fdr import DatabaseGroundedFDRControl
-residue_masses = {
-            "G": 57.021464,
-            "A": 71.037114,
-            "P": 97.052764,
-            "E": 129.042593,
-            "T": 101.047670,
-            "I": 113.084064,
-            "D": 115.026943,
-            "R": 156.101111,
-            "O": 237.147727,
-            "N": 114.042927,
-            "S": 87.032028,
-            "M": 131.040485,
-            "L": 113.084064,
-        }
 
 # Create FDR controller
-fdr_control = DatabaseGroundedFDRControl(confidence_feature="confidence")
-
-# Fit using labelled dataset
-fdr_control.fit(
-    dataset=labelled_dataframe,
-    residue_masses=residue_masses,
-    isotope_error_range=(0, 1),
-    drop=10  # Drop top N predictions for stability
+fdr_control = DatabaseGroundedFDRControl(
+    confidence_feature="confidence",
+    drop=10,  # Drop top N predictions for stability
 )
+
+# Fit using a CalibrationDataset with loader-finalised metadata
+# (requires correct, valid_sequence and confidence columns)
+fdr_control.fit(dataset=calibration_dataset)
 
 # Get confidence cutoff for 1% FDR
 confidence_cutoff = fdr_control.get_confidence_cutoff(threshold=0.01)
@@ -73,10 +58,10 @@ dataset_with_q_values = fdr_control.add_psm_q_value(dataset, "confidence")
 
 **Key Features:**
 
-- **Ground Truth Validation**: Uses database search results for validation
-- **Precision-Recall Analysis**: Computes precision-recall curves from predictions
-- **Isotope Error Handling**: Supports configurable isotope error ranges
+- **Ground Truth Validation**: Uses loader-derived `correct` labels from database-grounded sequences
+- **Precision-Recall Analysis**: Computes precision-recall curves from finalised predictions
 - **Stability Control**: Drop parameter for robust threshold estimation
+- **Finalised Metadata Only**: Does not tokenise peptides or compute match labels; prefer loading labelled data through a DatasetLoader first
 
 **Required Data:**
 

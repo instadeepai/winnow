@@ -413,18 +413,14 @@ No additional parameters required.
 ```yaml
 _target_: winnow.fdr.database_grounded.DatabaseGroundedFDRControl
 confidence_feature: ${fdr_control.confidence_column}
-residue_masses: ${residue_masses}
-isotope_error_range: [0, 1]
 drop: 10
 ```
 
-Requires ground truth sequences in the dataset.
+Requires finalised labelled metadata from a DatasetLoader (`correct` and `valid_sequence`).
 
 **Key parameters:**
 
 - `confidence_feature`: Name of the column with confidence scores (interpolated from fdr_control)
-- `residue_masses`: Amino acid and modification masses (interpolated from residues config)
-- `isotope_error_range`: Range of isotope errors to consider when matching peptides
 - `drop`: Number of top predictions to drop for stability
 
 ## Calibration diagnostic configuration
@@ -483,7 +479,7 @@ You must choose exactly one labelling mode. The command validates config before 
 
 | `label_source` | `label_column` | Behaviour |
 | --- | --- | --- |
-| `sequence` | must be `null` | Derive `correct` from full-sequence match of `sequence` vs `prediction` (uses `residue_masses` from `residues.yaml`). |
+| `sequence` | must be `null` | Use loader-finalised `correct` labels (and exclude rows with `valid_sequence=False`). |
 | `precomputed` | required (e.g. `proteome_hit`) | Read boolean labels from the named column in merged metadata (e.g. offline proteome mapping). |
 
 Extra label columns in the input file (e.g. `proteome_hit` when using `sequence`) are ignored. If both `sequence` and a precomputed column exist, only the path chosen by `label_source` is used.
