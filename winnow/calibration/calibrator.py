@@ -216,9 +216,12 @@ class ProbabilityCalibrator:
 
         This method computes the features from the dataset, prepares the labels, and trains an MLP classifier for recalibrating probabilities.
 
-        Only rows with a valid ground-truth sequence (``valid_sequence=True``, derived
-        from ``sequence`` when needed) contribute to scaler and classifier fitting;
-        all rows still receive feature computation and retain their ``correct`` labels.
+        Only rows with a valid ground-truth sequence (``valid_sequence=True``)
+        contribute to scaler and classifier fitting. The dataset must already
+        contain finalised metadata from a DatasetLoader (tokenised peptides and,
+        for labelled data, ``valid_sequence`` / ``correct``); this method does not
+        tokenise sequences itself. All rows still receive feature computation and
+        retain their ``correct`` labels.
 
         Args:
             dataset (CalibrationDataset): The dataset used for training the classifier.
