@@ -44,7 +44,7 @@ class DatabaseGroundedFDRControl(FDRControl):
 
         Per-row correctness is derived from ``sequence`` vs ``prediction``. Rows with
         ``valid_sequence=False`` receive ``correct=False`` but are excluded from the
-        FDR curve.
+        FDR curve and from ``self.preds``.
 
         Args:
             dataset: DataFrame with ``sequence``, ``prediction``, and the confidence
@@ -57,12 +57,12 @@ class DatabaseGroundedFDRControl(FDRControl):
             self.metrics,
             has_labels=True,
         )
-        self.preds = dataset[["correct", self.confidence_feature]]
 
         mask = require_labelled_rows(dataset, context="Database-grounded FDR fit")
         labelled = dataset.loc[mask].sort_values(
             by=self.confidence_feature, ascending=False
         )
+        self.preds = labelled[["correct", self.confidence_feature]]
 
         precision = np.cumsum(labelled["correct"]) / np.arange(1, len(labelled) + 1)
         confidence = np.array(labelled[self.confidence_feature])
