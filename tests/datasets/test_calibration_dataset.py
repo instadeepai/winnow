@@ -257,7 +257,8 @@ class TestCalibrationDataset:
         """Test that accessing beam[0] on empty beam raises helpful error."""
         # Create a dataset with an empty beam (empty list instead of None)
         empty_beam_dataset = CalibrationDataset(
-            metadata=pd.DataFrame({"confidence": [0.5]}), predictions=[[]]
+            metadata=pd.DataFrame({"confidence": [0.5], "prediction": [["A"]]}),
+            predictions=[[]],
         )
         with pytest.raises(ValueError, match="beam is empty"):
             empty_beam_dataset.filter_entries(
@@ -272,7 +273,7 @@ class TestCalibrationDataset:
         """Test that accessing beam[1] when beam has only 1 element raises helpful error."""
         # Create a dataset with a beam that has only 1 element
         short_beam_dataset = CalibrationDataset(
-            metadata=pd.DataFrame({"confidence": [0.5]}),
+            metadata=pd.DataFrame({"confidence": [0.5], "prediction": [["A"]]}),
             predictions=[[MockScoredSequence(["A"], np.log(0.8))]],
         )
         with pytest.raises(ValueError, match="too short"):
@@ -284,7 +285,10 @@ class TestCalibrationDataset:
 
     def test_filter_entries_handles_empty_dataset(self):
         """Test that filtering an empty dataset returns an empty dataset."""
-        empty_dataset = CalibrationDataset(metadata=pd.DataFrame(), predictions=[])
+        empty_dataset = CalibrationDataset(
+            metadata=pd.DataFrame({"prediction": pd.Series(dtype=object)}),
+            predictions=[],
+        )
         filtered = empty_dataset.filter_entries(lambda row: True)
         assert len(filtered) == 0
 
@@ -342,7 +346,7 @@ class TestCalibrationDataset:
 
     def test_empty_dataset(self):
         """Test operations on empty dataset."""
-        empty_metadata = pd.DataFrame()
+        empty_metadata = pd.DataFrame({"prediction": pd.Series(dtype=object)})
         empty_dataset = CalibrationDataset(metadata=empty_metadata, predictions=[])
 
         assert len(empty_dataset) == 0
@@ -422,7 +426,7 @@ class TestCalibrationDataset:
 
     def test_predictions_none_default(self):
         """Test that predictions defaults to None."""
-        metadata = pd.DataFrame({"confidence": [0.9]})
+        metadata = pd.DataFrame({"confidence": [0.9], "prediction": [["A"]]})
         dataset = CalibrationDataset(metadata=metadata)
 
         assert dataset.predictions is None

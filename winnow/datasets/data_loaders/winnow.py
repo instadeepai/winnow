@@ -58,13 +58,8 @@ class WinnowDatasetLoader(DatasetLoader):
                 f"The file should be a valid CSV containing PSM metadata. Error: {e}"
             ) from e
 
-        if "sequence" in metadata.columns:
-            metadata["sequence"] = metadata["sequence"].apply(
-                self.metrics._split_peptide
-            )
-        metadata["prediction"] = metadata["prediction"].apply(
-            self.metrics._split_peptide
-        )
+        # Reload-specific array parsing for saved CSV serialisations. Preserve both
+        # comma-delimited lists and numpy print formats.
         metadata["mz_array"] = metadata["mz_array"].apply(
             lambda s: (
                 ast.literal_eval(s)
@@ -84,14 +79,18 @@ class WinnowDatasetLoader(DatasetLoader):
             )
         )
 
-        if "valid_prediction" not in metadata.columns:
-            metadata["valid_prediction"] = metadata["prediction"].apply(
-                utils.is_valid_peptide_tokens
-            )
-        if "sequence" in metadata.columns and "valid_sequence" not in metadata.columns:
-            metadata["valid_sequence"] = metadata["sequence"].apply(
-                utils.is_valid_peptide_tokens
-            )
+        has_labels = "sequence" in metadata.columns and any(
+            utils.is_usable_peptide_label(value) for value in metadata["sequence"]
+        )
+        if "sequence" in metadata.columns and not has_labels:
+            metadata = metadata.drop(columns=["sequence"])
+
+        metadata = utils.finalize_peptide_metadata(
+            metadata,
+            self.metrics,
+            has_labels=has_labels,
+            residue_remapping=self.metrics.residue_set.residue_remapping,
+        )
 
         predictions_pkl_path = data_path / Path("predictions.pkl")
         if predictions_pkl_path.exists():

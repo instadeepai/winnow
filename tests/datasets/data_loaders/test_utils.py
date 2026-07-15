@@ -153,16 +153,17 @@ class TestNormalizePeptideCell:
 
 
 class TestLabelledTrainingMask:
-    def test_imputes_valid_sequence_from_sequence(self):
+    def test_requires_valid_sequence_when_sequence_present(self):
         metadata = pd.DataFrame({"sequence": [["A"], None, ["B"]]})
-        assert utils.labelled_training_mask(metadata).tolist() == [True, False, True]
-        assert metadata["valid_sequence"].tolist() == [True, False, True]
+        with pytest.raises(ValueError, match="valid_sequence"):
+            utils.labelled_training_mask(metadata)
 
     def test_uses_existing_valid_sequence_column(self):
         metadata = pd.DataFrame(
             {"valid_sequence": [True, False, True], "sequence": [["A"], None, ["B"]]}
         )
         assert utils.labelled_training_mask(metadata).tolist() == [True, False, True]
+        assert "valid_sequence" in metadata.columns
 
     def test_require_labelled_rows_raises_when_empty(self):
         metadata = pd.DataFrame(
