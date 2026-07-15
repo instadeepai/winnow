@@ -5,7 +5,7 @@ from numpy.typing import NDArray
 from winnow.fdr.base import FDRControl
 
 
-class NonParametricFDRControl(FDRControl):
+class NonParametricFDRControl(FDRControl[pd.Series]):
     """A non-parametric false discovery rate (FDR) control method that estimates FDR directly from confidence scores.
 
     This implementation uses a non-parametric approach to estimate FDR by computing the cumulative error probabilities across sorted confidence scores.
@@ -19,19 +19,19 @@ class NonParametricFDRControl(FDRControl):
         self._is_correct: NDArray[np.bool_] | None = None
         self._null_scores: NDArray[np.float64] | None = None
 
-    def fit(self, dataset: pd.DataFrame) -> None:
-        """Fit the FDR control method to a dataset of confidence scores.
+    def fit(self, dataset: pd.Series) -> None:
+        """Fit the FDR control method to a series of confidence scores.
 
         Args:
-            dataset (pd.DataFrame):
-                An array of confidence scores from the dataset.
+            dataset: One-dimensional series of confidence scores (for example
+                ``metadata["calibrated_confidence"]``).
         """
         assert len(dataset) > 0, "Fit method requires non-empty data"
-        dataset = dataset.to_numpy()
+        scores = dataset.to_numpy()
 
         # Store sorted confidence scores and their indices
-        self._sorted_indices = np.argsort(-dataset)  # Sort in descending order
-        self._confidence_scores = dataset[self._sorted_indices]
+        self._sorted_indices = np.argsort(-scores)  # Sort in descending order
+        self._confidence_scores = scores[self._sorted_indices]
 
         # Compute error probabilities (1 - confidence)
         error_probabilities = 1 - self._confidence_scores

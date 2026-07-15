@@ -94,7 +94,7 @@ from winnow.fdr import NonParametricFDRControl
 # Create non-parametric FDR controller
 fdr_control = NonParametricFDRControl()
 
-# Fit estimation method to confidence scores
+# Fit estimation method to a Series of confidence scores
 fdr_control.fit(dataset=dataset["confidence"])
 
 # Get confidence cutoff for 5% FDR

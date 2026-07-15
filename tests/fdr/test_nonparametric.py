@@ -16,9 +16,10 @@ class TestNonParametricFDRControl:
 
     @pytest.fixture()
     def sample_confidence_data(self):
-        """Create sample confidence data for testing."""
-        return pd.DataFrame(
-            {"confidence": [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]}
+        """Create sample confidence scores for testing."""
+        return pd.Series(
+            [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1],
+            name="confidence",
         )
 
     @pytest.fixture()
@@ -51,7 +52,7 @@ class TestNonParametricFDRControl:
 
     def test_fit_with_single_value(self, nonparametric_fdr_control):
         """Test fitting with a single confidence value."""
-        single_data = pd.DataFrame({"confidence": [0.8]})
+        single_data = pd.Series([0.8], name="confidence")
         nonparametric_fdr_control.fit(single_data)
 
         assert len(nonparametric_fdr_control._confidence_scores) == 1
@@ -59,14 +60,17 @@ class TestNonParametricFDRControl:
 
     def test_fit_with_duplicate_values(self, nonparametric_fdr_control):
         """Test fitting with duplicate confidence values."""
-        duplicate_data = pd.DataFrame({"confidence": [0.9, 0.8, 0.8, 0.7, 0.7, 0.6]})
+        duplicate_data = pd.Series(
+            [0.9, 0.8, 0.8, 0.7, 0.7, 0.6],
+            name="confidence",
+        )
         nonparametric_fdr_control.fit(duplicate_data)
 
         assert len(nonparametric_fdr_control._confidence_scores) == 6
 
     def test_fit_with_empty_data(self, nonparametric_fdr_control):
         """Test that fit method handles empty data."""
-        empty_data = pd.DataFrame({"confidence": []})
+        empty_data = pd.Series([], dtype=float, name="confidence")
         with pytest.raises(AssertionError, match="Fit method requires non-empty data"):
             nonparametric_fdr_control.fit(empty_data)
 

@@ -90,7 +90,7 @@ def apply_fdr_control(
         fdr_control.fit(dataset=dataset.metadata[confidence_column])
         dataset.metadata = fdr_control.add_psm_pep(dataset.metadata, confidence_column)
     else:
-        fdr_control.fit(dataset=dataset.metadata[confidence_column])
+        fdr_control.fit(dataset=dataset)
 
     dataset.metadata = fdr_control.add_psm_fdr(dataset.metadata, confidence_column)
     dataset.metadata = fdr_control.add_psm_q_value(dataset.metadata, confidence_column)
@@ -423,7 +423,6 @@ def diagnose_calibration_entry_point(
     """Run tail calibration diagnostics on a labelled holdout set."""
     from hydra import initialize_config_dir, compose
     from hydra.utils import instantiate
-    from omegaconf import OmegaConf
 
     from winnow.calibration.calibrator import ProbabilityCalibrator
     from winnow.calibration.diagnostics import (
@@ -469,14 +468,6 @@ def diagnose_calibration_entry_point(
     dataset = filter_dataset(dataset)
     logger.info(f"After filtering: {len(dataset.metadata)} spectra")
 
-    residue_masses = OmegaConf.to_container(cfg.residue_masses, resolve=True)
-    residue_remapping_cfg = getattr(cfg.data_loader, "residue_remapping", None)
-    residue_remapping = (
-        {}
-        if residue_remapping_cfg is None
-        else OmegaConf.to_container(residue_remapping_cfg, resolve=True)
-    )
-
     logger.info("Loading trained calibrator.")
     calibrator = ProbabilityCalibrator.load(
         pretrained_model_name_or_path=cfg.calibrator.pretrained_model_name_or_path,
@@ -490,8 +481,6 @@ def diagnose_calibration_entry_point(
         dataset,
         diagnostics.label_source,
         label_column,
-        residue_masses=residue_masses,
-        residue_remapping=residue_remapping,
     )
     logger.info(
         f"Resolved labels via label_source={diagnostics.label_source!r} "
