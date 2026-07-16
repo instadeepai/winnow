@@ -96,8 +96,9 @@ class TestDatabaseGroundedFDRControl:
         db_fdr_control.fit(dataset)
 
         assert dataset["valid_sequence"].tolist() == [True, False, False]
-        assert db_fdr_control.preds["correct"].tolist() == [True, False, False]
+        assert db_fdr_control.preds["correct"].tolist() == [True]
         assert dataset["num_matches"].tolist() == [7, 0, 0]
+        assert dataset["correct"].tolist() == [True, False, False]
 
     def test_fit_excludes_invalid_sequence_rows_from_fdr_curve(self):
         """Rows with valid_sequence=False must not enter the precision curve."""
