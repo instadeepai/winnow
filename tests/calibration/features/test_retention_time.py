@@ -43,6 +43,21 @@ class TestRetentionTimeFeature:
         assert retention_time_feature.columns == ["irt_error", "is_missing_irt_error"]
         assert retention_time_feature.dependencies == []
 
+    def test_check_valid_irt_prediction_treats_none_as_invalid(
+        self, retention_time_feature
+    ):
+        """Empty→None predictions must be iRT-invalid, not raise TypeError."""
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.95, 0.90, 0.85],
+                "prediction": [["A", "G"], None, ["U", "A"]],
+                "spectrum_id": [0, 1, 2],
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
+        is_valid = retention_time_feature.check_valid_irt_prediction(dataset)
+        assert is_valid.tolist() == [True, False, False]
+
     def test_initialization_parameters(self):
         """Test initialization with custom parameters."""
         feature = RetentionTimeFeature(

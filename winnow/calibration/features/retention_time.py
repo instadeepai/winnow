@@ -117,6 +117,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         """Check which predictions are valid for iRT prediction.
 
         A prediction is considered invalid if any of the following conditions hold:
+        - The prediction is missing or not a non-empty token list (e.g. ``None``).
         - The predicted peptide sequence has more than ``max_peptide_length`` residue tokens.
         - The predicted peptide sequence contains a residue in ``unsupported_residues``.
 
@@ -128,13 +129,19 @@ class RetentionTimeFeature(CalibrationFeatures):
                 that the prediction satisfies all validity constraints and can be passed to
                 the Koina iRT model.
         """
-        filtered_dataset = dataset.filter_entries(
-            metadata_predicate=lambda row: (
-                len(row["prediction"]) > self.max_peptide_length
+        filtered_dataset = (
+            dataset.filter_entries(
+                metadata_predicate=lambda row: as_token_list(row["prediction"]) is None
             )
-        ).filter_entries(
-            metadata_predicate=lambda row: any(
-                token in row["prediction"] for token in self.unsupported_residues
+            .filter_entries(
+                metadata_predicate=lambda row: (
+                    len(row["prediction"]) > self.max_peptide_length
+                )
+            )
+            .filter_entries(
+                metadata_predicate=lambda row: any(
+                    token in row["prediction"] for token in self.unsupported_residues
+                )
             )
         )
 
