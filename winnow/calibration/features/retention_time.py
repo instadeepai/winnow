@@ -10,7 +10,7 @@ from sklearn.linear_model import LinearRegression
 
 from winnow.calibration.features.base import CalibrationFeatures, FeatureDependency
 from winnow.datasets.calibration_dataset import CalibrationDataset
-from winnow.utils.peptide import tokens_to_proforma
+from winnow.utils.peptide import as_token_list, tokens_to_proforma
 
 
 class RetentionTimeFeature(CalibrationFeatures):
@@ -104,14 +104,14 @@ class RetentionTimeFeature(CalibrationFeatures):
     @staticmethod
     def _sequence_key(row: pd.Series) -> tuple:
         """Hashable key for a predicted peptide sequence."""
-        prediction = row["prediction"]
-        if isinstance(prediction, list):
-            return tuple(prediction)
+        tokens = as_token_list(row["prediction"])
+        if tokens is not None:
+            return tuple(tokens)
         if "prediction_untokenised" in row.index and pd.notna(
             row.get("prediction_untokenised")
         ):
             return (str(row["prediction_untokenised"]),)
-        return (str(prediction),)
+        return (str(row["prediction"]),)
 
     def check_valid_irt_prediction(self, dataset: CalibrationDataset) -> pd.Series:
         """Check which predictions are valid for iRT prediction.

@@ -100,6 +100,16 @@ class TestWinnowDatasetLoader:
         assert isinstance(dataset.metadata["sequence"].iloc[0], list)
         assert dataset.metadata["sequence"].iloc[0] == ["A", "G"]
 
+    def test_labelled_reload_computes_correct_and_num_matches(
+        self, loader, metadata_dir_with_sequence
+    ):
+        """Reload finalisation writes match labels for annotated metadata."""
+        dataset = loader.load(data_path=metadata_dir_with_sequence)
+        assert dataset.metadata["valid_prediction"].tolist() == [True, True]
+        assert dataset.metadata["valid_sequence"].tolist() == [True, True]
+        assert dataset.metadata["correct"].tolist() == [True, True]
+        assert dataset.metadata["num_matches"].tolist() == [2, 2]
+
     def test_mz_array_parsed_comma_format(self, loader, metadata_dir):
         """mz_array written with commas should be parsed to a Python list."""
         dataset = loader.load(data_path=metadata_dir)

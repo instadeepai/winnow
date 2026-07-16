@@ -257,7 +257,8 @@ class TestCalibrationDataset:
         """Test that accessing beam[0] on empty beam raises helpful error."""
         # Create a dataset with an empty beam (empty list instead of None)
         empty_beam_dataset = CalibrationDataset(
-            metadata=pd.DataFrame({"confidence": [0.5]}), predictions=[[]]
+            metadata=pd.DataFrame({"confidence": [0.5], "prediction": [["A"]]}),
+            predictions=[[]],
         )
         with pytest.raises(ValueError, match="beam is empty"):
             empty_beam_dataset.filter_entries(
@@ -272,7 +273,7 @@ class TestCalibrationDataset:
         """Test that accessing beam[1] when beam has only 1 element raises helpful error."""
         # Create a dataset with a beam that has only 1 element
         short_beam_dataset = CalibrationDataset(
-            metadata=pd.DataFrame({"confidence": [0.5]}),
+            metadata=pd.DataFrame({"confidence": [0.5], "prediction": [["A"]]}),
             predictions=[[MockScoredSequence(["A"], np.log(0.8))]],
         )
         with pytest.raises(ValueError, match="too short"):
@@ -284,7 +285,10 @@ class TestCalibrationDataset:
 
     def test_filter_entries_handles_empty_dataset(self):
         """Test that filtering an empty dataset returns an empty dataset."""
-        empty_dataset = CalibrationDataset(metadata=pd.DataFrame(), predictions=[])
+        empty_dataset = CalibrationDataset(
+            metadata=pd.DataFrame({"prediction": pd.Series(dtype=object)}),
+            predictions=[],
+        )
         filtered = empty_dataset.filter_entries(lambda row: True)
         assert len(filtered) == 0
 
@@ -324,25 +328,78 @@ class TestCalibrationDataset:
         assert "valid_sequence" not in saved_df.columns
         assert "valid_prediction" not in saved_df.columns
 
+    def test_format_metadata_for_export(self):
+        """Test export formatting converts peptides and drops internal columns."""
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.9, 0.8, 0.7],
+                "prediction": [
+                    ["[UNIMOD:1]", "P", "E", "P", "T", "I", "D", "E"],
+                    ["M[UNIMOD:35]", "P", "E", "P", "T", "I", "D", "E"],
+                    ["P", "E", "P", "T", "I", "D", "E", "[UNIMOD:2]"],
+                ],
+                "sequence": [
+                    ["P", "E", "P", "T", "I", "D", "E"],
+                    ["M[UNIMOD:35]", "P", "E", "P", "T", "I", "D", "E"],
+                    ["P", "E", "P", "T", "I", "D", "E", "[UNIMOD:2]"],
+                ],
+                "prediction_untokenised": [
+                    "[UNIMOD:1]-PEPTIDE",
+                    "M[UNIMOD:35]PEPTIDE",
+                    "PEPTIDE-[UNIMOD:2]",
+                ],
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
+
+        formatted = dataset.format_metadata_for_export()
+
+        assert "valid_sequence" not in formatted.columns
+        assert "valid_prediction" not in formatted.columns
+        assert "prediction_untokenised" not in formatted.columns
+        assert formatted["prediction"].tolist() == [
+            "[UNIMOD:1]-PEPTIDE",
+            "M[UNIMOD:35]PEPTIDE",
+            "PEPTIDE-[UNIMOD:2]",
+        ]
+        assert formatted["sequence"].tolist() == [
+            "PEPTIDE",
+            "M[UNIMOD:35]PEPTIDE",
+            "PEPTIDE-[UNIMOD:2]",
+        ]
+        # Original dataset remains tokenised / unmutated
+        assert dataset.metadata["prediction"].iloc[0] == [
+            "[UNIMOD:1]",
+            "P",
+            "E",
+            "P",
+            "T",
+            "I",
+            "D",
+            "E",
+        ]
+        assert "valid_prediction" in dataset.metadata.columns
+        assert "prediction_untokenised" in dataset.metadata.columns
+
     def test_length_consistency(self, calibration_dataset):
         """Test that length is consistent between metadata and predictions."""
-        # This should not raise an assertion error
+        # This should not raise an error
         assert len(calibration_dataset) == len(calibration_dataset.metadata)
         assert len(calibration_dataset) == len(calibration_dataset.predictions)
 
     def test_length_inconsistency_raises_error(self, sample_metadata):
-        """Test that length inconsistency raises assertion error."""
+        """Test that length inconsistency raises ValueError."""
         # Create mismatched lengths
         short_predictions = [None, None]  # Only 2 predictions for 5 metadata rows
 
         with pytest.raises(
-            AssertionError, match="Length of metadata and predictions must match"
+            ValueError, match="Length of metadata and predictions must match"
         ):
             CalibrationDataset(metadata=sample_metadata, predictions=short_predictions)
 
     def test_empty_dataset(self):
         """Test operations on empty dataset."""
-        empty_metadata = pd.DataFrame()
+        empty_metadata = pd.DataFrame({"prediction": pd.Series(dtype=object)})
         empty_dataset = CalibrationDataset(metadata=empty_metadata, predictions=[])
 
         assert len(empty_dataset) == 0
@@ -422,7 +479,7 @@ class TestCalibrationDataset:
 
     def test_predictions_none_default(self):
         """Test that predictions defaults to None."""
-        metadata = pd.DataFrame({"confidence": [0.9]})
+        metadata = pd.DataFrame({"confidence": [0.9], "prediction": [["A"]]})
         dataset = CalibrationDataset(metadata=metadata)
 
         assert dataset.predictions is None

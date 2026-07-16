@@ -11,12 +11,67 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, List, Optional, Tuple, Union
 import pickle
+import warnings
 
 import numpy as np
 import pandas as pd
 
 from winnow.compat.instanovo import ScoredSequence
-from winnow.utils.peptide import tokens_to_proforma
+from winnow.utils.peptide import (
+    is_missing_cell,
+    as_token_list,
+    is_usable_peptide_label,
+    is_valid_peptide_tokens,
+    tokens_to_proforma,
+)
+
+_LOADER_GUIDANCE = (
+    "Use a DatasetLoader to tokenise raw ProForma strings "
+    "(e.g. InstaNovoDatasetLoader) instead of constructing "
+    "CalibrationDataset directly."
+)
+
+
+def _normalise_and_validate_peptide_column(
+    metadata: pd.DataFrame,
+    column: str,
+) -> None:
+    """Normalise empty containers to None and reject unsupported peptide cells."""
+    for index, value in metadata[column].items():
+        if is_missing_cell(value):
+            continue
+        if isinstance(value, str):
+            raise ValueError(
+                f"Peptide column {column!r} contains raw strings; "
+                f"expected token lists such as ['P', 'E', 'P']. {_LOADER_GUIDANCE}"
+            )
+        if as_token_list(value) is None:
+            if not is_usable_peptide_label(value):
+                metadata.at[index, column] = None
+                continue
+            raise ValueError(
+                f"Peptide column {column!r} contains an unsupported value of type "
+                f"{type(value).__name__!r}; expected a token list or None. "
+                f"{_LOADER_GUIDANCE}"
+            )
+
+
+def _derive_validity_column(
+    metadata: pd.DataFrame,
+    peptide_column: str,
+    validity_column: str,
+) -> None:
+    """Derive a structural validity flag, warning if a stale column is overwritten."""
+    derived = metadata[peptide_column].apply(is_valid_peptide_tokens)
+    if validity_column in metadata.columns:
+        existing = metadata[validity_column].fillna(False).astype(bool)
+        if not existing.equals(derived.astype(bool)):
+            warnings.warn(
+                f"Existing {validity_column!r} differs from token-structure "
+                "validation and will be overwritten.",
+                stacklevel=2,
+            )
+    metadata[validity_column] = derived
 
 
 @dataclass
@@ -26,6 +81,10 @@ class CalibrationDataset:
     It holds metadata and prediction results and provides various utility methods for filtering,
     saving, and evaluating data. For loading datasets from various file formats, see the
     concrete implementations of the DatasetLoader interface in the data_loaders package.
+
+    Peptide columns must already be tokenised. ``__post_init__`` validates structure and
+    derives ``valid_prediction`` / ``valid_sequence``; it does not parse ProForma strings
+    or compute/validate ``correct`` / ``num_matches``.
 
     Attributes:
         metadata (pd.DataFrame): DataFrame containing metadata and predictions.
@@ -37,11 +96,25 @@ class CalibrationDataset:
     predictions: Optional[List[Optional[List[ScoredSequence]]]] = None
 
     def __post_init__(self):
-        """Validate that metadata and predictions have matching lengths."""
+        """Validate alignment and peptide column structure; derive ``valid_*`` flags."""
         # Allow predictions to be None (no beam predictions available)
         # But if predictions are provided, they must match metadata length
         if self.predictions is not None and len(self.metadata) != len(self.predictions):
-            raise AssertionError("Length of metadata and predictions must match")
+            raise ValueError("Length of metadata and predictions must match")
+
+        if "prediction" not in self.metadata.columns:
+            raise ValueError(
+                "CalibrationDataset requires a 'prediction' column containing "
+                "tokenised peptide predictions. If your inputs are raw peptide "
+                "strings, load them with a DatasetLoader first."
+            )
+
+        _normalise_and_validate_peptide_column(self.metadata, "prediction")
+        _derive_validity_column(self.metadata, "prediction", "valid_prediction")
+
+        if "sequence" in self.metadata.columns:
+            _normalise_and_validate_peptide_column(self.metadata, "sequence")
+            _derive_validity_column(self.metadata, "sequence", "valid_sequence")
 
     def save(self, data_dir: Path) -> None:
         """Save a `CalibrationDataset` to a directory.
@@ -155,22 +228,7 @@ class CalibrationDataset:
             path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        output_metadata = self.metadata.copy(deep=True)
-
-        if "sequence" in output_metadata.columns:
-            output_metadata["sequence"] = output_metadata["sequence"].apply(
-                tokens_to_proforma
-            )
-        if "prediction" in output_metadata.columns:
-            output_metadata["prediction"] = output_metadata["prediction"].apply(
-                tokens_to_proforma
-            )
-        if "prediction_untokenised" in output_metadata.columns:
-            output_metadata = output_metadata.drop(columns=["prediction_untokenised"])
-        if "valid_sequence" in output_metadata.columns:
-            output_metadata = output_metadata.drop(columns=["valid_sequence"])
-        if "valid_prediction" in output_metadata.columns:
-            output_metadata = output_metadata.drop(columns=["valid_prediction"])
+        output_metadata = self.format_metadata_for_export()
 
         if path.suffix == ".csv":
             output_metadata.to_csv(path, index=False)
@@ -213,6 +271,33 @@ class CalibrationDataset:
             path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         self.metadata.to_parquet(path)
+
+    def format_metadata_for_export(self) -> pd.DataFrame:
+        """Return a copy of metadata formatted for CSV or parquet export.
+
+        Converts ``sequence`` and ``prediction`` token lists to ProForma strings and
+        drops internal columns (``prediction_untokenised``, ``valid_sequence``,
+        ``valid_prediction``). Does not modify the dataset in place.
+
+        Returns:
+            pd.DataFrame: Export-ready metadata copy.
+        """
+        output_metadata = self.metadata.copy(deep=True)
+        if "sequence" in output_metadata.columns:
+            output_metadata["sequence"] = output_metadata["sequence"].apply(
+                tokens_to_proforma
+            )
+        if "prediction" in output_metadata.columns:
+            output_metadata["prediction"] = output_metadata["prediction"].apply(
+                tokens_to_proforma
+            )
+        if "prediction_untokenised" in output_metadata.columns:
+            output_metadata = output_metadata.drop(columns=["prediction_untokenised"])
+        if "valid_sequence" in output_metadata.columns:
+            output_metadata = output_metadata.drop(columns=["valid_sequence"])
+        if "valid_prediction" in output_metadata.columns:
+            output_metadata = output_metadata.drop(columns=["valid_prediction"])
+        return output_metadata
 
     def _create_predicate_error_message(
         self, error: Exception, beam: Optional[List[ScoredSequence]], idx: int
