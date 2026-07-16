@@ -524,13 +524,12 @@ def diagnose_calibration_entry_point(
     )
 
     confidence_col = cfg.fdr_control.confidence_column
-    diagnostic_data = DiagnosticArrays.from_raw(
-        dataset.metadata.loc[labels.index, confidence_col],
-        labels,
-    )
+    # Use the same labelled population for FDR cutoff estimation and diagnostics.
+    labelled_scores = dataset.metadata.loc[labels.index, confidence_col]
+    diagnostic_data = DiagnosticArrays.from_raw(labelled_scores, labels)
 
     fdr_control = NonParametricFDRControl()
-    fdr_control.fit(dataset.metadata[confidence_col])
+    fdr_control.fit(labelled_scores)
     conf_cutoff = fdr_control.get_confidence_cutoff(
         threshold=cfg.fdr_control.fdr_threshold
     )
