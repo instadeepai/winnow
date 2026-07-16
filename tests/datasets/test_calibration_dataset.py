@@ -383,17 +383,17 @@ class TestCalibrationDataset:
 
     def test_length_consistency(self, calibration_dataset):
         """Test that length is consistent between metadata and predictions."""
-        # This should not raise an assertion error
+        # This should not raise an error
         assert len(calibration_dataset) == len(calibration_dataset.metadata)
         assert len(calibration_dataset) == len(calibration_dataset.predictions)
 
     def test_length_inconsistency_raises_error(self, sample_metadata):
-        """Test that length inconsistency raises assertion error."""
+        """Test that length inconsistency raises ValueError."""
         # Create mismatched lengths
         short_predictions = [None, None]  # Only 2 predictions for 5 metadata rows
 
         with pytest.raises(
-            AssertionError, match="Length of metadata and predictions must match"
+            ValueError, match="Length of metadata and predictions must match"
         ):
             CalibrationDataset(metadata=sample_metadata, predictions=short_predictions)
 

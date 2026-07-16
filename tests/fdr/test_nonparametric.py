@@ -71,7 +71,7 @@ class TestNonParametricFDRControl:
     def test_fit_with_empty_data(self, nonparametric_fdr_control):
         """Test that fit method handles empty data."""
         empty_data = pd.Series([], dtype=float, name="confidence")
-        with pytest.raises(AssertionError, match="Fit method requires non-empty data"):
+        with pytest.raises(ValueError, match="Fit method requires non-empty data"):
             nonparametric_fdr_control.fit(empty_data)
 
     def test_get_confidence_cutoff_requires_fitting(self, nonparametric_fdr_control):

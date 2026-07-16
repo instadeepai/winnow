@@ -26,7 +26,9 @@ class NonParametricFDRControl(FDRControl[pd.Series]):
             dataset: One-dimensional series of confidence scores (for example
                 ``metadata["calibrated_confidence"]``).
         """
-        assert len(dataset) > 0, "Fit method requires non-empty data"
+        if len(dataset) == 0:
+            raise ValueError("Fit method requires non-empty data")
+
         scores = dataset.to_numpy()
 
         # Store sorted confidence scores and their indices

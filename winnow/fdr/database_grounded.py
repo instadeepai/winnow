@@ -34,7 +34,8 @@ class DatabaseGroundedFDRControl(FDRControl[CalibrationDataset]):
         Raises:
             ValueError: If required finalised label columns are missing.
         """
-        assert len(dataset) > 0, "Fit method requires non-empty data"
+        if len(dataset) == 0:
+            raise ValueError("Fit method requires non-empty data")
 
         metadata = dataset.metadata
         missing = [

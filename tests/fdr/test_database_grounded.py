@@ -80,7 +80,7 @@ class TestDatabaseGroundedFDRControl:
                 }
             )
         )
-        with pytest.raises(AssertionError, match="Fit method requires non-empty data"):
+        with pytest.raises(ValueError, match="Fit method requires non-empty data"):
             db_fdr_control.fit(empty_data)
 
     def test_fit_requires_finalised_metadata(self, db_fdr_control):

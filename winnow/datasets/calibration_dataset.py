@@ -100,7 +100,7 @@ class CalibrationDataset:
         # Allow predictions to be None (no beam predictions available)
         # But if predictions are provided, they must match metadata length
         if self.predictions is not None and len(self.metadata) != len(self.predictions):
-            raise AssertionError("Length of metadata and predictions must match")
+            raise ValueError("Length of metadata and predictions must match")
 
         if "prediction" not in self.metadata.columns:
             raise ValueError(
