@@ -357,28 +357,26 @@ def _finalize_peptide_metadata_polars(
     metadata = metadata.with_columns(
         pl.struct([sequence_col, prediction_col])
         .map_elements(
-            lambda row: _row_evaluation_polars(
-                row,
-                metrics,
-                sequence_col=sequence_col,
-                prediction_col=prediction_col,
-            )[0],
-            return_dtype=pl.Int64,
+            lambda row: dict(
+                zip(
+                    ("num_matches", "correct"),
+                    _row_evaluation_polars(
+                        row,
+                        metrics,
+                        sequence_col=sequence_col,
+                        prediction_col=prediction_col,
+                    ),
+                )
+            ),
+            return_dtype=pl.Struct(
+                [
+                    pl.Field("num_matches", pl.Int64),
+                    pl.Field("correct", pl.Boolean),
+                ]
+            ),
         )
-        .alias("num_matches"),
-    ).with_columns(
-        pl.struct([sequence_col, prediction_col])
-        .map_elements(
-            lambda row: _row_evaluation_polars(
-                row,
-                metrics,
-                sequence_col=sequence_col,
-                prediction_col=prediction_col,
-            )[1],
-            return_dtype=pl.Boolean,
-        )
-        .alias("correct"),
-    )
+        .alias("_row_eval")
+    ).unnest("_row_eval")
     return metadata
 
 

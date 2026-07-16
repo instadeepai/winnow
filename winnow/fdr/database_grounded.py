@@ -24,8 +24,8 @@ class DatabaseGroundedFDRControl(FDRControl[CalibrationDataset]):
     def fit(self, dataset: CalibrationDataset) -> None:
         """Computes the precision-recall curve from finalised correctness labels.
 
-        Rows with ``valid_sequence=False`` are excluded from the FDR curve. Per-row
-        correctness must already be present in ``correct``.
+        Rows with ``valid_sequence=False`` are excluded from the FDR curve and from ``self.preds``.
+        Per-row correctness must already be present in ``correct``.
 
         Args:
             dataset: Finalised calibration dataset with ``correct``, ``valid_sequence``,
@@ -50,12 +50,11 @@ class DatabaseGroundedFDRControl(FDRControl[CalibrationDataset]):
                 "diagnostics."
             )
 
-        self.preds = metadata[["correct", self.confidence_feature]]
-
         mask = require_labelled_rows(metadata, context="Database-grounded FDR fit")
         labelled = metadata.loc[mask].sort_values(
             by=self.confidence_feature, ascending=False
         )
+        self.preds = labelled[["correct", self.confidence_feature]]
 
         precision = np.cumsum(labelled["correct"]) / np.arange(1, len(labelled) + 1)
         confidence = np.array(labelled[self.confidence_feature])
