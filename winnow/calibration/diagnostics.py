@@ -137,6 +137,9 @@ def resolve_diagnostics_labels(
             "diagnostics."
         )
     mask = require_labelled_rows(metadata, context="Sequence-derived diagnostics")
+    # If no labelled rows are available, raise an error
+    if len(mask) == 0:
+        raise ValueError("No labelled rows available for sequence-derived diagnostics")
     labels = metadata.loc[mask, "correct"].astype(bool)
     return labels, SEQUENCE_LABEL_COLUMN
 

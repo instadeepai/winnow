@@ -420,7 +420,7 @@ def finalize_peptide_metadata(
 def labelled_training_mask(metadata: pd.DataFrame) -> np.ndarray:
     """Return a boolean mask of rows eligible for supervised training or FDR fit.
 
-    When a ``sequence`` column is present, ``valid_sequence`` must already be
+    When a ``sequence`` column is present, ``valid_sequence`` and ``correct`` must already be
     finalised (e.g. by ``CalibrationDataset.__post_init__`` or a DatasetLoader).
     When neither column exists (e.g. precomputed labels only), all rows are
     included.
@@ -430,6 +430,12 @@ def labelled_training_mask(metadata: pd.DataFrame) -> np.ndarray:
             raise ValueError(
                 "Metadata with a 'sequence' column requires a finalised "
                 "'valid_sequence' column. Load data through a DatasetLoader or "
+                "construct a CalibrationDataset instead of passing raw metadata."
+            )
+        if "correct" not in metadata.columns:
+            raise ValueError(
+                "Metadata with a 'sequence' column requires a finalised "
+                "'correct' column. Load data through a DatasetLoader or "
                 "construct a CalibrationDataset instead of passing raw metadata."
             )
         return metadata["valid_sequence"].fillna(False).to_numpy(dtype=bool)

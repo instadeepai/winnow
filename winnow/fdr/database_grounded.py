@@ -55,6 +55,9 @@ class DatabaseGroundedFDRControl(FDRControl[CalibrationDataset]):
         labelled = metadata.loc[mask].sort_values(
             by=self.confidence_feature, ascending=False
         )
+        # If no labelled rows are available, raise an error
+        if len(labelled) == 0:
+            raise ValueError("No labelled rows available for FDR fit")
         self.preds = labelled[["correct", self.confidence_feature]]
 
         precision = np.cumsum(labelled["correct"]) / np.arange(1, len(labelled) + 1)

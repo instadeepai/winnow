@@ -335,6 +335,21 @@ class TestProbabilityCalibrator:
         with pytest.raises(ValueError, match="valid_sequence=True"):
             calibrator.fit(dataset)
 
+    def test_fit_raises_when_correct_column_missing(self, calibrator):
+        """Missing finalised ``correct`` must raise before feature computation."""
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.9, 0.8],
+                "prediction": [["A", "G"], ["G", "A"]],
+                "sequence": [["A", "G"], ["G", "A"]],
+                "valid_sequence": [True, True],
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=[None, None])
+        calibrator.add_feature(MockCalibrationFeature("test_feature", ["test_col"]))
+        with pytest.raises(ValueError, match="'correct' column"):
+            calibrator.fit(dataset)
+
     def test_predict_after_fit(self, calibrator, labelled_dataset, sample_dataset):
         """Test prediction after fitting."""
         feature = MockCalibrationFeature("test_feature", ["test_col"])
