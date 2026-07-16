@@ -115,6 +115,18 @@ class TestNormalizePeptideCell:
         )
         assert tokens == ["A", "I"]
 
+    def test_string_leucine_mapped_without_corrupting_mod_names(
+        self, metrics: Metrics
+    ) -> None:
+        """Uppercase L inside a modification name must not be rewritten before split."""
+        remapping = {"C[Labelled]": "C[UniMod:999]"}
+        tokens = utils.normalize_peptide_cell(
+            "AC[Labelled]L",
+            metrics,
+            residue_remapping=remapping,
+        )
+        assert tokens == ["A", "C[UniMod:999]", "I"]
+
     def test_modification_remapping_on_list_input(self, metrics: Metrics) -> None:
         tokens = utils.normalize_peptide_cell(
             ["M[Oxidation]", "A"],

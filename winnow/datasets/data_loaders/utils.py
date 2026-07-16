@@ -164,8 +164,7 @@ def normalize_peptide_cell(
     if isinstance(value, str):
         if value.strip() == "":
             return None
-        peptide = value.replace("L", "I") if normalize_leucine else value
-        tokens = metrics._split_peptide(peptide)
+        tokens = metrics._split_peptide(value)
     else:
         tokens = as_token_list(value)
         if tokens is None:

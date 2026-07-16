@@ -304,9 +304,10 @@ class InstaNovoDatasetLoader(DatasetLoader):
                 )
 
                 if sequence and log_prob > float("-inf"):
+                    tokens = self.metrics._split_peptide(sequence)
                     scored_sequences.append(
                         ScoredSequence(
-                            sequence=self.metrics._split_peptide(sequence),
+                            sequence=utils._normalize_leucine_tokens(tokens),
                             mass_error=None,
                             sequence_log_probability=log_prob,
                             token_log_probabilities=ast.literal_eval(token_log_prob)
@@ -316,15 +317,6 @@ class InstaNovoDatasetLoader(DatasetLoader):
                     )
 
             return scored_sequences or None
-
-        # Apply L -> I transformation to multiple columns using polars with_columns
-        beam_df = beam_df.with_columns(
-            [
-                pl.col(col).str.replace_all("L", "I")
-                for col in beam_df.columns
-                if self.beam_columns["sequence"] in col
-            ]
-        )
 
         # Converts each row of the polars dataframe to a list of scored sequences representing the beam predictions for that row/spectrum.
         # All the beams are then stored in a list representing the entire dataset.
@@ -374,14 +366,6 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
         preds_dataset["prediction"] = preds_dataset["prediction"].apply(
             lambda peptide: peptide.split(", ") if isinstance(peptide, str) else peptide
-        )
-
-        preds_dataset["prediction_untokenised"] = preds_dataset[
-            "prediction_untokenised"
-        ].apply(
-            lambda peptide: (
-                peptide.replace("L", "I") if isinstance(peptide, str) else peptide
-            )
         )
 
         return preds_dataset
