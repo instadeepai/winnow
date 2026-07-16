@@ -69,6 +69,27 @@ dataset_with_q_values = fdr_control.add_psm_q_value(dataset, "confidence")
 - Boolean PSM correctness column (`correct`)
 - Boolean ground-truth sequence validity column (`valid_sequence`) used for filtering
 
+**Fit vs apply:**
+
+`fit` builds the FDR curve only from rows with `valid_sequence=True`. Applying a cutoff is score-based only: `get_confidence_cutoff`, `add_psm_fdr`, and `add_psm_q_value` do not require labels, so retained PSMs may include rows that never entered the curve (unlabelled spectra, or `valid_sequence=False`). That is intentional when filtering by confidence alone.
+
+Power users can fit on one labelled dataset and apply the resulting cutoff to another:
+
+```python
+fdr_control.fit(labelled_holdout)
+cutoff = fdr_control.get_confidence_cutoff(threshold=0.01)
+
+# Apply to any dataset that has the confidence column (labels optional)
+target_metadata = fdr_control.add_psm_fdr(
+    target_dataset.metadata, confidence_col="calibrated_confidence"
+)
+retained = target_dataset.filter_entries(
+    metadata_predicate=lambda row: row["calibrated_confidence"] < cutoff
+)
+```
+
+The `winnow predict` CLI still fits and applies on a single labelled input when using database-grounded FDR; use the library API above for transferred cutoffs.
+
 ### NonParametricFDRControl
 
 Uses a label-free, non-parametric method for FDR estimation, specifically designed for scenarios where database ground truth is unavailable.
