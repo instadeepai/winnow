@@ -65,9 +65,9 @@ dataset_with_q_values = fdr_control.add_psm_q_value(dataset, "confidence")
 
 **Required Data:**
 
-- Ground truth peptide sequences (`sequence` column)
-- Predicted peptide sequences (`prediction` column)
 - Confidence scores (configurable column name)
+- Boolean PSM correctness column (`correct`)
+- Boolean ground-truth sequence validity column (`valid_sequence`) used for filtering
 
 ### NonParametricFDRControl
 
