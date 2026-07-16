@@ -543,7 +543,7 @@ class TestInstaNovoDatasetLoader:
         assert hasattr(beams[0][0], "sequence_log_probability")
 
     def test_process_beams_replaces_l_with_i_in_sequences(self, loader):
-        """L amino acid must be replaced with I before tokenization."""
+        """L amino acid must be replaced with I at token level after split."""
         beam_df = pl.DataFrame(
             {
                 "predictions_beam_0": ["PEPTLDE"],
@@ -751,19 +751,18 @@ class TestInstaNovoDatasetLoader:
         finalized = _finalize(loader, processed, has_labels=False)
         assert "L" not in finalized["prediction"].iloc[0]
 
-    def test_process_predictions_replaces_l_with_i_in_prediction_untokenised(
-        self, loader
-    ):
+    def test_process_predictions_preserves_l_in_prediction_untokenised(self, loader):
+        """Untokenised strings keep source L; leucine remap is token-level only."""
         preds_df = pd.DataFrame(
             {
                 "spectrum_id": [1],
                 "predictions": ["PEPTLDE"],
-                "predictions_tokenised": ["P, E, P, T, I, D, E"],
+                "predictions_tokenised": ["P, E, P, T, L, D, E"],
                 "log_probs": [-0.5],
             }
         )
         result = loader._process_predictions(preds_df, ["spectrum_id"])
-        assert "L" not in result["prediction_untokenised"].iloc[0]
+        assert result["prediction_untokenised"].iloc[0] == "PEPTLDE"
 
     def test_process_predictions_drops_duplicate_input_columns(self, loader):
         """Columns present in input spectrum data (except spectrum_id) must be dropped."""

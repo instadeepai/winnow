@@ -10,6 +10,13 @@ import polars as pl
 import pandas as pd
 from instanovo.utils.metrics import Metrics
 
+from winnow.utils.peptide import (
+    is_missing_cell,
+    as_token_list,
+    is_usable_peptide_label,
+    is_valid_peptide_tokens,
+)
+
 if TYPE_CHECKING:
     from matchms import Spectrum
 
@@ -116,63 +123,6 @@ def add_index_cols(df: pl.DataFrame, fp: Path | str) -> pl.DataFrame:
 _add_index_cols_fn = add_index_cols
 
 
-def _is_missing_cell(value: object) -> bool:
-    """Return True when a peptide cell is absent (None, NaN, pd.NA)."""
-    if value is None:
-        return True
-    if isinstance(value, float) and value != value:
-        return True
-    try:
-        if pd.isna(value):
-            return True
-    except (TypeError, ValueError):
-        pass
-    return False
-
-
-def is_usable_peptide_label(value: object) -> bool:
-    """Return True when a raw peptide cell contains a label or sequence string."""
-    if _is_missing_cell(value):
-        return False
-    if isinstance(value, str):
-        return value.strip() != ""
-    if isinstance(value, (list, tuple)):
-        return len(value) > 0
-    if isinstance(value, pl.Series):
-        return len(value) > 0
-    if isinstance(value, np.ndarray):
-        return value.size > 0
-    if hasattr(value, "tolist"):
-        tokens = value.tolist()
-        return isinstance(tokens, (list, tuple)) and len(tokens) > 0
-    return True
-
-
-def as_token_list(value: object) -> list[str] | None:
-    """Coerce a metadata cell to a non-empty AA token list, or ``None``.
-
-    Accepts container types that already hold token strings. Does not parse raw
-    peptide strings; use :func:`normalize_peptide_cell` for that.
-    """
-    if _is_missing_cell(value):
-        return None
-    if isinstance(value, pl.Series):
-        tokens = value.to_list()
-        return list(tokens) if tokens else None
-    if isinstance(value, (list, tuple)):
-        tokens = list(value)
-        return tokens if tokens else None
-    if isinstance(value, np.ndarray):
-        tokens = value.tolist()
-        return tokens if isinstance(tokens, list) and tokens else None
-    return None
-
-
-def is_valid_peptide_tokens(value: object) -> bool:
-    """Return True when a cell holds a non-empty token list (not a raw string)."""
-    return as_token_list(value) is not None
-
-
 def _normalize_leucine_tokens(tokens: list[str]) -> list[str]:
     """Map leucine to isoleucine at the token level."""
     return ["I" if token == "L" else token for token in tokens]
@@ -209,13 +159,12 @@ def normalize_peptide_cell(
     """
     if require_label and not is_usable_peptide_label(value):
         return None
-    if _is_missing_cell(value):
+    if is_missing_cell(value):
         return None
     if isinstance(value, str):
         if value.strip() == "":
             return None
-        peptide = value.replace("L", "I") if normalize_leucine else value
-        tokens = metrics._split_peptide(peptide)
+        tokens = metrics._split_peptide(value)
     else:
         tokens = as_token_list(value)
         if tokens is None:
@@ -467,21 +416,27 @@ def finalize_peptide_metadata(
     )
 
 
-def _ensure_valid_sequence_column(metadata: pd.DataFrame) -> None:
-    """Set ``valid_sequence`` from ``sequence`` when the column is absent."""
-    if "sequence" in metadata.columns and "valid_sequence" not in metadata.columns:
-        metadata["valid_sequence"] = metadata["sequence"].apply(is_valid_peptide_tokens)
-
-
 def labelled_training_mask(metadata: pd.DataFrame) -> np.ndarray:
     """Return a boolean mask of rows eligible for supervised training or FDR fit.
 
-    When a ``sequence`` column is present, ``valid_sequence`` is derived from it
-    if not already supplied. When neither column exists (e.g. precomputed labels
-    only), all rows are included.
+    When a ``sequence`` column is present, ``valid_sequence`` and ``correct`` must already be
+    finalised (e.g. by ``CalibrationDataset.__post_init__`` or a DatasetLoader).
+    When neither column exists (e.g. precomputed labels only), all rows are
+    included.
     """
     if "sequence" in metadata.columns:
-        _ensure_valid_sequence_column(metadata)
+        if "valid_sequence" not in metadata.columns:
+            raise ValueError(
+                "Metadata with a 'sequence' column requires a finalised "
+                "'valid_sequence' column. Load data through a DatasetLoader or "
+                "construct a CalibrationDataset instead of passing raw metadata."
+            )
+        if "correct" not in metadata.columns:
+            raise ValueError(
+                "Metadata with a 'sequence' column requires a finalised "
+                "'correct' column. Load data through a DatasetLoader or "
+                "construct a CalibrationDataset instead of passing raw metadata."
+            )
         return metadata["valid_sequence"].fillna(False).to_numpy(dtype=bool)
     return np.ones(len(metadata), dtype=bool)
 

@@ -99,7 +99,9 @@ class TestBeamFeatures:
     @pytest.fixture()
     def sample_dataset_with_predictions(self):
         """Create a sample dataset with beam search predictions."""
-        metadata = pd.DataFrame({"confidence": [0.9, 0.8, 0.7]})
+        metadata = pd.DataFrame(
+            {"confidence": [0.9, 0.8, 0.7], "prediction": [["A"], ["G"], ["K"]]}
+        )
 
         # Mock beam search results with different numbers of sequences
         predictions = [
@@ -168,7 +170,7 @@ class TestBeamFeatures:
 
     def test_compute_raises_when_beam_predictions_not_loaded(self, beam_features):
         """BeamFeatures requires a predictions list; None means beams were not loaded."""
-        metadata = pd.DataFrame({"confidence": [0.9]})
+        metadata = pd.DataFrame({"confidence": [0.9], "prediction": [["A"]]})
         dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
         with pytest.raises(
@@ -179,7 +181,9 @@ class TestBeamFeatures:
 
     def test_compute_with_none_beam_row(self, beam_features):
         """Database-search rows without beam candidates use max edit distance."""
-        metadata = pd.DataFrame({"confidence": [0.9, 0.8]})
+        metadata = pd.DataFrame(
+            {"confidence": [0.9, 0.8], "prediction": [["A"], ["G"]]}
+        )
         predictions = [
             None,
             [
@@ -201,7 +205,7 @@ class TestBeamFeatures:
 
     def test_compute_with_empty_beam_list(self, beam_features):
         """An empty beam list is treated like a missing runner-up."""
-        metadata = pd.DataFrame({"confidence": [0.9]})
+        metadata = pd.DataFrame({"confidence": [0.9], "prediction": [["A"]]})
         dataset = CalibrationDataset(metadata=metadata, predictions=[[]])
 
         with pytest.warns(
@@ -214,7 +218,7 @@ class TestBeamFeatures:
 
     def test_compute_edit_distance_both_empty_sequences(self, beam_features):
         """Two present beam slots with empty token lists use max edit distance."""
-        metadata = pd.DataFrame({"confidence": [0.9]})
+        metadata = pd.DataFrame({"confidence": [0.9], "prediction": [["A"]]})
         predictions = [
             [
                 MockScoredSequence([], np.log(0.8)),
@@ -228,7 +232,7 @@ class TestBeamFeatures:
 
     def test_compute_edit_distance_one_empty_sequence(self, beam_features):
         """One empty and one non-empty sequence uses max edit distance."""
-        metadata = pd.DataFrame({"confidence": [0.9]})
+        metadata = pd.DataFrame({"confidence": [0.9], "prediction": [["A"]]})
         predictions = [
             [
                 MockScoredSequence([], np.log(0.8)),
@@ -242,7 +246,9 @@ class TestBeamFeatures:
 
     def test_compute_with_insufficient_sequences_warning(self, beam_features):
         """Test that warning is issued for beam results with < 2 sequences."""
-        metadata = pd.DataFrame({"confidence": [0.9, 0.8]})
+        metadata = pd.DataFrame(
+            {"confidence": [0.9, 0.8], "prediction": [["A"], ["G"]]}
+        )
         predictions = [
             [MockScoredSequence(["A"], np.log(0.8))],  # Only 1 sequence
             [
@@ -262,7 +268,7 @@ class TestBeamFeatures:
 
     def test_margin_calculation(self, beam_features):
         """Test specific margin calculation."""
-        metadata = pd.DataFrame({"confidence": [0.9]})
+        metadata = pd.DataFrame({"confidence": [0.9], "prediction": [["A"]]})
         predictions = [
             [
                 MockScoredSequence(["A"], np.log(0.8)),  # top = 0.8
@@ -280,7 +286,7 @@ class TestBeamFeatures:
 
     def test_beam_features_with_one_sequence(self, beam_features):
         """Test beam feature calculations with single sequence."""
-        metadata = pd.DataFrame({"confidence": [0.9]})
+        metadata = pd.DataFrame({"confidence": [0.9], "prediction": [["A"]]})
         predictions = [
             [MockScoredSequence(["A"], np.log(0.8))]  # Single sequence
         ]
@@ -321,7 +327,7 @@ class TestBeamFeatures:
 
     def test_beam_features_with_two_sequences(self, beam_features):
         """Test beam feature calculations with two sequences."""
-        metadata = pd.DataFrame({"confidence": [0.9]})
+        metadata = pd.DataFrame({"confidence": [0.9], "prediction": [["A"]]})
         predictions = [
             [
                 MockScoredSequence(["A"], np.log(0.8)),  # top
@@ -365,7 +371,7 @@ class TestBeamFeatures:
 
     def test_beam_features_with_three_sequences(self, beam_features):
         """Test beam feature calculations with three sequences."""
-        metadata = pd.DataFrame({"confidence": [0.9]})
+        metadata = pd.DataFrame({"confidence": [0.9], "prediction": [["A"]]})
         predictions = [
             [
                 MockScoredSequence(["A"], np.log(0.7)),  # top
@@ -408,7 +414,7 @@ class TestBeamFeatures:
 
     def test_beam_features_edit_distance_ignores_li(self, beam_features):
         """Test that edit distance treats L and I as identical."""
-        metadata = pd.DataFrame({"confidence": [0.9]})
+        metadata = pd.DataFrame({"confidence": [0.9], "prediction": [["A"]]})
         predictions = [
             [
                 MockScoredSequence(["L", "A", "G"], np.log(0.8)),
@@ -422,7 +428,7 @@ class TestBeamFeatures:
 
     def test_beam_features_edit_distance_mixed(self, beam_features):
         """Test edit distance with L/I equivalence and real differences."""
-        metadata = pd.DataFrame({"confidence": [0.9]})
+        metadata = pd.DataFrame({"confidence": [0.9], "prediction": [["A"]]})
         predictions = [
             [
                 MockScoredSequence(["L", "A", "K"], np.log(0.8)),
@@ -437,7 +443,7 @@ class TestBeamFeatures:
 
     def test_beam_features_edge_case_equal_probabilities(self, beam_features):
         """Test beam features when all sequences have equal probabilities."""
-        metadata = pd.DataFrame({"confidence": [0.9]})
+        metadata = pd.DataFrame({"confidence": [0.9], "prediction": [["A"]]})
         predictions = [
             [
                 MockScoredSequence(["A"], np.log(1 / 3)),
@@ -465,3 +471,11 @@ class TestBeamFeatures:
         assert dataset.metadata.iloc[0]["z-score"] == pytest.approx(
             0.0, rel=1e-10, abs=1e-10
         )
+
+    def test_beam_features_raises_for_none_predictions(self, beam_features):
+        """BeamFeatures.compute should raise ValueError when predictions is None."""
+        metadata = pd.DataFrame({"confidence": [0.9], "prediction": [["A"]]})
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
+
+        with pytest.raises(ValueError, match="BeamFeatures requires beam predictions"):
+            beam_features.compute(dataset)

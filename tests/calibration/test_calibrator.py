@@ -69,7 +69,11 @@ class TestProbabilityCalibrator:
     def sample_dataset(self):
         """Create a sample CalibrationDataset for testing."""
         metadata = pd.DataFrame(
-            {"confidence": [0.9, 0.8, 0.7, 0.6, 0.5], "other_col": [1, 2, 3, 4, 5]}
+            {
+                "confidence": [0.9, 0.8, 0.7, 0.6, 0.5],
+                "prediction": [["A"], ["G"], ["S"], ["V"], ["P"]],
+                "other_col": [1, 2, 3, 4, 5],
+            }
         )
         return CalibrationDataset(metadata=metadata, predictions=[None] * 5)
 
@@ -84,6 +88,7 @@ class TestProbabilityCalibrator:
         metadata = pd.DataFrame(
             {
                 "confidence": np.random.uniform(0.1, 0.99, n_samples),
+                "prediction": [["A", "G"]] * n_samples,
                 "correct": np.random.choice([0, 1], n_samples),
                 "feature1": np.random.uniform(1.0, 10.0, n_samples),
                 "feature2": np.random.uniform(0.1, 1.0, n_samples),
@@ -285,6 +290,7 @@ class TestProbabilityCalibrator:
                         np.random.uniform(0.1, 0.99, n_unlabelled),
                     ]
                 ),
+                "prediction": [["A", "G"]] * (n_labelled + n_unlabelled),
                 "sequence": [["A", "G"]] * n_labelled + [None] * n_unlabelled,
                 "valid_sequence": [True] * n_labelled + [False] * n_unlabelled,
                 "correct": np.concatenate(
@@ -304,11 +310,22 @@ class TestProbabilityCalibrator:
 
         assert calibrator.scaler.n_samples_seen_ == n_labelled
 
+    def test_fit_rejects_raw_proforma_string_ground_truth(self, labelled_dataset):
+        """Raw ProForma strings are rejected at CalibrationDataset construction."""
+        metadata = labelled_dataset.metadata.copy()
+        metadata["sequence"] = ["AG"] * len(metadata)
+        with pytest.raises(ValueError, match="raw strings"):
+            CalibrationDataset(
+                metadata=metadata,
+                predictions=labelled_dataset.predictions,
+            )
+
     def test_fit_raises_when_no_valid_ground_truth_sequences(self, calibrator):
         metadata = pd.DataFrame(
             {
                 "confidence": [0.9, 0.8],
-                "sequence": [None, []],
+                "prediction": [["A"], ["G"]],
+                "sequence": [None, None],
                 "valid_sequence": [False, False],
                 "correct": [0, 0],
             }
@@ -316,6 +333,21 @@ class TestProbabilityCalibrator:
         dataset = CalibrationDataset(metadata=metadata, predictions=[None, None])
         calibrator.add_feature(MockCalibrationFeature("test_feature", ["test_col"]))
         with pytest.raises(ValueError, match="valid_sequence=True"):
+            calibrator.fit(dataset)
+
+    def test_fit_raises_when_correct_column_missing(self, calibrator):
+        """Missing finalised ``correct`` must raise before feature computation."""
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.9, 0.8],
+                "prediction": [["A", "G"], ["G", "A"]],
+                "sequence": [["A", "G"], ["G", "A"]],
+                "valid_sequence": [True, True],
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=[None, None])
+        calibrator.add_feature(MockCalibrationFeature("test_feature", ["test_col"]))
+        with pytest.raises(ValueError, match="'correct' column"):
             calibrator.fit(dataset)
 
     def test_predict_after_fit(self, calibrator, labelled_dataset, sample_dataset):
@@ -361,7 +393,7 @@ class TestProbabilityCalibrator:
 
     def test_empty_dataset_handling(self, calibrator):
         """Test handling of empty datasets."""
-        empty_metadata = pd.DataFrame({"confidence": []})  # Include confidence column
+        empty_metadata = pd.DataFrame({"confidence": [], "prediction": []})
         empty_dataset = CalibrationDataset(metadata=empty_metadata, predictions=[])
 
         feature = MockCalibrationFeature("test_feature")

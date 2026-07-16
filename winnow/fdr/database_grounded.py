@@ -1,67 +1,63 @@
-from typing import Tuple
-
 import numpy as np
-import pandas as pd
-from instanovo.utils.metrics import Metrics
-from instanovo.utils.residues import ResidueSet
 
-from winnow.datasets.data_loaders.utils import (
-    finalize_peptide_metadata,
-    require_labelled_rows,
-)
+from winnow.datasets.calibration_dataset import CalibrationDataset
+from winnow.datasets.data_loaders.utils import require_labelled_rows
 from winnow.fdr.base import FDRControl
 
 
-class DatabaseGroundedFDRControl(FDRControl):
+class DatabaseGroundedFDRControl(FDRControl[CalibrationDataset]):
     """Performs false discovery rate (FDR) control by grounding predictions against a reference database.
 
     This method estimates FDR thresholds by comparing model-predicted peptides to ground-truth peptides from a database.
+    It expects finalised labelled metadata from a DatasetLoader, including ``correct`` and ``valid_sequence``.
     """
 
     def __init__(
         self,
         confidence_feature: str,
-        residue_masses: dict[str, float],
-        isotope_error_range: Tuple[int, int] = (0, 1),
         drop: int = 10,
     ) -> None:
         super().__init__()
         self.confidence_feature = confidence_feature
-        self.residue_masses = residue_masses
-        self.isotope_error_range = isotope_error_range
         self.drop = drop
 
-        self.metrics = Metrics(
-            residue_set=ResidueSet(residue_masses=residue_masses),
-            isotope_error_range=isotope_error_range,
-        )
+    def fit(self, dataset: CalibrationDataset) -> None:
+        """Computes the precision-recall curve from finalised correctness labels.
 
-    def fit(  # type: ignore
-        self,
-        dataset: pd.DataFrame,
-    ) -> None:
-        """Computes the precision-recall curve by comparing model predictions to database-grounded peptide sequences.
-
-        Per-row correctness is derived from ``sequence`` vs ``prediction``. Rows with
-        ``valid_sequence=False`` receive ``correct=False`` but are excluded from the
-        FDR curve and from ``self.preds``.
+        Rows with ``valid_sequence=False`` are excluded from the FDR curve and from ``self.preds``.
+        Per-row correctness must already be present in ``correct``.
 
         Args:
-            dataset: DataFrame with ``sequence``, ``prediction``, and the confidence
-                column named by ``confidence_feature``.
+            dataset: Finalised calibration dataset with ``correct``, ``valid_sequence``,
+                and the confidence column named by ``confidence_feature``.
+
+        Raises:
+            ValueError: If required finalised label columns are missing.
         """
-        assert len(dataset) > 0, "Fit method requires non-empty data"
+        if len(dataset) == 0:
+            raise ValueError("Fit method requires non-empty data")
 
-        finalize_peptide_metadata(
-            dataset,
-            self.metrics,
-            has_labels=True,
-        )
+        metadata = dataset.metadata
+        missing = [
+            column
+            for column in ("correct", "valid_sequence", self.confidence_feature)
+            if column not in metadata.columns
+        ]
+        if missing:
+            raise ValueError(
+                "This operation requires finalised labelled metadata with "
+                f"{', '.join(repr(c) for c in missing)}. "
+                "Load labelled data through a DatasetLoader before fitting/running "
+                "diagnostics."
+            )
 
-        mask = require_labelled_rows(dataset, context="Database-grounded FDR fit")
-        labelled = dataset.loc[mask].sort_values(
+        mask = require_labelled_rows(metadata, context="Database-grounded FDR fit")
+        labelled = metadata.loc[mask].sort_values(
             by=self.confidence_feature, ascending=False
         )
+        # If no labelled rows are available, raise an error
+        if len(labelled) == 0:
+            raise ValueError("No labelled rows available for FDR fit")
         self.preds = labelled[["correct", self.confidence_feature]]
 
         precision = np.cumsum(labelled["correct"]) / np.arange(1, len(labelled) + 1)

@@ -94,7 +94,7 @@ The calibrator uses a feature-based approach where multiple feature extractors c
 
 1. **Create Calibrator**: Initialise `ProbabilityCalibrator`
 2. **Add Features**: Use `add_feature()` to include desired calibration features
-3. **Fit Model**: Call `fit()` with labelled `CalibrationDataset`
+3. **Fit Model**: Call `fit()` with a labelled `CalibrationDataset`
 4. **Save Model**: Use `save()` to persist trained calibrator
 
 ### Prediction workflow
@@ -110,7 +110,7 @@ The calibrator uses a feature-based approach where multiple feature extractors c
    # Option 3: Use local model
    calibrator = ProbabilityCalibrator.load("./my_calibrator")
    ```
-2. **Predict**: Call `predict()` with unlabelled `CalibrationDataset`
+2. **Predict**: Call `predict()` with an unlabelled `CalibrationDataset`
 3. **Access Results**: Calibrated scores stored in dataset's "calibrated_confidence" column
 
 For detailed examples and usage patterns, refer to the [examples notebook](https://github.com/instadeepai/winnow/blob/main/examples/getting_started_with_winnow.ipynb).

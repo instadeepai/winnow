@@ -115,6 +115,18 @@ class TestNormalizePeptideCell:
         )
         assert tokens == ["A", "I"]
 
+    def test_string_leucine_mapped_without_corrupting_mod_names(
+        self, metrics: Metrics
+    ) -> None:
+        """Uppercase L inside a modification name must not be rewritten before split."""
+        remapping = {"C[Labelled]": "C[UniMod:999]"}
+        tokens = utils.normalize_peptide_cell(
+            "AC[Labelled]L",
+            metrics,
+            residue_remapping=remapping,
+        )
+        assert tokens == ["A", "C[UniMod:999]", "I"]
+
     def test_modification_remapping_on_list_input(self, metrics: Metrics) -> None:
         tokens = utils.normalize_peptide_cell(
             ["M[Oxidation]", "A"],
@@ -153,26 +165,62 @@ class TestNormalizePeptideCell:
 
 
 class TestLabelledTrainingMask:
-    def test_imputes_valid_sequence_from_sequence(self):
-        metadata = pd.DataFrame({"sequence": [["A"], None, ["B"]]})
-        assert utils.labelled_training_mask(metadata).tolist() == [True, False, True]
-        assert metadata["valid_sequence"].tolist() == [True, False, True]
+    def test_requires_valid_sequence_when_sequence_present(self):
+        metadata = pd.DataFrame(
+            {
+                "sequence": [["A"], None, ["B"]],
+                "correct": [True, False, False],
+            }
+        )
+        with pytest.raises(ValueError, match="'valid_sequence' column"):
+            utils.labelled_training_mask(metadata)
+
+    def test_requires_correct_when_sequence_present(self):
+        metadata = pd.DataFrame(
+            {
+                "sequence": [["A"], None, ["B"]],
+                "valid_sequence": [True, False, True],
+            }
+        )
+        with pytest.raises(ValueError, match="'correct' column"):
+            utils.labelled_training_mask(metadata)
 
     def test_uses_existing_valid_sequence_column(self):
         metadata = pd.DataFrame(
-            {"valid_sequence": [True, False, True], "sequence": [["A"], None, ["B"]]}
+            {
+                "valid_sequence": [True, False, True],
+                "sequence": [["A"], None, ["B"]],
+                "correct": [True, False, False],
+            }
         )
         assert utils.labelled_training_mask(metadata).tolist() == [True, False, True]
+        assert "valid_sequence" in metadata.columns
+
+    def test_all_rows_eligible_without_sequence_column(self):
+        metadata = pd.DataFrame({"confidence": [0.9, 0.8]})
+        assert utils.labelled_training_mask(metadata).tolist() == [True, True]
 
     def test_require_labelled_rows_raises_when_empty(self):
         metadata = pd.DataFrame(
             {
                 "sequence": [None],
                 "valid_sequence": [False],
+                "correct": [False],
             }
         )
         with pytest.raises(ValueError, match="valid_sequence=True"):
             utils.require_labelled_rows(metadata, context="Test context")
+
+    def test_require_labelled_rows_returns_mask_when_eligible(self):
+        metadata = pd.DataFrame(
+            {
+                "sequence": [["A"], None],
+                "valid_sequence": [True, False],
+                "correct": [True, False],
+            }
+        )
+        mask = utils.require_labelled_rows(metadata, context="Test context")
+        assert mask.tolist() == [True, False]
 
 
 class TestRowEvaluation:
