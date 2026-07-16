@@ -11,7 +11,7 @@ import pandas as pd
 from instanovo.utils.metrics import Metrics
 
 from winnow.utils.peptide import (
-    _is_missing_cell,
+    is_missing_cell,
     as_token_list,
     is_usable_peptide_label,
     is_valid_peptide_tokens,
@@ -159,7 +159,7 @@ def normalize_peptide_cell(
     """
     if require_label and not is_usable_peptide_label(value):
         return None
-    if _is_missing_cell(value):
+    if is_missing_cell(value):
         return None
     if isinstance(value, str):
         if value.strip() == "":

@@ -81,7 +81,6 @@ def validate_label_config(
     if label_source == "sequence" and label_column is not None:
         raise ValueError(
             "diagnostics.label_column must not be set when label_source is 'sequence'. "
-            "Sequence-derived labels are written to the 'correct' column automatically."
         )
     if label_source == "precomputed" and not label_column:
         raise ValueError(

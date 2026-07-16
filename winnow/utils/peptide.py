@@ -7,7 +7,7 @@ import pandas as pd
 import polars as pl
 
 
-def _is_missing_cell(value: object) -> bool:
+def is_missing_cell(value: object) -> bool:
     """Return True when a peptide cell is absent (None, NaN, pd.NA)."""
     if value is None:
         return True
@@ -23,7 +23,7 @@ def _is_missing_cell(value: object) -> bool:
 
 def is_usable_peptide_label(value: object) -> bool:
     """Return True when a raw peptide cell contains a label or sequence string."""
-    if _is_missing_cell(value):
+    if is_missing_cell(value):
         return False
     if isinstance(value, str):
         return value.strip() != ""
@@ -46,7 +46,7 @@ def as_token_list(value: object) -> list[str] | None:
     peptide strings; use
     :func:`winnow.datasets.data_loaders.utils.normalize_peptide_cell` for that.
     """
-    if _is_missing_cell(value):
+    if is_missing_cell(value):
         return None
     if isinstance(value, pl.Series):
         tokens = value.to_list()

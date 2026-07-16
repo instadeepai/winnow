@@ -57,7 +57,7 @@ def print_config(cfg) -> None:
     formatter.print_config(cfg)
 
 
-def filter_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
+def _filter_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
     """Filter out rows whose predictions are empty or contain unsupported PSMs.
 
     Args:
@@ -78,7 +78,7 @@ def filter_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
     )
 
 
-def apply_fdr_control(
+def _apply_fdr_control(
     fdr_control: Union[NonParametricFDRControl, DatabaseGroundedFDRControl],
     dataset: CalibrationDataset,
     fdr_threshold: float,
@@ -114,7 +114,7 @@ def apply_fdr_control(
     )
 
 
-def separate_metadata_and_predictions(
+def _separate_metadata_and_predictions(
     dataset_metadata: pd.DataFrame,
     confidence_column: str,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -149,7 +149,7 @@ def separate_metadata_and_predictions(
     return dataset_metadata, dataset_preds_and_fdr_metrics
 
 
-def save_predict_outputs(
+def _save_predict_outputs(
     dataset: CalibrationDataset,
     output_folder: Union[Path, str],
     confidence_column: str,
@@ -165,18 +165,26 @@ def save_predict_outputs(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     formatted_metadata = dataset.format_metadata_for_export()
-    metadata, preds_and_fdr_metrics = separate_metadata_and_predictions(
+    metadata, preds_and_fdr_metrics = _separate_metadata_and_predictions(
         formatted_metadata, confidence_column
     )
     metadata.to_csv(output_dir / "metadata.csv", index=False)
     preds_and_fdr_metrics.to_csv(output_dir / "preds_and_fdr_metrics.csv", index=False)
 
 
-def check_if_labelled(dataset: CalibrationDataset) -> None:
-    """Check if the dataset contains a ground-truth column."""
-    if "sequence" not in dataset.metadata.columns:
+def _check_if_labelled(dataset: CalibrationDataset) -> None:
+    """Check that metadata has finalised labels for database-grounded FDR."""
+    missing = [
+        column
+        for column in ("correct", "valid_sequence")
+        if column not in dataset.metadata.columns
+    ]
+    if missing:
         raise ValueError(
-            "Database-grounded FDR control can only be performed on annotated data."
+            "This operation requires finalised labelled metadata with "
+            f"{', '.join(repr(c) for c in missing)}. "
+            "Load labelled data through a DatasetLoader before fitting/running "
+            "diagnostics."
         )
 
 
@@ -232,7 +240,7 @@ def train_entry_point(
     logger.info(f"Loaded: {len(annotated_dataset.metadata)} spectra")
 
     logger.info("Filtering dataset for empty predictions.")
-    annotated_dataset = filter_dataset(annotated_dataset)
+    annotated_dataset = _filter_dataset(annotated_dataset)
 
     logger.info(f"After filtering: {len(annotated_dataset.metadata)} spectra")
 
@@ -320,7 +328,7 @@ def compute_features_entry_point(
 
     if cfg.filter_empty_predictions:
         logger.info("Filtering dataset for empty predictions.")
-        dataset = filter_dataset(dataset)
+        dataset = _filter_dataset(dataset)
         logger.info(f"After filtering: {len(dataset.metadata)} spectra")
 
     logger.info("Instantiating calibrator from config.")
@@ -389,7 +397,7 @@ def predict_entry_point(
     logger.info(f"Loaded: {len(dataset.metadata)} spectra")
 
     logger.info("Filtering dataset for empty predictions.")
-    dataset = filter_dataset(dataset)
+    dataset = _filter_dataset(dataset)
 
     logger.info(f"After filtering: {len(dataset.metadata)} spectra")
 
@@ -420,11 +428,11 @@ def predict_entry_point(
 
     # Check if dataset is labelled for database-grounded FDR
     if isinstance(fdr_control, DatabaseGroundedFDRControl):
-        check_if_labelled(dataset)
+        _check_if_labelled(dataset)
 
     # Apply FDR control
     logger.info(f"Applying {fdr_control.__class__.__name__} FDR control.")
-    filtered_dataset = apply_fdr_control(
+    filtered_dataset = _apply_fdr_control(
         fdr_control,
         dataset,
         cfg.fdr_control.fdr_threshold,
@@ -434,7 +442,7 @@ def predict_entry_point(
     # Write output
     logger.info(f"Final dataset: {len(filtered_dataset)} spectra")
     logger.info(f"Writing output to {cfg.output_folder}")
-    save_predict_outputs(
+    _save_predict_outputs(
         filtered_dataset,
         cfg.output_folder,
         cfg.fdr_control.confidence_column,
@@ -493,7 +501,7 @@ def diagnose_calibration_entry_point(
     dataset = data_loader.load(**dataset_params)
     logger.info(f"Loaded: {len(dataset.metadata)} spectra")
 
-    dataset = filter_dataset(dataset)
+    dataset = _filter_dataset(dataset)
     logger.info(f"After filtering: {len(dataset.metadata)} spectra")
 
     logger.info("Loading trained calibrator.")

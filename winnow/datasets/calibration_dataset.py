@@ -18,7 +18,7 @@ import pandas as pd
 
 from winnow.compat.instanovo import ScoredSequence
 from winnow.utils.peptide import (
-    _is_missing_cell,
+    is_missing_cell,
     as_token_list,
     is_usable_peptide_label,
     is_valid_peptide_tokens,
@@ -38,7 +38,7 @@ def _normalise_and_validate_peptide_column(
 ) -> None:
     """Normalise empty containers to None and reject unsupported peptide cells."""
     for index, value in metadata[column].items():
-        if _is_missing_cell(value):
+        if is_missing_cell(value):
             continue
         if isinstance(value, str):
             raise ValueError(
@@ -84,7 +84,7 @@ class CalibrationDataset:
 
     Peptide columns must already be tokenised. ``__post_init__`` validates structure and
     derives ``valid_prediction`` / ``valid_sequence``; it does not parse ProForma strings
-    or compute ``correct`` / ``num_matches``.
+    or compute/validate ``correct`` / ``num_matches``.
 
     Attributes:
         metadata (pd.DataFrame): DataFrame containing metadata and predictions.
