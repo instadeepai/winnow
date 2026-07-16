@@ -7,6 +7,7 @@ needed, significantly reducing --help and config command times.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Union, Tuple, Optional, List, TYPE_CHECKING, Annotated
 import typer
 import logging
@@ -82,22 +83,93 @@ def apply_fdr_control(
     dataset: CalibrationDataset,
     fdr_threshold: float,
     confidence_column: str,
-) -> pd.DataFrame:
-    """Apply FDR control to a dataset."""
+) -> CalibrationDataset:
+    """Apply FDR control and return a filtered dataset without mutating the input.
+
+    Fits the FDR method, annotates a copy of the metadata with FDR columns, then
+    returns a new ``CalibrationDataset`` containing only PSMs at or above the
+    confidence cutoff for ``fdr_threshold``.
+    """
+    from winnow.datasets.calibration_dataset import CalibrationDataset
     from winnow.fdr.nonparametric import NonParametricFDRControl
 
     if isinstance(fdr_control, NonParametricFDRControl):
         fdr_control.fit(dataset=dataset.metadata[confidence_column])
-        dataset.metadata = fdr_control.add_psm_pep(dataset.metadata, confidence_column)
+        metadata = fdr_control.add_psm_pep(dataset.metadata, confidence_column)
     else:
         fdr_control.fit(dataset=dataset)
+        metadata = dataset.metadata
 
-    dataset.metadata = fdr_control.add_psm_fdr(dataset.metadata, confidence_column)
-    dataset.metadata = fdr_control.add_psm_q_value(dataset.metadata, confidence_column)
+    metadata = fdr_control.add_psm_fdr(metadata, confidence_column)
+    metadata = fdr_control.add_psm_q_value(metadata, confidence_column)
     confidence_cutoff = fdr_control.get_confidence_cutoff(threshold=fdr_threshold)
-    output_data = dataset.metadata
-    output_data = output_data[output_data[confidence_column] >= confidence_cutoff]
-    return output_data
+
+    annotated_dataset = CalibrationDataset(
+        metadata=metadata,
+        predictions=dataset.predictions,
+    )
+    # Only retain PSMs with confidence scores equal to or greater than the cutoff
+    return annotated_dataset.filter_entries(
+        metadata_predicate=lambda row: row[confidence_column] < confidence_cutoff
+    )
+
+
+def separate_metadata_and_predictions(
+    dataset_metadata: pd.DataFrame,
+    confidence_column: str,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Separate metadata from prediction and FDR metric columns.
+
+    Args:
+        dataset_metadata: Formatted metadata dataframe to split.
+        confidence_column: Name of the confidence column used for FDR control.
+
+    Returns:
+        Tuple of (metadata without prediction/FDR columns, predictions and FDR metrics).
+    """
+    preds_and_fdr_metrics_cols = [
+        "prediction",
+        confidence_column,
+        "psm_fdr",
+        "psm_q_value",
+    ]
+    if "psm_pep" in dataset_metadata.columns:
+        preds_and_fdr_metrics_cols.append("psm_pep")
+    if "sequence" in dataset_metadata.columns:
+        preds_and_fdr_metrics_cols.append("sequence")
+        if "num_matches" in dataset_metadata.columns:
+            preds_and_fdr_metrics_cols.append("num_matches")
+        if "correct" in dataset_metadata.columns:
+            preds_and_fdr_metrics_cols.append("correct")
+
+    dataset_preds_and_fdr_metrics = dataset_metadata[
+        ["spectrum_id"] + preds_and_fdr_metrics_cols
+    ]
+    dataset_metadata = dataset_metadata.drop(columns=preds_and_fdr_metrics_cols)
+    return dataset_metadata, dataset_preds_and_fdr_metrics
+
+
+def save_predict_outputs(
+    dataset: CalibrationDataset,
+    output_folder: Union[Path, str],
+    confidence_column: str,
+) -> None:
+    """Write predict outputs as separate metadata and prediction/FDR CSV files.
+
+    Args:
+        dataset: Filtered dataset after FDR control.
+        output_folder: Directory for ``metadata.csv`` and ``preds_and_fdr_metrics.csv``.
+        confidence_column: Confidence column to include in the predictions file.
+    """
+    output_dir = Path(output_folder)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    formatted_metadata = dataset.format_metadata_for_export()
+    metadata, preds_and_fdr_metrics = separate_metadata_and_predictions(
+        formatted_metadata, confidence_column
+    )
+    metadata.to_csv(output_dir / "metadata.csv", index=False)
+    preds_and_fdr_metrics.to_csv(output_dir / "preds_and_fdr_metrics.csv", index=False)
 
 
 def check_if_labelled(dataset: CalibrationDataset) -> None:
@@ -106,44 +178,6 @@ def check_if_labelled(dataset: CalibrationDataset) -> None:
         raise ValueError(
             "Database-grounded FDR control can only be performed on annotated data."
         )
-
-
-def separate_metadata_and_predictions(
-    dataset_metadata: pd.DataFrame,
-    fdr_control: Union[NonParametricFDRControl, DatabaseGroundedFDRControl],
-    confidence_column: str,
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Separate out metadata from prediction and FDR metrics.
-
-    Args:
-        dataset_metadata: The metadata dataframe to separate out prediction and FDR metrics from metadata and computed features.
-        fdr_control: The FDR control object used (to determine which columns were added).
-        confidence_column: The name of the confidence column.
-
-    Returns:
-        Tuple[pd.DataFrame, pd.DataFrame]: A tuple containing the metadata dataframe and the prediction and FDR metrics dataframe.
-    """
-    from winnow.fdr.nonparametric import NonParametricFDRControl
-
-    # Separate out metadata from prediction and FDR metrics
-    preds_and_fdr_metrics_cols = [
-        "prediction",
-        confidence_column,
-        "psm_fdr",
-        "psm_q_value",
-    ]
-    # NonParametricFDRControl adds psm_pep column
-    if isinstance(fdr_control, NonParametricFDRControl):
-        preds_and_fdr_metrics_cols.append("psm_pep")
-    if "sequence" in dataset_metadata.columns:
-        preds_and_fdr_metrics_cols.append("sequence")
-        preds_and_fdr_metrics_cols.append("num_matches")
-        preds_and_fdr_metrics_cols.append("correct")
-    dataset_preds_and_fdr_metrics = dataset_metadata[
-        ["spectrum_id"] + preds_and_fdr_metrics_cols
-    ]
-    dataset_metadata = dataset_metadata.drop(columns=preds_and_fdr_metrics_cols)
-    return dataset_metadata, dataset_preds_and_fdr_metrics
 
 
 def train_entry_point(
@@ -335,7 +369,6 @@ def predict_entry_point(
         return
 
     from winnow.calibration.calibrator import ProbabilityCalibrator
-    from winnow.datasets.calibration_dataset import CalibrationDataset
     from winnow.fdr.database_grounded import DatabaseGroundedFDRControl
 
     logger.info("Starting prediction pipeline.")
@@ -391,7 +424,7 @@ def predict_entry_point(
 
     # Apply FDR control
     logger.info(f"Applying {fdr_control.__class__.__name__} FDR control.")
-    dataset_metadata = apply_fdr_control(
+    filtered_dataset = apply_fdr_control(
         fdr_control,
         dataset,
         cfg.fdr_control.fdr_threshold,
@@ -399,17 +432,12 @@ def predict_entry_point(
     )
 
     # Write output
-    logger.info(f"Final dataset: {len(dataset_metadata)} spectra")
+    logger.info(f"Final dataset: {len(filtered_dataset)} spectra")
     logger.info(f"Writing output to {cfg.output_folder}")
-    dataset_metadata, dataset_preds_and_fdr_metrics = separate_metadata_and_predictions(
-        dataset_metadata, fdr_control, cfg.fdr_control.confidence_column
-    )
-
-    CalibrationDataset(metadata=dataset_metadata).save_metadata(
-        cfg.output_folder + "/" + "metadata.csv"
-    )
-    CalibrationDataset(metadata=dataset_preds_and_fdr_metrics).save_metadata(
-        cfg.output_folder + "/" + "preds_and_fdr_metrics.csv"
+    save_predict_outputs(
+        filtered_dataset,
+        cfg.output_folder,
+        cfg.fdr_control.confidence_column,
     )
 
     logger.info("Prediction pipeline completed successfully.")

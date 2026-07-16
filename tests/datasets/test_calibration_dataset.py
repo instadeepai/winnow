@@ -328,6 +328,59 @@ class TestCalibrationDataset:
         assert "valid_sequence" not in saved_df.columns
         assert "valid_prediction" not in saved_df.columns
 
+    def test_format_metadata_for_export(self):
+        """Test export formatting converts peptides and drops internal columns."""
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.9, 0.8, 0.7],
+                "prediction": [
+                    ["[UNIMOD:1]", "P", "E", "P", "T", "I", "D", "E"],
+                    ["M[UNIMOD:35]", "P", "E", "P", "T", "I", "D", "E"],
+                    ["P", "E", "P", "T", "I", "D", "E", "[UNIMOD:2]"],
+                ],
+                "sequence": [
+                    ["P", "E", "P", "T", "I", "D", "E"],
+                    ["M[UNIMOD:35]", "P", "E", "P", "T", "I", "D", "E"],
+                    ["P", "E", "P", "T", "I", "D", "E", "[UNIMOD:2]"],
+                ],
+                "prediction_untokenised": [
+                    "[UNIMOD:1]-PEPTIDE",
+                    "M[UNIMOD:35]PEPTIDE",
+                    "PEPTIDE-[UNIMOD:2]",
+                ],
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
+
+        formatted = dataset.format_metadata_for_export()
+
+        assert "valid_sequence" not in formatted.columns
+        assert "valid_prediction" not in formatted.columns
+        assert "prediction_untokenised" not in formatted.columns
+        assert formatted["prediction"].tolist() == [
+            "[UNIMOD:1]-PEPTIDE",
+            "M[UNIMOD:35]PEPTIDE",
+            "PEPTIDE-[UNIMOD:2]",
+        ]
+        assert formatted["sequence"].tolist() == [
+            "PEPTIDE",
+            "M[UNIMOD:35]PEPTIDE",
+            "PEPTIDE-[UNIMOD:2]",
+        ]
+        # Original dataset remains tokenised / unmutated
+        assert dataset.metadata["prediction"].iloc[0] == [
+            "[UNIMOD:1]",
+            "P",
+            "E",
+            "P",
+            "T",
+            "I",
+            "D",
+            "E",
+        ]
+        assert "valid_prediction" in dataset.metadata.columns
+        assert "prediction_untokenised" in dataset.metadata.columns
+
     def test_length_consistency(self, calibration_dataset):
         """Test that length is consistent between metadata and predictions."""
         # This should not raise an assertion error

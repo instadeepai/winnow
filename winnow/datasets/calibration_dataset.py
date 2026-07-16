@@ -228,22 +228,7 @@ class CalibrationDataset:
             path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        output_metadata = self.metadata.copy(deep=True)
-
-        if "sequence" in output_metadata.columns:
-            output_metadata["sequence"] = output_metadata["sequence"].apply(
-                tokens_to_proforma
-            )
-        if "prediction" in output_metadata.columns:
-            output_metadata["prediction"] = output_metadata["prediction"].apply(
-                tokens_to_proforma
-            )
-        if "prediction_untokenised" in output_metadata.columns:
-            output_metadata = output_metadata.drop(columns=["prediction_untokenised"])
-        if "valid_sequence" in output_metadata.columns:
-            output_metadata = output_metadata.drop(columns=["valid_sequence"])
-        if "valid_prediction" in output_metadata.columns:
-            output_metadata = output_metadata.drop(columns=["valid_prediction"])
+        output_metadata = self.format_metadata_for_export()
 
         if path.suffix == ".csv":
             output_metadata.to_csv(path, index=False)
@@ -286,6 +271,33 @@ class CalibrationDataset:
             path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         self.metadata.to_parquet(path)
+
+    def format_metadata_for_export(self) -> pd.DataFrame:
+        """Return a copy of metadata formatted for CSV or parquet export.
+
+        Converts ``sequence`` and ``prediction`` token lists to ProForma strings and
+        drops internal columns (``prediction_untokenised``, ``valid_sequence``,
+        ``valid_prediction``). Does not modify the dataset in place.
+
+        Returns:
+            pd.DataFrame: Export-ready metadata copy.
+        """
+        output_metadata = self.metadata.copy(deep=True)
+        if "sequence" in output_metadata.columns:
+            output_metadata["sequence"] = output_metadata["sequence"].apply(
+                tokens_to_proforma
+            )
+        if "prediction" in output_metadata.columns:
+            output_metadata["prediction"] = output_metadata["prediction"].apply(
+                tokens_to_proforma
+            )
+        if "prediction_untokenised" in output_metadata.columns:
+            output_metadata = output_metadata.drop(columns=["prediction_untokenised"])
+        if "valid_sequence" in output_metadata.columns:
+            output_metadata = output_metadata.drop(columns=["valid_sequence"])
+        if "valid_prediction" in output_metadata.columns:
+            output_metadata = output_metadata.drop(columns=["valid_prediction"])
+        return output_metadata
 
     def _create_predicate_error_message(
         self, error: Exception, beam: Optional[List[ScoredSequence]], idx: int
