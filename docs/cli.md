@@ -189,6 +189,29 @@ winnow diagnose-calibration diagnostics.label_source=sequence diagnostics.tolera
 
 Set `diagnostics.fail_on_warning=true` to exit with code 1 when $|\widehat{\mathrm{sTECE}}| >$ `diagnostics.tolerance` at the operating cutoff (useful in CI).
 
+### `winnow annotate-proteome-hits`
+
+Post-process one or more `winnow predict` output folders: drop peptides shorter than a residue threshold and add a boolean `proteome_hit` column by matching each prediction (modifications stripped, isoleucine normalised to leucine) as a substring of a reference proteome. The predictions and metadata CSVs are rewritten in place, and rows dropped as too short are also removed from `metadata.csv`.
+
+This produces the `proteome_hit` column consumed by `diagnose-calibration diagnostics.label_source=precomputed diagnostics.label_column=proteome_hit`.
+
+```bash
+# Annotate a single predict output folder
+winnow annotate-proteome-hits results/my_run --fasta proteome.fasta
+
+# Multiple folders, custom minimum residue length and residues config
+winnow annotate-proteome-hits results/run_a results/run_b \
+  --fasta proteome.fasta \
+  --min-residue-length 9 \
+  --residues-config configs/residues.yaml
+```
+
+Options:
+
+- `--fasta`, `-f` (required): FASTA file used as the proteome for substring matching.
+- `--min-residue-length`, `-m` (default `7`): drop PSMs with fewer than this many tokeniser residues.
+- `--residues-config` (default: packaged `residues.yaml`): residue definitions used to tokenise predictions.
+
 ## Configuration system
 
 Winnow uses [Hydra](https://hydra.cc/) for configuration management. All parameters can be configured via:
