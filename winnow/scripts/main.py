@@ -7,6 +7,7 @@ needed, significantly reducing --help and config command times.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Union, Tuple, Optional, List, TYPE_CHECKING, Annotated
 import typer
 import logging
@@ -696,6 +697,124 @@ def diagnose_calibration(
     """Run tail calibration diagnostics on a labelled holdout."""
     overrides = ctx.args if ctx.args else None
     diagnose_calibration_entry_point(overrides, config_dir=config_dir)
+
+
+def _resolve_path(path: Path) -> Path:
+    """Resolve *path* (absolute or relative to the current working directory)."""
+    expanded = path.expanduser()
+    if expanded.is_absolute():
+        return expanded
+    return (Path.cwd() / expanded).resolve()
+
+
+def annotate_proteome_hits_entry_point(
+    output_folders: List[Path],
+    fasta: Path,
+    residues_config: Optional[Path] = None,
+    min_residue_length: int = 7,
+) -> None:
+    """Filter short peptides and annotate proteome hits across predict folders.
+
+    Args:
+        output_folders: Winnow predict output folders to annotate in place.
+        fasta: FASTA file used for proteome substring matching.
+        residues_config: Optional ``residues.yaml`` used to tokenise predictions;
+            defaults to the packaged config.
+        min_residue_length: Drop PSMs with fewer than this many tokeniser residues.
+    """
+    from winnow.scripts.annotate_proteome_hits import (
+        annotate_prediction_folder,
+        residue_set_from_residues_yaml,
+    )
+    from winnow.utils.config_path import get_config_dir
+
+    fasta_path = _resolve_path(fasta)
+    residues_path = (
+        _resolve_path(residues_config)
+        if residues_config is not None
+        else get_config_dir() / "residues.yaml"
+    )
+    residue_set = residue_set_from_residues_yaml(residues_path)
+
+    for raw_folder in output_folders:
+        out_dir = _resolve_path(raw_folder)
+        logger.info(
+            "folder=%s fasta=%s min_residues=%s",
+            out_dir,
+            fasta_path,
+            min_residue_length,
+        )
+        try:
+            num_input, num_removed_short, num_kept = annotate_prediction_folder(
+                out_dir,
+                fasta_path,
+                residue_set,
+                min_residue_length=min_residue_length,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            raise typer.BadParameter(str(exc)) from exc
+        logger.info(
+            "done folder=%s rows_in=%d removed_short=%d kept=%d",
+            out_dir,
+            num_input,
+            num_removed_short,
+            num_kept,
+        )
+
+
+@app.command(
+    name="annotate-proteome-hits",
+    help=(
+        "Filter short peptides and add a [dim]proteome_hit[/dim] column to "
+        "[dim]winnow predict[/dim] output folders via FASTA substring matching.\n\n"
+        "The resulting [dim]proteome_hit[/dim] column can be consumed by "
+        "[dim]diagnose-calibration[/dim] with "
+        "[dim]diagnostics.label_source=precomputed diagnostics.label_column=proteome_hit[/dim].\n\n"
+        "[bold cyan]Quick start:[/bold cyan]\n"
+        "  [dim]winnow annotate-proteome-hits OUTPUT_FOLDER --fasta proteome.fasta[/dim]"
+    ),
+)
+def annotate_proteome_hits(
+    output_folders: Annotated[
+        List[Path],
+        typer.Argument(
+            help=(
+                "One or more Winnow predict output folders, each containing "
+                "preds_and_fdr_metrics.csv and metadata.csv."
+            ),
+        ),
+    ],
+    fasta: Annotated[
+        Path,
+        typer.Option(
+            "--fasta",
+            "-f",
+            help="FASTA file for proteome substring matching.",
+        ),
+    ],
+    residues_config: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--residues-config",
+            help="residues.yaml used to tokenise predictions (defaults to the packaged config).",
+        ),
+    ] = None,
+    min_residue_length: Annotated[
+        int,
+        typer.Option(
+            "--min-residue-length",
+            "-m",
+            help="Drop PSMs with fewer than this many tokeniser residues.",
+        ),
+    ] = 7,
+) -> None:
+    """Annotate Winnow predictions with proteome substring hits."""
+    annotate_proteome_hits_entry_point(
+        output_folders,
+        fasta,
+        residues_config=residues_config,
+        min_residue_length=min_residue_length,
+    )
 
 
 @config_app.command(
