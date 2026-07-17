@@ -17,7 +17,7 @@ class DatabaseGroundedFDRControl(FDRControl):
         self,
         confidence_feature: str,
         residue_masses: dict[str, float],
-        isotope_error_range: Tuple[int, int] = (0, 1),
+        isotope_error_range: tuple[int, int] = (0, 1),
         drop: int = 10,
     ) -> None:
         super().__init__()
