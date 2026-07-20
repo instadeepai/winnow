@@ -164,6 +164,44 @@ class TestNormalizePeptideCell:
         assert tokens == ["P", "E"]
 
 
+class TestCoerceBoolLabels:
+    def test_bool_series_passes(self):
+        series = pd.Series([True, False, True])
+        result = utils.coerce_bool_labels(series, "correct")
+        assert result.dtype == bool
+        assert result.tolist() == [True, False, True]
+
+    def test_numeric_zero_one_passes(self):
+        series = pd.Series([1, 0, 1.0])
+        result = utils.coerce_bool_labels(series, "proteome_hit")
+        assert result.tolist() == [True, False, True]
+
+    def test_object_bool_cells_pass(self):
+        series = pd.Series([True, False], dtype=object)
+        result = utils.coerce_bool_labels(series, "proteome_hit")
+        assert result.tolist() == [True, False]
+
+    def test_nullable_boolean_with_na_raises(self):
+        series = pd.Series([True, pd.NA, False], dtype="boolean")
+        with pytest.raises(ValueError, match="contains missing values"):
+            utils.coerce_bool_labels(series, "proteome_hit")
+
+    def test_none_in_object_series_raises(self):
+        series = pd.Series([True, None, False])
+        with pytest.raises(ValueError, match="contains missing values"):
+            utils.coerce_bool_labels(series, "proteome_hit")
+
+    def test_string_labels_raise(self):
+        series = pd.Series(["true", "false"])
+        with pytest.raises(ValueError, match="must be a boolean or numeric series"):
+            utils.coerce_bool_labels(series, "proteome_hit")
+
+    def test_empty_series_passes(self):
+        series = pd.Series([], dtype=bool)
+        result = utils.coerce_bool_labels(series, "correct")
+        assert result.tolist() == []
+
+
 class TestLabelledTrainingMask:
     def test_requires_valid_sequence_when_sequence_present(self):
         metadata = pd.DataFrame(

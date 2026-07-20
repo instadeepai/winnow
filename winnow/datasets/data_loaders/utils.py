@@ -9,6 +9,7 @@ import numpy as np
 import polars as pl
 import pandas as pd
 from instanovo.utils.metrics import Metrics
+from pandas.api.types import is_bool_dtype, is_numeric_dtype
 
 from winnow.utils.peptide import (
     is_missing_cell,
@@ -16,6 +17,9 @@ from winnow.utils.peptide import (
     is_usable_peptide_label,
     is_valid_peptide_tokens,
 )
+
+# Reserved metadata column for sequence-derived correctness
+SEQUENCE_DERIVED_CORRECT_COLUMN = "correct"
 
 if TYPE_CHECKING:
     from matchms import Spectrum
@@ -416,6 +420,39 @@ def finalize_peptide_metadata(
     )
 
 
+def coerce_bool_labels(series: pd.Series, column: str) -> pd.Series:
+    """Coerce a label series to bool, rejecting missing and non-bool/numeric values.
+
+    Args:
+        series: Label values to coerce.
+        column: Column name used in error messages.
+
+    Returns:
+        Boolean series with the same index as ``series``.
+
+    Raises:
+        ValueError: If any values are missing, or values are not boolean/numeric.
+    """
+    if series.isna().any():
+        raise ValueError(
+            f"Label column {column!r} contains missing values; "
+            "all selected rows must have a label."
+        )
+    if is_bool_dtype(series.dtype) or is_numeric_dtype(series.dtype):
+        return series.astype(bool)
+    # Object dtype with only bool cells is accepted; strings and other types are
+    # rejected so they are not silently truthy-coerced.
+    if (
+        series.dtype == object
+        and series.map(lambda value: isinstance(value, (bool, np.bool_))).all()
+    ):
+        return series.astype(bool)
+    raise ValueError(
+        f"Label column {column!r} must be a boolean or numeric series, "
+        f"got {series.dtype}."
+    )
+
+
 def labelled_training_mask(metadata: pd.DataFrame) -> np.ndarray:
     """Return a boolean mask of rows eligible for supervised training or FDR fit.
 
@@ -431,11 +468,12 @@ def labelled_training_mask(metadata: pd.DataFrame) -> np.ndarray:
                 "'valid_sequence' column. Load data through a DatasetLoader or "
                 "construct a CalibrationDataset instead of passing raw metadata."
             )
-        if "correct" not in metadata.columns:
+        if SEQUENCE_DERIVED_CORRECT_COLUMN not in metadata.columns:
             raise ValueError(
                 "Metadata with a 'sequence' column requires a finalised "
-                "'correct' column. Load data through a DatasetLoader or "
-                "construct a CalibrationDataset instead of passing raw metadata."
+                f"{SEQUENCE_DERIVED_CORRECT_COLUMN!r} column. Load data through "
+                "a DatasetLoader or construct a CalibrationDataset instead of "
+                "passing raw metadata."
             )
         return metadata["valid_sequence"].fillna(False).to_numpy(dtype=bool)
     return np.ones(len(metadata), dtype=bool)

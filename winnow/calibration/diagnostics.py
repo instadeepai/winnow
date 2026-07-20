@@ -9,15 +9,17 @@ from typing import Literal, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
-from pandas.api.types import is_bool_dtype, is_numeric_dtype
 from numpy.typing import NDArray
 from sklearn.isotonic import IsotonicRegression
 
 from winnow.datasets.calibration_dataset import CalibrationDataset
-from winnow.datasets.data_loaders.utils import require_labelled_rows
+from winnow.datasets.data_loaders.utils import (
+    SEQUENCE_DERIVED_CORRECT_COLUMN,
+    coerce_bool_labels,
+    require_labelled_rows,
+)
 
 LabelSource = Literal["sequence", "precomputed"]
-SEQUENCE_LABEL_COLUMN = "correct"
 
 
 @dataclass(frozen=True)
@@ -88,20 +90,6 @@ def validate_label_config(
         )
 
 
-def _coerce_bool_labels(series: pd.Series, column: str) -> pd.Series:
-    if series.isna().any():
-        raise ValueError(
-            f"Label column {column!r} contains missing values; "
-            "all PSMs must have a label for calibration diagnostics."
-        )
-    # Allow only boolean or numeric labels
-    if not (is_bool_dtype(series.dtype) or is_numeric_dtype(series.dtype)):
-        raise ValueError(
-            f"Label column {column!r} must be a boolean or numeric series, got {series.dtype}."
-        )
-    return series.astype(bool)
-
-
 def resolve_diagnostics_labels(
     dataset: CalibrationDataset,
     label_source: LabelSource,
@@ -121,12 +109,12 @@ def resolve_diagnostics_labels(
                 f"Precomputed label column {label_column!r} not found in dataset metadata. "
                 f"Available columns: {list(metadata.columns)}"
             )
-        labels = _coerce_bool_labels(metadata[label_column], label_column)
+        labels = coerce_bool_labels(metadata[label_column], label_column)
         return labels, label_column
 
     missing = [
         column
-        for column in ("correct", "valid_sequence")
+        for column in (SEQUENCE_DERIVED_CORRECT_COLUMN, "valid_sequence")
         if column not in metadata.columns
     ]
     if missing:
@@ -137,11 +125,11 @@ def resolve_diagnostics_labels(
             "diagnostics."
         )
     mask = require_labelled_rows(metadata, context="Sequence-derived diagnostics")
-    # If no labelled rows are available, raise an error
-    if len(mask) == 0:
-        raise ValueError("No labelled rows available for sequence-derived diagnostics")
-    labels = metadata.loc[mask, "correct"].astype(bool)
-    return labels, SEQUENCE_LABEL_COLUMN
+    labels = coerce_bool_labels(
+        metadata.loc[mask, SEQUENCE_DERIVED_CORRECT_COLUMN],
+        SEQUENCE_DERIVED_CORRECT_COLUMN,
+    )
+    return labels, SEQUENCE_DERIVED_CORRECT_COLUMN
 
 
 def filter_tail(

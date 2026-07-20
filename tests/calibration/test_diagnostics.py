@@ -7,7 +7,6 @@ import pandas as pd
 import pytest
 
 from winnow.calibration.diagnostics import (
-    SEQUENCE_LABEL_COLUMN,
     DiagnosticArrays,
     TailSlice,
     empirical_stece,
@@ -20,6 +19,7 @@ from winnow.calibration.diagnostics import (
     validate_label_config,
 )
 from winnow.datasets.calibration_dataset import CalibrationDataset
+from winnow.datasets.data_loaders.utils import SEQUENCE_DERIVED_CORRECT_COLUMN
 
 
 def _token_prediction_frame(**columns: object) -> pd.DataFrame:
@@ -81,7 +81,7 @@ class TestResolveDiagnosticsLabels:
             "sequence",
             None,
         )
-        assert column == SEQUENCE_LABEL_COLUMN
+        assert column == SEQUENCE_DERIVED_CORRECT_COLUMN
         assert labels.tolist() == [True, False]
 
     def test_sequence_rejects_raw_proforma_strings(self) -> None:
@@ -118,9 +118,23 @@ class TestResolveDiagnosticsLabels:
             "sequence",
             None,
         )
-        assert column == SEQUENCE_LABEL_COLUMN
+        assert column == SEQUENCE_DERIVED_CORRECT_COLUMN
         assert labels.tolist() == [True]
         assert labels.index.tolist() == [0]
+
+    def test_sequence_rejects_null_correct_on_eligible_rows(self) -> None:
+        meta = _token_prediction_frame(
+            sequence=[["A"], ["A"]],
+            prediction=[["A"], ["G"]],
+            correct=[True, None],
+            valid_sequence=[True, True],
+        )
+        with pytest.raises(ValueError, match="contains missing values"):
+            resolve_diagnostics_labels(
+                CalibrationDataset(metadata=meta),
+                "sequence",
+                None,
+            )
 
     def test_precomputed_missing_column_raises(self) -> None:
         with pytest.raises(ValueError, match="not found"):
