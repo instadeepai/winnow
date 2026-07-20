@@ -16,6 +16,7 @@ from winnow.calibration.calibration_features import (
 )
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.datasets.data_loaders.utils import (
+    SEQUENCE_DERIVED_CORRECT_COLUMN,
     labelled_training_mask,
     require_labelled_rows,
 )
@@ -277,7 +278,7 @@ class ProbabilityCalibrator:
         features = dataset.metadata[feature_columns]
 
         if labelled:
-            labels = dataset.metadata["correct"]
+            labels = dataset.metadata[SEQUENCE_DERIVED_CORRECT_COLUMN]
             return features.values, labels.values
         else:
             return features.values
