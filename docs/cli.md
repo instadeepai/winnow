@@ -191,7 +191,7 @@ winnow diagnose-calibration diagnostics.label_source=sequence diagnostics.tolera
 **Outputs** (under `diagnostics.output_dir`, default `results/calibration_diagnostic`):
 
 - `diagnostic_report.json` — `conf_cutoff`, `n_tail`, sTECE, TECE, tolerance check, interpretation
-- `reliability_diagram.png` — empirical calibration curve on the operating tail ($S \ge \text{conf\_cutoff}$) vs the identity line
+- `reliability_diagram.png` — empirical calibration curve on the operating tail (scores $S$ at or above `conf_cutoff`) vs the identity line
 
 Set `diagnostics.fail_on_warning=true` to exit with code 1 when $|\widehat{\mathrm{sTECE}}| >$ `diagnostics.tolerance` at the operating cutoff (useful in CI).
 
