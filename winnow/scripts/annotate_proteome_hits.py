@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 _PROTEOME_JOIN_SEP = "\x1f"
 _MOD_ROUND = re.compile(r"\([^)]*\)-?")
 _MOD_SQUARE = re.compile(r"\[[^\]]*\]-?")
+_MOD_NUMERIC = re.compile(r"[+-]?\d+(?:\.\d+)?-?")
 
 
 def normalize_sequence(sequence: str) -> str:
@@ -48,11 +49,19 @@ def load_proteome_haystack(fasta_file: Path | str) -> str:
 
 
 def processed_peptide_for_match(prediction: str) -> str:
-    """Strip mods and normalise I/L for proteome substring matching."""
+    """Strip mods and normalise I/L for proteome substring matching.
+
+    Modifications of the following forms are stripped:
+    - Round brackets (e.g. "(+43.006)")
+    - Square brackets (e.g. "[+43.006]")
+    - Trailing dashes (e.g. "[+43.006]-")
+    - Unbracketed mass deltas (e.g. "+15.99", "-15.99", "15.99")
+    """
     if not prediction or not isinstance(prediction, str):
         return ""
     sequence = _MOD_ROUND.sub("", prediction)
     sequence = _MOD_SQUARE.sub("", sequence)
+    sequence = _MOD_NUMERIC.sub("", sequence)
     sequence = normalize_sequence(sequence)
     return sequence
 

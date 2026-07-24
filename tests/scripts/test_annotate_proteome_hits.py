@@ -32,6 +32,10 @@ def test_processed_peptide_for_match_strips_mods() -> None:
         ("PEPTAGDE[Carboxyl]", "PEPTAGDE"),
         ("[Acetyl]-PEPTAGDE", "PEPTAGDE"),
         ("(N-term)PEPTAGDE", "PEPTAGDE"),
+        ("PEP+15.99TIDE", "PEPTLDE"),
+        ("PEP-15.99TIDE", "PEPTLDE"),
+        ("PEP15.99TIDE", "PEPTLDE"),
+        ("+42.01-PEPTAGDE", "PEPTAGDE"),
     ]
     for raw, expected in cases:
         out = processed_peptide_for_match(raw)
