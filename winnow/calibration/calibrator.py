@@ -15,6 +15,11 @@ from winnow.calibration.calibration_features import (
     FeatureDependency,
 )
 from winnow.datasets.calibration_dataset import CalibrationDataset
+from winnow.datasets.data_loaders.utils import (
+    SEQUENCE_DERIVED_CORRECT_COLUMN,
+    labelled_training_mask,
+    require_labelled_rows,
+)
 
 
 class ProbabilityCalibrator:
@@ -215,10 +220,26 @@ class ProbabilityCalibrator:
 
         This method computes the features from the dataset, prepares the labels, and trains an MLP classifier for recalibrating probabilities.
 
+        Only rows with a valid ground-truth sequence (``valid_sequence=True``)
+        contribute to scaler and classifier fitting. The dataset must already
+        contain finalised metadata from a DatasetLoader (tokenised peptides and,
+        for labelled data, ``valid_sequence`` / ``correct``); this method does not
+        tokenise sequences itself. All rows still receive feature computation and
+        retain their ``correct`` labels.
+
         Args:
             dataset (CalibrationDataset): The dataset used for training the classifier.
         """
+        # Validate labelled columns / eligibility before feature computation.
+        # Recompute the mask afterwards in case feature computation drops rows.
+        require_labelled_rows(dataset.metadata, context="Calibrator fit")
         features, labels = self.compute_features(dataset=dataset, labelled=True)
+        mask = labelled_training_mask(dataset.metadata)
+        features = features[mask]
+        labels = labels[mask]
+        # If no labelled rows are available, raise an error
+        if len(features) == 0:
+            raise ValueError("No labelled rows available for training")
         # Fit and transform features with scaler
         features_scaled = self.scaler.fit_transform(features)
         self.classifier.fit(features_scaled, labels)
@@ -257,7 +278,7 @@ class ProbabilityCalibrator:
         features = dataset.metadata[feature_columns]
 
         if labelled:
-            labels = dataset.metadata["correct"]
+            labels = dataset.metadata[SEQUENCE_DERIVED_CORRECT_COLUMN]
             return features.values, labels.values
         else:
             return features.values

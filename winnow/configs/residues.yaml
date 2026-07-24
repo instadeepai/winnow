@@ -24,21 +24,51 @@ residue_masses:
   "R": 156.101111
   "Y": 163.063329
   "W": 186.079313
+  "U": 150.953633
+  "O": 237.147727
   # Modifications
-  "M[UNIMOD:35]": 147.035400 # Oxidation
+  "K[UNIMOD:1]": 170.105528 # Acetylation
+  "K[UNIMOD:3]": 354.172561 # Biotinylation
   "C[UNIMOD:4]": 160.030649 # Carboxyamidomethylation
-  "N[UNIMOD:7]": 115.026943 # Deamidation
   "Q[UNIMOD:7]": 129.042594 # Deamidation
   "R[UNIMOD:7]": 157.085127 # Arginine citrullination
+  "N[UNIMOD:7]": 115.026943 # Deamidation
+  "S[UNIMOD:21]": 166.998028 # Phosphorylation
+  "T[UNIMOD:21]": 181.01367 # Phosphorylation
+  "Y[UNIMOD:21]": 243.029329 # Phosphorylation
+  "E[UNIMOD:27]": 111.032028 # Pyroglutamation
+  "Q[UNIMOD:28]": 111.032029 # Pyroglutamation
+  "K[UNIMOD:34]": 142.110613 # Methylation
+  "R[UNIMOD:34]": 170.116761 # Methylation
+  "M[UNIMOD:35]": 147.035400 # Oxidation
   "P[UNIMOD:35]": 113.047679 # Proline hydroxylation
-  "S[UNIMOD:21]": 166.998028 # Phosphorylation + 79.966
-  "T[UNIMOD:21]": 181.01367 # Phosphorylation + 79.966
-  "Y[UNIMOD:21]": 243.029329 # Phosphorylation + 79.966
-  "C[UNIMOD:312]": 222.013284  # Cysteinylation
-  "E[UNIMOD:27]": 111.032028  # Glu -> pyro-Glu
-  "Q[UNIMOD:28]": 111.032029  # Gln -> pyro-Gln
+  "K[UNIMOD:36]": 156.126263 # di-Methylation
+  "R[UNIMOD:36]": 184.132411 # di-Methylation
+  "K[UNIMOD:37]": 170.141913 # tri-Methylation
+  "K[UNIMOD:58]": 184.121178 # Propionylation (light)
+  "K[UNIMOD:64]": 228.111007 # Succinic anhydride (light)
+  "K[UNIMOD:121]": 242.137890 # GlyGly (ubiquitinylation remnant)
+  "K[UNIMOD:122]": 156.089878 # Formylation
+  "R[UNIMOD:188]": 162.121240 # 13C(6) SILAC label
+  "K[UNIMOD:214]": 272.197026 # iTRAQ
+  "K[UNIMOD:259]": 136.109162 # 13C(6) 15N(2) SILAC label
+  "R[UNIMOD:267]": 166.109380 # 13C(6) 15N(4) SILAC label
+  "Y[UNIMOD:275]": 192.053493 # Nitrosylation (SNO)
+  "C[UNIMOD:312]": 222.013284 # Cysteinylation
+  "K[UNIMOD:481]": 132.120070 # 4,4,5,5-D4 Lysine (Lys4)
+  "K[UNIMOD:737]": 357.257895 # TMT6plex
+  "S[UNIMOD:737]": 316.194960 # TMT6plex
+  "K[UNIMOD:747]": 214.095357 # Malonylation
+  "K[UNIMOD:1289]": 198.136828 # Butyrylation
+  "K[UNIMOD:1363]": 196.121178 # Crotonylation
+  "K[UNIMOD:1848]": 242.126657 # Glutarylation
+  "K[UNIMOD:1849]": 214.131742 # 2-hydroxyisobutyrylation
+  "K[UNIMOD:2016]": 432.302109 # TMTpro 16plex
   # Terminal modifications
   "[UNIMOD:1]": 42.010565 # Acetylation
   "[UNIMOD:5]": 43.005814 # Carbamylation
+  "[UNIMOD:214]": 144.102063 # iTRAQ
   "[UNIMOD:385]": -17.026549 # NH3 loss
+  "[UNIMOD:737]": 229.162932 # TMT6plex
+  "[UNIMOD:2016]": 304.207146 # TMTpro 16plex
   "(+25.98)": 25.980265  # Carbamylation & NH3 loss (legacy notation)

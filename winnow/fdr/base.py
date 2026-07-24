@@ -2,7 +2,7 @@
 
 from abc import ABCMeta
 from abc import abstractmethod
-from typing import Iterable, Tuple, TypeVar
+from typing import Generic, Tuple, TypeVar
 import warnings
 
 import numpy as np
@@ -12,10 +12,10 @@ from numpy.typing import NDArray
 
 from winnow.datasets.psm_dataset import PSMDataset
 
-T = TypeVar("T", bound=Iterable)
+T = TypeVar("T")
 
 
-class FDRControl(metaclass=ABCMeta):
+class FDRControl(Generic[T], metaclass=ABCMeta):
     """The interface for FDR control classes."""
 
     def __init__(self) -> None:
