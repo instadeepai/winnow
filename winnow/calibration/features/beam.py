@@ -1,4 +1,4 @@
-from typing import List
+from typing import Dict, List, Optional
 import warnings
 import numpy as np
 from math import exp
@@ -8,10 +8,80 @@ from numpy import median
 from winnow.calibration.features.base import CalibrationFeatures, FeatureDependency
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.calibration.features.utils import require_beam_predictions
+from winnow.datasets.data_loaders.utils import _normalize_leucine_tokens
+
+
+def _beam_len(beam: Optional[List]) -> int:
+    """Return the number of scored sequences in a beam row (0 for ``None``)."""
+    return 0 if beam is None else len(beam)
+
+
+def _normalised_levenshtein(sequence_a: List[str], sequence_b: List[str]) -> float:
+    """Normalised token-level Levenshtein distance between two sequences.
+
+    Tokens are mapped to consecutive integers per pair comparison so the dynamic
+    program compares small ints instead of strings.
+
+    Returns the edit distance divided by the length of the longer sequence,
+    giving a value in [0, 1]. Returns 0.0 when both sequences are empty.
+    """
+    residue_to_id: Dict[str, int] = {}
+
+    def _to_ints(sequence: List[str]) -> List[int]:
+        return [
+            residue_to_id.setdefault(residue, len(residue_to_id))
+            for residue in sequence
+        ]
+
+    a_ints = _to_ints(sequence_a)
+    b_ints = _to_ints(sequence_b)
+    return _normalised_levenshtein_ints(a_ints, b_ints)
+
+
+def _normalised_levenshtein_ints(a: List[int], b: List[int]) -> float:
+    """Levenshtein on integer token ids; result normalised by max(len(a), len(b))."""
+    n, m = len(a), len(b)
+    max_len = max(n, m)
+    if max_len == 0:
+        return 0.0
+
+    prev = list(range(m + 1))
+    curr = [0] * (m + 1)
+    for i in range(1, n + 1):
+        curr[0] = i
+        ai = a[i - 1]
+        for j in range(1, m + 1):
+            cost = 0 if ai == b[j - 1] else 1
+            res = prev[j] + 1
+            if curr[j - 1] + 1 < res:
+                res = curr[j - 1] + 1
+            if prev[j - 1] + cost < res:
+                res = prev[j - 1] + cost
+            curr[j] = res
+        prev, curr = curr, prev
+    return prev[m] / max_len
+
+
+def _beam_edit_distance(beam: Optional[List]) -> float:
+    """Normalised top-1 vs top-2 edit distance, or 1.0 when undefined."""
+    if _beam_len(beam) < 2:
+        return 1.0
+
+    assert beam is not None
+    top_seq = beam[0].sequence or []
+    second_seq = beam[1].sequence or []
+    # Treat both-empty as undefined (same as missing runner-up), not raw
+    # Levenshtein 0.0 which would look spuriously confident.
+    if not top_seq and not second_seq:
+        return 1.0
+    return _normalised_levenshtein(
+        _normalize_leucine_tokens(top_seq),
+        _normalize_leucine_tokens(second_seq),
+    )
 
 
 class BeamFeatures(CalibrationFeatures):
-    """Calculates the margin, median margin and entropy of beam runners-up."""
+    """Calculates margin, median margin, entropy, z-score and edit distance of beam runners-up."""
 
     @property
     def dependencies(self) -> List[FeatureDependency]:
@@ -40,9 +110,15 @@ class BeamFeatures(CalibrationFeatures):
         """Defines the column names for the computed features.
 
         Returns:
-            List[str]: A list of column names: ["margin", "median_margin", "entropy", "z-score"].
+            List[str]: A list of column names: ["margin", "median_margin", "entropy", "z-score", "edit_distance"].
         """
-        return ["margin", "median_margin", "entropy", "z-score"]
+        return [
+            "margin",
+            "median_margin",
+            "entropy",
+            "z-score",
+            "edit_distance",
+        ]
 
     def prepare(self, dataset: CalibrationDataset) -> None:
         """Prepares the dataset before feature computation.
@@ -55,12 +131,13 @@ class BeamFeatures(CalibrationFeatures):
         return
 
     def compute(self, dataset: CalibrationDataset) -> None:
-        """Computes margin, median margin and entropy for beam search runners-up.
+        """Computes margin, median margin, entropy, z-score and edit distance for beam search runners-up.
 
         - Margin: Difference between the highest probability sequence and the second-best sequence.
         - Median Margin: Difference between the highest probability sequence and the median probability of the runner-ups.
         - Entropy: Shannon entropy of the normalised probabilities of the runner-up sequences.
         - Z-score: Distance between the top beam score and the population mean over all beam results for that spectra in units of the standard deviation.
+        - Edit distance: Normalised Levenshtein distance between the top-1 and top-2 sequences, treating I/L as the same residue. Returns 1.0 when no runner-up exists, when either beam row is missing, or when both sequences are empty.
 
         These metrics help assess the confidence of the top prediction relative to lower-ranked candidates.
 
@@ -71,7 +148,7 @@ class BeamFeatures(CalibrationFeatures):
         require_beam_predictions(dataset, "BeamFeatures")
         assert dataset.predictions is not None
 
-        count = sum(len(prediction) < 2 for prediction in dataset.predictions)  # type: ignore
+        count = sum(_beam_len(prediction) < 2 for prediction in dataset.predictions)
         if count > 0:
             warnings.warn(
                 f"{count} beam search results have fewer than two sequences. "
@@ -79,11 +156,15 @@ class BeamFeatures(CalibrationFeatures):
             )
 
         top_probs = [
-            exp(prediction[0].sequence_log_probability) if len(prediction) >= 1 else 0.0  # type: ignore
+            exp(prediction[0].sequence_log_probability)  # type: ignore
+            if _beam_len(prediction) >= 1
+            else 0.0
             for prediction in dataset.predictions
         ]
         second_probs = [
-            exp(prediction[1].sequence_log_probability) if len(prediction) >= 2 else 0.0  # type: ignore
+            exp(prediction[1].sequence_log_probability)  # type: ignore
+            if _beam_len(prediction) >= 2
+            else 0.0
             for prediction in dataset.predictions
         ]
         second_margin = [
@@ -92,7 +173,7 @@ class BeamFeatures(CalibrationFeatures):
         ]
         runner_up_probs = [
             [exp(item.sequence_log_probability) for item in prediction[1:]]  # type: ignore
-            if len(prediction) >= 2  # type: ignore
+            if _beam_len(prediction) >= 2
             else [0.0]
             for prediction in dataset.predictions
         ]
@@ -114,6 +195,8 @@ class BeamFeatures(CalibrationFeatures):
 
         # Function to compute mean, std, and z-score over a row's beam results
         def row_beam_z_score(row):
+            if row is None or len(row) == 0:
+                return 0.0
             probabilities = [exp(beam.sequence_log_probability) for beam in row]
             mean_prob = np.mean(probabilities)
             std_prob = np.std(probabilities)
@@ -123,8 +206,12 @@ class BeamFeatures(CalibrationFeatures):
 
         z_score = [row_beam_z_score(prediction) for prediction in dataset.predictions]
 
-        # dataset.metadata['confidence'] = top_probs
+        edit_distances = [
+            _beam_edit_distance(prediction) for prediction in dataset.predictions
+        ]
+
         dataset.metadata["margin"] = second_margin
         dataset.metadata["median_margin"] = median_margin
         dataset.metadata["entropy"] = runner_up_entropy
         dataset.metadata["z-score"] = z_score
+        dataset.metadata["edit_distance"] = edit_distances
