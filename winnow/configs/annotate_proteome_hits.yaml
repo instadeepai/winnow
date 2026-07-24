@@ -1,0 +1,20 @@
+# --- Annotate PSMs with proteome substring hits ---
+defaults:
+  - _self_
+  - residues
+  - data_loader: instanovo
+
+dataset:
+  # Path to spectrum data, or a previously saved Winnow dataset directory.
+  spectrum_path_or_directory: examples/example_data/spectra.mgf
+  # Path to de novo predictions CSV. Leave null when data_loader=winnow.
+  predictions_path: examples/example_data/predictions.csv
+
+proteome:
+  # Required: FASTA used for proteome substring matching.
+  fasta: null
+  # Drop PSMs with fewer than this many tokeniser residues.
+  min_residue_length: 7
+
+# Directory for CalibrationDataset.save (metadata.csv + optional predictions.pkl).
+output_dir: results/proteome_annotated_winnow_dataset

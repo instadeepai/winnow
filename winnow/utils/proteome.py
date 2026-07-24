@@ -1,23 +1,21 @@
-"""Annotate Winnow predict outputs with proteome substring hits.
-
-Post-process ``winnow predict`` folders: filter short peptides and add a
-``proteome_hit`` column via FASTA matching. Invoked via the CLI::
-
-    winnow annotate-proteome-hits OUTPUT_FOLDER --fasta proteome.fasta
-"""
+"""Proteome substring matching and ``proteome_hit`` annotation helpers."""
 
 from __future__ import annotations
 
 import logging
 import math
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import ahocorasick
-import polars as pl
+import pandas as pd
 import yaml
 from Bio import SeqIO
 from instanovo.utils.residues import ResidueSet
+
+from winnow.datasets.calibration_dataset import CalibrationDataset
+from winnow.utils.peptide import tokens_to_proforma
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +23,15 @@ _PROTEOME_JOIN_SEP = "\x1f"
 _MOD_ROUND = re.compile(r"\([^)]*\)-?")
 _MOD_SQUARE = re.compile(r"\[[^\]]*\]-?")
 _MOD_NUMERIC = re.compile(r"[+-]?\d+(?:\.\d+)?-?")
+
+
+@dataclass(frozen=True)
+class ProteomeAnnotationCounts:
+    """Row counts from a proteome-hit annotation pass."""
+
+    num_input: int
+    num_removed_short: int
+    num_kept: int
 
 
 def normalize_sequence(sequence: str) -> str:
@@ -116,79 +123,81 @@ def residue_token_count(
     return len(residue_set.tokenize(text))
 
 
-def filter_and_annotate_preds(
-    preds: pl.DataFrame,
-    haystack: str,
-    residue_set: ResidueSet,
-    min_residue_length: int,
-) -> pl.DataFrame:
-    """Filter short peptides and annotate ``proteome_hit`` via substring matching."""
-    token_counts = preds["prediction"].map_elements(
-        lambda prediction: residue_token_count(prediction, residue_set),
-        return_dtype=pl.Int32,
-    )
-    filtered = preds.with_columns(token_counts.alias("_n_residue_tokens")).filter(
-        pl.col("_n_residue_tokens") >= min_residue_length
-    )
-
-    processed_peptides = filtered["prediction"].map_elements(
-        lambda prediction: (
-            processed_peptide_for_match(prediction)
-            if isinstance(prediction, str)
-            else ""
-        ),
-        return_dtype=pl.Utf8,
-    )
-    hits = _batch_peptide_substring_hits(processed_peptides.to_list(), haystack)
-    return filtered.drop("_n_residue_tokens").with_columns(
-        pl.Series("proteome_hit", hits, dtype=pl.Boolean)
-    )
-
-
-def annotate_prediction_folder(
-    output_folder: Path | str,
-    fasta_path: Path | str,
-    residue_set: ResidueSet,
-    *,
-    min_residue_length: int = 7,
-) -> tuple[int, int, int]:
-    """Filter preds, annotate proteome hits, and write back CSVs in *output_folder*."""
-    folder = Path(output_folder)
-    preds_path = folder / "preds_and_fdr_metrics.csv"
-    meta_path = folder / "metadata.csv"
-    if not preds_path.is_file():
-        raise FileNotFoundError(f"Missing predictions file: {preds_path}")
-    if not meta_path.is_file():
-        raise FileNotFoundError(f"Missing metadata file: {meta_path}")
-
-    preds = pl.read_csv(preds_path)
-    if "prediction" not in preds.columns:
-        raise ValueError(f"'prediction' column missing in {preds_path}")
-    if "spectrum_id" not in preds.columns:
-        raise ValueError(f"'spectrum_id' column missing in {preds_path}")
-
-    num_input = preds.height
-    haystack = load_proteome_haystack(fasta_path)
-    annotated = filter_and_annotate_preds(
-        preds, haystack, residue_set, min_residue_length=min_residue_length
-    )
-    num_kept = annotated.height
-    num_removed_short = num_input - num_kept
-
-    kept_spectrum_ids = annotated.select("spectrum_id").unique()
-    metadata = pl.read_csv(meta_path)
-    if "spectrum_id" not in metadata.columns:
-        raise ValueError(f"'spectrum_id' column missing in {meta_path}")
-    metadata_kept = metadata.join(kept_spectrum_ids, on="spectrum_id", how="inner")
-
-    annotated.write_csv(preds_path)
-    metadata_kept.write_csv(meta_path)
-    return num_input, num_removed_short, num_kept
-
-
 def residue_set_from_residues_yaml(residues_path: Path) -> ResidueSet:
     """Build an InstaNovo ``ResidueSet`` from a Winnow ``residues.yaml`` file."""
     with residues_path.open() as f:
         data = yaml.safe_load(f)
     residue_masses = data["residue_masses"]
     return ResidueSet(residue_masses=residue_masses)
+
+
+def _peptide_string_for_match(row: pd.Series) -> str:
+    """Build a mod-stripped I/L-normalised string for proteome matching."""
+    if "prediction_untokenised" in row.index:
+        raw = row["prediction_untokenised"]
+        if isinstance(raw, str) and raw.strip():
+            return processed_peptide_for_match(raw)
+
+    prediction = row["prediction"]
+    if isinstance(prediction, list):
+        return processed_peptide_for_match(tokens_to_proforma(prediction))
+    if isinstance(prediction, str):
+        return processed_peptide_for_match(prediction)
+    return ""
+
+
+def annotate_calibration_dataset(
+    dataset: CalibrationDataset,
+    fasta_path: Path | str,
+    residue_set: ResidueSet,
+    *,
+    min_residue_length: int = 7,
+) -> tuple[CalibrationDataset, ProteomeAnnotationCounts]:
+    """Filter short peptides and annotate ``proteome_hit`` on a calibration dataset.
+
+    Prefers ``prediction_untokenised`` for substring matching when present; otherwise
+    converts tokenised ``prediction`` to ProForma then strips modifications.
+
+    Args:
+        dataset: Loaded calibration dataset with a ``prediction`` column.
+        fasta_path: Reference proteome FASTA.
+        residue_set: Residue tokeniser used for length filtering.
+        min_residue_length: Drop PSMs with fewer than this many residue tokens.
+
+    Returns:
+        Annotated dataset and row-count statistics.
+
+    Raises:
+        ValueError: If ``prediction`` is missing from metadata.
+    """
+    if "prediction" not in dataset.metadata.columns:
+        raise ValueError(
+            "annotate_calibration_dataset requires a 'prediction' column in dataset metadata."
+        )
+
+    num_input = len(dataset.metadata)
+    if "proteome_hit" in dataset.metadata.columns:
+        logger.info("Overwriting existing 'proteome_hit' column.")
+
+    filtered = dataset.filter_entries(
+        metadata_predicate=lambda row: (
+            residue_token_count(row["prediction"], residue_set) < min_residue_length
+        )
+    )
+    num_kept = len(filtered.metadata)
+    num_removed_short = num_input - num_kept
+
+    haystack = load_proteome_haystack(fasta_path)
+    processed_peptides = [
+        _peptide_string_for_match(row) for _, row in filtered.metadata.iterrows()
+    ]
+    hits = _batch_peptide_substring_hits(processed_peptides, haystack)
+    filtered.metadata = filtered.metadata.copy()
+    filtered.metadata["proteome_hit"] = hits
+
+    stats = ProteomeAnnotationCounts(
+        num_input=num_input,
+        num_removed_short=num_removed_short,
+        num_kept=num_kept,
+    )
+    return filtered, stats
