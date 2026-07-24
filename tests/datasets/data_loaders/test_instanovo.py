@@ -571,6 +571,67 @@ class TestInstaNovoDatasetLoader:
         beams = loader._process_beams(beam_df)
         assert beams[0] is None
 
+    @pytest.mark.parametrize(
+        "falsy_sequence",
+        ["", None],
+        ids=["empty_string", "none"],
+    )
+    def test_process_beams_skips_falsy_runner_up(self, loader, falsy_sequence):
+        """Blank/missing runner-ups are dropped, keeping only the top sequence."""
+        beam_df = pl.DataFrame(
+            {
+                "predictions_beam_0": ["PEPTIDE"],
+                "predictions_log_probability_beam_0": [-0.1],
+                "predictions_token_log_probabilities_0": [
+                    "[-0.1, -0.2, -0.3, -0.4, -0.5, -0.6, -0.7]"
+                ],
+                "predictions_beam_1": [falsy_sequence],
+                "predictions_log_probability_beam_1": [-1.2],
+                "predictions_token_log_probabilities_1": ["[-0.5]"],
+            }
+        )
+        beams = loader._process_beams(beam_df)
+        assert beams[0] is not None
+        assert len(beams[0]) == 1
+        assert beams[0][0].sequence == list("PEPTIDE")
+
+    def test_process_beams_skips_falsy_and_compacts_beam(self, loader):
+        """A falsy middle beam is dropped so the next valid candidate becomes beam[1]."""
+        beam_df = pl.DataFrame(
+            {
+                "predictions_beam_0": ["PEPTIDE"],
+                "predictions_log_probability_beam_0": [-0.1],
+                "predictions_token_log_probabilities_0": [
+                    "[-0.1, -0.2, -0.3, -0.4, -0.5, -0.6, -0.7]"
+                ],
+                "predictions_beam_1": [""],
+                "predictions_log_probability_beam_1": [-0.5],
+                "predictions_token_log_probabilities_1": ["[-0.5]"],
+                "predictions_beam_2": ["AC"],
+                "predictions_log_probability_beam_2": [-1.0],
+                "predictions_token_log_probabilities_2": ["[-0.3, -0.4]"],
+            }
+        )
+        beams = loader._process_beams(beam_df)
+        assert beams[0] is not None
+        assert len(beams[0]) == 2
+        assert beams[0][0].sequence == list("PEPTIDE")
+        assert beams[0][1].sequence == ["A", "C"]
+
+    def test_process_beams_all_falsy_sequences_returns_none(self, loader):
+        beam_df = pl.DataFrame(
+            {
+                "predictions_beam_0": [""],
+                "predictions_log_probability_beam_0": [-0.1],
+                "predictions_token_log_probabilities_0": ["[-0.1]"],
+                "predictions_beam_1": [None],
+                "predictions_log_probability_beam_1": [-1.2],
+                "predictions_token_log_probabilities_1": ["[-0.5]"],
+            }
+        )
+        beams = loader._process_beams(beam_df)
+        assert beams[0] is None
+
     def test_process_beams_parses_string_token_log_probabilities(self, loader):
         """token_log_probabilities stored as a string should be parsed to a list."""
         token_str = "[-0.1, -0.2, -0.3, -0.4, -0.5, -0.6, -0.7]"

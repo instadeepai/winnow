@@ -449,6 +449,10 @@ class MZTabDatasetLoader(DatasetLoader):
             spectrum_preds = predictions.filter(pl.col("index") == spectrum_index)
             scored_sequences: List[ScoredSequence] = []
             for row in spectrum_preds.iter_rows(named=True):
+                # Skip blank/missing sequences
+                prediction = row["prediction"]
+                if not prediction:
+                    continue
                 token_scores = row["token_scores"]
                 token_log_probs = None
                 if token_scores is not None:
@@ -458,7 +462,7 @@ class MZTabDatasetLoader(DatasetLoader):
                     ]
                 scored_sequences.append(
                     ScoredSequence(
-                        sequence=row["prediction"],
+                        sequence=prediction,
                         mass_error=None,
                         sequence_log_probability=self._casanovo_raw_score_to_log_probability(
                             float(row["confidence"])

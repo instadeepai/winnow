@@ -631,6 +631,66 @@ class TestMZTabDatasetLoader:
             [np.log(0.4), np.log(0.5), np.log(0.6)]
         )
 
+    @pytest.mark.parametrize(
+        "falsy_prediction",
+        [None, []],
+        ids=["none", "empty_list"],
+    )
+    def test_create_casanovo_beam_predictions_skips_falsy_runner_up(
+        self, loader, falsy_prediction
+    ):
+        """Blank/missing runner-ups are dropped from beams, not stored as None."""
+        df = pl.DataFrame(
+            {
+                "index": pl.Series([0, 0], dtype=pl.Int64),
+                "confidence": [0.9, 0.2],
+                "prediction": pl.Series(
+                    [["P", "E", "P"], falsy_prediction], dtype=pl.List(pl.Utf8)
+                ),
+                "token_scores": pl.Series(
+                    [[0.9, 0.8, 0.7], None], dtype=pl.List(pl.Float64)
+                ),
+            }
+        )
+        result = loader._create_casanovo_beam_predictions(df, [0])
+        assert result[0] is not None
+        assert len(result[0]) == 1
+        assert result[0][0].sequence == ["P", "E", "P"]
+
+    def test_create_casanovo_beam_predictions_skips_falsy_and_compacts_beam(
+        self, loader
+    ):
+        """A falsy middle rank is dropped so the next valid candidate becomes beam[1]."""
+        df = pl.DataFrame(
+            {
+                "index": pl.Series([0, 0, 0], dtype=pl.Int64),
+                "confidence": [0.9, 0.5, 0.2],
+                "prediction": pl.Series(
+                    [["P", "E", "P"], None, ["A", "C"]], dtype=pl.List(pl.Utf8)
+                ),
+                "token_scores": pl.Series(
+                    [None, None, None], dtype=pl.List(pl.Float64)
+                ),
+            }
+        )
+        result = loader._create_casanovo_beam_predictions(df, [0])
+        assert result[0] is not None
+        assert len(result[0]) == 2
+        assert result[0][0].sequence == ["P", "E", "P"]
+        assert result[0][1].sequence == ["A", "C"]
+
+    def test_create_casanovo_beam_predictions_all_falsy_returns_none(self, loader):
+        df = pl.DataFrame(
+            {
+                "index": pl.Series([0, 0], dtype=pl.Int64),
+                "confidence": [0.9, 0.2],
+                "prediction": pl.Series([None, []], dtype=pl.List(pl.Utf8)),
+                "token_scores": pl.Series([None, None], dtype=pl.List(pl.Float64)),
+            }
+        )
+        result = loader._create_casanovo_beam_predictions(df, [0])
+        assert result[0] is None
+
     # ------------------------------------------------------------------
     # load() – validation
     # ------------------------------------------------------------------
