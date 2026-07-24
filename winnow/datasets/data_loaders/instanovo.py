@@ -16,7 +16,7 @@ from instanovo.utils.residues import ResidueSet
 
 from winnow.compat.instanovo import ScoredSequence
 from winnow.datasets.calibration_dataset import CalibrationDataset
-from winnow.datasets.data_loaders import utils
+from winnow.datasets.data_loaders import utils as data_utils
 from winnow.datasets.interfaces import DatasetLoader
 
 
@@ -29,8 +29,8 @@ class InstaNovoDatasetLoader(DatasetLoader):
         "log_probability": "log_probs",
     }
 
-    _df_from_matchms = staticmethod(utils.df_from_matchms)
-    _add_index_cols = staticmethod(utils.add_index_cols)
+    _df_from_matchms = staticmethod(data_utils.df_from_matchms)
+    _add_index_cols = staticmethod(data_utils.add_index_cols)
 
     def __init__(
         self,
@@ -181,7 +181,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
         )
         predictions = self._merge_spectrum_data(predictions, inputs)
         residue_remapping = self.metrics.residue_set.residue_remapping
-        predictions = utils.finalize_peptide_metadata(
+        predictions = data_utils.finalize_peptide_metadata(
             predictions,
             self.metrics,
             has_labels=has_labels,
@@ -201,7 +201,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
         Returns:
             Tuple[pl.DataFrame, bool]: A tuple containing the spectrum data and a boolean indicating whether the dataset has ground truth labels.
         """
-        return utils.load_spectrum_data(
+        return data_utils.load_spectrum_data(
             spectrum_path, add_index_cols=self.add_index_cols
         )
 
@@ -307,7 +307,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
                     tokens = self.metrics._split_peptide(sequence)
                     scored_sequences.append(
                         ScoredSequence(
-                            sequence=utils._normalize_leucine_tokens(tokens),
+                            sequence=data_utils._normalize_leucine_tokens(tokens),
                             mass_error=None,
                             sequence_log_probability=log_prob,
                             token_log_probabilities=ast.literal_eval(token_log_prob)

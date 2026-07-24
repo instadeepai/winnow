@@ -8,11 +8,11 @@ import polars as pl
 import pytest
 
 from winnow.datasets.data_loaders import InstaNovoDatasetLoader
-from winnow.datasets.data_loaders import utils
+from winnow.datasets.data_loaders import utils as data_utils
 
 
 def _finalize(loader, metadata, *, has_labels: bool = True):
-    return utils.finalize_peptide_metadata(
+    return data_utils.finalize_peptide_metadata(
         metadata,
         loader.metrics,
         has_labels=has_labels,

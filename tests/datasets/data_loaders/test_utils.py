@@ -8,7 +8,7 @@ import pytest
 from instanovo.utils.metrics import Metrics
 from instanovo.utils.residues import ResidueSet
 
-from winnow.datasets.data_loaders import utils
+from winnow.datasets.data_loaders import utils as data_utils
 
 RESIDUE_MASSES = {
     "A": 71.037114,
@@ -35,27 +35,27 @@ class TestHasGroundTruthSequenceLabels:
 
     def test_true_when_sequence_has_content(self):
         df = pl.DataFrame({"sequence": ["PEPTIDE"], "charge": [2]})
-        assert utils.has_ground_truth_sequence_labels(df) is True
+        assert data_utils.has_ground_truth_sequence_labels(df) is True
 
     def test_true_when_sequence_has_at_least_one_non_empty_value(self):
         df = pl.DataFrame({"sequence": ["PEPTIDE", "", None], "charge": [2, 3, 4]})
-        assert utils.has_ground_truth_sequence_labels(df) is True
+        assert data_utils.has_ground_truth_sequence_labels(df) is True
         assert len(df) == 3
 
     def test_false_when_sequence_column_missing(self):
         df = pl.DataFrame({"charge": [2]})
-        assert utils.has_ground_truth_sequence_labels(df) is False
+        assert data_utils.has_ground_truth_sequence_labels(df) is False
 
     def test_false_when_sequence_column_all_empty(self):
         df = pl.DataFrame({"sequence": ["", "   ", None], "charge": [2, 3, 4]})
-        assert utils.has_ground_truth_sequence_labels(df) is False
+        assert data_utils.has_ground_truth_sequence_labels(df) is False
 
     def test_load_spectrum_data_drops_empty_sequence_column(self, tmp_path):
         df = pl.DataFrame({"sequence": ["", None], "charge": [2, 3]})
         path = tmp_path / "empty_labels.parquet"
         df.write_parquet(path)
 
-        loaded, has_labels = utils.load_spectrum_data(path)
+        loaded, has_labels = data_utils.load_spectrum_data(path)
 
         assert has_labels is False
         assert "sequence" not in loaded.columns
@@ -74,7 +74,7 @@ class TestIsValidPeptideTokens:
         ],
     )
     def test_valid_non_empty_containers(self, value: object) -> None:
-        assert utils.is_valid_peptide_tokens(value) is True
+        assert data_utils.is_valid_peptide_tokens(value) is True
 
     @pytest.mark.parametrize(
         "value",
@@ -90,17 +90,17 @@ class TestIsValidPeptideTokens:
         ],
     )
     def test_invalid_values(self, value: object) -> None:
-        assert utils.is_valid_peptide_tokens(value) is False
+        assert data_utils.is_valid_peptide_tokens(value) is False
 
     def test_as_token_list_matches_validity(self):
-        assert utils.is_valid_peptide_tokens(["A", "G"]) == (
-            utils.as_token_list(["A", "G"]) is not None
+        assert data_utils.is_valid_peptide_tokens(["A", "G"]) == (
+            data_utils.as_token_list(["A", "G"]) is not None
         )
 
 
 class TestNormalizePeptideCell:
     def test_string_splits_and_remaps(self, metrics: Metrics) -> None:
-        tokens = utils.normalize_peptide_cell(
+        tokens = data_utils.normalize_peptide_cell(
             "AG",
             metrics,
             residue_remapping=REMAPPING,
@@ -108,7 +108,7 @@ class TestNormalizePeptideCell:
         assert tokens == ["A", "G"]
 
     def test_leucine_mapped_at_token_level(self, metrics: Metrics) -> None:
-        tokens = utils.normalize_peptide_cell(
+        tokens = data_utils.normalize_peptide_cell(
             ["A", "L"],
             metrics,
             residue_remapping=REMAPPING,
@@ -120,7 +120,7 @@ class TestNormalizePeptideCell:
     ) -> None:
         """Uppercase L inside a modification name must not be rewritten before split."""
         remapping = {"C[Labelled]": "C[UniMod:999]"}
-        tokens = utils.normalize_peptide_cell(
+        tokens = data_utils.normalize_peptide_cell(
             "AC[Labelled]L",
             metrics,
             residue_remapping=remapping,
@@ -128,7 +128,7 @@ class TestNormalizePeptideCell:
         assert tokens == ["A", "C[UniMod:999]", "I"]
 
     def test_modification_remapping_on_list_input(self, metrics: Metrics) -> None:
-        tokens = utils.normalize_peptide_cell(
+        tokens = data_utils.normalize_peptide_cell(
             ["M[Oxidation]", "A"],
             metrics,
             residue_remapping=REMAPPING,
@@ -137,7 +137,7 @@ class TestNormalizePeptideCell:
 
     def test_require_label_false_for_absent(self, metrics: Metrics) -> None:
         assert (
-            utils.normalize_peptide_cell(
+            data_utils.normalize_peptide_cell(
                 None,
                 metrics,
                 residue_remapping=REMAPPING,
@@ -156,7 +156,7 @@ class TestNormalizePeptideCell:
     def test_accepts_ndarray_and_polars_series(
         self, metrics: Metrics, value: object
     ) -> None:
-        tokens = utils.normalize_peptide_cell(
+        tokens = data_utils.normalize_peptide_cell(
             value,
             metrics,
             residue_remapping=REMAPPING,
@@ -167,38 +167,38 @@ class TestNormalizePeptideCell:
 class TestCoerceBoolLabels:
     def test_bool_series_passes(self):
         series = pd.Series([True, False, True])
-        result = utils.coerce_bool_labels(series, "correct")
+        result = data_utils.coerce_bool_labels(series, "correct")
         assert result.dtype == bool
         assert result.tolist() == [True, False, True]
 
     def test_numeric_zero_one_passes(self):
         series = pd.Series([1, 0, 1.0])
-        result = utils.coerce_bool_labels(series, "proteome_hit")
+        result = data_utils.coerce_bool_labels(series, "proteome_hit")
         assert result.tolist() == [True, False, True]
 
     def test_object_bool_cells_pass(self):
         series = pd.Series([True, False], dtype=object)
-        result = utils.coerce_bool_labels(series, "proteome_hit")
+        result = data_utils.coerce_bool_labels(series, "proteome_hit")
         assert result.tolist() == [True, False]
 
     def test_nullable_boolean_with_na_raises(self):
         series = pd.Series([True, pd.NA, False], dtype="boolean")
         with pytest.raises(ValueError, match="contains missing values"):
-            utils.coerce_bool_labels(series, "proteome_hit")
+            data_utils.coerce_bool_labels(series, "proteome_hit")
 
     def test_none_in_object_series_raises(self):
         series = pd.Series([True, None, False])
         with pytest.raises(ValueError, match="contains missing values"):
-            utils.coerce_bool_labels(series, "proteome_hit")
+            data_utils.coerce_bool_labels(series, "proteome_hit")
 
     def test_string_labels_raise(self):
         series = pd.Series(["true", "false"])
         with pytest.raises(ValueError, match="must be a boolean or numeric series"):
-            utils.coerce_bool_labels(series, "proteome_hit")
+            data_utils.coerce_bool_labels(series, "proteome_hit")
 
     def test_empty_series_passes(self):
         series = pd.Series([], dtype=bool)
-        result = utils.coerce_bool_labels(series, "correct")
+        result = data_utils.coerce_bool_labels(series, "correct")
         assert result.tolist() == []
 
 
@@ -211,7 +211,7 @@ class TestLabelledTrainingMask:
             }
         )
         with pytest.raises(ValueError, match="'valid_sequence' column"):
-            utils.labelled_training_mask(metadata)
+            data_utils.labelled_training_mask(metadata)
 
     def test_requires_correct_when_sequence_present(self):
         metadata = pd.DataFrame(
@@ -221,7 +221,7 @@ class TestLabelledTrainingMask:
             }
         )
         with pytest.raises(ValueError, match="'correct' column"):
-            utils.labelled_training_mask(metadata)
+            data_utils.labelled_training_mask(metadata)
 
     def test_uses_existing_valid_sequence_column(self):
         metadata = pd.DataFrame(
@@ -231,12 +231,16 @@ class TestLabelledTrainingMask:
                 "correct": [True, False, False],
             }
         )
-        assert utils.labelled_training_mask(metadata).tolist() == [True, False, True]
+        assert data_utils.labelled_training_mask(metadata).tolist() == [
+            True,
+            False,
+            True,
+        ]
         assert "valid_sequence" in metadata.columns
 
     def test_all_rows_eligible_without_sequence_column(self):
         metadata = pd.DataFrame({"confidence": [0.9, 0.8]})
-        assert utils.labelled_training_mask(metadata).tolist() == [True, True]
+        assert data_utils.labelled_training_mask(metadata).tolist() == [True, True]
 
     def test_require_labelled_rows_raises_when_empty(self):
         metadata = pd.DataFrame(
@@ -247,7 +251,7 @@ class TestLabelledTrainingMask:
             }
         )
         with pytest.raises(ValueError, match="valid_sequence=True"):
-            utils.require_labelled_rows(metadata, context="Test context")
+            data_utils.require_labelled_rows(metadata, context="Test context")
 
     def test_require_labelled_rows_returns_mask_when_eligible(self):
         metadata = pd.DataFrame(
@@ -257,14 +261,14 @@ class TestLabelledTrainingMask:
                 "correct": [True, False],
             }
         )
-        mask = utils.require_labelled_rows(metadata, context="Test context")
+        mask = data_utils.require_labelled_rows(metadata, context="Test context")
         assert mask.tolist() == [True, False]
 
 
 class TestRowEvaluation:
     def test_row_num_matches_and_correct(self, metrics: Metrics) -> None:
         assert (
-            utils.row_num_matches(
+            data_utils.row_num_matches(
                 ["A", "G"],
                 ["A", "G"],
                 metrics,
@@ -274,7 +278,7 @@ class TestRowEvaluation:
             == 2
         )
         assert (
-            utils.row_num_matches(
+            data_utils.row_num_matches(
                 ["A", "G"],
                 ["A", "G"],
                 metrics,
@@ -283,10 +287,10 @@ class TestRowEvaluation:
             )
             == 0
         )
-        assert utils.row_is_correct(
+        assert data_utils.row_is_correct(
             2, ["A", "G"], ["A", "G"], sequence_valid=True, prediction_valid=True
         )
-        assert not utils.row_is_correct(
+        assert not data_utils.row_is_correct(
             1, ["A", "G"], ["A", "G"], sequence_valid=True, prediction_valid=True
         )
 
@@ -301,7 +305,7 @@ class TestFinalizePeptideMetadata:
 
     def test_pandas_frame(self, metrics: Metrics, labelled_fixture: dict) -> None:
         metadata = pd.DataFrame(labelled_fixture)
-        utils.finalize_peptide_metadata(
+        data_utils.finalize_peptide_metadata(
             metadata,
             metrics,
             has_labels=True,
@@ -315,7 +319,7 @@ class TestFinalizePeptideMetadata:
 
     def test_polars_frame(self, metrics: Metrics, labelled_fixture: dict) -> None:
         metadata = pl.DataFrame(labelled_fixture)
-        result = utils.finalize_peptide_metadata(
+        result = data_utils.finalize_peptide_metadata(
             metadata,
             metrics,
             has_labels=True,
@@ -334,7 +338,7 @@ class TestFinalizePeptideMetadata:
                 "prediction": [np.array(["P", "E"], dtype=object)],
             }
         )
-        utils.finalize_peptide_metadata(
+        data_utils.finalize_peptide_metadata(
             metadata,
             metrics,
             has_labels=True,
@@ -350,7 +354,7 @@ class TestFinalizePeptideMetadata:
                 "prediction": [[]],
             }
         )
-        utils.finalize_peptide_metadata(
+        data_utils.finalize_peptide_metadata(
             metadata,
             metrics,
             has_labels=True,
@@ -361,7 +365,7 @@ class TestFinalizePeptideMetadata:
 
     def test_unlabelled_sets_valid_prediction_only(self, metrics: Metrics) -> None:
         metadata = pd.DataFrame({"prediction": [["A", "G"]]})
-        utils.finalize_peptide_metadata(
+        data_utils.finalize_peptide_metadata(
             metadata,
             metrics,
             has_labels=False,

@@ -44,7 +44,7 @@ from pyteomics import mztab
 
 from winnow.compat.instanovo import ScoredSequence
 from winnow.datasets.calibration_dataset import CalibrationDataset
-from winnow.datasets.data_loaders import utils
+from winnow.datasets.data_loaders import utils as data_utils
 from winnow.datasets.interfaces import DatasetLoader
 
 
@@ -312,7 +312,7 @@ class MZTabDatasetLoader(DatasetLoader):
             pl.col("prediction_untokenised").alias("prediction")
         )
         residue_remapping = self.metrics.residue_set.residue_remapping
-        predictions = utils.finalize_peptide_metadata(
+        predictions = data_utils.finalize_peptide_metadata(
             predictions,
             self.metrics,
             has_labels=False,
@@ -321,7 +321,7 @@ class MZTabDatasetLoader(DatasetLoader):
 
         top_predictions = self._get_top_predictions(predictions, is_casanovo)
         metadata = self._merge_data(spectrum_data, top_predictions)
-        metadata = utils.finalize_peptide_metadata(
+        metadata = data_utils.finalize_peptide_metadata(
             metadata,
             self.metrics,
             has_labels=has_labels,
@@ -351,8 +351,10 @@ class MZTabDatasetLoader(DatasetLoader):
             Tuple of (DataFrame containing spectrum data, whether ground truth labels exist).
         """
         spectrum_path = Path(spectrum_path)
-        df, has_labels = utils.load_spectrum_data(spectrum_path, add_index_cols=False)
-        df = utils.add_row_order_spectrum_ids(df, spectrum_path.stem)
+        df, has_labels = data_utils.load_spectrum_data(
+            spectrum_path, add_index_cols=False
+        )
+        df = data_utils.add_row_order_spectrum_ids(df, spectrum_path.stem)
         return df, has_labels
 
     def _process_predictions(

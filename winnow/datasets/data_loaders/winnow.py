@@ -13,7 +13,7 @@ from instanovo.utils.metrics import Metrics
 from instanovo.utils.residues import ResidueSet
 
 from winnow.datasets.calibration_dataset import CalibrationDataset
-from winnow.datasets.data_loaders import utils
+from winnow.datasets.data_loaders import utils as data_utils
 from winnow.datasets.interfaces import DatasetLoader
 
 
@@ -80,12 +80,12 @@ class WinnowDatasetLoader(DatasetLoader):
         )
 
         has_labels = "sequence" in metadata.columns and any(
-            utils.is_usable_peptide_label(value) for value in metadata["sequence"]
+            data_utils.is_usable_peptide_label(value) for value in metadata["sequence"]
         )
         if "sequence" in metadata.columns and not has_labels:
             metadata = metadata.drop(columns=["sequence"])
 
-        metadata = utils.finalize_peptide_metadata(
+        metadata = data_utils.finalize_peptide_metadata(
             metadata,
             self.metrics,
             has_labels=has_labels,

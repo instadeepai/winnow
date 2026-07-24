@@ -5,7 +5,7 @@ import polars as pl
 import pytest
 
 from winnow.datasets.data_loaders import MZTabDatasetLoader
-from winnow.datasets.data_loaders import utils
+from winnow.datasets.data_loaders import utils as data_utils
 
 
 EXPERIMENT_NAME = "test"
@@ -13,7 +13,7 @@ EXPERIMENT_NAME = "test"
 
 def _finalize(loader, metadata, *, has_labels: bool = True):
     """Run shared peptide finalization with loader metrics/remapping."""
-    return utils.finalize_peptide_metadata(
+    return data_utils.finalize_peptide_metadata(
         metadata,
         loader.metrics,
         has_labels=has_labels,
@@ -23,7 +23,7 @@ def _finalize(loader, metadata, *, has_labels: bool = True):
 
 def _normalize_peptide(loader, value: object) -> list[str] | None:
     """Normalize a peptide cell using loader metrics (string or token list)."""
-    return utils.normalize_peptide_cell(
+    return data_utils.normalize_peptide_cell(
         value,
         loader.metrics,
         residue_remapping=loader.metrics.residue_set.residue_remapping,
@@ -127,7 +127,7 @@ class TestMZTabDatasetLoader:
         ]
 
     # ------------------------------------------------------------------
-    # Token remapping via utils.normalize_peptide_cell
+    # Token remapping via data_utils.normalize_peptide_cell
     # ------------------------------------------------------------------
 
     def test_remap_tokens_residue_modifications(self, mztab_loader):
@@ -353,7 +353,7 @@ class TestMZTabDatasetLoader:
 
     def test_add_row_order_spectrum_ids_assigns_sequential_ids(self):
         df = pl.DataFrame({"charge": [2, 2]})
-        result = utils.add_row_order_spectrum_ids(df, "spec")
+        result = data_utils.add_row_order_spectrum_ids(df, "spec")
         assert result["experiment_name"].to_list() == ["spec", "spec"]
         assert result["spectrum_id"].to_list() == ["spec:0", "spec:1"]
 
@@ -744,7 +744,7 @@ class TestMZTabDatasetLoader:
                 "search_engine_score[1]": [0.3, 0.9],
             }
         )
-        spectrum = utils.add_row_order_spectrum_ids(
+        spectrum = data_utils.add_row_order_spectrum_ids(
             pl.DataFrame(
                 {
                     "charge": [2, 2],
