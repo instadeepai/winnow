@@ -39,6 +39,8 @@ dataset.save(Path("output_directory"))
 
 - **Multiple Format Support**: Load data using specialised loaders for different file formats
 - **Data Integration**: Combines spectral data with prediction metadata
+- **Tokenised Peptides**: Loaders normalise `prediction` (and labelled `sequence`) to token lists and write `valid_prediction` / `valid_sequence` (plus `correct` / `num_matches` when labelled)
+- **Structural Gate**: Direct `CalibrationDataset` construction requires already-tokenised peptide columns.
 - **Filtering**: Removes invalid tokens and unsupported modifications
 - **Evaluation**: Computes correctness labels when ground truth available
 

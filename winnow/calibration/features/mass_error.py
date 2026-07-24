@@ -9,6 +9,7 @@ from winnow.calibration.features.constants import (
     PROTON_MASS,
 )
 from winnow.datasets.calibration_dataset import CalibrationDataset
+from winnow.datasets.data_loaders.utils import is_valid_peptide_tokens
 
 
 def _validate_dataset(dataset: CalibrationDataset) -> None:
@@ -31,20 +32,16 @@ def _compute_signed_mass_errors(
     measured_mz = dataset.metadata["precursor_mz"]
     charge = dataset.metadata["precursor_charge"]
 
-    invalid_mask = ~dataset.metadata["prediction"].apply(lambda p: isinstance(p, list))
+    invalid_mask = ~dataset.metadata["prediction"].apply(is_valid_peptide_tokens)
     if invalid_mask.any():
         n_invalid = invalid_mask.sum()
         raise ValueError(
             f"{n_invalid} prediction(s) are not valid peptide sequences "
-            f"(expected list of residue tokens)."
+            f"(expected non-empty list of residue tokens)."
         )
 
     neutral_mass = dataset.metadata["prediction"].apply(
-        lambda peptide: (
-            sum(residue_masses[residue] for residue in peptide) + H2O_MASS
-            if isinstance(peptide, list)
-            else 0.0
-        )
+        lambda peptide: sum(residue_masses[residue] for residue in peptide) + H2O_MASS
     )
     theoretical_mz = (neutral_mass + charge * PROTON_MASS) / charge
 
