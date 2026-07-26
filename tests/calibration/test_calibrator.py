@@ -478,6 +478,26 @@ class TestProbabilityCalibrator:
         assert loaded.columns == ["margin"]
         assert "entropy" in loaded._registry_feature_columns()
 
+    def test_load_preserves_empty_fitted_training_schema(self, tmp_path):
+        """An empty fitted subset remains frozen after checkpoint loading."""
+        n = 40
+        confidence_only = FeatureDataset(
+            features=np.random.rand(n, 1).astype(np.float32),
+            labels=np.random.choice([0.0, 1.0], n).astype(np.float32),
+            columns=[],
+        )
+        calibrator = ProbabilityCalibrator(max_epochs=1, hidden_dims=(4,), seed=0)
+        calibrator.add_feature(MockCalibrationFeature("beam", ["margin", "entropy"]))
+        calibrator.set_training_feature_columns([])
+        calibrator.fit_from_features(confidence_only)
+        ProbabilityCalibrator.save(calibrator, tmp_path / "confidence_only")
+
+        loaded = ProbabilityCalibrator.load(tmp_path / "confidence_only")
+
+        assert loaded._fitted_feature_columns == []
+        with pytest.raises(ValueError, match="after the calibrator has been fitted"):
+            loaded.set_training_feature_columns(["margin"])
+
     def test_feature_names_empty(self, calibrator):
         """Test feature_names property when no features are added."""
         assert calibrator.feature_names == []
