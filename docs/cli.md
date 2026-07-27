@@ -197,6 +197,10 @@ winnow diagnose-calibration \
 
 # Stricter tolerance for 1% FDR workflows
 winnow diagnose-calibration diagnostics.label_source=sequence diagnostics.tolerance=0.002
+
+# Audit the same saved RT→iRT regressors used at predict time
+winnow diagnose-calibration diagnostics.label_source=sequence \
+  calibrator.irt_regressor_path=./irt_regressors.safetensors
 ```
 
 **Outputs** (under `diagnostics.output_dir`, default `results/calibration_diagnostic`):

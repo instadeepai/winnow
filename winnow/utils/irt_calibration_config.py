@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Optional, Set
+import logging
+from typing import TYPE_CHECKING, Any, Optional, List
 
 import typer
 
 from winnow.utils.hydra_overrides import hydra_override_keys
+
+if TYPE_CHECKING:
+    from winnow.calibration.calibrator import ProbabilityCalibrator
+    from winnow.calibration.features.retention_time import RetentionTimeFeature
 
 IRT_CALIBRATION_PREFIX = "calibrator.irt_calibration."
 IRT_CALIBRATION_FIELDS = ("train_fraction", "min_train_points")
@@ -22,9 +27,9 @@ def _irt_calibration_block(cfg: Any) -> Any:
 def explicit_irt_calibration_fields(
     irt_calibration_cfg: Any,
     hydra_overrides: Optional[List[str]] = None,
-) -> Set[str]:
+) -> set[str]:
     """Field names the user explicitly set via config or Hydra overrides."""
-    explicit: Set[str] = set()
+    explicit: set[str] = set()
     override_keys = hydra_override_keys(hydra_overrides)
     for field in IRT_CALIBRATION_FIELDS:
         hydra_path = f"{IRT_CALIBRATION_PREFIX}{field}"
@@ -73,7 +78,9 @@ def validate_irt_calibration_config(
     raise typer.Exit(code=1)
 
 
-def _get_retention_time_feature(calibrator: Any):
+def _get_retention_time_feature(
+    calibrator: ProbabilityCalibrator,
+) -> RetentionTimeFeature | None:
     from winnow.calibration.features.retention_time import RetentionTimeFeature
 
     rt_feature = calibrator.feature_dict.get("iRT Feature")
@@ -98,11 +105,11 @@ def _resolved_irt_calibration(
 
 def _log_irt_calibration_override(
     field: str,
-    new_value: Any,
-    old_value: Any,
+    new_value: float | int,
+    old_value: float | int,
     *,
-    explicit: Set[str],
-    logger: Any,
+    explicit: set[str],
+    logger: logging.Logger | None,
 ) -> None:
     if field not in explicit or logger is None:
         return
@@ -124,10 +131,10 @@ def _log_irt_calibration_override(
 
 
 def apply_irt_calibration_config(
-    calibrator: Any,
+    calibrator: ProbabilityCalibrator,
     irt_calibration_cfg: Any,
     hydra_overrides: Optional[List[str]] = None,
-    logger: Any = None,
+    logger: logging.Logger | None = None,
 ) -> None:
     """Apply optional predict-time overrides to RetentionTimeFeature calibration params."""
     rt_feature = _get_retention_time_feature(calibrator)
@@ -165,13 +172,13 @@ def apply_irt_calibration_config(
 
 def maybe_load_irt_regressors(
     cfg: Any,
-    calibrator: Any,
-    logger: Any = None,
+    calibrator: ProbabilityCalibrator,
+    logger: logging.Logger | None = None,
 ) -> None:
     """Load pre-fitted iRT regressors from ``calibrator.irt_regressor_path`` if set.
 
     When the path is unset/null, this is a no-op. When the path is set but the
-    calibrator has no ``RetentionTimeFeature``, the load is skipped silently.
+    calibrator has no ``RetentionTimeFeature``, the load is skipped with a warning.
 
     Args:
         cfg: Resolved Hydra config with a ``calibrator`` section.
@@ -186,6 +193,10 @@ def maybe_load_irt_regressors(
 
     rt_feature = _get_retention_time_feature(calibrator)
     if rt_feature is None:
+        if logger is not None:
+            logger.warning(
+                "No RetentionTimeFeature on calibrator; skipping iRT regressors load."
+            )
         return
 
     if logger is not None:

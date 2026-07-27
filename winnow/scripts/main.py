@@ -75,7 +75,7 @@ def _log_pipeline_complete(pipeline_label: str) -> None:
         pipeline_label: Capitalised name used in the completion message
             (e.g. ``Training``, ``Compute-features``).
     """
-    logger.info(f"{pipeline_label} pipeline completed successfully.")
+    logger.info(f"{pipeline_label} pipeline completed.")
 
 
 def _handle_koina_intensity_config(
@@ -632,12 +632,16 @@ def _save_training_artifacts(cfg, calibrator, history):
     """
     irt_regressor_output_path = cfg.get("irt_regressor_output_path")
     if irt_regressor_output_path:
-        from winnow.calibration.calibration_features import RetentionTimeFeature
+        from winnow.calibration.features.retention_time import RetentionTimeFeature
 
         rt_feature = calibrator.feature_dict.get("iRT Feature")
         if isinstance(rt_feature, RetentionTimeFeature):
             logger.info(f"Saving iRT regressors to {irt_regressor_output_path}")
             rt_feature.save_regressors(irt_regressor_output_path)
+        else:
+            logger.warning(
+                "No RetentionTimeFeature on calibrator; skipping iRT regressors save."
+            )
 
     training_history_path = cfg.get("training_history_path")
     if training_history_path:
@@ -1147,8 +1151,6 @@ def diagnose_calibration_entry_point(
     )
     logger.info(result.interpretation)
 
-    _log_pipeline_complete("Calibration diagnostic")
-
     if not result.within_tolerance:
         logger.warning(
             f"|sTECE| = {abs(result.stece):.5f} exceeds tolerance = {diagnostics.tolerance:.5f}. "
@@ -1156,6 +1158,8 @@ def diagnose_calibration_entry_point(
         )
         if diagnostics.fail_on_warning:
             raise typer.Exit(code=1)
+
+    _log_pipeline_complete("Calibration diagnostic")
 
 
 def annotate_proteome_hits_entry_point(
