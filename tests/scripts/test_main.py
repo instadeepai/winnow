@@ -90,6 +90,7 @@ def _labelled_calibration_dataset() -> CalibrationDataset:
             "confidence": [0.9, 0.5],
             "f1": [1.0, 2.0],
             "correct": [1.0, 0.0],
+            "prediction": [["A", "G"], ["G", "A"]],
         }
     )
     return CalibrationDataset(metadata=metadata, predictions=[None, None])

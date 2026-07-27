@@ -56,7 +56,9 @@ class TestConcreteFeatureImplementation:
     def test_concrete_feature_compute(self):
         """Test that concrete feature can compute values."""
         feature = ConcreteFeature()
-        metadata = pd.DataFrame({"existing_col": [1, 2, 3]})
+        metadata = pd.DataFrame(
+            {"existing_col": [1, 2, 3], "prediction": [["A"], ["G"], ["K"]]}
+        )
         dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
         feature.compute(dataset)

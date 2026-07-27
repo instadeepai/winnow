@@ -7,10 +7,8 @@ import pandas as pd
 import pytest
 
 from winnow.calibration.diagnostics import (
-    SEQUENCE_LABEL_COLUMN,
     DiagnosticArrays,
     TailSlice,
-    compute_correct_from_sequence,
     empirical_stece,
     filter_tail,
     fit_isotonic_calibration,
@@ -21,8 +19,15 @@ from winnow.calibration.diagnostics import (
     validate_label_config,
 )
 from winnow.datasets.calibration_dataset import CalibrationDataset
+from winnow.datasets.data_loaders.utils import SEQUENCE_DERIVED_CORRECT_COLUMN
 
-RESIDUE_MASSES = {"A": 71.037114, "G": 57.021464}
+
+def _token_prediction_frame(**columns: object) -> pd.DataFrame:
+    """Build metadata that satisfies CalibrationDataset peptide structure checks."""
+    frame = pd.DataFrame(columns)
+    if "prediction" not in frame.columns:
+        frame["prediction"] = [["A"]] * len(frame)
+    return frame
 
 
 class TestValidateLabelConfig:
@@ -53,78 +58,103 @@ class TestValidateLabelConfig:
         validate_label_config(label_source, label_column)
 
 
-class TestComputeCorrectFromSequence:
-    @pytest.mark.parametrize(
-        ("sequence", "prediction", "expected"),
-        [
-            ([["A", "G"], ["A"]], [["A", "G"], ["G"]], [True, False]),
-            (
-                [np.array(["A", "G"], dtype=object)],
-                [np.array(["A", "G"], dtype=object)],
-                [True],
-            ),
-        ],
-    )
-    def test_sequence_correctness(
-        self, sequence: object, prediction: object, expected: list[bool]
-    ) -> None:
-        meta = pd.DataFrame({"sequence": sequence, "prediction": prediction})
-        correct = compute_correct_from_sequence(meta, RESIDUE_MASSES)
-        assert correct.tolist() == expected
-
-
 class TestResolveDiagnosticsLabels:
     def test_precomputed_reads_column(self) -> None:
-        meta = pd.DataFrame({"proteome_hit": [True, False, True]})
+        meta = _token_prediction_frame(proteome_hit=[True, False, True])
         labels, column = resolve_diagnostics_labels(
             CalibrationDataset(metadata=meta),
             "precomputed",
             "proteome_hit",
-            residue_masses=RESIDUE_MASSES,
         )
         assert column == "proteome_hit"
         assert labels.tolist() == [True, False, True]
 
-    def test_sequence_uses_derived_correct_column(self) -> None:
-        meta = pd.DataFrame(
-            {
-                "sequence": [["A"], ["A"]],
-                "prediction": [["A"], ["G"]],
-                "correct": [False, True],
-            }
+    def test_sequence_uses_finalised_correct_column(self) -> None:
+        meta = _token_prediction_frame(
+            sequence=[["A"], ["A"]],
+            prediction=[["A"], ["G"]],
+            correct=[True, False],
+            valid_sequence=[True, True],
         )
         labels, column = resolve_diagnostics_labels(
             CalibrationDataset(metadata=meta),
             "sequence",
             None,
-            residue_masses=RESIDUE_MASSES,
         )
-        assert column == SEQUENCE_LABEL_COLUMN
+        assert column == SEQUENCE_DERIVED_CORRECT_COLUMN
         assert labels.tolist() == [True, False]
+
+    def test_sequence_rejects_raw_proforma_strings(self) -> None:
+        meta = pd.DataFrame(
+            {
+                "sequence": ["AG", "AG"],
+                "prediction": ["AG", "AA"],
+            }
+        )
+        with pytest.raises(ValueError, match="raw strings"):
+            CalibrationDataset(metadata=meta)
+
+    def test_sequence_requires_finalised_correct(self) -> None:
+        meta = _token_prediction_frame(
+            sequence=[["A"], ["A"]],
+            prediction=[["A"], ["G"]],
+        )
+        with pytest.raises(ValueError, match="finalised labelled metadata"):
+            resolve_diagnostics_labels(
+                CalibrationDataset(metadata=meta),
+                "sequence",
+                None,
+            )
+
+    def test_sequence_excludes_invalid_sequence_rows(self) -> None:
+        meta = _token_prediction_frame(
+            sequence=[["A"], None],
+            prediction=[["A"], ["G"]],
+            correct=[True, False],
+            valid_sequence=[True, False],
+        )
+        labels, column = resolve_diagnostics_labels(
+            CalibrationDataset(metadata=meta),
+            "sequence",
+            None,
+        )
+        assert column == SEQUENCE_DERIVED_CORRECT_COLUMN
+        assert labels.tolist() == [True]
+        assert labels.index.tolist() == [0]
+
+    def test_sequence_rejects_null_correct_on_eligible_rows(self) -> None:
+        meta = _token_prediction_frame(
+            sequence=[["A"], ["A"]],
+            prediction=[["A"], ["G"]],
+            correct=[True, None],
+            valid_sequence=[True, True],
+        )
+        with pytest.raises(ValueError, match="contains missing values"):
+            resolve_diagnostics_labels(
+                CalibrationDataset(metadata=meta),
+                "sequence",
+                None,
+            )
 
     def test_precomputed_missing_column_raises(self) -> None:
         with pytest.raises(ValueError, match="not found"):
             resolve_diagnostics_labels(
-                CalibrationDataset(metadata=pd.DataFrame({"confidence": [0.5]})),
+                CalibrationDataset(metadata=_token_prediction_frame(confidence=[0.5])),
                 "precomputed",
                 "proteome_hit",
-                residue_masses=RESIDUE_MASSES,
             )
 
     def test_precomputed_string_labels_raises(self) -> None:
         with pytest.raises(ValueError, match="must be a boolean or numeric series"):
             resolve_diagnostics_labels(
                 CalibrationDataset(
-                    metadata=pd.DataFrame(
-                        {
-                            "confidence": [0.5, 0.7, 0.6],
-                            "proteome_hit": ["True", "False", "True"],
-                        }
+                    metadata=_token_prediction_frame(
+                        confidence=[0.5, 0.7, 0.6],
+                        proteome_hit=["True", "False", "True"],
                     )
                 ),
                 "precomputed",
                 "proteome_hit",
-                residue_masses=RESIDUE_MASSES,
             )
 
 

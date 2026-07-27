@@ -9,16 +9,17 @@ from typing import Literal, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
-from pandas.api.types import is_bool_dtype, is_numeric_dtype
-from instanovo.utils.metrics import Metrics
-from instanovo.utils.residues import ResidueSet
 from numpy.typing import NDArray
 from sklearn.isotonic import IsotonicRegression
 
 from winnow.datasets.calibration_dataset import CalibrationDataset
+from winnow.datasets.data_loaders.utils import (
+    SEQUENCE_DERIVED_CORRECT_COLUMN,
+    coerce_bool_labels,
+    require_labelled_rows,
+)
 
 LabelSource = Literal["sequence", "precomputed"]
-SEQUENCE_LABEL_COLUMN = "correct"
 
 
 @dataclass(frozen=True)
@@ -82,7 +83,6 @@ def validate_label_config(
     if label_source == "sequence" and label_column is not None:
         raise ValueError(
             "diagnostics.label_column must not be set when label_source is 'sequence'. "
-            "Sequence-derived labels are written to the 'correct' column automatically."
         )
     if label_source == "precomputed" and not label_column:
         raise ValueError(
@@ -90,79 +90,16 @@ def validate_label_config(
         )
 
 
-def _normalize_peptide_tokens(value: object, metrics: Metrics) -> list[str]:
-    """Normalize a sequence or prediction cell to a list of residue tokens."""
-    if isinstance(value, str):
-        return metrics._split_peptide(value)
-    if isinstance(value, (list, tuple)):
-        return list(value)
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    return []
-
-
-def compute_correct_from_sequence(
-    metadata: pd.DataFrame,
-    residue_masses: dict[str, float],
-    residue_remapping: Optional[dict[str, str]] = None,
-) -> pd.Series:
-    """Derive full-sequence correctness from sequence and prediction columns."""
-    if "sequence" not in metadata.columns:
-        raise ValueError(
-            "label_source='sequence' requires a 'sequence' column in the dataset."
-        )
-    if "prediction" not in metadata.columns:
-        raise ValueError(
-            "label_source='sequence' requires a 'prediction' column in the dataset."
-        )
-
-    metrics = Metrics(
-        residue_set=ResidueSet(
-            residue_masses=residue_masses,
-            residue_remapping=residue_remapping or {},
-        )
-    )
-    df = metadata.copy()
-    df["sequence"] = df["sequence"].apply(
-        lambda value: _normalize_peptide_tokens(value, metrics)
-    )
-    df["prediction"] = df["prediction"].apply(
-        lambda value: _normalize_peptide_tokens(value, metrics)
-    )
-
-    def _row_correct(row: pd.Series) -> bool:
-        sequence = row["sequence"]
-        prediction = row["prediction"]
-        if not sequence or not prediction:
-            return False
-        num_matches = metrics._novor_match(sequence, prediction)
-        return num_matches == len(sequence) == len(prediction)
-
-    return df.apply(_row_correct, axis=1)
-
-
-def _coerce_bool_labels(series: pd.Series, column: str) -> pd.Series:
-    if series.isna().any():
-        raise ValueError(
-            f"Label column {column!r} contains missing values; "
-            "all PSMs must have a label for calibration diagnostics."
-        )
-    # Allow only boolean or numeric labels
-    if not (is_bool_dtype(series.dtype) or is_numeric_dtype(series.dtype)):
-        raise ValueError(
-            f"Label column {column!r} must be a boolean or numeric series, got {series.dtype}."
-        )
-    return series.astype(bool)
-
-
 def resolve_diagnostics_labels(
     dataset: CalibrationDataset,
     label_source: LabelSource,
     label_column: Optional[str],
-    residue_masses: dict[str, float],
-    residue_remapping: Optional[dict[str, str]] = None,
 ) -> Tuple[pd.Series, str]:
-    """Resolve boolean labels and return (labels, resolved_column_name)."""
+    """Resolve boolean labels and return (labels, resolved_column_name).
+
+    For ``label_source='sequence'``, the dataset must already contain finalised
+    ``correct`` and ``valid_sequence`` columns from a DatasetLoader.
+    """
     metadata = dataset.metadata
 
     if label_source == "precomputed":
@@ -172,11 +109,27 @@ def resolve_diagnostics_labels(
                 f"Precomputed label column {label_column!r} not found in dataset metadata. "
                 f"Available columns: {list(metadata.columns)}"
             )
-        labels = _coerce_bool_labels(metadata[label_column], label_column)
+        labels = coerce_bool_labels(metadata[label_column], label_column)
         return labels, label_column
 
-    labels = compute_correct_from_sequence(metadata, residue_masses, residue_remapping)
-    return labels, SEQUENCE_LABEL_COLUMN
+    missing = [
+        column
+        for column in (SEQUENCE_DERIVED_CORRECT_COLUMN, "valid_sequence")
+        if column not in metadata.columns
+    ]
+    if missing:
+        raise ValueError(
+            "This operation requires finalised labelled metadata with "
+            f"{', '.join(repr(c) for c in missing)}. "
+            "Load labelled data through a DatasetLoader before fitting/running "
+            "diagnostics."
+        )
+    mask = require_labelled_rows(metadata, context="Sequence-derived diagnostics")
+    labels = coerce_bool_labels(
+        metadata.loc[mask, SEQUENCE_DERIVED_CORRECT_COLUMN],
+        SEQUENCE_DERIVED_CORRECT_COLUMN,
+    )
+    return labels, SEQUENCE_DERIVED_CORRECT_COLUMN
 
 
 def filter_tail(

@@ -5,6 +5,7 @@ of peptide sequences, including N-terminal and C-terminal modifications.
 """
 
 import pytest
+import numpy as np
 
 from winnow.utils.peptide import tokens_to_proforma, _is_standalone_modification
 
@@ -60,6 +61,11 @@ class TestTokensToProforma:
         """Test empty token list returns empty string."""
         assert tokens_to_proforma([]) == ""
         assert tokens_to_proforma(None) == ""
+
+    def test_numpy_token_array(self):
+        """Test numpy arrays of tokens are coerced before ProForma conversion."""
+        tokens = np.array(["P", "E", "P", "T", "I", "D", "E"], dtype=object)
+        assert tokens_to_proforma(tokens) == "PEPTIDE"
 
     def test_single_amino_acid(self):
         """Test single amino acid."""
