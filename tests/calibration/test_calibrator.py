@@ -226,12 +226,22 @@ class TestProbabilityCalibrator:
     """Test the ProbabilityCalibrator class."""
 
     @staticmethod
-    def _feature_dataset_with_width(n_features: int, n: int = 100) -> FeatureDataset:
-        """Build a labelled FeatureDataset with a given feature width."""
+    def _feature_dataset_with_width(
+        n_features: int,
+        n: int = 100,
+        columns: list[str] | None = None,
+    ) -> FeatureDataset:
+        """Build a labelled FeatureDataset with a given feature width.
+
+        Matrix layout is ``[confidence, *columns]``. When ``columns`` is
+        omitted, synthetic names ``c0`` .. are used for non-confidence slots.
+        """
         np.random.seed(42)
         features = np.random.randn(n, n_features).astype(np.float32)
         labels = np.random.choice([0.0, 1.0], n).astype(np.float32)
-        return FeatureDataset(features=features, labels=labels)
+        if columns is None:
+            columns = [f"c{i}" for i in range(n_features - 1)]
+        return FeatureDataset(features=features, labels=labels, columns=columns)
 
     @pytest.fixture()
     def calibrator(self):
@@ -257,7 +267,7 @@ class TestProbabilityCalibrator:
         np.random.seed(42)
         features = np.random.randn(n, 1).astype(np.float32)
         labels = np.random.choice([0.0, 1.0], n).astype(np.float32)
-        return FeatureDataset(features=features, labels=labels)
+        return FeatureDataset(features=features, labels=labels, columns=[])
 
     @pytest.fixture()
     def labelled_dataset(self):
@@ -344,34 +354,155 @@ class TestProbabilityCalibrator:
         """Test columns property when no features are added."""
         assert calibrator.columns == []
 
-    def test_load_rejects_feature_column_shift(self, tmp_path, labelled_dataset):
-        """Loading a checkpoint whose feature columns drift from training raises."""
+    def test_load_rejects_fitted_columns_missing_from_registry(
+        self, tmp_path, labelled_dataset
+    ):
+        """Loading fails when fitted columns are no longer in the registry."""
         calibrator = ProbabilityCalibrator(seed=42)
         feature = MockCalibrationFeature("test_feature", ["test_col"])
         calibrator.add_feature(feature)
         calibrator.fit(labelled_dataset)
 
-        calibrator.feature_dict["test_feature"]._columns = ["test_col", "extra_col"]
+        calibrator.feature_dict["test_feature"]._columns = ["other_col"]
         ProbabilityCalibrator.save(calibrator, tmp_path)
 
         with pytest.raises(
             ValueError,
-            match="feature_columns .* do not match the registered feature columns",
+            match=r"fitted feature column\(s\) \['test_col'\].*not produced",
         ):
             ProbabilityCalibrator.load(tmp_path)
 
-    def test_predict_rejects_feature_column_shift(
+    def test_predict_rejects_fitted_columns_missing_from_registry(
         self, calibrator, labelled_dataset, sample_dataset
     ):
-        """Prediction raises when the live feature set no longer matches training."""
+        """Prediction raises when fitted columns leave the live registry."""
         feature = MockCalibrationFeature("test_feature", ["test_col"])
         calibrator.add_feature(feature)
         calibrator.fit(labelled_dataset)
 
-        calibrator.feature_dict["test_feature"]._columns = ["test_col", "extra_col"]
+        calibrator.feature_dict["test_feature"]._columns = ["other_col"]
 
-        with pytest.raises(ValueError, match="feature dimension mismatch"):
+        with pytest.raises(
+            ValueError,
+            match=r"fitted feature column\(s\) \['test_col'\].*not produced",
+        ):
             calibrator.predict(sample_dataset)
+
+    def test_training_feature_columns_subsets_columns_property(self, calibrator):
+        """training_feature_columns narrows columns without changing Feature.columns."""
+        feature = MockCalibrationFeature("beam", ["margin", "entropy", "z-score"])
+        calibrator.add_feature(feature)
+        assert feature.columns == ["margin", "entropy", "z-score"]
+
+        calibrator.set_training_feature_columns(["margin", "z-score"])
+        assert calibrator.columns == ["margin", "z-score"]
+        assert feature.columns == ["margin", "entropy", "z-score"]
+        assert calibrator.training_feature_columns == ["margin", "z-score"]
+
+    def test_training_feature_columns_unknown_name_raises(self, calibrator):
+        """Unknown training column names are rejected against the registry."""
+        calibrator.add_feature(MockCalibrationFeature("beam", ["margin"]))
+        with pytest.raises(ValueError, match="unknown column"):
+            calibrator.set_training_feature_columns(["margin", "nope"])
+
+    def test_training_feature_columns_allows_sequential_add_feature(self, calibrator):
+        """Deferred training columns are not checked on each add_feature."""
+        calibrator.set_training_feature_columns(["margin", "irt_error"])
+        calibrator.add_feature(MockCalibrationFeature("beam", ["margin", "entropy"]))
+        calibrator.add_feature(MockCalibrationFeature("rt", ["irt_error"]))
+        assert calibrator.columns == ["margin", "irt_error"]
+        # Still valid once the registry is complete.
+        calibrator._validate_training_feature_columns_against_registry()
+
+    def test_training_feature_columns_deferred_unknown_raises_at_fit(self):
+        """Unknown deferred training columns are caught at fit_from_features."""
+        n = 40
+        train = FeatureDataset(
+            features=np.random.randn(n, 2).astype(np.float32),
+            labels=np.random.choice([0.0, 1.0], n).astype(np.float32),
+            columns=["margin"],
+        )
+        calibrator = ProbabilityCalibrator(max_epochs=1, hidden_dims=(4,), seed=0)
+        calibrator.set_training_feature_columns(["margin", "nope"])
+        calibrator.add_feature(MockCalibrationFeature("beam", ["margin"]))
+        with pytest.raises(ValueError, match="unknown column"):
+            calibrator.fit_from_features(train)
+
+    def test_training_feature_columns_rejects_after_fit(self, feature_dataset):
+        """Cannot change training_feature_columns after fit."""
+        calibrator = ProbabilityCalibrator(max_epochs=1, hidden_dims=(4,), seed=0)
+        calibrator.fit_from_features(feature_dataset)
+        with pytest.raises(ValueError, match="after the calibrator has been fitted"):
+            calibrator.set_training_feature_columns([])
+
+    def test_fit_from_features_with_training_feature_subset(self, tmp_path):
+        """Subset training freezes fitted columns and survives save/load."""
+        n = 80
+        features = np.random.randn(n, 4).astype(np.float32)
+        labels = np.random.choice([0.0, 1.0], n).astype(np.float32)
+        wide = FeatureDataset(
+            features=features,
+            labels=labels,
+            columns=["margin", "entropy", "z-score"],
+        )
+        calibrator = ProbabilityCalibrator(max_epochs=2, hidden_dims=(8,), seed=0)
+        calibrator.add_feature(
+            MockCalibrationFeature("beam", ["margin", "entropy", "z-score"])
+        )
+        calibrator.set_training_feature_columns(["z-score", "margin"])
+        train = wide.select_for(calibrator)
+        assert train.columns == ["z-score", "margin"]
+
+        calibrator.fit_from_features(train)
+        assert calibrator.columns == ["z-score", "margin"]
+        assert calibrator._fitted_feature_columns == ["z-score", "margin"]
+
+        ProbabilityCalibrator.save(calibrator, tmp_path / "subset_model")
+        with open(tmp_path / "subset_model" / "config.json") as f:
+            config = json.load(f)
+        assert config["feature_columns"] == ["z-score", "margin"]
+        assert config["training_feature_columns"] == ["z-score", "margin"]
+        assert "beam" in config["features"]
+
+        loaded = ProbabilityCalibrator.load(tmp_path / "subset_model")
+        assert loaded.columns == ["z-score", "margin"]
+        assert loaded._registry_feature_columns() == ["margin", "entropy", "z-score"]
+
+    def test_load_allows_fitted_subset_of_wider_registry(self, tmp_path):
+        """Fitted columns may be a proper subset of registered feature columns."""
+        n = 60
+        features = np.random.randn(n, 2).astype(np.float32)
+        labels = np.random.choice([0.0, 1.0], n).astype(np.float32)
+        train = FeatureDataset(features=features, labels=labels, columns=["margin"])
+        calibrator = ProbabilityCalibrator(max_epochs=1, hidden_dims=(4,), seed=0)
+        calibrator.add_feature(MockCalibrationFeature("beam", ["margin", "entropy"]))
+        calibrator.set_training_feature_columns(["margin"])
+        calibrator.fit_from_features(train)
+        ProbabilityCalibrator.save(calibrator, tmp_path / "subset")
+
+        loaded = ProbabilityCalibrator.load(tmp_path / "subset")
+        assert loaded.columns == ["margin"]
+        assert "entropy" in loaded._registry_feature_columns()
+
+    def test_load_preserves_empty_fitted_training_schema(self, tmp_path):
+        """An empty fitted subset remains frozen after checkpoint loading."""
+        n = 40
+        confidence_only = FeatureDataset(
+            features=np.random.rand(n, 1).astype(np.float32),
+            labels=np.random.choice([0.0, 1.0], n).astype(np.float32),
+            columns=[],
+        )
+        calibrator = ProbabilityCalibrator(max_epochs=1, hidden_dims=(4,), seed=0)
+        calibrator.add_feature(MockCalibrationFeature("beam", ["margin", "entropy"]))
+        calibrator.set_training_feature_columns([])
+        calibrator.fit_from_features(confidence_only)
+        ProbabilityCalibrator.save(calibrator, tmp_path / "confidence_only")
+
+        loaded = ProbabilityCalibrator.load(tmp_path / "confidence_only")
+
+        assert loaded._fitted_feature_columns == []
+        with pytest.raises(ValueError, match="after the calibrator has been fitted"):
+            loaded.set_training_feature_columns(["margin"])
 
     def test_feature_names_empty(self, calibrator):
         """Test feature_names property when no features are added."""
@@ -595,6 +726,7 @@ class TestProbabilityCalibrator:
         feature_dataset = calibrator.to_feature_dataset(dataset)
         features, labels = calibrator._extract_feature_matrix(dataset, labelled=True)
 
+        assert feature_dataset.columns == list(calibrator.columns)
         assert feature_dataset.features.dtype == torch.float32
         assert feature_dataset.labels.dtype == torch.float32
         np.testing.assert_allclose(
@@ -644,7 +776,9 @@ class TestProbabilityCalibrator:
         np.random.seed(123)
         val_features = np.random.randn(20, 1).astype(np.float32)
         val_labels = np.random.choice([0.0, 1.0], 20).astype(np.float32)
-        val_dataset = FeatureDataset(features=val_features, labels=val_labels)
+        val_dataset = FeatureDataset(
+            features=val_features, labels=val_labels, columns=[]
+        )
 
         calibrator = ProbabilityCalibrator(
             max_epochs=5,
@@ -668,7 +802,9 @@ class TestProbabilityCalibrator:
         n_val = 50
         val_features = np.random.randn(n_val, 1).astype(np.float32)
         val_labels = np.random.choice([0.0, 1.0], n_val).astype(np.float32)
-        val_dataset = FeatureDataset(features=val_features, labels=val_labels)
+        val_dataset = FeatureDataset(
+            features=val_features, labels=val_labels, columns=[]
+        )
 
         calibrator = ProbabilityCalibrator(
             max_epochs=2,
@@ -836,7 +972,9 @@ class TestProbabilityCalibrator:
             model_input_columns={"fragmentation_types": "frag_type"},
         )
         calibrator.add_feature(feature)
-        train_ds = self._feature_dataset_with_width(1 + len(feature.columns))
+        train_ds = self._feature_dataset_with_width(
+            1 + len(feature.columns), columns=list(feature.columns)
+        )
         calibrator.fit_from_features(train_ds)
         ProbabilityCalibrator.save(calibrator, tmp_path / "koina_model")
 
@@ -859,7 +997,9 @@ class TestProbabilityCalibrator:
             },
         )
         calibrator.add_feature(feature)
-        train_ds = self._feature_dataset_with_width(1 + len(feature.columns))
+        train_ds = self._feature_dataset_with_width(
+            1 + len(feature.columns), columns=list(feature.columns)
+        )
         calibrator.fit_from_features(train_ds)
         ProbabilityCalibrator.save(calibrator, tmp_path / "legacy_model")
 
@@ -887,7 +1027,7 @@ class TestProbabilityCalibrator:
         )
         feature = MockCalibrationFeature("test_feature", ["test_col"])
         calibrator.add_feature(feature)
-        train_ds = self._feature_dataset_with_width(2)
+        train_ds = self._feature_dataset_with_width(2, columns=["test_col"])
         calibrator.fit_from_features(train_ds)
 
         ProbabilityCalibrator.save(calibrator, tmp_path / "model")
@@ -993,12 +1133,12 @@ class TestProbabilityCalibrator:
         # Linearly separable training data: label = 1 when x > 0.
         x_train = np.linspace(-2, 2, 200).reshape(-1, 1).astype(np.float32)
         y_train = (x_train[:, 0] > 0).astype(np.float32)
-        train_ds = FeatureDataset(features=x_train, labels=y_train)
+        train_ds = FeatureDataset(features=x_train, labels=y_train, columns=[])
 
         # Validation with *inverted* labels: model overfits train, val loss rises.
         x_val = np.linspace(-2, 2, 50).reshape(-1, 1).astype(np.float32)
         y_val = (x_val[:, 0] <= 0).astype(np.float32)
-        val_ds = FeatureDataset(features=x_val, labels=y_val)
+        val_ds = FeatureDataset(features=x_val, labels=y_val, columns=[])
 
         calibrator = ProbabilityCalibrator(
             max_epochs=50,
@@ -1106,16 +1246,15 @@ class TestProbabilityCalibrator:
         json.dumps(config)
 
     def test_fit_from_features_rejects_input_dim_mismatch(self):
-        """Matrix width must match ``1 + len(calibrator.columns)``.
-
-        Registered features imply expected width 2 (confidence + ``real_col``).
-        A wider FeatureDataset (as when full metadata Parquet is loaded without
-        ``feature_columns``) must raise before training.
-        """
+        """Extra FeatureDataset columns must match calibrator.columns exactly."""
         n = 40
         features = np.random.randn(n, 5).astype(np.float32)
         labels = np.random.choice([0.0, 1.0], n).astype(np.float32)
-        train_ds = FeatureDataset(features=features, labels=labels)
+        train_ds = FeatureDataset(
+            features=features,
+            labels=labels,
+            columns=["real_col", "extra_a", "extra_b", "extra_c"],
+        )
 
         calibrator = ProbabilityCalibrator(
             max_epochs=1, hidden_dims=(4,), seed=0, batch_size=16
@@ -1124,11 +1263,7 @@ class TestProbabilityCalibrator:
 
         with pytest.raises(
             ValueError,
-            match=(
-                r"Feature matrix width \(5\) does not match the registered "
-                r"feature schema \(expected 2: confidence plus 1 column\(s\) "
-                r"\['real_col'\]\)"
-            ),
+            match=r"Extra:.*select_for\(calibrator\)",
         ):
             calibrator.fit_from_features(train_ds)
 
@@ -1136,15 +1271,17 @@ class TestProbabilityCalibrator:
         assert calibrator._fitted_feature_columns is None
         assert calibrator.network is None
 
-    def test_fit_from_features_rejects_validation_width_mismatch(self):
-        """Validation matrix width must match the training matrix."""
-        train_ds = self._feature_dataset_with_width(2)
-        val_ds = self._feature_dataset_with_width(3, n=20)
+    def test_fit_from_features_rejects_validation_column_mismatch(self):
+        """Validation FeatureDataset.columns must match training columns."""
+        train_ds = self._feature_dataset_with_width(2, columns=["real_col"])
+        val_ds = self._feature_dataset_with_width(
+            3, n=20, columns=["real_col", "extra"]
+        )
         calibrator = ProbabilityCalibrator(max_epochs=1, hidden_dims=(4,), seed=0)
         calibrator.add_feature(MockCalibrationFeature("real_feat", ["real_col"]))
 
         with pytest.raises(
             ValueError,
-            match=r"Validation feature matrix width \(3\) does not match",
+            match=r"Training and validation FeatureDataset.columns must be identical",
         ):
             calibrator.fit_from_features(train_ds, val_ds)

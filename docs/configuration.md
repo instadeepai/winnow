@@ -210,6 +210,9 @@ calibrator:
   val_early_stopping_max_psms: null  # Subsample large validation sets during early stopping only.
   val_subsample_seed: null  # RNG seed for validation subsampling (defaults to seed).
   seed: 42  # Random seed for reproducibility.
+  # Optional ordered subset of registered feature columns for the MLP
+  # (non-confidence names only). null uses the full registry.
+  training_feature_columns: null
 
   features:
     mass_error:
@@ -271,6 +274,7 @@ live in [`winnow/configs/koina.yaml`](https://github.com/instadeepai/winnow/blob
 - `tol`: Minimum validation loss improvement (absolute) to count as progress
 - `val_early_stopping_max_psms`: When set, subsample validation PSMs for per-epoch early stopping (full validation metrics recorded after training)
 - `val_subsample_seed`: RNG seed for validation subsampling (defaults to `seed`)
+- `training_feature_columns`: Optional ordered subset of registry columns for the MLP (non-confidence). `null` uses the full registry; feature modules still compute fully
 - `features.*`: Individual calibration feature configurations
 
 ### Koina config (`configs/koina.yaml`)

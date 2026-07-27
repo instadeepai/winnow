@@ -99,6 +99,9 @@ winnow train calibrator.learning_rate=0.01 calibrator.max_epochs=200 calibrator.
 
 winnow train calibrator.features.fragment_match_features.mz_tolerance=0.01 \
   calibrator.features.fragment_match_features.mz_tolerance_unit=da
+
+# Train on a subset of feature columns (included feature sets still compute fully)
+winnow train 'calibrator.training_feature_columns=[ion_matches,ion_match_intensity]'
 ```
 
 For comprehensive calibrator configuration options, see:
@@ -129,7 +132,7 @@ winnow compute-features labelled=false '~calibrator.features.retention_time_feat
 
 - `data_loader`, `dataset.*`: Same as `winnow train`
 - `metadata_output_path`: Full metadata CSV for EDA (all columns)
-- `training_matrix_output_path`: Optional lean numeric Parquet containing only features and labels for model training (used with two-phase `features_path` workflow)
+- `training_matrix_output_path`: Optional lean numeric Parquet containing confidence, registered feature columns, and labels for two-phase training via `features_path` (CLI aligns with `select_for(calibrator)` after load)
 - `labelled`: If true (default), spectrum data must include a `sequence` column.
 
 Feature selection matches training: override `calibrator.features` or use `~calibrator.features.<name>` to drop entries. See [Configuration guide](configuration.md#compute-features-configuration).

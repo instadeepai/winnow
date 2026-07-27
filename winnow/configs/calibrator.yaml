@@ -25,6 +25,10 @@ calibrator:
   # Set to null to disable subsampling (use all validation PSMs each epoch).
   val_early_stopping_max_psms: null
   val_subsample_seed: null
+  # Optional ordered subset of registered feature columns used for training
+  # (non-confidence names only). Null uses the full registry. Compute still
+  # runs all registered feature modules; only the MLP input schema is narrowed.
+  training_feature_columns: null
 
   features:
     mass_error:
