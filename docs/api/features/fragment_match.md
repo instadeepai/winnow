@@ -11,7 +11,7 @@ The quality of the match between observed and theoretical fragmentation patterns
 - Consecutive ion series without gaps
 - Low unexplained intensity
 
-False identifications often show poor spectral agreement even when the de novo sequencer reports high confidence.
+False identifications often show poor spectral agreement even when the *de novo* sequencer reports high confidence.
 
 ## Implementation
 

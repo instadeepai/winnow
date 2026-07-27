@@ -44,7 +44,8 @@ configs/
 ├── calibrator.yaml            # Model architecture and features
 ├── koina.yaml                 # Koina model names, inputs, and constraints
 ├── predict.yaml               # Main prediction config
-└── diagnose_calibration.yaml  # Tail calibration diagnostic (sTECE / TECE)
+├── diagnose_calibration.yaml  # Tail calibration diagnostic (sTECE / TECE)
+└── annotate_proteome_hits.yaml  # Proteome-hit annotation
 ```
 
 ## Overriding configuration
@@ -74,7 +75,12 @@ winnow compute-features training_matrix_output_path=results/features.parquet
 
 # Calibration diagnostic overrides
 winnow diagnose-calibration diagnostics.label_source=sequence fdr_control.fdr_threshold=0.01
-winnow diagnose-calibration diagnostics.label_source=precomputed diagnostics.label_column=proteome_hit
+winnow diagnose-calibration data_loader=winnow \
+  dataset.spectrum_path_or_directory=holdout/annotated dataset.predictions_path=null \
+  diagnostics.label_source=precomputed diagnostics.label_column=proteome_hit
+
+# Proteome-hit annotation
+winnow annotate-proteome-hits proteome.fasta=proteome.fasta output_dir=holdout/annotated
 ```
 
 ### Nested parameters
@@ -446,25 +452,21 @@ No additional parameters required.
 ```yaml
 _target_: winnow.fdr.database_grounded.DatabaseGroundedFDRControl
 confidence_feature: ${fdr_control.confidence_column}
-residue_masses: ${residue_masses}
-isotope_error_range: [0, 1]
 drop: 10
 ```
 
-Requires ground truth sequences in the dataset.
+Requires finalised labelled metadata from a DatasetLoader (`correct` and `valid_sequence`).
 
 **Key parameters:**
 
 - `confidence_feature`: Name of the column with confidence scores (interpolated from fdr_control)
-- `residue_masses`: Amino acid and modification masses (interpolated from residues config)
-- `isotope_error_range`: Range of isotope errors to consider when matching peptides
 - `drop`: Number of top predictions to drop for stability
 
 ## Calibration diagnostic configuration
 
 ### Main config (`configs/diagnose_calibration.yaml`)
 
-Runs tail calibration diagnostics on a labelled holdout set: loads data like `winnow predict`, applies a pretrained calibrator, derives the operating cutoff $\tau$ at `fdr_control.fdr_threshold`, and reports sTECE and TECE on $\{S \ge \tau\}$. See the [CLI reference](cli.md#winnow-diagnose-calibration) for usage examples and interpretation.
+Runs tail calibration diagnostics on a labelled holdout set: loads data like `winnow predict`, applies a pretrained calibrator, derives the operating cutoff $\tau$ at `fdr_control.fdr_threshold` on the labelled diagnostic population, and reports sTECE and TECE on $\{S \ge \tau\}$. See the [CLI reference](cli.md#winnow-diagnose-calibration) for usage examples and interpretation.
 
 ```yaml
 defaults:
@@ -480,6 +482,10 @@ dataset:
 calibrator:
   pretrained_model_name_or_path: InstaDeepAI/winnow-general-model
   cache_dir: null
+  irt_regressor_path: null
+  # irt_calibration:
+  #   train_fraction: 0.3
+  #   min_train_points: 10
 
 fdr_control:
   fdr_threshold: 0.05
@@ -500,15 +506,15 @@ diagnostics:
 
 - `data_loader`, `dataset.*`: Same meaning as in `predict.yaml` (holdout spectra + predictions)
 - `koina.*`: Koina collision energy / fragmentation inputs (same as predict)
-- `calibrator.pretrained_model_name_or_path`, `calibrator.cache_dir`: Model loading
 - `calibrator.pretrained_model_name_or_path`, `calibrator.cache_dir`: Calibrator checkpoint to score the holdout (same as predict)
+- `calibrator.irt_regressor_path`: Optional pre-fitted iRT regressors from training. When set, diagnose loads the same RT→iRT maps as `winnow predict` instead of re-fitting on the holdout. Use the same path you pass to predict when auditing that workflow; leave `null` (default) for the general pretrained-model re-fit behaviour.
 - `fdr_control.fdr_threshold`: Nominal FDR target $\alpha$ used to set $\tau$ via `NonParametricFDRControl.get_confidence_cutoff`
 - `fdr_control.confidence_column`: Column used for scores $S$ after calibration (default `calibrated_confidence`)
 - `diagnostics.label_source`: How correctness labels $Y$ are obtained (see below)
 - `diagnostics.label_column`: Boolean column name when `label_source=precomputed`; must be `null` when `label_source=sequence`
 - `diagnostics.tolerance`: Maximum acceptable $|\widehat{\mathrm{sTECE}}(\tau)|$ before a warning (default `0.005` ≈ 0.5 pp on the FDR scale at $\alpha=0.05$)
 - `diagnostics.min_tail_psms`: Fail if fewer than this many PSMs remain above $\tau$
-- `diagnostics.n_bins`: Equal-frequency bins for the reliability diagram (tail only, $S \ge \text{conf\_cutoff}$)
+- `diagnostics.n_bins`: Equal-frequency bins for the reliability diagram (tail only, scores $S$ at or above `conf_cutoff`)
 - `diagnostics.output_dir`: Writes `diagnostic_report.json` and `reliability_diagram.png`
 - `diagnostics.fail_on_warning`: If true, non-zero exit when tolerance is exceeded (for CI)
 - `diagnostics.plot`: If false, skip writing the reliability diagram
@@ -519,10 +525,38 @@ You must choose exactly one labelling mode. The command validates config before 
 
 | `label_source` | `label_column` | Behaviour |
 | --- | --- | --- |
-| `sequence` | must be `null` | Derive `correct` from full-sequence match of `sequence` vs `prediction` (uses `residue_masses` from `residues.yaml`). |
-| `precomputed` | required (e.g. `proteome_hit`) | Read boolean labels from the named column in merged metadata (e.g. offline proteome mapping). |
+| `sequence` | must be `null` | Use loader-finalised `correct` labels (and exclude rows with `valid_sequence=False`). |
+| `precomputed` | required (e.g. `proteome_hit`) | Read boolean labels from the named column in merged metadata (typically from `winnow annotate-proteome-hits`). |
 
-Extra label columns in the input file (e.g. `proteome_hit` when using `sequence`) are ignored. If both `sequence` and a precomputed column exist, only the path chosen by `label_source` is used.
+## Proteome-hit annotation configuration
+
+### Main config (`configs/annotate_proteome_hits.yaml`)
+
+Loads a *de novo* prediction dataset, filters short peptides, adds `proteome_hit` via FASTA substring matching, and writes a Winnow dataset directory. See the [CLI reference](cli.md#winnow-annotate-proteome-hits).
+
+```yaml
+defaults:
+  - _self_
+  - residues
+  - data_loader: instanovo
+
+dataset:
+  spectrum_path_or_directory: examples/example_data/spectra.mgf
+  predictions_path: examples/example_data/predictions.csv
+
+proteome:
+  fasta: null                 # required override
+  min_residue_length: 7
+
+output_dir: results/annotated_winnow_dataset
+```
+
+**Key parameters:**
+
+- `data_loader`, `dataset.*`: Same meaning as in `predict.yaml`
+- `proteome.fasta`: Reference proteome FASTA (required)
+- `proteome.min_residue_length`: Drop PSMs with fewer tokeniser residues than this
+- `output_dir`: Directory for `metadata.csv` and optional `predictions.pkl`
 
 ## Shared configuration
 
@@ -768,6 +802,7 @@ my_configs/
 ├── compute_features.yaml      # Override compute-features config (if needed)
 ├── predict.yaml               # Override prediction config (if needed)
 ├── diagnose_calibration.yaml  # Override calibration diagnostic config (if needed)
+├── annotate_proteome_hits.yaml  # Override proteome-hit annotation config (if needed)
 ├── data_loader/               # Override data loaders (if needed)
 │   └── instanovo.yaml
 │   └── mztab.yaml

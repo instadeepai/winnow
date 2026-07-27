@@ -30,33 +30,23 @@ from winnow.fdr.base import FDRControl
 Implements database-grounded FDR control using database search results as ground truth for FDR estimation.
 
 ```python
+from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.fdr import DatabaseGroundedFDRControl
-residue_masses = {
-            "G": 57.021464,
-            "A": 71.037114,
-            "P": 97.052764,
-            "E": 129.042593,
-            "T": 101.047670,
-            "I": 113.084064,
-            "D": 115.026943,
-            "R": 156.101111,
-            "O": 237.147727,
-            "N": 114.042927,
-            "S": 87.032028,
-            "M": 131.040485,
-            "L": 113.084064,
-        }
 
 # Create FDR controller
-fdr_control = DatabaseGroundedFDRControl(confidence_feature="confidence")
-
-# Fit using labelled dataset
-fdr_control.fit(
-    dataset=labelled_dataframe,
-    residue_masses=residue_masses,
-    isotope_error_range=(0, 1),
-    drop=10  # Drop top N predictions for stability
+fdr_control = DatabaseGroundedFDRControl(
+    confidence_feature="confidence",
+    drop=10,  # Drop top N predictions for stability
 )
+
+# Fit using a CalibrationDataset with loader-finalised metadata
+# (requires correct, valid_sequence and confidence columns by default)
+fdr_control.fit(dataset=calibration_dataset)
+
+# Or fit against a proxy correctness column (SDK only; not exposed in the CLI),
+# e.g. proteome_hit from winnow.utils.proteome.annotate_calibration_dataset.
+# Custom correct_column values do not require valid_sequence.
+fdr_control.fit(dataset=annotated_dataset, correct_column="proteome_hit")
 
 # Get confidence cutoff for 1% FDR
 confidence_cutoff = fdr_control.get_confidence_cutoff(threshold=0.01)
@@ -73,16 +63,38 @@ dataset_with_q_values = fdr_control.add_psm_q_value(dataset, "confidence")
 
 **Key Features:**
 
-- **Ground Truth Validation**: Uses database search results for validation
-- **Precision-Recall Analysis**: Computes precision-recall curves from predictions
-- **Isotope Error Handling**: Supports configurable isotope error ranges
+- **Ground Truth Validation**: Uses loader-derived `correct` labels from database-grounded sequences by default, or a custom boolean proxy via `correct_column` (for example `proteome_hit`)
+- **Precision-Recall Analysis**: Computes precision-recall curves from finalised predictions
 - **Stability Control**: Drop parameter for robust threshold estimation
+- **Finalised Metadata Only**: Does not tokenise peptides or compute match labels; prefer loading labelled data through a DatasetLoader first
 
 **Required Data:**
 
-- Ground truth peptide sequences (`sequence` column)
-- Predicted peptide sequences (`prediction` column)
 - Confidence scores (configurable column name)
+- Boolean PSM correctness column (`correct` by default, or `correct_column`)
+- When `correct_column` is `"correct"`: boolean `valid_sequence` used for filtering eligible fit rows
+- When `correct_column` is a proxy such as `"proteome_hit"`: `valid_sequence` is not required
+
+**Fit vs apply:**
+
+`fit` builds the FDR curve only from rows with `valid_sequence=True`. Applying a cutoff is score-based only: `get_confidence_cutoff`, `add_psm_fdr`, and `add_psm_q_value` do not require labels, so retained PSMs may include rows that never entered the curve (unlabelled spectra, or `valid_sequence=False`). That is intentional when filtering by confidence alone.
+
+Power users can fit on one labelled dataset and apply the resulting cutoff to another:
+
+```python
+fdr_control.fit(labelled_holdout)
+cutoff = fdr_control.get_confidence_cutoff(threshold=0.01)
+
+# Apply to any dataset that has the confidence column (labels optional)
+target_metadata = fdr_control.add_psm_fdr(
+    target_dataset.metadata, confidence_col="calibrated_confidence"
+)
+retained = target_dataset.filter_entries(
+    metadata_predicate=lambda row: row["calibrated_confidence"] < cutoff
+)
+```
+
+The `winnow predict` CLI still fits and applies on a single labelled input when using database-grounded FDR; use the library API above for transferred cutoffs.
 
 ### NonParametricFDRControl
 
@@ -94,7 +106,7 @@ from winnow.fdr import NonParametricFDRControl
 # Create non-parametric FDR controller
 fdr_control = NonParametricFDRControl()
 
-# Fit estimation method to confidence scores
+# Fit estimation method to a Series of confidence scores
 fdr_control.fit(dataset=dataset["confidence"])
 
 # Get confidence cutoff for 5% FDR

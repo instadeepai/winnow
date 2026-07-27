@@ -1,6 +1,6 @@
 # Beam Features
 
-Extracts confidence signals from beam search diversity metrics, measuring how confident the de novo sequencer is in its top prediction relative to alternatives.
+Extracts confidence signals from beam search diversity metrics, measuring how confident the *de novo* sequencer is in its top prediction relative to alternatives.
 
 ## Purpose
 
@@ -21,6 +21,7 @@ For each spectrum with beam search results `[p₁, p₂, ..., pₙ]` where `p₁
 2. **Median Margin**: `p₁ - median(p₂, ..., pₙ)` (difference from median runner-up)
 3. **Entropy**: Shannon entropy of normalised runner-up distribution
 4. **Z-score**: `(p₁ - mean(all)) / std(all)` (how unusual is the top score)
+5. **Edit distance**: normalised token-level Levenshtein distance between the top-1 and top-2 sequences (I/L treated as identical)
 
 ## Columns
 
@@ -30,6 +31,7 @@ For each spectrum with beam search results `[p₁, p₂, ..., pₙ]` where `p₁
 | `median_margin` | Probability difference (0-1) | Difference between top-1 probability and median probability of runner-ups. |
 | `entropy` | Nats | Shannon entropy of the **normalised** runner-up probability distribution. Higher entropy = more uncertainty among alternatives. |
 | `z-score` | Standard deviations | Z-score of the top-1 probability relative to the full beam distribution (mean and std computed over all beam probabilities). |
+| `edit_distance` | Unitless (0-1) | Normalised Levenshtein distance between top-1 and top-2 token sequences. I and L are treated as the same residue. Larger distance = more dissimilar runner-up. Returns `1.0` when no runner-up exists, when either beam row is missing, or when both sequences are empty. |
 
 ## Usage
 
@@ -51,7 +53,9 @@ The dataset must have beam predictions available (`dataset.predictions` must not
 ## Notes
 
 - A warning is emitted if any beam search results have fewer than two sequences
-- When beam size is 1, margin and entropy default to 0
+- When beam size is 1, margin and entropy default to 0; `edit_distance` defaults to `1.0`
 - Entropy is computed on the **normalised** runner-up probabilities (excluding top-1)
 - Z-score uses the full beam including top-1 for mean/std calculation
+- Edit distance collapses I/L via the same leucine normalisation used elsewhere in the package (`L` → `I`)
+- Both sequences empty is treated as undefined (`1.0`), not as raw Levenshtein zero
 - All probability values are derived from `exp(sequence_log_probability)`

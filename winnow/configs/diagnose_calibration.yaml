@@ -12,6 +12,14 @@ dataset:
 calibrator:
   pretrained_model_name_or_path: InstaDeepAI/winnow-general-model
   cache_dir: null
+  # Optional: path to pre-fitted iRT regressors saved during training.
+  # When set, loaded regressors are used instead of re-fitting from hold-out data.
+  # Leave as null for the general pretrained model workflow (regressors re-fit automatically).
+  irt_regressor_path: null
+  # Optional RT->iRT regressor fitting overrides (when irt_regressor_path is null):
+  # irt_calibration:
+  #   train_fraction: 0.3
+  #   min_train_points: 10
 
 fdr_control:
   fdr_threshold: 0.05

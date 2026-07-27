@@ -13,6 +13,7 @@ from instanovo.utils.metrics import Metrics
 from instanovo.utils.residues import ResidueSet
 
 from winnow.datasets.calibration_dataset import CalibrationDataset
+from winnow.datasets.data_loaders import utils as data_utils
 from winnow.datasets.interfaces import DatasetLoader
 
 
@@ -57,13 +58,8 @@ class WinnowDatasetLoader(DatasetLoader):
                 f"The file should be a valid CSV containing PSM metadata. Error: {e}"
             ) from e
 
-        if "sequence" in metadata.columns:
-            metadata["sequence"] = metadata["sequence"].apply(
-                self.metrics._split_peptide
-            )
-        metadata["prediction"] = metadata["prediction"].apply(
-            self.metrics._split_peptide
-        )
+        # Reload-specific array parsing for saved CSV serialisations. Preserve both
+        # comma-delimited lists and numpy print formats.
         metadata["mz_array"] = metadata["mz_array"].apply(
             lambda s: (
                 ast.literal_eval(s)
@@ -81,6 +77,19 @@ class WinnowDatasetLoader(DatasetLoader):
                     re.sub(r"(\n?)(\s+)", ", ", re.sub(r"\[\s+", "[", s))
                 )
             )
+        )
+
+        has_labels = "sequence" in metadata.columns and any(
+            data_utils.is_usable_peptide_label(value) for value in metadata["sequence"]
+        )
+        if "sequence" in metadata.columns and not has_labels:
+            metadata = metadata.drop(columns=["sequence"])
+
+        metadata = data_utils.finalize_peptide_metadata(
+            metadata,
+            self.metrics,
+            has_labels=has_labels,
+            residue_remapping=self.metrics.residue_set.residue_remapping,
         )
 
         predictions_pkl_path = data_path / Path("predictions.pkl")

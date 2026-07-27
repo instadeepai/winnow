@@ -30,6 +30,7 @@ class TestChimericFeatures:
         metadata = pd.DataFrame(
             {
                 "confidence": [0.9, 0.8, 0.7],
+                "prediction": [["A", "G"], ["V", "T"], ["K"]],
                 "precursor_charge": [2, 2, 3],
                 "spectrum_id": [0, 1, 2],
                 "mz_array": [
@@ -168,7 +169,9 @@ class TestChimericFeatures:
 
     def test_compute_with_none_predictions(self, chimeric_features):
         """Test that compute raises error when predictions is None."""
-        metadata = pd.DataFrame({"confidence": [0.9], "precursor_charge": [2]})
+        metadata = pd.DataFrame(
+            {"confidence": [0.9], "prediction": [["A"]], "precursor_charge": [2]}
+        )
         dataset = CalibrationDataset(metadata=metadata, predictions=None)
 
         with pytest.raises(
@@ -182,6 +185,7 @@ class TestChimericFeatures:
         metadata = pd.DataFrame(
             {
                 "confidence": [0.9],
+                "prediction": [["A"]],
                 "precursor_charge": [2],
             }
         )
@@ -302,6 +306,7 @@ class TestChimericFeatures:
         metadata = pd.DataFrame(
             {
                 "confidence": [0.9, 0.7, 0.6],
+                "prediction": [["A", "G"], ["K"], ["S", "P"]],
                 "precursor_charge": [2, 2, 7],  # Last one has charge > 6
                 "spectrum_id": [10, 30, 40],
                 "mz_array": [
@@ -372,6 +377,7 @@ class TestChimericFeatures:
         )
         metadata = pd.DataFrame(
             {
+                "prediction": [["A", "G"], ["V", "T"], ["S", "P"]],
                 "precursor_charge": [2, 2, 2],
                 "spectrum_id": [10, 20, 30],
                 "mz_array": [[100.0, 200.0], [120.0], [110.0, 210.0]],

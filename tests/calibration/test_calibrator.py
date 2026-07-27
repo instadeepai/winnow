@@ -112,6 +112,7 @@ def _freeze_feature_metadata(*, labelled: bool = False) -> pd.DataFrame:
         "confidence": [0.9, 0.5, 0.1],
         "f1": [1.0, 2.0, 3.0],
         "f2": [0.1, 0.2, 0.3],
+        "prediction": [["A", "G"], ["G", "A"], ["A", "G"]],
     }
     if labelled:
         data["correct"] = [1.0, 0.0, 1.0]
@@ -251,7 +252,11 @@ class TestProbabilityCalibrator:
     def sample_dataset(self):
         """Create a sample CalibrationDataset for testing."""
         metadata = pd.DataFrame(
-            {"confidence": [0.9, 0.8, 0.7, 0.6, 0.5], "other_col": [1, 2, 3, 4, 5]}
+            {
+                "confidence": [0.9, 0.8, 0.7, 0.6, 0.5],
+                "prediction": [["A"], ["G"], ["S"], ["V"], ["P"]],
+                "other_col": [1, 2, 3, 4, 5],
+            }
         )
         return CalibrationDataset(metadata=metadata, predictions=[None] * 5)
 
@@ -272,6 +277,7 @@ class TestProbabilityCalibrator:
         metadata = pd.DataFrame(
             {
                 "confidence": np.random.uniform(0.1, 0.99, n_samples),
+                "prediction": [["A", "G"]] * n_samples,
                 "correct": np.random.choice([0, 1], n_samples),
                 "feature1": np.random.uniform(1.0, 10.0, n_samples),
                 "feature2": np.random.uniform(0.1, 1.0, n_samples),
@@ -622,7 +628,7 @@ class TestProbabilityCalibrator:
         calibrator = _hand_wired_freeze_calibrator()
         dataset = CalibrationDataset(
             metadata=_freeze_feature_metadata(labelled=False),
-            predictions=[None] * 3,
+            predictions=[["A", "G"], ["G", "A"], ["A", "G"]],
         )
         features = calibrator._extract_feature_matrix(dataset, labelled=False)
 
@@ -701,7 +707,9 @@ class TestProbabilityCalibrator:
     def test_predict_feature_column_order(self):
         """Metadata column permutation must not change predict output order."""
         calibrator = _hand_wired_freeze_calibrator(batch_size=1)
-        permuted = _freeze_feature_metadata(labelled=False)[["f2", "confidence", "f1"]]
+        permuted = _freeze_feature_metadata(labelled=False)[
+            ["f2", "confidence", "f1", "prediction"]
+        ]
         dataset = CalibrationDataset(metadata=permuted, predictions=[None] * 3)
         calibrator.predict(dataset)
 
@@ -829,6 +837,7 @@ class TestProbabilityCalibrator:
         train_metadata = pd.DataFrame(
             {
                 "confidence": np.random.uniform(0.1, 0.99, n_train),
+                "prediction": [["A", "G"]] * n_train,
                 "correct": np.random.choice([0, 1], n_train),
             }
         )
@@ -851,6 +860,7 @@ class TestProbabilityCalibrator:
         pred_metadata = pd.DataFrame(
             {
                 "confidence": np.random.uniform(0.1, 0.99, n_pred),
+                "prediction": [["A", "G"]] * n_pred,
             }
         )
         pred_raw = CalibrationDataset(
@@ -864,6 +874,85 @@ class TestProbabilityCalibrator:
         probs = pred_raw.metadata["calibrated_confidence"]
         assert len(probs) == n_pred
         assert all(0.0 <= p <= 1.0 for p in probs)
+
+    def test_fit_excludes_rows_without_valid_ground_truth_sequences(self):
+        """Rows with valid_sequence=False must not enter normalisation or network fitting."""
+        n_labelled = 50
+        n_unlabelled = 10
+        np.random.seed(0)
+        metadata = pd.DataFrame(
+            {
+                "confidence": np.concatenate(
+                    [
+                        np.random.uniform(0.1, 0.99, n_labelled),
+                        np.random.uniform(0.1, 0.99, n_unlabelled),
+                    ]
+                ),
+                "prediction": [["A", "G"]] * (n_labelled + n_unlabelled),
+                "sequence": [["A", "G"]] * n_labelled + [None] * n_unlabelled,
+                "valid_sequence": [True] * n_labelled + [False] * n_unlabelled,
+                "correct": np.concatenate(
+                    [np.random.choice([0, 1], n_labelled), np.zeros(n_unlabelled)]
+                ),
+            }
+        )
+        dataset = CalibrationDataset(
+            metadata=metadata,
+            predictions=[None] * len(metadata),
+        )
+        calibrator = ProbabilityCalibrator(seed=42, max_epochs=2, hidden_dims=(8,))
+        feature = MockCalibrationFeature("test_feature", ["test_col"])
+        calibrator.add_feature(feature)
+
+        calibrator.compute_features(dataset)
+        # Feature computation still runs on every row.
+        assert len(dataset.metadata) == n_labelled + n_unlabelled
+        # Only labelled rows become the supervised training matrix.
+        assert len(calibrator.to_feature_dataset(dataset)) == n_labelled
+
+        calibrator.fit(dataset)
+        assert calibrator.network is not None
+        assert calibrator.feature_mean is not None
+
+    def test_fit_rejects_raw_proforma_string_ground_truth(self, labelled_dataset):
+        """Raw ProForma strings are rejected at CalibrationDataset construction."""
+        metadata = labelled_dataset.metadata.copy()
+        metadata["sequence"] = ["AG"] * len(metadata)
+        with pytest.raises(ValueError, match="raw strings"):
+            CalibrationDataset(
+                metadata=metadata,
+                predictions=labelled_dataset.predictions,
+            )
+
+    def test_fit_raises_when_no_valid_ground_truth_sequences(self, calibrator):
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.9, 0.8],
+                "prediction": [["A"], ["G"]],
+                "sequence": [None, None],
+                "valid_sequence": [False, False],
+                "correct": [0, 0],
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=[None, None])
+        calibrator.add_feature(MockCalibrationFeature("test_feature", ["test_col"]))
+        with pytest.raises(ValueError, match="valid_sequence=True"):
+            calibrator.fit(dataset)
+
+    def test_fit_raises_when_correct_column_missing(self, calibrator):
+        """Missing finalised ``correct`` must raise before feature computation."""
+        metadata = pd.DataFrame(
+            {
+                "confidence": [0.9, 0.8],
+                "prediction": [["A", "G"], ["G", "A"]],
+                "sequence": [["A", "G"], ["G", "A"]],
+                "valid_sequence": [True, True],
+            }
+        )
+        dataset = CalibrationDataset(metadata=metadata, predictions=[None, None])
+        calibrator.add_feature(MockCalibrationFeature("test_feature", ["test_col"]))
+        with pytest.raises(ValueError, match="'correct' column"):
+            calibrator.fit(dataset)
 
     def test_predict_without_fit_raises(self, calibrator, sample_dataset):
         """Test that prediction fails if calibrator hasn't been fitted."""
@@ -998,6 +1087,7 @@ class TestProbabilityCalibrator:
         train_metadata = pd.DataFrame(
             {
                 "confidence": np.random.uniform(0.1, 0.99, n),
+                "prediction": [["A", "G"]] * n,
                 "correct": np.random.choice([0, 1], n),
             }
         )
@@ -1019,7 +1109,12 @@ class TestProbabilityCalibrator:
         ProbabilityCalibrator.save(calibrator, tmp_path / "model")
         loaded = ProbabilityCalibrator.load(tmp_path / "model")
 
-        pred_metadata = pd.DataFrame({"confidence": [0.9, 0.5, 0.1]})
+        pred_metadata = pd.DataFrame(
+            {
+                "confidence": [0.9, 0.5, 0.1],
+                "prediction": [["A", "G"], ["G", "A"], ["S", "P"]],
+            }
+        )
         pred_ds = CalibrationDataset(
             metadata=pred_metadata,
             predictions=[None] * 3,
@@ -1091,7 +1186,7 @@ class TestProbabilityCalibrator:
 
     def test_empty_dataset_handling(self, calibrator):
         """Test handling of empty datasets."""
-        empty_metadata = pd.DataFrame({"confidence": []})
+        empty_metadata = pd.DataFrame({"confidence": [], "prediction": []})
         empty_dataset = CalibrationDataset(metadata=empty_metadata, predictions=[])
 
         feature = MockCalibrationFeature("test_feature")
@@ -1107,6 +1202,7 @@ class TestProbabilityCalibrator:
         train_metadata = pd.DataFrame(
             {
                 "confidence": np.linspace(0.9, 0.5, n_train),
+                "prediction": [["A", "G"]] * n_train,
                 "correct": np.ones(n_train, dtype=int),
             }
         )

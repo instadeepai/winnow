@@ -113,7 +113,7 @@ For two-phase training from a pre-computed Parquet file, load with `FeatureDatas
 1. **Create Calibrator**: Initialise `ProbabilityCalibrator`
 2. **Add Features**: Use `add_feature()` to include desired calibration features
 3. **Optional subset**: `set_training_feature_columns([...])` to train on a subset of registry columns
-4. **Fit Model**: Call `fit()` with a labelled `CalibrationDataset`; feature computation and training happen in one step
+4. **Fit Model**: Call `fit()` with a labelled `CalibrationDataset`
 5. **Save Model**: Use `save()` to persist trained calibrator
 
 For the two-phase workflow (compute features once, save a matrix, train later):
@@ -138,7 +138,7 @@ For the two-phase workflow (compute features once, save a matrix, train later):
    # Option 3: Use local model
    calibrator = ProbabilityCalibrator.load("./my_calibrator")
    ```
-2. **Predict**: Call `predict()` with unlabelled `CalibrationDataset`
+2. **Predict**: Call `predict()` with an unlabelled `CalibrationDataset`
 3. **Access Results**: Calibrated scores stored in dataset's "calibrated_confidence" column
 
 For detailed examples and usage patterns, refer to the [examples notebook](https://github.com/instadeepai/winnow/blob/main/examples/getting_started_with_winnow.ipynb).

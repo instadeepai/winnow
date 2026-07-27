@@ -7,10 +7,10 @@ needed, significantly reducing --help and config command times.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Union, Tuple, Optional, List, TYPE_CHECKING, Annotated
 import typer
 import logging
-from pathlib import Path
 
 from winnow.utils.rich_console import STDERR_CONSOLE, notebook_safe_rich_handler
 
@@ -62,21 +62,39 @@ def print_config(cfg) -> None:
     formatter.print_config(cfg)
 
 
+def _log_pipeline_start(pipeline_name: str, config_label: str, cfg) -> None:
+    """Log the standard pipeline start and configuration dump lines."""
+    logger.info(f"Starting {pipeline_name} pipeline.")
+    logger.info(f"{config_label}: {cfg}")
+
+
+def _log_pipeline_complete(pipeline_label: str) -> None:
+    """Log the standard pipeline completion line.
+
+    Args:
+        pipeline_label: Capitalised name used in the completion message
+            (e.g. ``Training``, ``Compute-features``).
+    """
+    logger.info(f"{pipeline_label} pipeline completed.")
+
+
 def _handle_koina_intensity_config(
     cfg,
     calibrator: Optional["ProbabilityCalibrator"] = None,
     *,
     hydra_overrides: Optional[List[str]] = None,
     execute: bool = True,
+    validate: bool = True,
 ) -> None:
-    """Validate and apply Koina intensity-model predict-time settings."""
+    """Validate and/or apply Koina intensity-model predict-time settings."""
     from winnow.utils.koina_intensity_config import (
         apply_koina_intensity_config,
         validate_koina_intensity_config,
     )
 
     koina_cfg = cfg.get("koina")
-    validate_koina_intensity_config(koina_cfg, hydra_overrides)
+    if validate:
+        validate_koina_intensity_config(koina_cfg, hydra_overrides)
 
     if not execute or calibrator is None:
         return
@@ -90,14 +108,16 @@ def _handle_irt_calibration_config(
     *,
     hydra_overrides: Optional[List[str]] = None,
     execute: bool = True,
+    validate: bool = True,
 ) -> None:
-    """Validate and apply predict-time iRT regressor calibration overrides."""
+    """Validate and/or apply predict-time iRT regressor calibration overrides."""
     from winnow.utils.irt_calibration_config import (
         apply_irt_calibration_config,
         validate_irt_calibration_config,
     )
 
-    validate_irt_calibration_config(cfg, hydra_overrides)
+    if validate:
+        validate_irt_calibration_config(cfg, hydra_overrides)
 
     if not execute or calibrator is None:
         return
@@ -111,8 +131,16 @@ def _handle_irt_calibration_config(
     )
 
 
-def _require_spectrum_path(spectrum_path_or_directory: Optional[str]) -> Path:
+def _require_spectrum_path(
+    spectrum_path_or_directory: Optional[str],
+    *,
+    command: str,
+) -> Path:
     """Validate that a dataset path was supplied and return it as a :class:`Path`.
+
+    Args:
+        spectrum_path_or_directory: Path from ``dataset.spectrum_path_or_directory``.
+        command: CLI command name used in error examples (e.g. ``predict``).
 
     Raises:
         typer.Exit: If no path was provided (exit code 1).
@@ -124,18 +152,38 @@ def _require_spectrum_path(spectrum_path_or_directory: Optional[str]) -> Path:
         STDERR_CONSOLE.print(
             "[bold red]Error:[/bold red] No dataset supplied.\n\n"
             "Set dataset.spectrum_path_or_directory to your spectrum "
-            "parquet file or a directory of internal Winnow datasets.\n\n"
+            "file (e.g. parquet, mgf) or a directory of internal Winnow "
+            "datasets.\n\n"
             "[bold cyan]Example:[/bold cyan]\n"
-            "  [dim]winnow predict data_loader=winnow "
+            f"  [dim]winnow {command} data_loader=winnow "
             "dataset.spectrum_path_or_directory=/path/to/winnow_dataset[/dim]\n"
-            "  [dim]winnow predict data_loader=instanovo "
+            f"  [dim]winnow {command} data_loader=instanovo "
             "dataset.spectrum_path_or_directory=/path/to/data.parquet "
             "dataset.predictions_path=/path/to/instanovo_predictions.csv[/dim]\n\n"
-            "Edit predict.yaml or pass overrides on the command line. "
-            "Run [dim]winnow config predict[/dim] to inspect the resolved config.",
+            "Edit the command YAML or pass overrides on the command line. "
+            f"Run [dim]winnow config {command}[/dim] to inspect the resolved config.",
         )
         raise typer.Exit(code=1)
     return Path(spectrum_path_or_directory)
+
+
+def _require_proteome_fasta(fasta: Optional[str]) -> str:
+    """Validate that a proteome FASTA path was supplied.
+
+    Args:
+        fasta: Path from ``proteome.fasta`` in config.
+
+    Returns:
+        The non-empty FASTA path string.
+
+    Raises:
+        typer.BadParameter: If no FASTA path was provided.
+    """
+    if fasta is None or not str(fasta).strip():
+        raise typer.BadParameter(
+            "proteome.fasta is required (e.g. proteome.fasta=/path/to/proteome.fasta)."
+        )
+    return str(fasta)
 
 
 def _require_spectra_after_features(n_spectra: int) -> None:
@@ -149,7 +197,7 @@ def _require_spectra_after_features(n_spectra: int) -> None:
 
     lines = [
         "[bold red]Error:[/bold red] All spectra were removed during feature "
-        "computation; nothing left to calibrate.",
+        "computation; nothing left to process.",
         "",
         "Check the warnings above. Common causes:",
         "  • iRT calibration skipped an experiment (e.g. only one "
@@ -168,7 +216,7 @@ def _require_spectra_after_features(n_spectra: int) -> None:
     raise typer.Exit(code=1)
 
 
-def filter_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
+def _filter_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
     """Filter out rows whose predictions are empty or contain unsupported PSMs.
 
     Args:
@@ -177,93 +225,126 @@ def filter_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
     Returns:
         CalibrationDataset: The filtered dataset
     """
-    filtered_dataset = (
-        dataset.filter_entries(
-            # Filter out non-list predictions
-            metadata_predicate=lambda row: not isinstance(row["prediction"], list),
-        )
-        # Filter out empty predictions
-        .filter_entries(metadata_predicate=lambda row: not row["prediction"])
+    from winnow.datasets.data_loaders.utils import is_valid_peptide_tokens
+
+    def row_has_valid_prediction(row: pd.Series) -> bool:
+        if "valid_prediction" in row.index:
+            return bool(row["valid_prediction"])
+        return is_valid_peptide_tokens(row["prediction"])
+
+    return dataset.filter_entries(
+        metadata_predicate=lambda row: not row_has_valid_prediction(row),
     )
-    return filtered_dataset
 
 
-def apply_fdr_control(
+def _apply_fdr_control(
     fdr_control: Union[NonParametricFDRControl, DatabaseGroundedFDRControl],
     dataset: CalibrationDataset,
     fdr_threshold: float,
     confidence_column: str,
-) -> pd.DataFrame:
-    """Apply FDR control to a dataset."""
+) -> CalibrationDataset:
+    """Apply FDR control and return a filtered dataset without mutating the input.
+
+    Fits the FDR method, annotates a copy of the metadata with FDR columns, then
+    returns a new ``CalibrationDataset`` containing only PSMs at or above the
+    confidence cutoff for ``fdr_threshold``.
+    """
+    from winnow.datasets.calibration_dataset import CalibrationDataset
     from winnow.fdr.nonparametric import NonParametricFDRControl
 
     if isinstance(fdr_control, NonParametricFDRControl):
         fdr_control.fit(dataset=dataset.metadata[confidence_column])
-        dataset.metadata = fdr_control.add_psm_pep(dataset.metadata, confidence_column)
+        metadata = fdr_control.add_psm_pep(dataset.metadata, confidence_column)
     else:
-        fdr_control.fit(dataset=dataset.metadata[confidence_column])
+        fdr_control.fit(dataset=dataset)
+        metadata = dataset.metadata
 
-    dataset.metadata = fdr_control.add_psm_fdr(dataset.metadata, confidence_column)
-    dataset.metadata = fdr_control.add_psm_q_value(dataset.metadata, confidence_column)
+    metadata = fdr_control.add_psm_fdr(metadata, confidence_column)
+    metadata = fdr_control.add_psm_q_value(metadata, confidence_column)
     confidence_cutoff = fdr_control.get_confidence_cutoff(threshold=fdr_threshold)
-    output_data = dataset.metadata
-    output_data = output_data[output_data[confidence_column] >= confidence_cutoff]
-    return output_data
 
-
-def check_if_labelled(dataset: CalibrationDataset) -> None:
-    """Check if the dataset contains a ground-truth column."""
-    if not _has_ground_truth_sequences(dataset.metadata):
-        raise ValueError(
-            "Database-grounded FDR control can only be performed on annotated data."
-        )
-
-
-def _has_ground_truth_sequences(metadata: pd.DataFrame) -> bool:
-    """Return True when metadata contains at least one tokenised ground-truth sequence."""
-    if "sequence" not in metadata.columns:
-        return False
-    return (
-        metadata["sequence"]
-        .apply(lambda value: isinstance(value, list) and len(value) > 0)
-        .any()
+    annotated_dataset = CalibrationDataset(
+        metadata=metadata,
+        predictions=dataset.predictions,
+    )
+    # Only retain PSMs with confidence scores equal to or greater than the cutoff
+    return annotated_dataset.filter_entries(
+        metadata_predicate=lambda row: row[confidence_column] < confidence_cutoff
     )
 
 
-def separate_metadata_and_predictions(
+def _separate_metadata_and_predictions(
     dataset_metadata: pd.DataFrame,
-    fdr_control: Union[NonParametricFDRControl, DatabaseGroundedFDRControl],
     confidence_column: str,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Separate out metadata from prediction and FDR metrics.
+    """Separate metadata from prediction and FDR metric columns.
 
     Args:
-        dataset_metadata: The metadata dataframe to separate out prediction and FDR metrics from metadata and computed features.
-        fdr_control: The FDR control object used (to determine which columns were added).
-        confidence_column: The name of the confidence column.
+        dataset_metadata: Formatted metadata dataframe to split.
+        confidence_column: Name of the confidence column used for FDR control.
 
     Returns:
-        Tuple[pd.DataFrame, pd.DataFrame]: A tuple containing the metadata dataframe and the prediction and FDR metrics dataframe.
+        Tuple of (metadata without prediction/FDR columns, predictions and FDR metrics).
     """
-    from winnow.fdr.nonparametric import NonParametricFDRControl
-
-    # Separate out metadata from prediction and FDR metrics
     preds_and_fdr_metrics_cols = [
         "prediction",
         confidence_column,
         "psm_fdr",
         "psm_q_value",
     ]
-    # NonParametricFDRControl adds psm_pep column
-    if isinstance(fdr_control, NonParametricFDRControl):
+    if "psm_pep" in dataset_metadata.columns:
         preds_and_fdr_metrics_cols.append("psm_pep")
-    if _has_ground_truth_sequences(dataset_metadata):
-        preds_and_fdr_metrics_cols.extend(["sequence", "num_matches", "correct"])
+    if "sequence" in dataset_metadata.columns:
+        preds_and_fdr_metrics_cols.append("sequence")
+        if "num_matches" in dataset_metadata.columns:
+            preds_and_fdr_metrics_cols.append("num_matches")
+        if "correct" in dataset_metadata.columns:
+            preds_and_fdr_metrics_cols.append("correct")
+
     dataset_preds_and_fdr_metrics = dataset_metadata[
         ["spectrum_id"] + preds_and_fdr_metrics_cols
     ]
     dataset_metadata = dataset_metadata.drop(columns=preds_and_fdr_metrics_cols)
     return dataset_metadata, dataset_preds_and_fdr_metrics
+
+
+def _save_predict_outputs(
+    dataset: CalibrationDataset,
+    output_folder: Union[Path, str],
+    confidence_column: str,
+) -> None:
+    """Write predict outputs as separate metadata and prediction/FDR CSV files.
+
+    Args:
+        dataset: Filtered dataset after FDR control.
+        output_folder: Directory for ``metadata.csv`` and ``preds_and_fdr_metrics.csv``.
+        confidence_column: Confidence column to include in the predictions file.
+    """
+    output_dir = Path(output_folder)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    formatted_metadata = dataset.format_metadata_for_export()
+    metadata, preds_and_fdr_metrics = _separate_metadata_and_predictions(
+        formatted_metadata, confidence_column
+    )
+    metadata.to_csv(output_dir / "metadata.csv", index=False)
+    preds_and_fdr_metrics.to_csv(output_dir / "preds_and_fdr_metrics.csv", index=False)
+
+
+def _check_if_labelled(dataset: CalibrationDataset) -> None:
+    """Check that metadata has finalised labels for database-grounded FDR."""
+    missing = [
+        column
+        for column in ("correct", "valid_sequence")
+        if column not in dataset.metadata.columns
+    ]
+    if missing:
+        raise ValueError(
+            "This operation requires finalised labelled metadata with "
+            f"{', '.join(repr(c) for c in missing)}. "
+            "Load labelled data through a DatasetLoader before fitting/running "
+            "diagnostics."
+        )
 
 
 def train_entry_point(
@@ -276,9 +357,9 @@ def train_entry_point(
     Two modes are supported, controlled by the presence of ``features_path``
     in the config:
 
-    1. **Single-phase** (``features_path`` not set): load raw spectra and
-       call ``calibrator.fit(CalibrationDataset)`` which computes features
-       and trains in one step.
+    1. **Single-phase** (``features_path`` not set): load raw spectra,
+        compute features using ``calibrator.compute_features()``, optionally split the dataset,
+        and then call ``calibrator.fit_from_features()``.
     2. **Two-phase** (``features_path`` set): load pre-computed features from
        Parquet file(s) into a ``FeatureDataset`` and call
        ``calibrator.fit_from_features()``.
@@ -305,20 +386,23 @@ def train_entry_point(
     ):
         cfg = compose(config_name="train", overrides=overrides)
 
+    _handle_koina_intensity_config(
+        cfg, hydra_overrides=overrides, execute=False, validate=True
+    )
+
     if not execute:
-        _handle_koina_intensity_config(cfg, hydra_overrides=overrides, execute=False)
         print_config(cfg)
         return
 
     from winnow.calibration.calibrator import ProbabilityCalibrator
 
-    logger.info("Starting training pipeline.")
-    logger.info(f"Training configuration: {cfg}")
+    features_path = cfg.get("features_path")
+    if features_path is None:
+        _require_spectrum_path(cfg.dataset.spectrum_path_or_directory, command="train")
 
-    _handle_koina_intensity_config(cfg, hydra_overrides=overrides, execute=True)
+    _log_pipeline_start("training", "Training configuration", cfg)
 
     calibrator = instantiate(cfg.calibrator)
-    features_path = cfg.get("features_path")
 
     if features_path is not None:
         train_dataset, val_dataset = _load_feature_datasets(
@@ -355,7 +439,7 @@ def train_entry_point(
 
     _save_training_artifacts(cfg, calibrator, history)
 
-    logger.info("Training pipeline completed successfully.")
+    _log_pipeline_complete("Training")
 
 
 def _load_feature_datasets(cfg, features_path, calibrator):
@@ -409,7 +493,8 @@ def _load_and_prepare_dataset(cfg, instantiate):
     logger.info(f"Loaded: {len(annotated_dataset.metadata)} spectra")
 
     logger.info("Filtering dataset for empty predictions.")
-    annotated_dataset = filter_dataset(annotated_dataset)
+    annotated_dataset = _filter_dataset(annotated_dataset)
+
     logger.info(f"After filtering: {len(annotated_dataset.metadata)} spectra")
 
     dataset_output_path = cfg.get("dataset_output_path")
@@ -547,12 +632,16 @@ def _save_training_artifacts(cfg, calibrator, history):
     """
     irt_regressor_output_path = cfg.get("irt_regressor_output_path")
     if irt_regressor_output_path:
-        from winnow.calibration.calibration_features import RetentionTimeFeature
+        from winnow.calibration.features.retention_time import RetentionTimeFeature
 
         rt_feature = calibrator.feature_dict.get("iRT Feature")
         if isinstance(rt_feature, RetentionTimeFeature):
             logger.info(f"Saving iRT regressors to {irt_regressor_output_path}")
             rt_feature.save_regressors(irt_regressor_output_path)
+        else:
+            logger.warning(
+                "No RetentionTimeFeature on calibrator; skipping iRT regressors save."
+            )
 
     training_history_path = cfg.get("training_history_path")
     if training_history_path:
@@ -604,7 +693,7 @@ def _compute_features_directory(
             predictions_path=predictions_path,
         )
         logger.info(f"  Loaded: {len(dataset.metadata)} spectra")
-        dataset = filter_dataset(dataset)
+        dataset = _filter_dataset(dataset)
         logger.info(f"  After filtering: {len(dataset.metadata)} spectra")
         if labelled and "sequence" not in dataset.metadata.columns:
             raise ValueError(
@@ -640,7 +729,7 @@ def _compute_features_single_file(
             "ground-truth sequences."
         )
 
-    dataset = filter_dataset(dataset)
+    dataset = _filter_dataset(dataset)
     logger.info(f"After filtering: {len(dataset.metadata)} spectra")
 
     calibrator.compute_features(dataset)
@@ -736,17 +825,18 @@ def compute_features_entry_point(
     ):
         cfg = compose(config_name="compute_features", overrides=overrides)
 
+    _handle_koina_intensity_config(
+        cfg, hydra_overrides=overrides, execute=False, validate=True
+    )
+
     if not execute:
-        _handle_koina_intensity_config(cfg, hydra_overrides=overrides, execute=False)
         print_config(cfg)
         return
 
-    spectrum_path = _require_spectrum_path(cfg.dataset.spectrum_path_or_directory)
-
-    _handle_koina_intensity_config(cfg, hydra_overrides=overrides, execute=True)
-
-    logger.info("Starting compute-features pipeline.")
-    logger.info(f"Compute-features configuration: {cfg}")
+    spectrum_path = _require_spectrum_path(
+        cfg.dataset.spectrum_path_or_directory, command="compute-features"
+    )
+    _log_pipeline_start("compute-features", "Compute-features configuration", cfg)
 
     labelled = bool(cfg.labelled)
     data_loader = instantiate(cfg.data_loader)
@@ -763,6 +853,7 @@ def compute_features_entry_point(
 
     combined_metadata = pd.concat(all_metadata, ignore_index=True)
     logger.info(f"Total spectra after feature computation: {len(combined_metadata)}")
+    _require_spectra_after_features(len(combined_metadata))
 
     from winnow.datasets.calibration_dataset import CalibrationDataset
 
@@ -784,7 +875,7 @@ def compute_features_entry_point(
             training_matrix_output_path,
         )
 
-    logger.info("Compute-features pipeline completed successfully.")
+    _log_pipeline_complete("Compute-features")
 
 
 def predict_entry_point(
@@ -816,25 +907,27 @@ def predict_entry_point(
     ):
         cfg = compose(config_name="predict", overrides=overrides)
 
+    _handle_koina_intensity_config(
+        cfg, hydra_overrides=overrides, execute=False, validate=True
+    )
+    _handle_irt_calibration_config(
+        cfg, hydra_overrides=overrides, execute=False, validate=True
+    )
+
     if not execute:
-        _handle_koina_intensity_config(cfg, hydra_overrides=overrides, execute=False)
-        _handle_irt_calibration_config(cfg, hydra_overrides=overrides, execute=False)
         print_config(cfg)
         return
 
-    spectrum_path = _require_spectrum_path(cfg.dataset.spectrum_path_or_directory)
-
-    _handle_koina_intensity_config(cfg, hydra_overrides=overrides, execute=True)
-    _handle_irt_calibration_config(cfg, hydra_overrides=overrides, execute=True)
+    spectrum_path = _require_spectrum_path(
+        cfg.dataset.spectrum_path_or_directory, command="predict"
+    )
 
     from winnow.calibration.calibrator import ProbabilityCalibrator
     from winnow.datasets.calibration_dataset import CalibrationDataset
     from winnow.fdr.database_grounded import DatabaseGroundedFDRControl
 
-    logger.info("Starting prediction pipeline.")
-    logger.info(f"Prediction configuration: {cfg}")
+    _log_pipeline_start("prediction", "Prediction configuration", cfg)
 
-    # Load trained calibrator
     logger.info("Loading trained calibrator.")
     calibrator = ProbabilityCalibrator.load(
         pretrained_model_name_or_path=cfg.calibrator.pretrained_model_name_or_path,
@@ -842,23 +935,24 @@ def predict_entry_point(
     )
 
     _handle_koina_intensity_config(
-        cfg, calibrator, hydra_overrides=overrides, execute=True
+        cfg,
+        calibrator,
+        hydra_overrides=overrides,
+        execute=True,
+        validate=False,
     )
     _handle_irt_calibration_config(
-        cfg, calibrator, hydra_overrides=overrides, execute=True
+        cfg,
+        calibrator,
+        hydra_overrides=overrides,
+        execute=True,
+        validate=False,
     )
 
-    # Load pre-fitted iRT regressors if configured
-    irt_regressor_path = cfg.calibrator.get("irt_regressor_path")
-    if irt_regressor_path:
-        from winnow.calibration.calibration_features import RetentionTimeFeature
+    from winnow.utils.irt_calibration_config import maybe_load_irt_regressors
 
-        rt_feature = calibrator.feature_dict.get("iRT Feature")
-        if isinstance(rt_feature, RetentionTimeFeature):
-            logger.info(f"Loading iRT regressors from {irt_regressor_path}")
-            rt_feature.load_regressors(irt_regressor_path)
+    maybe_load_irt_regressors(cfg, calibrator, logger=logger)
 
-    # Load dataset - Hydra creates the DatasetLoader object
     logger.info("Loading dataset.")
     data_loader = instantiate(cfg.data_loader)
 
@@ -878,42 +972,32 @@ def predict_entry_point(
 
     dataset = CalibrationDataset(metadata=combined_metadata)
 
-    # Calibrate scores
     logger.info("Calibrating scores.")
     calibrator.predict(dataset)
 
-    # Instantiate FDR control from config - Hydra handles which FDR method to use
     logger.info("Instantiating FDR control from config.")
     fdr_control = instantiate(cfg.fdr_method)
 
-    # Check if dataset is labelled for database-grounded FDR
     if isinstance(fdr_control, DatabaseGroundedFDRControl):
-        check_if_labelled(dataset)
+        _check_if_labelled(dataset)
 
-    # Apply FDR control
     logger.info(f"Applying {fdr_control.__class__.__name__} FDR control.")
-    dataset_metadata = apply_fdr_control(
+    filtered_dataset = _apply_fdr_control(
         fdr_control,
         dataset,
         cfg.fdr_control.fdr_threshold,
         cfg.fdr_control.confidence_column,
     )
 
-    # Write output
-    logger.info(f"Final dataset: {len(dataset_metadata)} spectra")
+    logger.info(f"Final dataset: {len(filtered_dataset)} spectra")
     logger.info(f"Writing output to {cfg.output_folder}")
-    dataset_metadata, dataset_preds_and_fdr_metrics = separate_metadata_and_predictions(
-        dataset_metadata, fdr_control, cfg.fdr_control.confidence_column
+    _save_predict_outputs(
+        filtered_dataset,
+        cfg.output_folder,
+        cfg.fdr_control.confidence_column,
     )
 
-    CalibrationDataset(metadata=dataset_metadata).save_metadata(
-        cfg.output_folder + "/" + "metadata.csv"
-    )
-    CalibrationDataset(metadata=dataset_preds_and_fdr_metrics).save_metadata(
-        cfg.output_folder + "/" + "preds_and_fdr_metrics.csv"
-    )
-
-    logger.info("Prediction pipeline completed successfully.")
+    _log_pipeline_complete("Prediction")
 
 
 def diagnose_calibration_entry_point(
@@ -924,7 +1008,6 @@ def diagnose_calibration_entry_point(
     """Run tail calibration diagnostics on a labelled holdout set."""
     from hydra import initialize_config_dir, compose
     from hydra.utils import instantiate
-    from omegaconf import OmegaConf
 
     from winnow.calibration.calibrator import ProbabilityCalibrator
     from winnow.calibration.diagnostics import (
@@ -934,6 +1017,7 @@ def diagnose_calibration_entry_point(
         validate_label_config,
         write_diagnostic_report,
     )
+    from winnow.datasets.calibration_dataset import CalibrationDataset
     from winnow.fdr.nonparametric import NonParametricFDRControl
     from winnow.utils.config_path import get_primary_config_dir
 
@@ -946,29 +1030,34 @@ def diagnose_calibration_entry_point(
     ):
         cfg = compose(config_name="diagnose_calibration", overrides=overrides)
 
+    _handle_koina_intensity_config(
+        cfg, hydra_overrides=overrides, execute=False, validate=True
+    )
+    _handle_irt_calibration_config(
+        cfg, hydra_overrides=overrides, execute=False, validate=True
+    )
+
     if not execute:
-        _handle_koina_intensity_config(cfg, hydra_overrides=overrides, execute=False)
-        _handle_irt_calibration_config(cfg, hydra_overrides=overrides, execute=False)
         print_config(cfg)
         return
-
-    _handle_koina_intensity_config(cfg, hydra_overrides=overrides, execute=True)
-    _handle_irt_calibration_config(cfg, hydra_overrides=overrides, execute=True)
 
     diagnostics = cfg.diagnostics
     label_column = (
         diagnostics.label_column if diagnostics.label_column is not None else None
     )
+    spectrum_path = _require_spectrum_path(
+        cfg.dataset.spectrum_path_or_directory, command="diagnose-calibration"
+    )
     validate_label_config(diagnostics.label_source, label_column)
 
-    logger.info("Starting calibration diagnostic pipeline.")
-    logger.info(f"Configuration: {cfg}")
+    _log_pipeline_start(
+        "calibration diagnostic",
+        "Calibration diagnostic configuration",
+        cfg,
+    )
 
-    spectrum_path = _require_spectrum_path(cfg.dataset.spectrum_path_or_directory)
     predictions_path = cfg.dataset.get("predictions_path")
     labelled = diagnostics.label_source == "sequence"
-
-    from winnow.datasets.calibration_dataset import CalibrationDataset
 
     logger.info("Loading trained calibrator.")
     calibrator = ProbabilityCalibrator.load(
@@ -976,11 +1065,23 @@ def diagnose_calibration_entry_point(
         cache_dir=cfg.calibrator.cache_dir,
     )
     _handle_koina_intensity_config(
-        cfg, calibrator, hydra_overrides=overrides, execute=True
+        cfg,
+        calibrator,
+        hydra_overrides=overrides,
+        execute=True,
+        validate=False,
     )
     _handle_irt_calibration_config(
-        cfg, calibrator, hydra_overrides=overrides, execute=True
+        cfg,
+        calibrator,
+        hydra_overrides=overrides,
+        execute=True,
+        validate=False,
     )
+
+    from winnow.utils.irt_calibration_config import maybe_load_irt_regressors
+
+    maybe_load_irt_regressors(cfg, calibrator, logger=logger)
 
     logger.info("Loading dataset and computing calibration features.")
     data_loader = instantiate(cfg.data_loader)
@@ -999,21 +1100,11 @@ def diagnose_calibration_entry_point(
     logger.info("Calibrating scores.")
     calibrator.predict(dataset)
 
-    residue_masses = OmegaConf.to_container(cfg.residue_masses, resolve=True)
-    residue_remapping_cfg = getattr(cfg.data_loader, "residue_remapping", None)
-    residue_remapping = (
-        {}
-        if residue_remapping_cfg is None
-        else OmegaConf.to_container(residue_remapping_cfg, resolve=True)
-    )
-
     # Resolve labels after predict: feature computation may filter invalid PSMs in place.
     labels, resolved_label_column = resolve_diagnostics_labels(
         dataset,
         diagnostics.label_source,
         label_column,
-        residue_masses=residue_masses,
-        residue_remapping=residue_remapping,
     )
     logger.info(
         f"Resolved labels via label_source={diagnostics.label_source!r} "
@@ -1021,13 +1112,12 @@ def diagnose_calibration_entry_point(
     )
 
     confidence_col = cfg.fdr_control.confidence_column
-    diagnostic_data = DiagnosticArrays.from_raw(
-        dataset.metadata[confidence_col],
-        labels,
-    )
+    # Use the same labelled population for FDR cutoff estimation and diagnostics.
+    labelled_scores = dataset.metadata.loc[labels.index, confidence_col]
+    diagnostic_data = DiagnosticArrays.from_raw(labelled_scores, labels)
 
     fdr_control = NonParametricFDRControl()
-    fdr_control.fit(dataset.metadata[confidence_col])
+    fdr_control.fit(labelled_scores)
     conf_cutoff = fdr_control.get_confidence_cutoff(
         threshold=cfg.fdr_control.fdr_threshold
     )
@@ -1068,6 +1158,80 @@ def diagnose_calibration_entry_point(
         )
         if diagnostics.fail_on_warning:
             raise typer.Exit(code=1)
+
+    _log_pipeline_complete("Calibration diagnostic")
+
+
+def annotate_proteome_hits_entry_point(
+    overrides: Optional[List[str]] = None,
+    execute: bool = True,
+    config_dir: Optional[str] = None,
+) -> None:
+    """Load a dataset, annotate proteome hits, and save a Winnow dataset directory."""
+    from hydra import initialize_config_dir, compose
+    from hydra.utils import instantiate
+    from instanovo.utils.residues import ResidueSet
+    from omegaconf import OmegaConf
+
+    from winnow.utils.config_path import get_primary_config_dir
+    from winnow.utils.proteome import annotate_calibration_dataset
+
+    primary_config_dir = get_primary_config_dir(config_dir)
+
+    with initialize_config_dir(
+        config_dir=str(primary_config_dir),
+        version_base="1.3",
+        job_name="winnow_annotate_proteome_hits",
+    ):
+        cfg = compose(config_name="annotate_proteome_hits", overrides=overrides)
+
+    if not execute:
+        print_config(cfg)
+        return
+
+    _require_spectrum_path(
+        cfg.dataset.spectrum_path_or_directory, command="annotate-proteome-hits"
+    )
+    fasta = _require_proteome_fasta(cfg.proteome.fasta)
+
+    _log_pipeline_start(
+        "proteome-hit annotation",
+        "Proteome-hit annotation configuration",
+        cfg,
+    )
+
+    data_loader = instantiate(cfg.data_loader)
+    dataset_params = dict(cfg.dataset)
+    dataset_params["data_path"] = dataset_params.pop("spectrum_path_or_directory")
+    dataset_params["predictions_path"] = dataset_params.pop("predictions_path", None)
+
+    dataset = data_loader.load(**dataset_params)
+    logger.info(f"Loaded: {len(dataset.metadata)} spectra")
+
+    dataset = _filter_dataset(dataset)
+    logger.info(f"After filtering: {len(dataset.metadata)} spectra")
+
+    residue_masses = OmegaConf.to_container(cfg.residue_masses, resolve=True)
+    residue_set = ResidueSet(residue_masses=residue_masses)
+
+    dataset, stats = annotate_calibration_dataset(
+        dataset,
+        fasta,
+        residue_set,
+        min_residue_length=int(cfg.proteome.min_residue_length),
+    )
+    logger.info(
+        "Annotated proteome hits: rows_in=%d removed_short=%d kept=%d",
+        stats.num_input,
+        stats.num_removed_short,
+        stats.num_kept,
+    )
+
+    output_dir = Path(cfg.output_dir)
+    dataset.save(output_dir)
+    logger.info(f"Saved annotated Winnow dataset to {output_dir}")
+
+    _log_pipeline_complete("Proteome-hit annotation")
 
 
 @app.command(
@@ -1225,6 +1389,35 @@ def diagnose_calibration(
     diagnose_calibration_entry_point(overrides, config_dir=config_dir)
 
 
+@app.command(
+    name="annotate-proteome-hits",
+    help=(
+        "Load spectra and de novo predictions via a DatasetLoader, filter short "
+        "peptides, add a boolean [dim]proteome_hit[/dim] column via FASTA "
+        "substring matching, and save a Winnow dataset directory "
+        "([dim]metadata.csv[/dim] + optional [dim]predictions.pkl[/dim]).\n\n"
+        "[bold cyan]Quick start:[/bold cyan]\n"
+        "  [dim]winnow annotate-proteome-hits proteome.fasta=proteome.fasta "
+        "output_dir=holdout/annotated[/dim]"
+    ),
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def annotate_proteome_hits(
+    ctx: typer.Context,
+    config_dir: Annotated[
+        Optional[str],
+        typer.Option(
+            "--config-dir",
+            "-cp",
+            help="Path to custom config directory (relative or absolute).",
+        ),
+    ] = None,
+) -> None:
+    """Annotate a holdout dataset with proteome substring hits."""
+    overrides = ctx.args if ctx.args else None
+    annotate_proteome_hits_entry_point(overrides, config_dir=config_dir)
+
+
 @config_app.command(
     name="train",
     help=(
@@ -1338,6 +1531,31 @@ def config_diagnose_calibration(
     """Display the resolved calibration diagnostic configuration."""
     overrides = ctx.args if ctx.args else None
     diagnose_calibration_entry_point(overrides, execute=False, config_dir=config_dir)
+
+
+@config_app.command(
+    name="annotate-proteome-hits",
+    help=(
+        "Display the resolved annotate-proteome-hits configuration without running.\n\n"
+        "[bold cyan]Usage:[/bold cyan]\n"
+        "  [dim]winnow config annotate-proteome-hits proteome.fasta=proteome.fasta[/dim]\n"
+    ),
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def config_annotate_proteome_hits(
+    ctx: typer.Context,
+    config_dir: Annotated[
+        Optional[str],
+        typer.Option(
+            "--config-dir",
+            "-cp",
+            help="Path to custom config directory (relative or absolute).",
+        ),
+    ] = None,
+) -> None:
+    """Display the resolved proteome-hit annotation configuration."""
+    overrides = ctx.args if ctx.args else None
+    annotate_proteome_hits_entry_point(overrides, execute=False, config_dir=config_dir)
 
 
 if __name__ == "__main__":

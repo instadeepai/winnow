@@ -10,7 +10,7 @@ import koinapy
 
 from winnow.calibration.features.base import CalibrationFeatures, FeatureDependency
 from winnow.datasets.calibration_dataset import CalibrationDataset
-from winnow.utils.peptide import tokens_to_proforma
+from winnow.utils.peptide import as_token_list, tokens_to_proforma
 
 
 class RetentionTimeFeature(CalibrationFeatures):
@@ -39,7 +39,7 @@ class RetentionTimeFeature(CalibrationFeatures):
                 as training data for the RT->iRT regressor.
             min_train_points (int): Minimum number of high-confidence spectra needed per
                 experiment to fit a regressor. If fewer are available after applying
-                ``train_fraction``, a ``ValueError`` is raised.
+                ``train_fraction``, that experiment is skipped with a warning.
             learn_from_missing (bool): When True, invalid predictions are recorded in an
                 ``is_missing_irt_error`` indicator column and imputed with zeros, allowing
                 the calibrator to learn from missingness. When False, invalid entries are
@@ -105,19 +105,20 @@ class RetentionTimeFeature(CalibrationFeatures):
     @staticmethod
     def _sequence_key(row: pd.Series) -> tuple:
         """Hashable key for a predicted peptide sequence."""
-        prediction = row["prediction"]
-        if isinstance(prediction, list):
-            return tuple(prediction)
+        tokens = as_token_list(row["prediction"])
+        if tokens is not None:
+            return tuple(tokens)
         if "prediction_untokenised" in row.index and pd.notna(
             row.get("prediction_untokenised")
         ):
             return (str(row["prediction_untokenised"]),)
-        return (str(prediction),)
+        return (str(row["prediction"]),)
 
     def check_valid_irt_prediction(self, dataset: CalibrationDataset) -> pd.Series:
         """Check which predictions are valid for iRT prediction.
 
         A prediction is considered invalid if any of the following conditions hold:
+        - The prediction is missing or not a non-empty token list (e.g. ``None``).
         - The predicted peptide sequence has more than ``max_peptide_length`` residue tokens.
         - The predicted peptide sequence contains a residue in ``unsupported_residues``.
 
@@ -129,13 +130,19 @@ class RetentionTimeFeature(CalibrationFeatures):
                 that the prediction satisfies all validity constraints and can be passed to
                 the Koina iRT model.
         """
-        filtered_dataset = dataset.filter_entries(
-            metadata_predicate=lambda row: (
-                len(row["prediction"]) > self.max_peptide_length
+        filtered_dataset = (
+            dataset.filter_entries(
+                metadata_predicate=lambda row: as_token_list(row["prediction"]) is None
             )
-        ).filter_entries(
-            metadata_predicate=lambda row: any(
-                token in row["prediction"] for token in self.unsupported_residues
+            .filter_entries(
+                metadata_predicate=lambda row: (
+                    len(row["prediction"]) > self.max_peptide_length
+                )
+            )
+            .filter_entries(
+                metadata_predicate=lambda row: any(
+                    token in row["prediction"] for token in self.unsupported_residues
+                )
             )
         )
 
@@ -296,6 +303,7 @@ class RetentionTimeFeature(CalibrationFeatures):
             dataset.metadata["irt_error"] = 0.0
             return
 
+        # Prepare input data
         inputs = pd.DataFrame()
         inputs["peptide_sequences"] = np.array(
             [
@@ -475,34 +483,36 @@ class RetentionTimeFeature(CalibrationFeatures):
         n_unique_peptides = self._count_unique_sequences(train_data)
         if n_unique_peptides < 2:
             raise ValueError(
-                "Cannot fit iRT calibration regressor —\n"
-                f"  training pool has only {n_unique_peptides} unique peptide(s) after applying train_fraction={self.train_fraction}.\n"
+                f"Experiment '{experiment_name}': Cannot fit iRT calibration regressor.\n"
+                f" Training pool has only {n_unique_peptides} unique peptide(s) after applying train_fraction={self.train_fraction}.\n"
                 "  Koina iRT prediction models output one iRT per peptide sequence, so RT->iRT regression requires at least 2 distinct training peptides.\n"
                 "  Increase calibrator.irt_calibration.train_fraction or provide more peptide diversity."
             )
 
-        if 2 < n_unique_peptides < self.min_train_points:
-            warnings.warn(
-                f"Experiment '{experiment_name}': iRT calibration pool (top {self.train_fraction:.0%}, {len(train_data)} PSMs):\n"
-                f"  Only {n_unique_peptides} unique peptide(s), below min_train_points={self.min_train_points}.\n"
-                f"  The RT->iRT regressor fit may be unreliable.\n"
-                f"  Consider increasing calibrator.irt_calibration.train_fraction or de-duplicating peptides.",
-                stacklevel=2,
-            )
-
         if train_data["retention_time"].nunique() < 2:
             raise ValueError(
-                "Cannot fit iRT calibration regressor —\n"
+                f"Experiment '{experiment_name}': Cannot fit iRT calibration regressor.\n"
                 f"  training pool has only {train_data['retention_time'].nunique()} unique retention time value(s) after applying train_fraction={self.train_fraction}.\n"
                 "  Increase calibrator.irt_calibration.train_fraction."
             )
 
         if len(train_data) < self.min_train_points:
             raise ValueError(
-                "Insufficient data for iRT calibration.\n"
-                f"  After applying train_fraction={self.train_fraction}, only {len(train_data)} valid training points remain (from {len(metadata)} total spectra),\n"
-                f"  but min_train_points={self.min_train_points} are required.\n"
-                "  Adjust train_fraction, min_train_points, or provide more data."
+                f"Experiment '{experiment_name}': insufficient data for iRT "
+                f"calibration. After applying train_fraction={self.train_fraction}, "
+                f"only {len(train_data)} valid training points remain "
+                f"(from {len(metadata)} total spectra), but "
+                f"min_train_points={self.min_train_points} are required. "
+                f"Adjust train_fraction, min_train_points, or provide more data."
+            )
+
+        if 2 <= n_unique_peptides < self.min_train_points:
+            warnings.warn(
+                f"Experiment '{experiment_name}': iRT calibration pool (top {self.train_fraction:.0%}, {len(train_data)} PSMs):\n"
+                f"  Only {n_unique_peptides} unique peptide(s), below min_train_points={self.min_train_points}.\n"
+                f"  The RT->iRT regressor fit may be unreliable.\n"
+                f"  Consider increasing calibrator.irt_calibration.train_fraction or de-duplicating peptides.",
+                stacklevel=2,
             )
 
         return train_data

@@ -167,21 +167,6 @@ class TestMassErrorPPMFeature:
         result = dataset.metadata.iloc[0]["mass_error_ppm"]
         assert result < 0
 
-    def test_compute_with_invalid_peptide(self, residue_masses):
-        """When prediction is not a list, compute should raise."""
-        feature = MassErrorPPMFeature(residue_masses=residue_masses)
-        metadata = pd.DataFrame(
-            {
-                "precursor_mz": [500.503638],
-                "precursor_charge": [2],
-                "prediction": ["invalid_string"],
-            }
-        )
-        dataset = CalibrationDataset(metadata=metadata, predictions=None)
-
-        with pytest.raises(ValueError, match="not valid peptide sequences"):
-            feature.compute(dataset)
-
     def test_custom_residue_masses(self):
         """Test that custom residue masses are used correctly."""
         custom_masses = {"A": 100.0, "G": 200.0}
@@ -333,21 +318,6 @@ class TestMassErrorDaFeature:
 
         result = dataset.metadata.iloc[0]["mass_error_da"]
         assert result < 0
-
-    def test_compute_with_invalid_peptide(self, residue_masses):
-        """When prediction is not a list, compute should raise."""
-        feature = MassErrorDaFeature(residue_masses=residue_masses)
-        metadata = pd.DataFrame(
-            {
-                "precursor_mz": [500.503638],
-                "precursor_charge": [2],
-                "prediction": ["invalid_string"],
-            }
-        )
-        dataset = CalibrationDataset(metadata=metadata, predictions=None)
-
-        with pytest.raises(ValueError, match="not valid peptide sequences"):
-            feature.compute(dataset)
 
     def test_custom_residue_masses(self):
         """Test that custom residue masses are used correctly."""

@@ -47,6 +47,9 @@ winnow config compute-features
 # Show calibration diagnostic configuration
 winnow config diagnose-calibration diagnostics.label_source=sequence
 
+# Show proteome-hit annotation configuration
+winnow config annotate-proteome-hits proteome.fasta=proteome.fasta
+
 # Check configuration with overrides
 winnow config train data_loader=mztab model_output_dir=models/my_model
 winnow config predict fdr_method=database_grounded fdr_control.fdr_threshold=0.01
@@ -168,7 +171,7 @@ By default, `winnow predict` uses the pretrained model `InstaDeepAI/winnow-gener
 
 ### `winnow diagnose-calibration`
 
-Assess tail calibration on a labelled holdout set before trusting non-parametric FDR at your operating threshold. The command applies a trained calibrator, derives the confidence cutoff $\tau$ at `fdr_control.fdr_threshold`, estimates signed tail expected calibration error (sTECE) and TECE on $\{S \ge \tau\}$ using isotonic regression, writes a reliability diagram, and warns when $|\widehat{\mathrm{sTECE}}(\tau)|$ exceeds `diagnostics.tolerance` (default `0.005`, i.e. 0.5 percentage points on the FDR scale, which is about 10% of a 5% FDR target).
+Assess tail calibration on a labelled holdout set before trusting non-parametric FDR at your operating threshold. The command applies a trained calibrator, derives the confidence cutoff $\tau$ at `fdr_control.fdr_threshold` from the same labelled population used for diagnostics (for `label_source=sequence`, rows with `valid_sequence=True`), estimates signed tail expected calibration error (sTECE) and TECE on $\{S \ge \tau\}$ using isotonic regression, writes a reliability diagram, and warns when $|\widehat{\mathrm{sTECE}}(\tau)|$ exceeds `diagnostics.tolerance` (default `0.005`, i.e. 0.5 percentage points on the FDR scale, which is about 10% of a 5% FDR target).
 
 **Configuration:** see [Calibration diagnostic configuration](configuration.md#calibration-diagnostic-configuration) for the full parameter reference.
 
@@ -176,8 +179,8 @@ Assess tail calibration on a labelled holdout set before trusting non-parametric
 
 | `label_source` | `label_column` | Behaviour |
 | --- | --- | --- |
-| `sequence` | must be unset (`null`) | Derives `correct` from `sequence` and `prediction`. Do not pass `label_column`. |
-| `precomputed` | required (e.g. `proteome_hit`, `correct`) | Uses the given boolean column from predictions/metadata. |
+| `sequence` | must be unset (`null`) | Uses loader-finalised `correct` (rows with `valid_sequence=False` excluded). Do not pass `label_column`. |
+| `precomputed` | required (e.g. `proteome_hit`, `correct`) | Uses the given boolean column from dataset metadata. |
 
 Setting `label_column` while `label_source=sequence` (or omitting `label_column` for `precomputed`) raises an error.
 
@@ -187,21 +190,61 @@ winnow diagnose-calibration diagnostics.label_source=sequence \
   dataset.spectrum_path_or_directory=holdout/spectra.mgf \
   dataset.predictions_path=holdout/preds.csv
 
-# Pre-computed labels (e.g. proteome mapping done offline)
+# Pre-computed labels (e.g. proteome mapping)
 winnow diagnose-calibration \
-  diagnostics.label_source=precomputed diagnostics.label_column=proteome_hit \
-  dataset.predictions_path=holdout/preds_with_hits.csv
+  data_loader=winnow \
+  dataset.spectrum_path_or_directory=holdout/annotated \
+  dataset.predictions_path=null \
+  diagnostics.label_source=precomputed \
+  diagnostics.label_column=proteome_hit
 
 # Stricter tolerance for 1% FDR workflows
 winnow diagnose-calibration diagnostics.label_source=sequence diagnostics.tolerance=0.002
+
+# Audit the same saved RT→iRT regressors used at predict time
+winnow diagnose-calibration diagnostics.label_source=sequence \
+  calibrator.irt_regressor_path=./irt_regressors.safetensors
 ```
 
 **Outputs** (under `diagnostics.output_dir`, default `results/calibration_diagnostic`):
 
 - `diagnostic_report.json` — `conf_cutoff`, `n_tail`, sTECE, TECE, tolerance check, interpretation
-- `reliability_diagram.png` — empirical calibration curve on the operating tail ($S \ge \text{conf\_cutoff}$) vs the identity line
+- `reliability_diagram.png` — empirical calibration curve on the operating tail (scores $S$ at or above `conf_cutoff`) vs the identity line
 
 Set `diagnostics.fail_on_warning=true` to exit with code 1 when $|\widehat{\mathrm{sTECE}}| >$ `diagnostics.tolerance` at the operating cutoff (useful in CI).
+
+### `winnow annotate-proteome-hits`
+
+Load spectra and *de novo* predictions via a `DatasetLoader`, drop peptides shorter than a residue threshold, and add a boolean `proteome_hit` column by matching each prediction (modifications stripped, isoleucine normalised to leucine) as a substring of a reference proteome. The annotated holdout is written as a Winnow dataset directory (`metadata.csv` plus optional `predictions.pkl`).
+
+This produces the `proteome_hit` column consumed by `diagnose-calibration` with `data_loader=winnow` and `diagnostics.label_source=precomputed diagnostics.label_column=proteome_hit`. Training does not use `proteome_hit`; the column may sit alongside sequence-derived labels without changing train behaviour. Prediction accepts datasets with or without the column.
+
+**Configuration:** see [Proteome-hit annotation configuration](configuration.md#proteome-hit-annotation-configuration).
+
+```bash
+# Annotate an InstantNovo holdout and save a Winnow dataset directory
+winnow annotate-proteome-hits \
+  data_loader=instanovo \
+  dataset.spectrum_path_or_directory=holdout/spectra.mgf \
+  dataset.predictions_path=holdout/preds.csv \
+  proteome.fasta=proteome.fasta \
+  output_dir=holdout/annotated
+
+# Then diagnose using the saved directory
+winnow diagnose-calibration \
+  data_loader=winnow \
+  dataset.spectrum_path_or_directory=holdout/annotated \
+  dataset.predictions_path=null \
+  diagnostics.label_source=precomputed \
+  diagnostics.label_column=proteome_hit
+```
+
+Key overrides:
+
+- `proteome.fasta` (required): FASTA file used as the proteome for substring matching.
+- `proteome.min_residue_length` (default `7`): drop PSMs with fewer than this many tokeniser residues.
+- `output_dir`: destination for `CalibrationDataset.save`.
+- `data_loader` / `dataset.*`: same meaning as in `predict.yaml` / `diagnose_calibration.yaml`.
 
 ## Configuration system
 

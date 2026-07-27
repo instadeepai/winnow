@@ -24,6 +24,11 @@ from winnow.calibration.calibration_features import (
 )
 from winnow.calibration.features.utils import validate_model_input_params
 from winnow.datasets.calibration_dataset import CalibrationDataset
+from winnow.datasets.data_loaders.utils import (
+    SEQUENCE_DERIVED_CORRECT_COLUMN,
+    labelled_training_mask,
+    require_labelled_rows,
+)
 from winnow.datasets.feature_dataset import FeatureDataset
 from winnow.utils.koina_intensity_config import (
     resolve_feature_model_inputs,
@@ -656,6 +661,13 @@ class ProbabilityCalibrator:
         (feature columns are added, and rows may be dropped when individual
         features have ``learn_from_missing=False``).
 
+        Only rows with a valid ground-truth sequence (``valid_sequence=True``)
+        contribute to feature normalisation and network training. The dataset must already
+        contain finalised metadata from a DatasetLoader (tokenised peptides and,
+        for labelled data, ``valid_sequence`` / ``correct``); this method does not
+        tokenise sequences itself. All rows still receive feature computation and
+        retain their ``correct`` labels.
+
         Args:
             train_dataset: Labelled training dataset.
             val_dataset: Optional labelled validation dataset for early
@@ -667,12 +679,19 @@ class ProbabilityCalibrator:
             Epoch-level training metrics.
         """
         self._validate_training_feature_columns_against_registry()
+
+        # Validate labelled columns / eligibility before feature computation.
+        # Recompute the mask afterwards in case feature computation drops rows.
+        require_labelled_rows(train_dataset.metadata, context="Calibrator fit")
         self.compute_features(train_dataset)
+        require_labelled_rows(train_dataset.metadata, context="Calibrator fit")
         train_fd = self.to_feature_dataset(train_dataset)
 
         val_fd = None
         if val_dataset is not None:
+            require_labelled_rows(val_dataset.metadata, context="Calibrator fit")
             self.compute_features(val_dataset)
+            require_labelled_rows(val_dataset.metadata, context="Calibrator fit")
             val_fd = self.to_feature_dataset(val_dataset)
 
         return self._fit_from_features(train_fd, val_fd, progress_bar=progress_bar)
@@ -683,6 +702,8 @@ class ProbabilityCalibrator:
         Must be called *after* :meth:`compute_features` has populated the
         feature columns on ``dataset.metadata`` (or when those columns are
         already present). Requires a ``correct`` label column.
+
+        Rows without a valid ground-truth sequence (``valid_sequence=True``) are dropped.
 
         Args:
             dataset: Labelled dataset whose metadata already contains the
@@ -695,9 +716,10 @@ class ProbabilityCalibrator:
         """
         self._validate_training_feature_columns_against_registry()
         features, labels = self._extract_feature_matrix(dataset, labelled=True)
+        mask = labelled_training_mask(dataset.metadata)
         return FeatureDataset(
-            features=np.asarray(features),
-            labels=np.asarray(labels),
+            features=np.asarray(features[mask]),
+            labels=np.asarray(labels[mask]),
             columns=list(self.columns),
         )
 
@@ -847,12 +869,16 @@ class ProbabilityCalibrator:
         """
         feature_columns = [dataset.confidence_column]
         feature_columns.extend(self.columns)
-        features = dataset.metadata[feature_columns]
+        features = dataset.metadata[feature_columns].to_numpy(
+            dtype=np.float64, copy=True
+        )
 
         if labelled:
-            labels = dataset.metadata["correct"]
-            return features.values, labels.values
-        return features.values
+            labels = dataset.metadata[SEQUENCE_DERIVED_CORRECT_COLUMN].to_numpy(
+                dtype=np.float64, copy=True
+            )
+            return features, labels
+        return features
 
     def _predict_feature_matrix(
         self, features: NDArray[np.float64]
