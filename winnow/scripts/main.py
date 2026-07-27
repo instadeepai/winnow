@@ -945,15 +945,9 @@ def predict_entry_point(
         validate=False,
     )
 
-    # Load pre-fitted iRT regressors if configured
-    irt_regressor_path = cfg.calibrator.get("irt_regressor_path")
-    if irt_regressor_path:
-        from winnow.calibration.calibration_features import RetentionTimeFeature
+    from winnow.utils.irt_calibration_config import maybe_load_irt_regressors
 
-        rt_feature = calibrator.feature_dict.get("iRT Feature")
-        if isinstance(rt_feature, RetentionTimeFeature):
-            logger.info(f"Loading iRT regressors from {irt_regressor_path}")
-            rt_feature.load_regressors(irt_regressor_path)
+    maybe_load_irt_regressors(cfg, calibrator, logger=logger)
 
     logger.info("Loading dataset.")
     data_loader = instantiate(cfg.data_loader)
@@ -1080,6 +1074,10 @@ def diagnose_calibration_entry_point(
         execute=True,
         validate=False,
     )
+
+    from winnow.utils.irt_calibration_config import maybe_load_irt_regressors
+
+    maybe_load_irt_regressors(cfg, calibrator, logger=logger)
 
     logger.info("Loading dataset and computing calibration features.")
     data_loader = instantiate(cfg.data_loader)

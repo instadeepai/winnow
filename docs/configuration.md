@@ -478,6 +478,10 @@ dataset:
 calibrator:
   pretrained_model_name_or_path: InstaDeepAI/winnow-general-model
   cache_dir: null
+  irt_regressor_path: null
+  # irt_calibration:
+  #   train_fraction: 0.3
+  #   min_train_points: 10
 
 fdr_control:
   fdr_threshold: 0.05
@@ -498,8 +502,8 @@ diagnostics:
 
 - `data_loader`, `dataset.*`: Same meaning as in `predict.yaml` (holdout spectra + predictions)
 - `koina.*`: Koina collision energy / fragmentation inputs (same as predict)
-- `calibrator.pretrained_model_name_or_path`, `calibrator.cache_dir`: Model loading
 - `calibrator.pretrained_model_name_or_path`, `calibrator.cache_dir`: Calibrator checkpoint to score the holdout (same as predict)
+- `calibrator.irt_regressor_path`: Optional pre-fitted iRT regressors from training. When set, diagnose loads the same RT→iRT maps as `winnow predict` instead of re-fitting on the holdout. Use the same path you pass to predict when auditing that workflow; leave `null` (default) for the general pretrained-model re-fit behaviour.
 - `fdr_control.fdr_threshold`: Nominal FDR target $\alpha$ used to set $\tau$ via `NonParametricFDRControl.get_confidence_cutoff`
 - `fdr_control.confidence_column`: Column used for scores $S$ after calibration (default `calibrated_confidence`)
 - `diagnostics.label_source`: How correctness labels $Y$ are obtained (see below)

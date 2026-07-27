@@ -161,3 +161,33 @@ def apply_irt_calibration_config(
             rt_feature.train_fraction,
             rt_feature.min_train_points,
         )
+
+
+def maybe_load_irt_regressors(
+    cfg: Any,
+    calibrator: Any,
+    logger: Any = None,
+) -> None:
+    """Load pre-fitted iRT regressors from ``calibrator.irt_regressor_path`` if set.
+
+    When the path is unset/null, this is a no-op. When the path is set but the
+    calibrator has no ``RetentionTimeFeature``, the load is skipped silently.
+
+    Args:
+        cfg: Resolved Hydra config with a ``calibrator`` section.
+        calibrator: Loaded ``ProbabilityCalibrator`` whose feature dict may
+            contain an ``iRT Feature``.
+        logger: Optional logger for the load message.
+    """
+    calibrator_cfg = cfg.get("calibrator") or {}
+    irt_regressor_path = calibrator_cfg.get("irt_regressor_path")
+    if not irt_regressor_path:
+        return
+
+    rt_feature = _get_retention_time_feature(calibrator)
+    if rt_feature is None:
+        return
+
+    if logger is not None:
+        logger.info("Loading iRT regressors from %s", irt_regressor_path)
+    rt_feature.load_regressors(irt_regressor_path)
