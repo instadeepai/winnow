@@ -474,7 +474,7 @@ diagnostics:
 - `diagnostics.label_column`: Boolean column name when `label_source=precomputed`; must be `null` when `label_source=sequence`
 - `diagnostics.tolerance`: Maximum acceptable $|\widehat{\mathrm{sTECE}}(\tau)|$ before a warning (default `0.005` ≈ 0.5 pp on the FDR scale at $\alpha=0.05$)
 - `diagnostics.min_tail_psms`: Fail if fewer than this many PSMs remain above $\tau$
-- `diagnostics.n_bins`: Equal-frequency bins for the reliability diagram (tail only, $S \ge \text{conf\_cutoff}$)
+- `diagnostics.n_bins`: Equal-frequency bins for the reliability diagram (tail only, scores $S$ at or above `conf_cutoff`)
 - `diagnostics.output_dir`: Writes `diagnostic_report.json` and `reliability_diagram.png`
 - `diagnostics.fail_on_warning`: If true, non-zero exit when tolerance is exceeded (for CI)
 - `diagnostics.plot`: If false, skip writing the reliability diagram
