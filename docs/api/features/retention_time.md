@@ -24,7 +24,7 @@ The RT-to-iRT mapping is inherently experiment-specific because different LC-MS 
 
 **Training phase** (`prepare` method):
 
-1. **Self-supervised training** — High-confidence de novo predictions (top `train_fraction` by confidence score, descending) serve as pseudo-labels. The Koina iRT model is called on these peptide sequences to obtain iRT values, then a `LinearRegression` is fitted from observed RT to iRT. No database labels are needed.
+1. **Self-supervised training** — High-confidence *de novo* predictions (top `train_fraction` by confidence score, descending) serve as pseudo-labels. The Koina iRT model is called on these peptide sequences to obtain iRT values, then a `LinearRegression` is fitted from observed RT to iRT. No database labels are needed.
 2. **Per-experiment fitting** — Spectra are grouped by their `experiment_name` column. One regressor is fitted per experiment. If `experiment_name` is absent, a single global regressor is fitted with a warning.
 3. **Always re-fitted** — The regressor is fitted at both training and inference time (in `prepare()`). It is not persisted inside the calibrator pickle. Given the same data and random seed, the same regressor is produced.
 

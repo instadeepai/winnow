@@ -43,7 +43,8 @@ configs/
 ├── compute_features.yaml      # Feature-only export (no MLP fit)
 ├── calibrator.yaml            # Model architecture and features
 ├── predict.yaml               # Main prediction config
-└── diagnose_calibration.yaml  # Tail calibration diagnostic (sTECE / TECE)
+├── diagnose_calibration.yaml  # Tail calibration diagnostic (sTECE / TECE)
+└── annotate_proteome_hits.yaml  # Proteome-hit annotation
 ```
 
 ## Overriding configuration
@@ -72,7 +73,12 @@ winnow compute-features dataset_output_path=results/features.csv labelled=false
 
 # Calibration diagnostic overrides
 winnow diagnose-calibration diagnostics.label_source=sequence fdr_control.fdr_threshold=0.01
-winnow diagnose-calibration diagnostics.label_source=precomputed diagnostics.label_column=proteome_hit
+winnow diagnose-calibration data_loader=winnow \
+  dataset.spectrum_path_or_directory=holdout/annotated dataset.predictions_path=null \
+  diagnostics.label_source=precomputed diagnostics.label_column=proteome_hit
+
+# Proteome-hit annotation
+winnow annotate-proteome-hits proteome.fasta=proteome.fasta output_dir=holdout/annotated
 ```
 
 ### Nested parameters
@@ -480,9 +486,37 @@ You must choose exactly one labelling mode. The command validates config before 
 | `label_source` | `label_column` | Behaviour |
 | --- | --- | --- |
 | `sequence` | must be `null` | Use loader-finalised `correct` labels (and exclude rows with `valid_sequence=False`). |
-| `precomputed` | required (e.g. `proteome_hit`) | Read boolean labels from the named column in merged metadata (e.g. offline proteome mapping). |
+| `precomputed` | required (e.g. `proteome_hit`) | Read boolean labels from the named column in merged metadata (typically from `winnow annotate-proteome-hits`). |
 
-Extra label columns in the input file (e.g. `proteome_hit` when using `sequence`) are ignored. If both `sequence` and a precomputed column exist, only the path chosen by `label_source` is used.
+## Proteome-hit annotation configuration
+
+### Main config (`configs/annotate_proteome_hits.yaml`)
+
+Loads a *de novo* prediction dataset, filters short peptides, adds `proteome_hit` via FASTA substring matching, and writes a Winnow dataset directory. See the [CLI reference](cli.md#winnow-annotate-proteome-hits).
+
+```yaml
+defaults:
+  - _self_
+  - residues
+  - data_loader: instanovo
+
+dataset:
+  spectrum_path_or_directory: examples/example_data/spectra.mgf
+  predictions_path: examples/example_data/predictions.csv
+
+proteome:
+  fasta: null                 # required override
+  min_residue_length: 7
+
+output_dir: results/annotated_winnow_dataset
+```
+
+**Key parameters:**
+
+- `data_loader`, `dataset.*`: Same meaning as in `predict.yaml`
+- `proteome.fasta`: Reference proteome FASTA (required)
+- `proteome.min_residue_length`: Drop PSMs with fewer tokeniser residues than this
+- `output_dir`: Directory for `metadata.csv` and optional `predictions.pkl`
 
 ## Shared configuration
 
@@ -727,6 +761,7 @@ my_configs/
 ├── compute_features.yaml      # Override compute-features config (if needed)
 ├── predict.yaml               # Override prediction config (if needed)
 ├── diagnose_calibration.yaml  # Override calibration diagnostic config (if needed)
+├── annotate_proteome_hits.yaml  # Override proteome-hit annotation config (if needed)
 ├── data_loader/               # Override data loaders (if needed)
 │   └── instanovo.yaml
 │   └── mztab.yaml

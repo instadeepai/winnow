@@ -40,8 +40,13 @@ fdr_control = DatabaseGroundedFDRControl(
 )
 
 # Fit using a CalibrationDataset with loader-finalised metadata
-# (requires correct, valid_sequence and confidence columns)
+# (requires correct, valid_sequence and confidence columns by default)
 fdr_control.fit(dataset=calibration_dataset)
+
+# Or fit against a proxy correctness column (SDK only; not exposed in the CLI),
+# e.g. proteome_hit from winnow.utils.proteome.annotate_calibration_dataset.
+# Custom correct_column values do not require valid_sequence.
+fdr_control.fit(dataset=annotated_dataset, correct_column="proteome_hit")
 
 # Get confidence cutoff for 1% FDR
 confidence_cutoff = fdr_control.get_confidence_cutoff(threshold=0.01)
@@ -58,7 +63,7 @@ dataset_with_q_values = fdr_control.add_psm_q_value(dataset, "confidence")
 
 **Key Features:**
 
-- **Ground Truth Validation**: Uses loader-derived `correct` labels from database-grounded sequences
+- **Ground Truth Validation**: Uses loader-derived `correct` labels from database-grounded sequences by default, or a custom boolean proxy via `correct_column` (for example `proteome_hit`)
 - **Precision-Recall Analysis**: Computes precision-recall curves from finalised predictions
 - **Stability Control**: Drop parameter for robust threshold estimation
 - **Finalised Metadata Only**: Does not tokenise peptides or compute match labels; prefer loading labelled data through a DatasetLoader first
@@ -66,8 +71,9 @@ dataset_with_q_values = fdr_control.add_psm_q_value(dataset, "confidence")
 **Required Data:**
 
 - Confidence scores (configurable column name)
-- Boolean PSM correctness column (`correct`)
-- Boolean ground-truth sequence validity column (`valid_sequence`) used for filtering
+- Boolean PSM correctness column (`correct` by default, or `correct_column`)
+- When `correct_column` is `"correct"`: boolean `valid_sequence` used for filtering eligible fit rows
+- When `correct_column` is a proxy such as `"proteome_hit"`: `valid_sequence` is not required
 
 **Fit vs apply:**
 
