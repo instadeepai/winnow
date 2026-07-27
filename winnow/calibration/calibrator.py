@@ -762,12 +762,16 @@ class ProbabilityCalibrator:
         """
         feature_columns = [dataset.confidence_column]
         feature_columns.extend(self.columns)
-        features = dataset.metadata[feature_columns]
+        features = dataset.metadata[feature_columns].to_numpy(
+            dtype=np.float64, copy=True
+        )
 
         if labelled:
-            labels = dataset.metadata[SEQUENCE_DERIVED_CORRECT_COLUMN]
-            return features.values, labels.values
-        return features.values
+            labels = dataset.metadata[SEQUENCE_DERIVED_CORRECT_COLUMN].to_numpy(
+                dtype=np.float64, copy=True
+            )
+            return features, labels
+        return features
 
     def _predict_feature_matrix(
         self, features: NDArray[np.float64]
