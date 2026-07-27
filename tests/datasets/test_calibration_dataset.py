@@ -429,7 +429,7 @@ class TestCalibrationDataset:
 
         # Test that all data types are preserved
         assert dataset.metadata["numeric_col"].dtype in [np.float64, float]
-        assert dataset.metadata["string_col"].dtype == object
+        assert pd.api.types.is_string_dtype(dataset.metadata["string_col"])
         assert dataset.metadata["bool_col"].dtype == bool
 
     def test_getitem_negative_index(self, calibration_dataset):
