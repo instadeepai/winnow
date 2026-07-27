@@ -483,7 +483,7 @@ class ProbabilityCalibrator:
 
         _load_saved_features_section(calibrator, config.get("features", {}))
         saved_columns = config.get("feature_columns")
-        if saved_columns:
+        if saved_columns is not None:
             calibrator._fitted_feature_columns = list(saved_columns)
             # Mirror fitted schema for round-trip readability of the training override.
             calibrator._training_feature_columns = list(saved_columns)
