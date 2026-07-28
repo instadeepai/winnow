@@ -3,7 +3,7 @@ defaults:
   - _self_
   - residues
   - calibrator
-  - data_loader: instanovo  # Options: instanovo, mztab, pointnovo, winnow
+  - data_loader: instanovo  # Options: instanovo, mztab, pointnovo, primenovo, winnow
 
 dataset:
   # Dataset paths (same as train):
