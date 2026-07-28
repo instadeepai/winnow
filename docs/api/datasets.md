@@ -18,29 +18,60 @@ from winnow.datasets.data_loaders import (
 )
 from pathlib import Path
 
+# ProForma residue → mass (subset; full map in configs/residues.yaml)
+residue_masses = {
+    "G": 57.021464,
+    "A": 71.037114,
+    "S": 87.032028,
+    "P": 97.052764,
+    "V": 99.068414,
+    "T": 101.047670,
+    "C": 103.009185,
+    "M": 131.040485,
+    "C[UNIMOD:4]": 160.030649,
+    "M[UNIMOD:35]": 147.035400,
+    "[UNIMOD:1]": 42.010565,
+    "[UNIMOD:5]": 43.005814,
+}
+
 # Load using InstaNovo data loader
-loader = InstaNovoDatasetLoader()
+loader = InstaNovoDatasetLoader(residue_masses=residue_masses)
 dataset = loader.load(
     data_path=Path("spectrum_data.parquet"),
     predictions_path=Path("predictions.csv")
 )
 
 # Load using MZTab data loader
-mztab_loader = MZTabDatasetLoader()
+mztab_loader = MZTabDatasetLoader(
+    residue_masses=residue_masses,
+    residue_remapping={"M+15.995": "M[UNIMOD:35]"},
+)
 dataset = mztab_loader.load(
     data_path=Path("spectrum_data.parquet"),
     predictions_path=Path("predictions.mztab")
 )
 
 # Load using PrimeNovo data loader (MGF + TSV)
-primenovo_loader = PrimeNovoDatasetLoader()
+primenovo_loader = PrimeNovoDatasetLoader(
+    residue_masses=residue_masses,
+    mid_sequence_n_terminal_mods=[
+        "[+42.011]",
+        "[+43.006]",
+    ],
+    residue_remapping={
+        "M[+15.995]": "M[UNIMOD:35]",
+        "C[+57.021]": "C[UNIMOD:4]",
+        "[+42.011]": "[UNIMOD:1]",
+        "[+43.006]": "[UNIMOD:5]",
+    },
+)
 dataset = primenovo_loader.load(
     data_path=Path("spectrum_data.mgf"),
     predictions_path=Path("primenovo_predictions.tsv")
 )
 
 # Load previously saved dataset
-winnow_loader = WinnowDatasetLoader()
+winnow_loader = WinnowDatasetLoader(residue_masses=residue_masses)
 dataset = winnow_loader.load(data_path=Path("saved_dataset_directory"))
 
 # Save dataset (Winnow's internal format)
@@ -58,7 +89,9 @@ dataset.save(Path("output_directory"))
 
 ### Data loaders
 
-The datasets module provides several data loaders that implement the `DatasetLoader` protocol:
+The datasets module provides several data loaders that implement the `DatasetLoader` protocol.
+
+All loaders require `residue_masses` (ProForma residue → mass; see `configs/residues.yaml`). Loaders that ingest tool-specific peptide notation also take `residue_remapping`.
 
 #### InstaNovoDatasetLoader
 
@@ -67,7 +100,22 @@ Loads InstaNovo predictions from CSV format along with spectrum data from Parque
 ```python
 from winnow.datasets.data_loaders import InstaNovoDatasetLoader
 
-loader = InstaNovoDatasetLoader()
+residue_masses = {
+    "G": 57.021464,
+    "A": 71.037114,
+    "C": 103.009185,
+    "M": 131.040485,
+    "C[UNIMOD:4]": 160.030649,
+    "M[UNIMOD:35]": 147.035400,
+}
+
+loader = InstaNovoDatasetLoader(
+    residue_masses=residue_masses,
+    residue_remapping={
+        "M(ox)": "M[UNIMOD:35]",
+        "C(+57.02)": "C[UNIMOD:4]",
+    },
+)
 dataset = loader.load(
     data_path=Path("spectrum_data.parquet"),  # Spectrum metadata
     predictions_path=Path("instanovo_predictions.csv")  # InstaNovo beam predictions
@@ -81,16 +129,27 @@ Loads predictions from MZTab format, supporting both traditional search engines 
 ```python
 from winnow.datasets.data_loaders import MZTabDatasetLoader
 
-# Default loader (uses Casanovo residue mapping)
-loader = MZTabDatasetLoader()
+residue_masses = {
+    "G": 57.021464,
+    "A": 71.037114,
+    "C": 103.009185,
+    "M": 131.040485,
+    "C[UNIMOD:4]": 160.030649,
+    "M[UNIMOD:35]": 147.035400,
+}
+
+# Casanovo-oriented remapping
+loader = MZTabDatasetLoader(
+    residue_masses=residue_masses,
+    residue_remapping={
+        "M+15.995": "M[UNIMOD:35]",
+        "C+57.021": "C[UNIMOD:4]",
+    },
+)
 dataset = loader.load(
     data_path=Path("spectrum_data.parquet"),
     predictions_path=Path("search_results.mztab")
 )
-
-# Custom residue mapping
-custom_mapping = {"M+15.995": "M[UNIMOD:35]"}
-loader = MZTabDatasetLoader(residue_remapping=custom_mapping)
 ```
 
 #### PrimeNovoDatasetLoader
@@ -104,7 +163,36 @@ Beam predictions are not saved in PrimeNovo outputs, so the returned `Calibratio
 ```python
 from winnow.datasets.data_loaders import PrimeNovoDatasetLoader
 
-loader = PrimeNovoDatasetLoader()
+residue_masses = {
+    "G": 57.021464,
+    "A": 71.037114,
+    "C": 103.009185,
+    "M": 131.040485,
+    "C[UNIMOD:4]": 160.030649,
+    "M[UNIMOD:35]": 147.035400,
+    "[UNIMOD:1]": 42.010565,
+    "[UNIMOD:5]": 43.005814,
+    "[UNIMOD:385]": -17.026549,
+    "(+25.98)": 25.980265,
+}
+
+loader = PrimeNovoDatasetLoader(
+    residue_masses=residue_masses,
+    mid_sequence_n_terminal_mods=[
+        "[+43.006-17.027]",
+        "[+42.011]",
+        "[+43.006]",
+        "[-17.027]",
+    ],
+    residue_remapping={
+        "M[+15.995]": "M[UNIMOD:35]",
+        "C[+57.021]": "C[UNIMOD:4]",
+        "[+42.011]": "[UNIMOD:1]",
+        "[+43.006]": "[UNIMOD:5]",
+        "[-17.027]": "[UNIMOD:385]",
+        "[+43.006-17.027]": "(+25.98)",
+    },
+)
 dataset = loader.load(
     data_path=Path("spectrum_data.mgf"),
     predictions_path=Path("primenovo_predictions.tsv"),
@@ -118,7 +206,14 @@ Loads previously saved CalibrationDataset instances from Winnow's internal forma
 ```python
 from winnow.datasets.data_loaders import WinnowDatasetLoader
 
-loader = WinnowDatasetLoader()
+residue_masses = {
+    "G": 57.021464,
+    "A": 71.037114,
+    "C": 103.009185,
+    "M": 131.040485,
+}
+
+loader = WinnowDatasetLoader(residue_masses=residue_masses)
 dataset = loader.load(data_path=Path("saved_dataset_directory"))
 ```
 
