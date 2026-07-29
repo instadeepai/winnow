@@ -289,13 +289,33 @@ class MZTabDatasetLoader(DatasetLoader):
     def load(
         self, *, data_path: Path, predictions_path: Optional[Path] = None, **kwargs: Any
     ) -> CalibrationDataset:
-        """Load a calibration dataset from mzTab predictions and spectrum data."""
+        """Load a CalibrationDataset from mzTab PSM tables and spectrum data.
+
+        Args:
+            data_path: Path to the spectrum data file (``.parquet``, ``.ipc``, or
+                ``.mgf``).
+            predictions_path: Path to the mzTab predictions file (``.mztab``).
+            **kwargs: Not used.
+
+        Returns:
+            CalibrationDataset: Dataset containing merged metadata. For Casanovo
+                mzTab with ``load_beams=True``, ``predictions`` holds per-spectrum
+                beam lists; otherwise ``predictions`` is ``None``.
+
+        Raises:
+            ValueError: If ``predictions_path`` is None, the predictions path is
+                not ``.mztab``, required mzTab columns are missing or
+                ``spectra_ref`` cannot be parsed, ``load_beams=True`` is set for
+                non-Casanovo mzTab, Casanovo PSM or token scores are outside their
+                expected ranges, spectrum ``spectrum_id`` values are missing or
+                not unique, or predictions reference spectrum IDs with no match
+                in the spectrum data.
+        """
         if predictions_path is None:
             raise ValueError("predictions_path is required for MZTabDatasetLoader")
 
         experiment_name = Path(data_path).stem
         spectrum_data, has_labels = self._load_spectrum_data(data_path)
-        spectrum_data = self._process_spectrum_data(spectrum_data)
 
         raw_predictions = self._load_dataset(predictions_path)
         is_casanovo = self._is_casanovo_mztab(raw_predictions)
@@ -472,10 +492,6 @@ class MZTabDatasetLoader(DatasetLoader):
                 )
             beam_predictions.append(scored_sequences or None)
         return beam_predictions
-
-    def _process_spectrum_data(self, spectrum_data: pl.DataFrame) -> pl.DataFrame:
-        """Return spectrum data unchanged; tokenization happens in finalize."""
-        return spectrum_data
 
     def _merge_data(
         self, spectrum_data: pl.DataFrame, predictions: pl.DataFrame

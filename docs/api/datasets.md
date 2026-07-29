@@ -10,25 +10,68 @@ The main class for storing and processing calibration datasets for peptide seque
 
 ```python
 from winnow.datasets.calibration_dataset import CalibrationDataset
-from winnow.datasets.data_loaders import InstaNovoDatasetLoader, MZTabDatasetLoader, WinnowDatasetLoader
+from winnow.datasets.data_loaders import (
+    InstaNovoDatasetLoader,
+    MZTabDatasetLoader,
+    PrimeNovoDatasetLoader,
+    WinnowDatasetLoader,
+)
 from pathlib import Path
 
+# ProForma residue → mass (subset; full map in configs/residues.yaml)
+residue_masses = {
+    "G": 57.021464,
+    "A": 71.037114,
+    "S": 87.032028,
+    "P": 97.052764,
+    "V": 99.068414,
+    "T": 101.047670,
+    "C": 103.009185,
+    "M": 131.040485,
+    "C[UNIMOD:4]": 160.030649,
+    "M[UNIMOD:35]": 147.035400,
+    "[UNIMOD:1]": 42.010565,
+    "[UNIMOD:5]": 43.005814,
+}
+
 # Load using InstaNovo data loader
-loader = InstaNovoDatasetLoader()
+loader = InstaNovoDatasetLoader(residue_masses=residue_masses)
 dataset = loader.load(
     data_path=Path("spectrum_data.parquet"),
     predictions_path=Path("predictions.csv")
 )
 
 # Load using MZTab data loader
-mztab_loader = MZTabDatasetLoader()
+mztab_loader = MZTabDatasetLoader(
+    residue_masses=residue_masses,
+    residue_remapping={"M+15.995": "M[UNIMOD:35]"},
+)
 dataset = mztab_loader.load(
     data_path=Path("spectrum_data.parquet"),
     predictions_path=Path("predictions.mztab")
 )
 
+# Load using pi-PrimeNovo data loader (MGF + TSV)
+primenovo_loader = PrimeNovoDatasetLoader(
+    residue_masses=residue_masses,
+    mid_sequence_n_terminal_mods=[
+        "[+42.011]",
+        "[+43.006]",
+    ],
+    residue_remapping={
+        "M[+15.995]": "M[UNIMOD:35]",
+        "C[+57.021]": "C[UNIMOD:4]",
+        "[+42.011]": "[UNIMOD:1]",
+        "[+43.006]": "[UNIMOD:5]",
+    },
+)
+dataset = primenovo_loader.load(
+    data_path=Path("spectrum_data.mgf"),
+    predictions_path=Path("primenovo_predictions.tsv")
+)
+
 # Load previously saved dataset
-winnow_loader = WinnowDatasetLoader()
+winnow_loader = WinnowDatasetLoader(residue_masses=residue_masses)
 dataset = winnow_loader.load(data_path=Path("saved_dataset_directory"))
 
 # Save dataset (Winnow's internal format)
@@ -46,7 +89,9 @@ dataset.save(Path("output_directory"))
 
 ### Data loaders
 
-The datasets module provides several data loaders that implement the `DatasetLoader` protocol:
+The datasets module provides several data loaders that implement the `DatasetLoader` protocol.
+
+All loaders require `residue_masses` (ProForma residue → mass; see `configs/residues.yaml`). Loaders that ingest tool-specific peptide notation also take `residue_remapping`.
 
 #### InstaNovoDatasetLoader
 
@@ -55,7 +100,22 @@ Loads InstaNovo predictions from CSV format along with spectrum data from Parque
 ```python
 from winnow.datasets.data_loaders import InstaNovoDatasetLoader
 
-loader = InstaNovoDatasetLoader()
+residue_masses = {
+    "G": 57.021464,
+    "A": 71.037114,
+    "C": 103.009185,
+    "M": 131.040485,
+    "C[UNIMOD:4]": 160.030649,
+    "M[UNIMOD:35]": 147.035400,
+}
+
+loader = InstaNovoDatasetLoader(
+    residue_masses=residue_masses,
+    residue_remapping={
+        "M(ox)": "M[UNIMOD:35]",
+        "C(+57.02)": "C[UNIMOD:4]",
+    },
+)
 dataset = loader.load(
     data_path=Path("spectrum_data.parquet"),  # Spectrum metadata
     predictions_path=Path("instanovo_predictions.csv")  # InstaNovo beam predictions
@@ -69,16 +129,74 @@ Loads predictions from MZTab format, supporting both traditional search engines 
 ```python
 from winnow.datasets.data_loaders import MZTabDatasetLoader
 
-# Default loader (uses Casanovo residue mapping)
-loader = MZTabDatasetLoader()
+residue_masses = {
+    "G": 57.021464,
+    "A": 71.037114,
+    "C": 103.009185,
+    "M": 131.040485,
+    "C[UNIMOD:4]": 160.030649,
+    "M[UNIMOD:35]": 147.035400,
+}
+
+# Casanovo-oriented remapping
+loader = MZTabDatasetLoader(
+    residue_masses=residue_masses,
+    residue_remapping={
+        "M+15.995": "M[UNIMOD:35]",
+        "C+57.021": "C[UNIMOD:4]",
+    },
+)
 dataset = loader.load(
     data_path=Path("spectrum_data.parquet"),
     predictions_path=Path("search_results.mztab")
 )
+```
 
-# Custom residue mapping
-custom_mapping = {"M+15.995": "M[UNIMOD:35]"}
-loader = MZTabDatasetLoader(residue_remapping=custom_mapping)
+#### PrimeNovoDatasetLoader
+
+Loads $\pi$-PrimeNovo predictions from a tab-separated file along with spectrum data from MGF files.
+
+Beam predictions are not saved in $\pi$-PrimeNovo outputs, so the returned `CalibrationDataset` always has `predictions=None`.
+
+`mid_sequence_n_terminal_mods` (see `primenovo.yaml`) lists substrings matched against the **raw** TSV `prediction` string **before** tokenisation and `residue_remapping`. Supply tokens in $\pi$-PrimeNovo compact notation as written in the TSV (e.g. `[+42.011]`), not remapped UNIMOD forms (e.g. `[UNIMOD:1]`). Rows with any listed mod after residue position 0 are dropped.
+
+```python
+from winnow.datasets.data_loaders import PrimeNovoDatasetLoader
+
+residue_masses = {
+    "G": 57.021464,
+    "A": 71.037114,
+    "C": 103.009185,
+    "M": 131.040485,
+    "C[UNIMOD:4]": 160.030649,
+    "M[UNIMOD:35]": 147.035400,
+    "[UNIMOD:1]": 42.010565,
+    "[UNIMOD:5]": 43.005814,
+    "[UNIMOD:385]": -17.026549,
+    "(+25.98)": 25.980265,
+}
+
+loader = PrimeNovoDatasetLoader(
+    residue_masses=residue_masses,
+    mid_sequence_n_terminal_mods=[
+        "[+43.006-17.027]",
+        "[+42.011]",
+        "[+43.006]",
+        "[-17.027]",
+    ],
+    residue_remapping={
+        "M[+15.995]": "M[UNIMOD:35]",
+        "C[+57.021]": "C[UNIMOD:4]",
+        "[+42.011]": "[UNIMOD:1]",
+        "[+43.006]": "[UNIMOD:5]",
+        "[-17.027]": "[UNIMOD:385]",
+        "[+43.006-17.027]": "(+25.98)",
+    },
+)
+dataset = loader.load(
+    data_path=Path("spectrum_data.mgf"),
+    predictions_path=Path("primenovo_predictions.tsv"),
+)
 ```
 
 #### WinnowDatasetLoader
@@ -88,17 +206,26 @@ Loads previously saved CalibrationDataset instances from Winnow's internal forma
 ```python
 from winnow.datasets.data_loaders import WinnowDatasetLoader
 
-loader = WinnowDatasetLoader()
+residue_masses = {
+    "G": 57.021464,
+    "A": 71.037114,
+    "C": 103.009185,
+    "M": 131.040485,
+}
+
+loader = WinnowDatasetLoader(residue_masses=residue_masses)
 dataset = loader.load(data_path=Path("saved_dataset_directory"))
 ```
 
 #### Spectrum and prediction matching
 
-InstaNovo and MZTab both inner-join spectrum rows and prediction rows on `spectrum_id`, but they derive that key differently.
+InstaNovo, MZTab, and $\pi$-PrimeNovo all inner-join spectrum rows and prediction rows on `spectrum_id`, but they derive that key differently.
+
+When a loader synthesises identity columns, `experiment_name` is the spectrum path stem (e.g. `spectra` for `spectra.mgf`). MZTab and $\pi$-PrimeNovo always use that rule, and InstaNovo uses it when synthesising IDs for MGF inputs or when `add_index_cols` is enabled for parquet/IPC.
 
 ##### Join and validation
 
-Both loaders inner-join on `spectrum_id`:
+All three loaders inner-join on `spectrum_id`:
 
 - **Spectrum with no matching prediction** — dropped from the merged dataset (these are treated as spectra that did not survive filtering from the peptide sequencer).
 - **Prediction with no matching spectrum row** — loading raises a `ValueError`.
@@ -109,6 +236,7 @@ Loading also raises a `ValueError` if:
 - `spectrum_id` values are not unique in the spectrum data.
 
 MZTab additionally raises if `spectra_ref` cannot be parsed (expected form `ms_run[k]:index=N`).
+$\pi$-PrimeNovo additionally raises if MGF `TITLE` values are missing or not unique within the file, or if a TSV `label` yields a `spectrum_id` absent from the MGF.
 
 ##### InstaNovo: join on `spectrum_id`
 
@@ -123,9 +251,9 @@ Controls whether Winnow synthesises `experiment_name` and `spectrum_id` when loa
 
 When `add_index_cols: true`:
 
-- `experiment_name` is set to the spectrum file stem (e.g. `spectra` for `spectra.parquet`).
-- If a `scan_number` column exists, `spectrum_id` is `{file_stem}:{scan_number}`.
-- Otherwise, `spectrum_id` is `{file_stem}:{row_index}` (0-based row position in the file).
+- `experiment_name` is set to the spectrum path stem (e.g. `spectra` for `spectra.parquet`).
+- If a `scan_number` column exists, `spectrum_id` is `{experiment_name}:{scan_number}`.
+- Otherwise, `spectrum_id` is `{experiment_name}:{row_index}` (0-based row position in the file).
 
 These columns are used directly as the join key (see above).
 
@@ -147,6 +275,16 @@ The MZTab loader inner-joins spectrum rows and PSM rows on `spectrum_id` in `{ex
 This is always applied for parquet, IPC, and MGF inputs; there is no config flag.
 
 Use the **same** input file in the **same** order Casanovo indexed.
+
+##### $\pi$-PrimeNovo: join on `{experiment_name}:{title}`
+
+$\pi$-PrimeNovo predictions do not carry a native `spectrum_id`. The loader builds matching IDs on both sides and then joins like InstaNovo / MZTab:
+
+1. Each MGF spectrum contributes a `title` from the MGF `TITLE` field. That value may be any non-empty string, but **must be unique within the MGF file**. Missing titles raise.
+2. Spectra receive `spectrum_id = {experiment_name}:{title}` (`experiment_name` is `Path(data_path).stem`, as for MZTab).
+3. The predictions TSV must include `label`, `prediction`, and `score` (probabilities in `[0, 1]`). $\pi$-PrimeNovo sets `label` from the spectrum `TITLE`, so predictions receive `spectrum_id = {experiment_name}:{label}`.
+4. Spectra and predictions are inner-joined on `spectrum_id`. Spectra without a prediction are dropped (assumed to be filtered by $\pi$-PrimeNovo), but orphaned predictions will raise.
+5. Before remapping, rows whose raw TSV `prediction` contains a configured mid-sequence N-terminal mod (see `mid_sequence_n_terminal_mods`) are dropped; tokens must be $\pi$-PrimeNovo compact notation.
 
 ### PSMDataset
 

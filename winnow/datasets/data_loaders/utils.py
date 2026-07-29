@@ -216,6 +216,11 @@ def _normalize_peptide_column_polars(
     )
 
 
+def _prediction_has_valid_score(value: object) -> bool:
+    """Return True when a confidence/score cell is present and non-NaN."""
+    return not is_missing_cell(value)
+
+
 def _row_evaluation_pandas(
     row: pd.Series,
     metrics: Metrics,
@@ -225,8 +230,8 @@ def _row_evaluation_pandas(
 ) -> tuple[int, bool]:
     sequence = as_token_list(row.get(sequence_col)) or []
     prediction = as_token_list(row.get(prediction_col)) or []
-    sequence_valid = is_valid_peptide_tokens(row.get(sequence_col))
-    prediction_valid = is_valid_peptide_tokens(row.get(prediction_col))
+    sequence_valid = bool(row["valid_sequence"])
+    prediction_valid = bool(row["valid_prediction"])
     num_matches = row_num_matches(
         sequence,
         prediction,
@@ -253,8 +258,8 @@ def _row_evaluation_polars(
 ) -> tuple[int, bool]:
     sequence = as_token_list(row.get(sequence_col)) or []
     prediction = as_token_list(row.get(prediction_col)) or []
-    sequence_valid = is_valid_peptide_tokens(row.get(sequence_col))
-    prediction_valid = is_valid_peptide_tokens(row.get(prediction_col))
+    sequence_valid = bool(row["valid_sequence"])
+    prediction_valid = bool(row["valid_prediction"])
     num_matches = row_num_matches(
         sequence,
         prediction,
@@ -272,6 +277,31 @@ def _row_evaluation_polars(
     return num_matches, correct
 
 
+def _apply_score_validity_pandas(
+    metadata: pd.DataFrame, score_col: str
+) -> pd.DataFrame:
+    if score_col not in metadata.columns:
+        return metadata
+    score_valid = metadata[score_col].map(_prediction_has_valid_score)
+    metadata["valid_prediction"] = metadata["valid_prediction"] & score_valid
+    return metadata
+
+
+def _apply_score_validity_polars(
+    metadata: pl.DataFrame, score_col: str
+) -> pl.DataFrame:
+    if score_col not in metadata.columns:
+        return metadata
+    score_valid = (
+        pl.col(score_col)
+        .map_elements(_prediction_has_valid_score, return_dtype=pl.Boolean)
+        .fill_null(False)
+    )
+    return metadata.with_columns(
+        (pl.col("valid_prediction") & score_valid).alias("valid_prediction")
+    )
+
+
 def _finalize_peptide_metadata_pandas(
     metadata: pd.DataFrame,
     metrics: Metrics,
@@ -280,6 +310,7 @@ def _finalize_peptide_metadata_pandas(
     residue_remapping: dict[str, str],
     sequence_col: str,
     prediction_col: str,
+    score_col: str,
 ) -> pd.DataFrame:
     metadata[prediction_col] = _normalize_peptide_column_pandas(
         metadata[prediction_col],
@@ -290,6 +321,7 @@ def _finalize_peptide_metadata_pandas(
     metadata["valid_prediction"] = metadata[prediction_col].apply(
         is_valid_peptide_tokens
     )
+    metadata = _apply_score_validity_pandas(metadata, score_col)
 
     if not has_labels:
         return metadata
@@ -326,6 +358,7 @@ def _finalize_peptide_metadata_polars(
     residue_remapping: dict[str, str],
     sequence_col: str,
     prediction_col: str,
+    score_col: str,
 ) -> pl.DataFrame:
     metadata = metadata.with_columns(
         _normalize_peptide_column_polars(
@@ -339,6 +372,7 @@ def _finalize_peptide_metadata_polars(
         .map_elements(is_valid_peptide_tokens, return_dtype=pl.Boolean)
         .alias("valid_prediction"),
     )
+    metadata = _apply_score_validity_polars(metadata, score_col)
 
     if not has_labels:
         return metadata
@@ -358,7 +392,7 @@ def _finalize_peptide_metadata_polars(
     )
 
     metadata = metadata.with_columns(
-        pl.struct([sequence_col, prediction_col])
+        pl.struct([sequence_col, prediction_col, "valid_sequence", "valid_prediction"])
         .map_elements(
             lambda row: dict(
                 zip(
@@ -391,12 +425,17 @@ def finalize_peptide_metadata(
     residue_remapping: dict[str, str] | None = None,
     sequence_col: str = "sequence",
     prediction_col: str = "prediction",
+    score_col: str = "confidence",
 ) -> DataFrameT:
     """Normalize peptide columns, set validity flags, and compute match columns.
 
     Accepts pandas or polars frames and returns the same frame type. All logic
     delegates to cell-level helpers so behaviour is identical regardless of
     whether cells arrive as ``list``, ``np.ndarray``, ``pl.Series``, or ``str``.
+
+    When ``score_col`` is present, rows with ``None``/NaN scores are marked
+    ``valid_prediction=False`` in addition to token-level checks. The score
+    check is skipped if the column is absent.
     """
     if residue_remapping is None:
         residue_remapping = metrics.residue_set.residue_remapping
@@ -409,6 +448,7 @@ def finalize_peptide_metadata(
             residue_remapping=residue_remapping,
             sequence_col=sequence_col,
             prediction_col=prediction_col,
+            score_col=score_col,
         )
     return _finalize_peptide_metadata_pandas(
         metadata,
@@ -417,6 +457,7 @@ def finalize_peptide_metadata(
         residue_remapping=residue_remapping,
         sequence_col=sequence_col,
         prediction_col=prediction_col,
+        score_col=score_col,
     )
 
 

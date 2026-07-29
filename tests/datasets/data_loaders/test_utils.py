@@ -373,3 +373,56 @@ class TestFinalizePeptideMetadata:
         )
         assert metadata["valid_prediction"].iloc[0]
         assert "valid_sequence" not in metadata.columns
+
+    def test_none_or_nan_score_marks_prediction_invalid(self, metrics: Metrics) -> None:
+        metadata = pd.DataFrame(
+            {
+                "sequence": [["P", "E"], ["P", "E"], ["P", "E"]],
+                "prediction": [["P", "E"], ["P", "E"], ["P", "E"]],
+                "confidence": [0.9, None, float("nan")],
+            }
+        )
+        data_utils.finalize_peptide_metadata(
+            metadata,
+            metrics,
+            has_labels=True,
+            residue_remapping=REMAPPING,
+        )
+        assert metadata["valid_prediction"].tolist() == [True, False, False]
+        assert metadata["correct"].tolist() == [True, False, False]
+        assert metadata["num_matches"].tolist() == [2, 0, 0]
+
+    def test_polars_none_or_nan_score_marks_prediction_invalid(
+        self, metrics: Metrics
+    ) -> None:
+        metadata = pl.DataFrame(
+            {
+                "sequence": [["P", "E"], ["P", "E"], ["P", "E"]],
+                "prediction": [["P", "E"], ["P", "E"], ["P", "E"]],
+                "confidence": [0.9, None, float("nan")],
+            }
+        )
+        result = data_utils.finalize_peptide_metadata(
+            metadata,
+            metrics,
+            has_labels=True,
+            residue_remapping=REMAPPING,
+        )
+        assert result["valid_prediction"].to_list() == [True, False, False]
+        assert result["correct"].to_list() == [True, False, False]
+        assert result["num_matches"].to_list() == [2, 0, 0]
+
+    def test_missing_score_column_skips_score_check(self, metrics: Metrics) -> None:
+        metadata = pd.DataFrame(
+            {
+                "sequence": [["P", "E"]],
+                "prediction": [["P", "E"]],
+            }
+        )
+        data_utils.finalize_peptide_metadata(
+            metadata,
+            metrics,
+            has_labels=True,
+            residue_remapping=REMAPPING,
+        )
+        assert metadata["valid_prediction"].iloc[0]
