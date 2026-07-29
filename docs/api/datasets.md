@@ -51,7 +51,7 @@ dataset = mztab_loader.load(
     predictions_path=Path("predictions.mztab")
 )
 
-# Load using PrimeNovo data loader (MGF + TSV)
+# Load using pi-PrimeNovo data loader (MGF + TSV)
 primenovo_loader = PrimeNovoDatasetLoader(
     residue_masses=residue_masses,
     mid_sequence_n_terminal_mods=[
@@ -154,11 +154,11 @@ dataset = loader.load(
 
 #### PrimeNovoDatasetLoader
 
-Loads PrimeNovo predictions from a tab-separated file along with spectrum data from MGF files.
+Loads $\pi$-PrimeNovo predictions from a tab-separated file along with spectrum data from MGF files.
 
-Beam predictions are not saved in PrimeNovo outputs, so the returned `CalibrationDataset` always has `predictions=None`.
+Beam predictions are not saved in $\pi$-PrimeNovo outputs, so the returned `CalibrationDataset` always has `predictions=None`.
 
-`mid_sequence_n_terminal_mods` (see `primenovo.yaml`) lists substrings matched against the **raw** TSV `prediction` string **before** tokenisation and `residue_remapping`. Supply tokens in PrimeNovo compact notation as written in the TSV (e.g. `[+42.011]`), not remapped UNIMOD forms (e.g. `[UNIMOD:1]`). Rows with any listed mod after residue position 0 are dropped.
+`mid_sequence_n_terminal_mods` (see `primenovo.yaml`) lists substrings matched against the **raw** TSV `prediction` string **before** tokenisation and `residue_remapping`. Supply tokens in $\pi$-PrimeNovo compact notation as written in the TSV (e.g. `[+42.011]`), not remapped UNIMOD forms (e.g. `[UNIMOD:1]`). Rows with any listed mod after residue position 0 are dropped.
 
 ```python
 from winnow.datasets.data_loaders import PrimeNovoDatasetLoader
@@ -219,9 +219,9 @@ dataset = loader.load(data_path=Path("saved_dataset_directory"))
 
 #### Spectrum and prediction matching
 
-InstaNovo, MZTab, and PrimeNovo all inner-join spectrum rows and prediction rows on `spectrum_id`, but they derive that key differently.
+InstaNovo, MZTab, and $\pi$-PrimeNovo all inner-join spectrum rows and prediction rows on `spectrum_id`, but they derive that key differently.
 
-When a loader synthesises identity columns, `experiment_name` is the spectrum path stem (e.g. `spectra` for `spectra.mgf`). MZTab and PrimeNovo always use that rule, and InstaNovo uses it when synthesising IDs for MGF inputs or when `add_index_cols` is enabled for parquet/IPC.
+When a loader synthesises identity columns, `experiment_name` is the spectrum path stem (e.g. `spectra` for `spectra.mgf`). MZTab and $\pi$-PrimeNovo always use that rule, and InstaNovo uses it when synthesising IDs for MGF inputs or when `add_index_cols` is enabled for parquet/IPC.
 
 ##### Join and validation
 
@@ -236,7 +236,7 @@ Loading also raises a `ValueError` if:
 - `spectrum_id` values are not unique in the spectrum data.
 
 MZTab additionally raises if `spectra_ref` cannot be parsed (expected form `ms_run[k]:index=N`).
-PrimeNovo additionally raises if MGF `TITLE` values are missing or not unique within the file, or if a TSV `label` yields a `spectrum_id` absent from the MGF.
+$\pi$-PrimeNovo additionally raises if MGF `TITLE` values are missing or not unique within the file, or if a TSV `label` yields a `spectrum_id` absent from the MGF.
 
 ##### InstaNovo: join on `spectrum_id`
 
@@ -276,15 +276,15 @@ This is always applied for parquet, IPC, and MGF inputs; there is no config flag
 
 Use the **same** input file in the **same** order Casanovo indexed.
 
-##### PrimeNovo: join on `{experiment_name}:{title}`
+##### $\pi$-PrimeNovo: join on `{experiment_name}:{title}`
 
-PrimeNovo predictions do not carry a native `spectrum_id`. The loader builds matching IDs on both sides and then joins like InstaNovo / MZTab:
+$\pi$-PrimeNovo predictions do not carry a native `spectrum_id`. The loader builds matching IDs on both sides and then joins like InstaNovo / MZTab:
 
 1. Each MGF spectrum contributes a `title` from the MGF `TITLE` field. That value may be any non-empty string, but **must be unique within the MGF file**. Missing titles raise.
 2. Spectra receive `spectrum_id = {experiment_name}:{title}` (`experiment_name` is `Path(data_path).stem`, as for MZTab).
-3. The predictions TSV must include `label`, `prediction`, and `score` (probabilities in `[0, 1]`). PrimeNovo sets `label` from the spectrum `TITLE`, so predictions receive `spectrum_id = {experiment_name}:{label}`.
-4. Spectra and predictions are inner-joined on `spectrum_id`. Spectra without a prediction are dropped (assumed to be filtered by PrimeNovo), but orphaned predictions will raise.
-5. Before remapping, rows whose raw TSV `prediction` contains a configured mid-sequence N-terminal mod (see `mid_sequence_n_terminal_mods`) are dropped; tokens must be PrimeNovo compact notation.
+3. The predictions TSV must include `label`, `prediction`, and `score` (probabilities in `[0, 1]`). $\pi$-PrimeNovo sets `label` from the spectrum `TITLE`, so predictions receive `spectrum_id = {experiment_name}:{label}`.
+4. Spectra and predictions are inner-joined on `spectrum_id`. Spectra without a prediction are dropped (assumed to be filtered by $\pi$-PrimeNovo), but orphaned predictions will raise.
+5. Before remapping, rows whose raw TSV `prediction` contains a configured mid-sequence N-terminal mod (see `mid_sequence_n_terminal_mods`) are dropped; tokens must be $\pi$-PrimeNovo compact notation.
 
 ### PSMDataset
 

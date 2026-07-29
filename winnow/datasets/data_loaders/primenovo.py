@@ -1,9 +1,9 @@
-"""PrimeNovo TSV + MGF dataset loader.
+"""pi-PrimeNovo TSV + MGF dataset loader.
 
 Spectrum-prediction linking
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Spectra are loaded from ``.mgf`` with matchms. Each ion's matchms ``title`` comes
-from the MGF ``TITLE`` field and may be any non-empty string; PrimeNovo copies
+from the MGF ``TITLE`` field and may be any non-empty string; pi-PrimeNovo copies
 that value into the TSV ``label`` column. Within one MGF file, ``TITLE`` values
 must be unique.
 
@@ -20,7 +20,7 @@ predictions whose ``label`` does not match any spectrum ``TITLE`` raise.
 
 Score assumptions
 ~~~~~~~~~~~~~~~~~
-PrimeNovo ``score`` values are probabilities in ``[0, 1]`` and are stored as
+pi-PrimeNovo ``score`` values are probabilities in ``[0, 1]`` and are stored as
 ``confidence`` without transformation. Values outside this range raise at load
 time.
 
@@ -28,14 +28,14 @@ Mid-sequence N-terminal modification filtering
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ``mid_sequence_n_terminal_mods`` lists substrings matched against the **raw**
 TSV ``prediction`` string **before** tokenisation and ``residue_remapping``.
-Supply tokens in PrimeNovo compact notation as written in the TSV (e.g.
+Supply tokens in pi-PrimeNovo compact notation as written in the TSV (e.g.
 ``[+42.011]``), not remapped UNIMOD / ProForma forms (e.g. ``[UNIMOD:1]``).
 Rows whose prediction contains any listed mod after residue position 0 are
 dropped.
 
 Beams
 ~~~~~
-PrimeNovo does not emit beam predictions, so the returned
+pi-PrimeNovo does not emit beam predictions, so the returned
 :class:`~winnow.datasets.calibration_dataset.CalibrationDataset` always has
 ``predictions=None``.
 """
@@ -58,25 +58,25 @@ logger = logging.getLogger(__name__)
 
 
 class PrimeNovoDatasetLoader(DatasetLoader):
-    """Loader for PrimeNovo predictions in TSV format.
+    """Loader for pi-PrimeNovo predictions in TSV format.
 
-    PrimeNovo writes predictions to a tab-separated file with fixed columns
+    pi-PrimeNovo writes predictions to a tab-separated file with fixed columns
     ``label``, ``prediction``, ``charge``, ``score``. Spectra (``.mgf``) are loaded
     with matchms. ``spectrum_id`` is ``{experiment_name}:{title}`` on the MGF side and
-    ``{experiment_name}:{label}`` on the TSV side (PrimeNovo sets TSV ``label`` from the
+    ``{experiment_name}:{label}`` on the TSV side (pi-PrimeNovo sets TSV ``label`` from the
     MGF ``TITLE``). Titles and labels may be any non-empty string but must each be
     unique within their file. Tables are inner-joined on ``spectrum_id``.
 
     Score values are already probabilities in ``[0, 1]`` and are stored as
     ``confidence`` without transformation. Beam predictions are not available from
-    PrimeNovo, so the returned :class:`CalibrationDataset` always has
+    pi-PrimeNovo, so the returned :class:`CalibrationDataset` always has
     ``predictions=None``.
 
     ``mid_sequence_n_terminal_mods`` are matched as substrings of the raw TSV
-    ``prediction`` before remapping; use PrimeNovo compact notation, not UNIMOD.
+    ``prediction`` before remapping; use pi-PrimeNovo compact notation, not UNIMOD.
     """
 
-    # Score encoding: PrimeNovo ``score`` is a probability
+    # Score encoding: pi-PrimeNovo ``score`` is a probability
     _SCORE_MIN = 0.0
     _SCORE_MAX = 1.0
 
@@ -94,9 +94,9 @@ class PrimeNovoDatasetLoader(DatasetLoader):
             mid_sequence_n_terminal_mods: N-terminal modification tokens that are
                 invalid if they appear after residue position 0. Matched as
                 substrings of the raw TSV ``prediction`` **before**
-                ``residue_remapping``; use PrimeNovo compact notation (e.g.
+                ``residue_remapping``; use pi-PrimeNovo compact notation (e.g.
                 ``[+42.011]``), not remapped UNIMOD forms. Matching rows are dropped.
-            residue_remapping: Optional ProForma mapping from PrimeNovo tokens.
+            residue_remapping: Optional ProForma mapping from pi-PrimeNovo tokens.
             isotope_error_range: The range of isotope errors to consider when matching
                 peptides.
         """
@@ -155,25 +155,25 @@ class PrimeNovoDatasetLoader(DatasetLoader):
 
     @classmethod
     def _validate_primenovo_score(cls, score: float) -> None:
-        """Raise if a PrimeNovo score is outside ``[0, 1]``."""
+        """Raise if a pi-PrimeNovo score is outside ``[0, 1]``."""
         if not cls._SCORE_MIN <= score <= cls._SCORE_MAX:
             raise ValueError(
-                f"PrimeNovo scores must be probabilities in [0, 1]. Got {score}."
+                f"pi-PrimeNovo scores must be probabilities in [0, 1]. Got {score}."
             )
 
     def load(
         self, *, data_path: Path, predictions_path: Optional[Path] = None, **kwargs: Any
     ) -> CalibrationDataset:
-        """Load a CalibrationDataset from PrimeNovo TSV predictions and MGF spectra.
+        """Load a CalibrationDataset from pi-PrimeNovo TSV predictions and MGF spectra.
 
         Args:
             data_path: Path to the spectrum data file (``.mgf`` only).
-            predictions_path: Path to the PrimeNovo predictions TSV file.
+            predictions_path: Path to the pi-PrimeNovo predictions TSV file.
             **kwargs: Not used.
 
         Returns:
             CalibrationDataset: Dataset containing merged metadata. ``predictions`` is
-                always ``None`` because PrimeNovo does not produce beams.
+                always ``None`` because pi-PrimeNovo does not produce beams.
 
         Raises:
             ValueError: If ``predictions_path`` is None, required TSV columns are
@@ -222,7 +222,7 @@ class PrimeNovoDatasetLoader(DatasetLoader):
     ) -> pl.DataFrame:
         """Set prediction ``spectrum_id`` to ``{experiment_name}:{label}``.
 
-        PrimeNovo sets TSV ``label`` from the MGF ``TITLE``, so ids match
+        pi-PrimeNovo sets TSV ``label`` from the MGF ``TITLE``, so ids match
         ``{experiment_name}:{title}`` on the spectrum side.
         """
         predictions = predictions.with_columns(
@@ -240,7 +240,7 @@ class PrimeNovoDatasetLoader(DatasetLoader):
         empty_labels = predictions.filter(pl.col("label").is_null())
         if len(empty_labels) > 0:
             raise ValueError(
-                "PrimeNovo predictions contain empty label values; label must equal "
+                "pi-PrimeNovo predictions contain empty label values; label must equal "
                 "the corresponding MGF TITLE."
             )
 
@@ -263,7 +263,7 @@ class PrimeNovoDatasetLoader(DatasetLoader):
         return False
 
     def _load_predictions(self, predictions_path: Path | str) -> pl.DataFrame:
-        """Load PrimeNovo TSV predictions and validate required columns and scores.
+        """Load pi-PrimeNovo TSV predictions and validate required columns and scores.
 
         Args:
             predictions_path: Path to the predictions TSV or TXT file.
@@ -279,7 +279,7 @@ class PrimeNovoDatasetLoader(DatasetLoader):
         predictions_path = Path(predictions_path)
         if predictions_path.suffix not in {".tsv", ".txt"}:
             raise ValueError(
-                f"Unsupported file format for PrimeNovo predictions: "
+                f"Unsupported file format for pi-PrimeNovo predictions: "
                 f"{predictions_path.suffix}. Supported formats are .tsv and .txt."
             )
         predictions = pl.read_csv(predictions_path, separator="\t")
@@ -288,7 +288,7 @@ class PrimeNovoDatasetLoader(DatasetLoader):
         missing = [col for col in required if col not in predictions.columns]
         if missing:
             raise ValueError(
-                f"PrimeNovo predictions file is missing required column(s): {missing}. "
+                f"pi-PrimeNovo predictions file is missing required column(s): {missing}. "
                 f"Present columns: {list(predictions.columns)}."
             )
 
@@ -345,7 +345,7 @@ class PrimeNovoDatasetLoader(DatasetLoader):
         missing_titles = df.filter(pl.col("title").is_null())
         if len(missing_titles) > 0:
             raise ValueError(
-                "PrimeNovo MGF spectra require a non-empty TITLE for every ion. "
+                "pi-PrimeNovo MGF spectra require a non-empty TITLE for every ion. "
                 f"Missing TITLE on {len(missing_titles)} spectrum row(s)."
             )
         if df["title"].n_unique() != len(df):
@@ -382,7 +382,7 @@ class PrimeNovoDatasetLoader(DatasetLoader):
 
         if merged.height == 0:
             raise ValueError(
-                "PrimeNovo inner join on spectrum_id produced no rows. Ensure each "
+                "pi-PrimeNovo inner join on spectrum_id produced no rows. Ensure each "
                 "TSV label equals the corresponding spectrum TITLE in the MGF."
             )
         if merged.height != predictions.height:
@@ -415,7 +415,7 @@ class PrimeNovoDatasetLoader(DatasetLoader):
         n_bad = int(bad_mask.sum())
         if n_bad:
             logger.warning(
-                "Filtered %d spectra with PrimeNovo N-terminal modifications "
+                "Filtered %d spectra with pi-PrimeNovo N-terminal modifications "
                 "incorrectly placed in the middle of the peptide sequence.",
                 n_bad,
             )

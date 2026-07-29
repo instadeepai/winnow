@@ -1,9 +1,9 @@
-# --- PrimeNovo data loading configuration ---
+# --- pi-PrimeNovo data loading configuration ---
 _target_: winnow.datasets.data_loaders.PrimeNovoDatasetLoader
 
 residue_masses: ${residue_masses}
 
-residue_remapping:  # Used to map PrimeNovo-specific notations to UNIMOD tokens.
+residue_remapping:  # Used to map pi-PrimeNovo-specific notations to UNIMOD tokens.
   "M[+15.995]": "M[UNIMOD:35]"  # Oxidation
   "C[+57.021]": "C[UNIMOD:4]"  # Carbamidomethylation
   "N[+0.984]": "N[UNIMOD:7]"  # Deamidation
@@ -20,7 +20,7 @@ residue_remapping:  # Used to map PrimeNovo-specific notations to UNIMOD tokens.
   "[Carbamyl]": "[UNIMOD:5]"  # Carbamylation
 
 # Matched as substrings of the raw TSV `prediction` column BEFORE residue_remapping
-# and tokenisation. Use PrimeNovo compact notation as written in the TSV
+# and tokenisation. Use pi-PrimeNovo compact notation as written in the TSV
 # (e.g. "[+42.011]"), not remapped UNIMOD / ProForma forms (e.g. "[UNIMOD:1]").
 # Rows with any listed mod after residue position 0 are dropped.
 mid_sequence_n_terminal_mods:

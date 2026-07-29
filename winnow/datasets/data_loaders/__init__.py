@@ -1,4 +1,4 @@
-"""Dataset loaders for InstaNovo, mzTab, PointNovo, PrimeNovo, and saved Winnow datasets."""
+"""Dataset loaders for InstaNovo, mzTab, PointNovo, pi-PrimeNovo, and saved Winnow datasets."""
 
 from winnow.datasets.data_loaders.instanovo import InstaNovoDatasetLoader
 from winnow.datasets.data_loaders.mztab import MZTabDatasetLoader
