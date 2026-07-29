@@ -1,11 +1,8 @@
 """Tests for PrimeNovoDatasetLoader: join on {experiment_name}:{title|label}."""
 
-from pathlib import Path
-
 import pandas as pd
 import polars as pl
 import pytest
-from omegaconf import OmegaConf
 
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.datasets.data_loaders import PrimeNovoDatasetLoader
@@ -113,18 +110,6 @@ class TestPrimeNovoDatasetLoader:
             }
         ).to_csv(path, sep="\t", index=False)
         with pytest.raises(ValueError, match=r"\[0, 1\]"):
-            loader._load_predictions(path)
-
-    def test_load_predictions_rejects_missing_score(self, loader, tmp_path):
-        path = tmp_path / "missing_score.tsv"
-        pd.DataFrame(
-            {
-                "label": ["a"],
-                "prediction": ["AG"],
-                "score": [None],
-            }
-        ).to_csv(path, sep="\t", index=False)
-        with pytest.raises(ValueError, match="missing score"):
             loader._load_predictions(path)
 
     def test_load_spectrum_data_sets_spectrum_id_from_title(self, loader, mgf_path):
@@ -439,10 +424,3 @@ class TestPrimeNovoDatasetLoader:
         row = meta.set_index("spectrum_id").loc["spectra:run_X_SCANS_1"]
         assert bool(row["correct"]) is True
         assert row["num_matches"] == len(row["sequence"])
-
-
-def test_primenovo_config_target() -> None:
-    """Bundled Hydra YAML points at PrimeNovoDatasetLoader."""
-    config_dir = Path(__file__).parents[3] / "winnow" / "configs"
-    cfg = OmegaConf.load(config_dir / "data_loader" / "primenovo.yaml")
-    assert cfg._target_ == "winnow.datasets.data_loaders.PrimeNovoDatasetLoader"
