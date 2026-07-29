@@ -115,6 +115,18 @@ class TestPrimeNovoDatasetLoader:
         with pytest.raises(ValueError, match=r"\[0, 1\]"):
             loader._load_predictions(path)
 
+    def test_load_predictions_rejects_missing_score(self, loader, tmp_path):
+        path = tmp_path / "missing_score.tsv"
+        pd.DataFrame(
+            {
+                "label": ["a"],
+                "prediction": ["AG"],
+                "score": [None],
+            }
+        ).to_csv(path, sep="\t", index=False)
+        with pytest.raises(ValueError, match="missing score"):
+            loader._load_predictions(path)
+
     def test_load_spectrum_data_sets_spectrum_id_from_title(self, loader, mgf_path):
         df, has_labels = loader._load_spectrum_data(mgf_path)
         assert has_labels is True
