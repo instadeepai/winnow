@@ -6,10 +6,11 @@ on:
       - main
 jobs:
   tests:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13"]
     env:
       # secrets cannot be referenced in step `if:` (schema); expose a boolean via env instead.
@@ -31,14 +32,14 @@ jobs:
         run: uv run pytest tests --verbose --cov=winnow --cov-report xml:coverage.xml --cov-report term-missing --junitxml=pytest.xml --cov-fail-under=0
       - name: pytest coverage comment
         id: coverageComment
-        if: matrix.python-version == '3.12'
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         uses: MishaKav/pytest-coverage-comment@287292879eaaff04116f36d3eb1a670f6e5df1a4
         with:
           pytest-xml-coverage-path: ./coverage.xml
           junitxml-path: ./pytest.xml
       # Dependabot (and some fork PRs) do not receive Actions secrets; skip gist update to avoid 401.
       - name: Create the badge
-        if: env.HAS_BOT_TOKEN == 'true' && matrix.python-version == '3.12'
+        if: env.HAS_BOT_TOKEN == 'true' && matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         uses: schneegans/dynamic-badges-action@e9a478b16159b4d31420099ba146cdc50f134483
         with:
           auth: ${{ secrets.BOT_ACCESS_TOKEN }}
