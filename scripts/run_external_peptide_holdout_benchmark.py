@@ -35,6 +35,11 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.annotate_preds_proteome_hits import load_proteome_haystack  # noqa: E402
+from scripts.fdr_tool_comparison_summaries import (  # noqa: E402
+    SUMMARY_THRESHOLDS,
+    summarise_holdout_results,
+    write_summary_tables,
+)
 from scripts.plot_eval_results import _PALETTE, _display_name, _save_fig, _style_ax  # noqa: E402
 from scripts.plot_fdr_method_comparison import (  # noqa: E402
     DEFAULT_GLISSADE_ROOT,
@@ -596,6 +601,22 @@ def plot_benchmark_results(results: pd.DataFrame, output_dir: Path) -> None:
             )
 
 
+def write_holdout_summary_tables(
+    results: pd.DataFrame,
+    output_dir: Path,
+    *,
+    thresholds: list[float] | None = None,
+) -> tuple[Path, Path]:
+    """Aggregate raw mixture rows into acceptance and error/gain CSVs."""
+    acceptance, error_gain = summarise_holdout_results(
+        results,
+        thresholds=thresholds if thresholds is not None else SUMMARY_THRESHOLDS,
+    )
+    return write_summary_tables(
+        acceptance, error_gain, output_dir, "external_peptide_holdout"
+    )
+
+
 @app.command()
 def main(
     output_dir: Annotated[
@@ -665,10 +686,28 @@ def main(
         ),
     ] = 0,
     plot: Annotated[bool, typer.Option(help="Create summary plots.")] = True,
+    summarise_only: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--summarise-only",
+            help=(
+                "Skip the mixture benchmark and only write summary CSVs from an "
+                "existing external_peptide_holdout_results.csv."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Run the score-mixture external peptide benchmark."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    if summarise_only is not None:
+        results = pd.read_csv(summarise_only)
+        write_holdout_summary_tables(results, output_dir)
+        if plot:
+            plot_benchmark_results(results, output_dir / "plots")
+        return
+
     dataset_keys = datasets if datasets is not None else DEFAULT_DATASETS
     fracs = holdout_fracs if holdout_fracs is not None else [DEFAULT_HOLDOUT_FRAC]
     thresholds = (
@@ -717,6 +756,7 @@ def main(
     results_path = output_dir / "external_peptide_holdout_results.csv"
     results.to_csv(results_path, index=False)
     logger.info("Wrote %s", results_path)
+    write_holdout_summary_tables(results, output_dir)
     if plot:
         plot_benchmark_results(results, output_dir / "plots")
 
