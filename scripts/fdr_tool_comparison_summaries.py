@@ -4,7 +4,8 @@ Produces two long-form CSVs:
 
 - ``*_acceptance.csv``: accepted counts and recovery at q-value thresholds.
 - ``*_error_gain.csv``: observed FDP, excess over nominal FDR, optional mean
-  absolute q-value deviation vs a database-grounded reference, and relative
+  absolute q-value deviation vs a database-grounded reference (calibrated-score
+  DBG for Winnow; raw-score / ALC DBG for NovoBoard and Glissade), and relative
   gain/loss of a primary method vs each comparator.
 """
 
@@ -12,14 +13,18 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Sequence, cast
 
 import numpy as np
 import pandas as pd
 
+from scripts.fdr_tool_comparison_preprocess import compute_q_values
+
 logger = logging.getLogger(__name__)
 
 SUMMARY_THRESHOLDS: list[float] = [0.01, 0.05, 0.10]
+# Match ``DatabaseGroundedFDRControl`` / PSM comparison default.
+_DB_GROUNDED_DROP = 10
 
 _KEY_COLS = ["dataset", "panel", "level", "method", "q_value_threshold"]
 
@@ -127,6 +132,60 @@ def observed_fdp_at_thresholds(
     return out
 
 
+def database_grounded_q_from_labels(
+    scores: np.ndarray,
+    labels: np.ndarray,
+    *,
+    drop: int = _DB_GROUNDED_DROP,
+) -> np.ndarray:
+    """In-sample database-grounded q-values from ranked scores and boolean labels.
+
+    Builds the empirical precision curve ``1 - cumsum(correct) / rank`` on scores
+    sorted descending (same construction as the proteome-hit shortcut in the PSM
+    comparison), drops the first *drop* ranks from the FDR map, assigns FDR by
+    score lookup, then converts to q-values.
+
+    Args:
+        scores: Ranking scores (higher = more confident).
+        labels: Boolean correctness / hit labels aligned with *scores*.
+        drop: Leading ranks excluded from the FDR map (default 10).
+
+    Returns:
+        q-value array aligned with *scores*.
+    """
+    scores_a = np.asarray(scores, dtype=float)
+    labels_a = np.asarray(labels, dtype=bool)
+    n = len(scores_a)
+    if n == 0:
+        return np.asarray([], dtype=float)
+    if len(labels_a) != n:
+        raise ValueError(
+            f"labels length {len(labels_a)} does not match scores length {n}"
+        )
+
+    order = np.argsort(-scores_a, kind="mergesort")
+    precision = np.cumsum(labels_a[order].astype(float)) / np.arange(1, n + 1)
+    fdr_ranked = 1.0 - precision
+    drop_eff = min(drop, max(0, n - 1))
+    fit_scores = scores_a[order][drop_eff:]
+    fit_fdr = fdr_ranked[drop_eff:]
+    n_fit = len(fit_scores)
+
+    idx = np.searchsorted(-fit_scores, -scores_a, side="left")
+    fdr = np.empty(n, dtype=float)
+    below = (idx == n_fit) & (scores_a < fit_scores[-1])
+    above = (idx == 0) & (scores_a > fit_scores[0])
+    normal = ~(below | above)
+    fdr[below] = 1.0
+    fdr[above] = float(fit_fdr[0])
+    fdr[normal] = fit_fdr[np.clip(idx[normal], 0, n_fit - 1)]
+
+    q_sorted = compute_q_values(fdr[order])
+    q = np.empty(n, dtype=float)
+    q[order] = q_sorted
+    return q
+
+
 def mean_abs_q_dev_vs_reference(
     q_method: np.ndarray,
     q_ref: np.ndarray,
@@ -220,6 +279,56 @@ def _relative_gain_column(value_col: str, comparator: str) -> str:
     return f"{value_col}_pct_vs_{slug}"
 
 
+def _relative_gain_value(
+    value_col: str, primary_val: object, comparator_val: object
+) -> float:
+    """Compute primary-vs-comparator gain for one metric cell."""
+    if pd.isna(primary_val) or pd.isna(comparator_val):
+        return float("nan")
+    primary = float(cast("float | int | str", primary_val))
+    comparator = float(cast("float | int | str", comparator_val))
+    if value_col == "observed_fdp" or "fdp" in value_col:
+        return primary - comparator
+    if comparator == 0:
+        return float("nan")
+    return 100.0 * (primary - comparator) / comparator
+
+
+def _fill_primary_relative_gains(
+    work: pd.DataFrame,
+    group: pd.DataFrame,
+    *,
+    primary_method: str,
+    comparators: Sequence[str],
+    value_cols: Sequence[str],
+    group_cols: Sequence[str],
+    group_keys: tuple[object, ...],
+) -> None:
+    """Write relative-gain columns onto the primary-method row for one group."""
+    primary_rows = group[group["method"] == primary_method]
+    if primary_rows.empty:
+        return
+    primary = primary_rows.iloc[0]
+    mask = pd.Series(True, index=work.index)
+    for col, val in zip(group_cols, group_keys):
+        mask &= work[col] == val
+    primary_idx = work.index[mask & (work["method"] == primary_method)]
+    if len(primary_idx) == 0:
+        return
+    idx = primary_idx[0]
+
+    for comparator in comparators:
+        comp_rows = group[group["method"] == comparator]
+        if comp_rows.empty:
+            continue
+        comp = comp_rows.iloc[0]
+        for col in value_cols:
+            out_col = _relative_gain_column(col, comparator)
+            gain = _relative_gain_value(col, primary[col], comp[col])
+            if np.isfinite(gain):
+                work.at[idx, out_col] = gain
+
+
 def add_relative_gain_columns(
     df: pd.DataFrame,
     *,
@@ -248,55 +357,37 @@ def add_relative_gain_columns(
     for keys, group in work.groupby(group_list, dropna=False, sort=False):
         if not isinstance(keys, tuple):
             keys = (keys,)
-        primary_rows = group[group["method"] == primary_method]
-        if primary_rows.empty:
-            continue
-        primary = primary_rows.iloc[0]
-        mask = True
-        for col, val in zip(group_list, keys):
-            mask = mask & (work[col] == val)
-        primary_idx = work.index[mask & (work["method"] == primary_method)]
-        if len(primary_idx) == 0:
-            continue
-        idx = primary_idx[0]
-
-        for comparator in comparator_list:
-            comp_rows = group[group["method"] == comparator]
-            if comp_rows.empty:
-                continue
-            comp = comp_rows.iloc[0]
-            for col in value_cols:
-                out_col = _relative_gain_column(col, comparator)
-                p_val = primary[col]
-                c_val = comp[col]
-                if pd.isna(p_val) or pd.isna(c_val):
-                    continue
-                p_f = float(p_val)
-                c_f = float(c_val)
-                if col == "observed_fdp" or "fdp" in col:
-                    work.at[idx, out_col] = p_f - c_f
-                else:
-                    if c_f == 0:
-                        continue
-                    work.at[idx, out_col] = 100.0 * (p_f - c_f) / c_f
+        _fill_primary_relative_gains(
+            work,
+            group,
+            primary_method=primary_method,
+            comparators=comparator_list,
+            value_cols=value_cols,
+            group_cols=group_list,
+            group_keys=keys,
+        )
     return work
 
 
 def merge_acceptance_and_error(
     acceptance: pd.DataFrame,
     error: pd.DataFrame,
+    *,
+    key_cols: Sequence[str] | None = None,
 ) -> pd.DataFrame:
     """Join acceptance counts onto error rows for relative-gain construction."""
     if acceptance.empty or error.empty:
         return error.copy()
+    keys = list(key_cols) if key_cols is not None else list(_KEY_COLS)
+    keys = [c for c in keys if c in acceptance.columns and c in error.columns]
     cols = [
         c
         for c in ("n_accepted", "n_correct", "recovery_pct")
         if c in acceptance.columns
     ]
     return error.merge(
-        acceptance[_KEY_COLS + cols],
-        on=_KEY_COLS,
+        acceptance[keys + cols],
+        on=keys,
         how="left",
     )
 
@@ -307,17 +398,25 @@ def finalise_error_gain_table(
     *,
     primary_method: str,
     comparators: Sequence[str],
+    key_cols: Sequence[str] | None = None,
+    group_cols: Sequence[str] | None = None,
 ) -> pd.DataFrame:
     """Merge counts into error rows and add primary-vs-comparator relative columns."""
-    merged = merge_acceptance_and_error(acceptance, error)
+    merged = merge_acceptance_and_error(acceptance, error, key_cols=key_cols)
     value_cols = [
         c for c in ("n_accepted", "recovery_pct", "observed_fdp") if c in merged.columns
     ]
+    gain_groups = (
+        tuple(group_cols)
+        if group_cols is not None
+        else ("dataset", "panel", "level", "q_value_threshold")
+    )
     with_gain = add_relative_gain_columns(
         merged,
         primary_method=primary_method,
         comparators=comparators,
         value_cols=value_cols,
+        group_cols=gain_groups,
     )
     # Keep error-table identity columns first; drop helper count cols that duplicate
     # the acceptance table except when used only for gain calculation.
@@ -350,6 +449,7 @@ def summarise_holdout_results(
     comparators: Sequence[str] = ("NovoBoard", "Glissade"),
     panel: str = "score_mixture",
     level: str = "peptide",
+    group_extra: Sequence[str] = (),
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Aggregate mixture-benchmark iterations into the two summary tables.
 
@@ -360,6 +460,7 @@ def summarise_holdout_results(
         comparators: Comparator method labels.
         panel: Panel name written into the summary tables.
         level: Identification level written into the summary tables.
+        group_extra: Extra columns to group by (e.g. ``pi0_target``).
 
     Returns:
         ``(acceptance_df, error_gain_df)``.
@@ -371,33 +472,36 @@ def summarise_holdout_results(
     if filtered.empty:
         return pd.DataFrame(), pd.DataFrame()
 
-    group_cols = ["dataset", "method", "q_value_threshold"]
+    extra = [c for c in group_extra if c in filtered.columns]
+    group_cols = ["dataset", *extra, "method", "q_value_threshold"]
+    gain_group_cols = ("dataset", *extra, "panel", "level", "q_value_threshold")
+    agg_kwargs: dict[str, tuple[str, str]] = {
+        "n_accepted": ("accepted_peptides", "mean"),
+        "n_correct": ("true_correct_peptides", "mean"),
+        "recovery_pct": ("correct_discovery_pct", "mean"),
+        "observed_fdp": ("observed_fdp", "mean"),
+        "n_accepted_std": ("accepted_peptides", "std"),
+        "observed_fdp_std": ("observed_fdp", "std"),
+        "recovery_pct_std": ("correct_discovery_pct", "std"),
+    }
+    if "mean_abs_q_dev_vs_db" in filtered.columns:
+        agg_kwargs["mean_abs_q_dev_vs_db"] = ("mean_abs_q_dev_vs_db", "mean")
     agg = (
         filtered.groupby(group_cols, as_index=False)
-        .agg(
-            n_accepted=("accepted_peptides", "mean"),
-            n_correct=("true_correct_peptides", "mean"),
-            recovery_pct=("correct_discovery_pct", "mean"),
-            observed_fdp=("observed_fdp", "mean"),
-            n_accepted_std=("accepted_peptides", "std"),
-            observed_fdp_std=("observed_fdp", "std"),
-            recovery_pct_std=("correct_discovery_pct", "std"),
-        )
+        .agg(**agg_kwargs)
         .sort_values(group_cols)
         .reset_index(drop=True)
     )
     agg["panel"] = panel
     agg["level"] = level
     agg["fdp_excess"] = agg["observed_fdp"] - agg["q_value_threshold"]
-    agg["mean_abs_q_dev_vs_db"] = np.nan
+    if "mean_abs_q_dev_vs_db" not in agg.columns:
+        agg["mean_abs_q_dev_vs_db"] = np.nan
 
+    id_cols = ["dataset", *extra, "panel", "level", "method", "q_value_threshold"]
     acceptance = agg[
-        [
-            "dataset",
-            "panel",
-            "level",
-            "method",
-            "q_value_threshold",
+        id_cols
+        + [
             "n_accepted",
             "n_correct",
             "recovery_pct",
@@ -407,12 +511,8 @@ def summarise_holdout_results(
     ].copy()
 
     error = agg[
-        [
-            "dataset",
-            "panel",
-            "level",
-            "method",
-            "q_value_threshold",
+        id_cols
+        + [
             "observed_fdp",
             "fdp_excess",
             "mean_abs_q_dev_vs_db",
@@ -427,5 +527,7 @@ def summarise_holdout_results(
         error,
         primary_method=primary_method,
         comparators=comparators,
+        key_cols=id_cols,
+        group_cols=gain_group_cols,
     )
     return acceptance, error_gain
