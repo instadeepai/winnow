@@ -23,12 +23,15 @@ from typing import Iterable
 
 import numpy as np
 import pandas as pd
+import polars as pl
 import yaml
 from instanovo.utils.metrics import Metrics
 from instanovo.utils.residues import ResidueSet
 
-from scripts.annotate_preds_proteome_hits import (
+from winnow.utils.proteome import (
     _batch_peptide_substring_hits,
+    processed_peptide_for_match,
+    residue_token_count,
 )
 
 logger = logging.getLogger(__name__)
@@ -486,6 +489,38 @@ def proteome_hit_mask(
     return np.array(
         [bool(eligible[i] and hit_map.get(keys[i], False)) for i in range(len(keys))],
         dtype=bool,
+    )
+
+
+def filter_and_annotate_preds(
+    preds: pl.DataFrame,
+    haystack: str,
+    metrics: Metrics,
+    min_residue_length: int,
+) -> pl.DataFrame:
+    """Filter short peptides and annotate ``proteome_hit`` via ``winnow.utils.proteome``.
+
+    Args:
+        preds: Polars frame with a ``prediction`` column.
+        haystack: I/L-normalised FASTA haystack from ``load_proteome_haystack``.
+        metrics: InstaNovo ``Metrics`` (uses ``metrics.residue_set`` for length).
+        min_residue_length: Drop PSMs with fewer than this many residue tokens.
+    """
+    residue_set = metrics.residue_set
+    n_tok = preds["prediction"].map_elements(
+        lambda x: residue_token_count(x, residue_set),
+        return_dtype=pl.Int32,
+    )
+    filtered = preds.with_columns(n_tok.alias("_n_residue_tokens")).filter(
+        pl.col("_n_residue_tokens") >= min_residue_length
+    )
+    processed = filtered["prediction"].map_elements(
+        lambda x: processed_peptide_for_match(x) if isinstance(x, str) else "",
+        return_dtype=pl.Utf8,
+    )
+    hits = _batch_peptide_substring_hits(processed.to_list(), haystack)
+    return filtered.drop("_n_residue_tokens").with_columns(
+        pl.Series("proteome_hit", hits, dtype=pl.Boolean)
     )
 
 

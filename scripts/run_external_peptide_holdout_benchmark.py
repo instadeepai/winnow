@@ -91,7 +91,7 @@ from winnow.fdr.nonparametric import NonParametricFDRControl  # noqa: E402
 logger = logging.getLogger(__name__)
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
-DEFAULT_OUTPUT_DIR = _REPO_ROOT / "results/external_peptide_holdout_benchmark_v2"
+DEFAULT_OUTPUT_DIR = _REPO_ROOT / "results/external_peptide_holdout_benchmark"
 DEFAULT_DATASETS = ["helaqc", "celegans"]
 DEFAULT_Q_THRESHOLDS = [round(float(x), 2) for x in np.linspace(0.0, 0.25, 26)]
 DEFAULT_PI0_GRID = [0.5, 0.6, 0.7, 0.8, 0.9]

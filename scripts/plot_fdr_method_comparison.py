@@ -43,7 +43,7 @@ import typer
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.annotate_preds_proteome_hits import load_proteome_haystack  # noqa: E402
+from winnow.utils.proteome import load_proteome_haystack  # noqa: E402
 from scripts.fdr_tool_comparison_preprocess import (  # noqa: E402
     LABELLED_MIN_PEPTIDE_LENGTH,
     MIN_PEPTIDE_LENGTH,
@@ -116,7 +116,7 @@ _DATASET_META = {
         "winnow_suffix": "helaqc",
     },
     "celegans": {
-        "fasta": "fasta/Celegans.fasta",
+        "fasta": "fasta/celegans.fasta",
         "novoboard_decoy": "0.70",
         "winnow_suffix": "celegans",
     },

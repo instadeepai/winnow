@@ -261,7 +261,7 @@ def _nontryptic_annotate(
     """Annotate full-search predictions with proteome and tryptic-terminus flags.
 
     ``proteome_hit`` is True when the mod-stripped prediction is a substring of
-    the reference proteome FASTA (same rule as ``annotate_preds_proteome_hits``).
+    the reference proteome FASTA (same rule as ``winnow.utils.proteome``).
     """
     haystack = _load_proteome_haystack(fasta_path)
 

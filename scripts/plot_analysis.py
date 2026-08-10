@@ -31,12 +31,12 @@ from sklearn.preprocessing import StandardScaler
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.fdr_tool_comparison_preprocess import (  # noqa: E402
+    filter_and_annotate_preds,
+)
+from winnow.utils.proteome import load_proteome_haystack  # noqa: E402
 from winnow.calibration.calibrator import TrainingHistory  # noqa: E402
 from winnow.fdr.database_grounded import DatabaseGroundedFDRControl  # noqa: E402
-from scripts.annotate_preds_proteome_hits import (  # noqa: E402
-    filter_and_annotate_preds,
-    load_proteome_haystack,
-)
 
 # ── Style — Paul Tol "bright" palette (colour-blind safe) ────────────
 _PALETTE = ["#4477AA", "#EE6677", "#228833", "#CCBB44", "#66CCEE", "#AA3377", "#BBBBBB"]
