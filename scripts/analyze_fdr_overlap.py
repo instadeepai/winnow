@@ -30,7 +30,7 @@ import logging
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import Annotated, cast
+from typing import Annotated, Callable, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -448,39 +448,52 @@ def _load_from_folder(folder: Path) -> pd.DataFrame:
     return preds_df
 
 
+def _register_project_folder(projects: dict[str, Path], key: str, folder: Path) -> None:
+    """Register *folder* under *key*, warning on duplicate keys."""
+    if key in projects:
+        logger.warning(
+            "Duplicate project key %r: %s and %s",
+            key,
+            projects[key],
+            folder,
+        )
+        return
+    projects[key] = folder
+
+
+def _discover_project_folders(
+    root: Path,
+    *,
+    is_preds_folder: Callable[[Path], bool],
+) -> dict[str, Path]:
+    """Map project key -> preds folder under *root* (flat or ``PXD*/<run>/``)."""
+    projects: dict[str, Path] = {}
+    if not root.is_dir():
+        return projects
+
+    for child in sorted(root.iterdir()):
+        if not child.is_dir():
+            continue
+        if is_preds_folder(child):
+            _register_project_folder(
+                projects, _project_key_from_folder(child.name), child
+            )
+            continue
+        if not child.name.startswith(_PXD_ACCESSION_PREFIX):
+            continue
+        for run_dir in sorted(child.iterdir()):
+            if run_dir.is_dir() and is_preds_folder(run_dir):
+                _register_project_folder(projects, run_dir.name, run_dir)
+    return projects
+
+
 def _discover_unlabelled_folders(root: Path) -> dict[str, Path]:
     """Map project key -> full-search folder under ``root``.
 
     Supports flat project folders (``{root}/PXD004732/``) and nested per-run
     layouts (``{root}/PXD004452/<run>/``) used by new eval sets.
     """
-    projects: dict[str, Path] = {}
-    if not root.is_dir():
-        return projects
-
-    def _register(key: str, folder: Path) -> None:
-        if key in projects:
-            logger.warning(
-                "Duplicate unlabelled project key %r: %s and %s",
-                key,
-                projects[key],
-                folder,
-            )
-            return
-        projects[key] = folder
-
-    for child in sorted(root.iterdir()):
-        if not child.is_dir():
-            continue
-        if _is_unlabelled_preds_folder(child):
-            _register(_project_key_from_folder(child.name), child)
-            continue
-        if not child.name.startswith(_PXD_ACCESSION_PREFIX):
-            continue
-        for run_dir in sorted(child.iterdir()):
-            if run_dir.is_dir() and _is_unlabelled_preds_folder(run_dir):
-                _register(run_dir.name, run_dir)
-    return projects
+    return _discover_project_folders(root, is_preds_folder=_is_unlabelled_preds_folder)
 
 
 def _discover_labelled_folders(root: Path) -> dict[str, Path]:
@@ -489,33 +502,7 @@ def _discover_labelled_folders(root: Path) -> dict[str, Path]:
     Supports flat project folders (``{root}/PXD004732/``) and nested per-run
     layouts (``{root}/PXD004452/<run>/``) used by new eval sets.
     """
-    projects: dict[str, Path] = {}
-    if not root.is_dir():
-        return projects
-
-    def _register(key: str, folder: Path) -> None:
-        if key in projects:
-            logger.warning(
-                "Duplicate labelled project key %r: %s and %s",
-                key,
-                projects[key],
-                folder,
-            )
-            return
-        projects[key] = folder
-
-    for child in sorted(root.iterdir()):
-        if not child.is_dir():
-            continue
-        if _is_labelled_preds_folder(child):
-            _register(_project_key_from_folder(child.name), child)
-            continue
-        if not child.name.startswith(_PXD_ACCESSION_PREFIX):
-            continue
-        for run_dir in sorted(child.iterdir()):
-            if run_dir.is_dir() and _is_labelled_preds_folder(run_dir):
-                _register(run_dir.name, run_dir)
-    return projects
+    return _discover_project_folders(root, is_preds_folder=_is_labelled_preds_folder)
 
 
 def discover_project_pairs(
@@ -584,7 +571,6 @@ def _add_q_values(
 
 def _add_database_grounded_q_values(
     df: pd.DataFrame,
-    residue_masses: dict[str, float],
     confidence_col: str = RAW_CONFIDENCE_COL,
     *,
     q_col: str = DB_Q_VALUE_COL,
@@ -606,12 +592,18 @@ def _add_database_grounded_q_values(
         columns=[q_col, "psm_q_value", "psm_fdr", "fdr"],
         errors="ignore",
     ).copy()
+    drop = _effective_db_grounded_drop(len(work))
     ctrl = DatabaseGroundedFDRControl(
         confidence_feature=confidence_col,
-        residue_masses=residue_masses,
-        drop=_effective_db_grounded_drop(len(work)),
+        drop=drop,
     )
-    ctrl.fit(dataset=work.copy(), correct_column=correct_col)
+    # DataFrame path: mirror DatabaseGroundedFDRControl.fit without CalibrationDataset.
+    sorted_df = work.sort_values(confidence_col, ascending=False)
+    labels = sorted_df[correct_col].astype(float).to_numpy()
+    conf = sorted_df[confidence_col].to_numpy()
+    precision = np.cumsum(labels) / np.arange(1, len(labels) + 1)
+    ctrl._fdr_values = np.array(1.0 - precision)[drop:]
+    ctrl._confidence_scores = conf[drop:]
     q_df = ctrl.add_psm_q_value(
         work[[confidence_col]].copy(), confidence_col=confidence_col
     )
@@ -711,7 +703,6 @@ def compute_overlap_table(
     df = _add_q_values(df.copy())
     db_scored = _add_database_grounded_q_values(
         db_df.copy(),
-        residue_masses,
         confidence_col=RAW_CONFIDENCE_COL,
         q_col=DB_Q_VALUE_COL,
     )
@@ -739,7 +730,7 @@ def compute_overlap_table(
             is_match = retained["pred_key"] == retained["seq_key"]
         else:
             is_match = retained["prediction"].map(
-                lambda p: _is_db_match(str(p), db_keys_at_fdr)
+                lambda p, keys=db_keys_at_fdr: _is_db_match(str(p), keys)
             )
 
         n_matching = int(is_match.sum())
@@ -789,6 +780,46 @@ def compute_overlap_table(
 # ---------------------------------------------------------------------------
 # Plots
 # ---------------------------------------------------------------------------
+def _draw_venn_panel(
+    ax,
+    *,
+    winnow_peptides: set[str],
+    db_peptides: set[str],
+    winnow_label: str,
+    fdr_t: float,
+) -> None:
+    """Draw one FDR-threshold Venn panel onto *ax*."""
+    pct = int(fdr_t * 100)
+    if not winnow_peptides and not db_peptides:
+        ax.set_title(f"No peptides retained at {pct}% FDR")
+        ax.axis("off")
+        return
+
+    if not winnow_peptides or not db_peptides:
+        missing = "Winnow" if not winnow_peptides else "Database search"
+        ax.text(
+            0.5,
+            0.5,
+            f"No {missing} peptides at {pct}% FDR",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+        )
+        ax.set_title(f"{pct}% FDR")
+        ax.axis("off")
+        return
+
+    venn2(
+        [db_peptides, winnow_peptides],
+        set_labels=("Database search", winnow_label),
+        set_colors=(_CORRECT_COLOUR, _INCORRECT_COLOUR),
+        alpha=0.6,
+        ax=ax,
+    )
+    ax.set_title(f"Unique peptides at {pct}% FDR")
+    _style_ax(ax)
+
+
 def _plot_venn_panels(
     winnow_df: pd.DataFrame,
     project: str,
@@ -800,17 +831,16 @@ def _plot_venn_panels(
     db_df: pd.DataFrame | None = None,
     db_peptides_static: set[str] | None = None,
 ) -> None:
+    del residue_masses  # kept for call-site compatibility
+    del project
     if db_df is None and db_peptides_static is None:
         raise ValueError("Provide db_df or db_peptides_static for Venn panels")
 
     winnow_scored = _add_q_values(winnow_df.copy())
     db_scored: pd.DataFrame | None = None
     if db_df is not None:
-        if residue_masses is None:
-            raise ValueError("residue_masses required when db_df is provided")
         db_scored = _add_database_grounded_q_values(
             db_df.copy(),
-            residue_masses,
             confidence_col=RAW_CONFIDENCE_COL,
             q_col=DB_Q_VALUE_COL,
         )
@@ -832,35 +862,13 @@ def _plot_venn_panels(
             assert db_peptides_static is not None
             db_peptides = db_peptides_static
 
-        pct = int(fdr_t * 100)
-        if not winnow_peptides and not db_peptides:
-            ax.set_title(f"No peptides retained at {pct}% FDR")
-            ax.axis("off")
-            continue
-
-        if not winnow_peptides or not db_peptides:
-            missing = "Winnow" if not winnow_peptides else "Database search"
-            ax.text(
-                0.5,
-                0.5,
-                f"No {missing} peptides at {pct}% FDR",
-                ha="center",
-                va="center",
-                transform=ax.transAxes,
-            )
-            ax.set_title(f"{pct}% FDR")
-            ax.axis("off")
-            continue
-
-        venn2(
-            [db_peptides, winnow_peptides],
-            set_labels=("Database search", winnow_label),
-            set_colors=(_CORRECT_COLOUR, _INCORRECT_COLOUR),
-            alpha=0.6,
-            ax=ax,
+        _draw_venn_panel(
+            ax,
+            winnow_peptides=winnow_peptides,
+            db_peptides=db_peptides,
+            winnow_label=winnow_label,
+            fdr_t=fdr_t,
         )
-        ax.set_title(f"Unique peptides at {pct}% FDR")
-        _style_ax(ax)
 
     fig.suptitle(suptitle, fontsize=12)
     fig.tight_layout()
@@ -962,6 +970,109 @@ def _subsample_violin_groups(df: pd.DataFrame, category_col: str) -> pd.DataFram
     return pd.concat(parts, ignore_index=True) if parts else df
 
 
+def _plot_novel_violins_at_fdr(
+    df: pd.DataFrame,
+    db_scored: pd.DataFrame | None,
+    discordance_cache: LabelledDiscordanceCache | DbDiscordanceCache,
+    available: list[tuple[str, str]],
+    *,
+    project: str,
+    display: str,
+    eval_type: str,
+    plots_dir: Path,
+    fdr_t: float,
+    labelled_subset: bool,
+) -> None:
+    """Render one FDR-threshold novel-feature violin figure, or skip if too sparse."""
+    retained = df[df["psm_q_value"] <= fdr_t].copy()
+    if len(retained) < _MIN_VIOLIN_GROUP_SIZE:
+        logger.info(
+            "%s: skip violins at %d%% FDR (n=%d retained)",
+            project,
+            int(fdr_t * 100),
+            len(retained),
+        )
+        return
+
+    match_keys: set[str] | None = None
+    if not labelled_subset:
+        assert db_scored is not None
+        match_keys = _unique_peptides_at_fdr(
+            db_scored, "sequence", DB_Q_VALUE_COL, fdr_t
+        )
+
+    groups = _assign_retained_groups(
+        retained,
+        match_keys,
+        discordance_cache,
+        labelled_subset=labelled_subset,
+    )
+    retained = retained.assign(_overlap_group=groups)
+    plot_df = retained[
+        retained["_overlap_group"].isin(["Database match", "fully_discordant"])
+    ].copy()
+    plot_df["Category"] = plot_df["_overlap_group"].map(
+        {
+            "Database match": "Database match",
+            "fully_discordant": "Novel",
+        }
+    )
+    plot_df = _subsample_violin_groups(plot_df, "Category")
+
+    n_match = (plot_df["Category"] == "Database match").sum()
+    n_novel = (plot_df["Category"] == "Novel").sum()
+    if n_match < _MIN_VIOLIN_GROUP_SIZE or n_novel < _MIN_VIOLIN_GROUP_SIZE:
+        logger.info(
+            "%s: skip violins at %d%% FDR (match=%d, novel=%d)",
+            project,
+            int(fdr_t * 100),
+            n_match,
+            n_novel,
+        )
+        return
+
+    n_feats = len(available)
+    n_cols = 4
+    n_rows = int(np.ceil(n_feats / n_cols))
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 4 * n_rows))
+    axes_flat = np.atleast_1d(axes).flatten()
+    palette = {"Database match": _CORRECT_COLOUR, "Novel": _NOVEL_COLOUR}
+    cat_order = ["Database match", "Novel"]
+
+    for ax, (col, label) in zip(axes_flat, available):
+        sub = plot_df[[col, "Category"]].dropna()
+        if sub["Category"].nunique() < 2:
+            ax.set_visible(False)
+            continue
+        sns.violinplot(
+            data=sub,
+            x="Category",
+            y=col,
+            order=cat_order,
+            palette=palette,
+            ax=ax,
+            inner="quartile",
+            cut=0,
+            linewidth=0.8,
+        )
+        ax.set_xlabel("")
+        ax.set_ylabel(label)
+        ax.tick_params(axis="x", rotation=15)
+        _style_ax(ax)
+
+    for ax in axes_flat[len(available) :]:
+        ax.set_visible(False)
+
+    pct = int(fdr_t * 100)
+    fig.suptitle(
+        f"{display} ({_eval_type_display(eval_type)}): "
+        f"database-matched vs novel features at {pct}% FDR",
+        fontsize=12,
+    )
+    fig.tight_layout()
+    _save_fig(fig, plots_dir / f"novel_feature_violins_{project}_fdr{pct}")
+
+
 def plot_novel_feature_violins(
     df: pd.DataFrame,
     db_df: pd.DataFrame | None,
@@ -979,6 +1090,7 @@ def plot_novel_feature_violins(
     full-search comparisons, database match uses peptides retained at the same
     nominal FDR via database-grounded FDR on raw confidence (see overlap table).
     """
+    del residue_masses  # kept for call-site compatibility
     available = [
         (col, label) for col, label in NOVEL_FEATURE_COLUMNS if col in df.columns
     ]
@@ -994,107 +1106,27 @@ def plot_novel_feature_violins(
 
     db_scored: pd.DataFrame | None = None
     if not labelled_subset:
-        if db_df is None or residue_masses is None:
-            raise ValueError(
-                "Full-search violin plots require db_df and residue_masses"
-            )
+        if db_df is None:
+            raise ValueError("Full-search violin plots require db_df")
         db_scored = _add_database_grounded_q_values(
             db_df.copy(),
-            residue_masses,
             confidence_col=RAW_CONFIDENCE_COL,
             q_col=DB_Q_VALUE_COL,
         )
 
     for fdr_t in FDR_THRESHOLDS:
-        retained = df[df["psm_q_value"] <= fdr_t].copy()
-        if len(retained) < _MIN_VIOLIN_GROUP_SIZE:
-            logger.info(
-                "%s: skip violins at %d%% FDR (n=%d retained)",
-                project,
-                int(fdr_t * 100),
-                len(retained),
-            )
-            continue
-
-        if labelled_subset:
-            match_keys: set[str] | None = None
-        else:
-            assert db_scored is not None
-            match_keys = _unique_peptides_at_fdr(
-                db_scored, "sequence", DB_Q_VALUE_COL, fdr_t
-            )
-
-        groups = _assign_retained_groups(
-            retained,
-            match_keys,
+        _plot_novel_violins_at_fdr(
+            df,
+            db_scored,
             discordance_cache,
+            available,
+            project=project,
+            display=display,
+            eval_type=eval_type,
+            plots_dir=plots_dir,
+            fdr_t=fdr_t,
             labelled_subset=labelled_subset,
         )
-        retained = retained.assign(_overlap_group=groups)
-        plot_df = retained[
-            retained["_overlap_group"].isin(["Database match", "fully_discordant"])
-        ].copy()
-        plot_df["Category"] = plot_df["_overlap_group"].map(
-            {
-                "Database match": "Database match",
-                "fully_discordant": "Novel",
-            }
-        )
-        plot_df = _subsample_violin_groups(plot_df, "Category")
-
-        n_match = (plot_df["Category"] == "Database match").sum()
-        n_novel = (plot_df["Category"] == "Novel").sum()
-        if n_match < _MIN_VIOLIN_GROUP_SIZE or n_novel < _MIN_VIOLIN_GROUP_SIZE:
-            logger.info(
-                "%s: skip violins at %d%% FDR (match=%d, novel=%d)",
-                project,
-                int(fdr_t * 100),
-                n_match,
-                n_novel,
-            )
-            continue
-
-        n_feats = len(available)
-        n_cols = 4
-        n_rows = int(np.ceil(n_feats / n_cols))
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 4 * n_rows))
-        axes_flat = np.atleast_1d(axes).flatten()
-
-        palette = {"Database match": _CORRECT_COLOUR, "Novel": _NOVEL_COLOUR}
-        cat_order = ["Database match", "Novel"]
-
-        for ax, (col, label) in zip(axes_flat, available):
-            sub = plot_df[[col, "Category"]].dropna()
-            if sub["Category"].nunique() < 2:
-                ax.set_visible(False)
-                continue
-            sns.violinplot(
-                data=sub,
-                x="Category",
-                y=col,
-                order=cat_order,
-                palette=palette,
-                ax=ax,
-                inner="quartile",
-                cut=0,
-                linewidth=0.8,
-            )
-            ax.set_xlabel("")
-            ax.set_ylabel(label)
-            ax.tick_params(axis="x", rotation=15)
-            _style_ax(ax)
-
-        for ax in axes_flat[len(available) :]:
-            ax.set_visible(False)
-
-        pct = int(fdr_t * 100)
-        fig.suptitle(
-            f"{display} ({_eval_type_display(eval_type)}): "
-            f"database-matched vs novel features at {pct}% FDR",
-            fontsize=12,
-        )
-        fig.tight_layout()
-        _save_fig(fig, plots_dir / f"novel_feature_violins_{project}_fdr{pct}")
 
 
 # ---------------------------------------------------------------------------

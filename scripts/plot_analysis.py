@@ -252,26 +252,20 @@ def plot_confidence_histogram(
 def _fit_db_fdr(
     df: pl.DataFrame,
     correct_col: str,
-    residue_masses: dict,
     confidence_feature: str = "calibrated_confidence",
     drop: int = 10,
-    use_proteome_shortcut: bool = False,
 ) -> DatabaseGroundedFDRControl:
-    """Fit a DatabaseGroundedFDRControl, using a proteome shortcut if labels lack sequences."""
+    """Fit a DatabaseGroundedFDRControl from per-row correctness labels."""
     ctrl = DatabaseGroundedFDRControl(
         confidence_feature=confidence_feature,
-        residue_masses=residue_masses,
         drop=drop,
     )
-    if use_proteome_shortcut:
-        sorted_df = df.sort(confidence_feature, descending=True)
-        correct_vals = sorted_df[correct_col].to_numpy().astype(float)
-        confidence_vals = sorted_df[confidence_feature].to_numpy()
-        precision = np.cumsum(correct_vals) / np.arange(1, len(sorted_df) + 1)
-        ctrl._fdr_values = np.array(1 - precision[drop:])
-        ctrl._confidence_scores = confidence_vals[drop:]
-    else:
-        ctrl.fit(dataset=df.to_pandas(), correct_column=correct_col)
+    sorted_df = df.sort(confidence_feature, descending=True)
+    correct_vals = sorted_df[correct_col].to_numpy().astype(float)
+    confidence_vals = sorted_df[confidence_feature].to_numpy()
+    precision = np.cumsum(correct_vals) / np.arange(1, len(sorted_df) + 1)
+    ctrl._fdr_values = np.array(1 - precision[drop:])
+    ctrl._confidence_scores = confidence_vals[drop:]
     return ctrl
 
 
@@ -284,13 +278,12 @@ def plot_fdr_accuracy(
     use_proteome_shortcut: bool = False,
 ) -> plt.Figure:
     """Compare non-parametric vs database-grounded FDR or q-value vs confidence."""
+    del residue_masses, use_proteome_shortcut  # retained for call-site compatibility
     fig, ax = plt.subplots(figsize=(8, 6))
     col_name = "psm_fdr" if metric == "fdr" else "psm_q_value"
     winnow_col = col_name
 
-    ctrl = _fit_db_fdr(
-        df, correct_col, residue_masses, use_proteome_shortcut=use_proteome_shortcut
-    )
+    ctrl = _fit_db_fdr(df, correct_col)
 
     if metric == "fdr":
         db_pd = ctrl.add_psm_fdr(df.to_pandas(), "calibrated_confidence")
@@ -340,7 +333,7 @@ def plot_ranked_qvalue(
     title: str,
 ) -> plt.Figure:
     """Ranked predictions vs q-value (non-parametric & database-grounded)."""
-    ctrl = _fit_db_fdr(df, correct_col, residue_masses)
+    ctrl = _fit_db_fdr(df, correct_col)
     test_pd = df.to_pandas()
     test_pd_no_q = test_pd.drop(columns=["psm_q_value"], errors="ignore")
     db_q = ctrl.add_psm_q_value(test_pd_no_q, "calibrated_confidence")
@@ -421,12 +414,10 @@ def plot_ranked_fdr_raw_vs_cal(
     )
 
     db_cal_ctrl = _fit_db_fdr(
-        df, correct_col, residue_masses, confidence_feature="calibrated_confidence"
+        df, correct_col, confidence_feature="calibrated_confidence"
     )
     raw_df = df_raw if df_raw is not None else df
-    db_raw_ctrl = _fit_db_fdr(
-        raw_df, correct_col, residue_masses, confidence_feature="confidence"
-    )
+    db_raw_ctrl = _fit_db_fdr(raw_df, correct_col, confidence_feature="confidence")
 
     col_name = "psm_fdr" if metric == "fdr" else "psm_q_value"
     add_fn = "add_psm_fdr" if metric == "fdr" else "add_psm_q_value"
@@ -489,12 +480,10 @@ def plot_bar_psms_fdr(
     test_pd_no_q = test_pd.drop(columns=["psm_q_value", "psm_fdr"], errors="ignore")
 
     db_cal_ctrl = _fit_db_fdr(
-        df, correct_col, residue_masses, confidence_feature="calibrated_confidence"
+        df, correct_col, confidence_feature="calibrated_confidence"
     )
     raw_df = df_raw if df_raw is not None else df
-    db_raw_ctrl = _fit_db_fdr(
-        raw_df, correct_col, residue_masses, confidence_feature="confidence"
-    )
+    db_raw_ctrl = _fit_db_fdr(raw_df, correct_col, confidence_feature="confidence")
 
     db_cal = db_cal_ctrl.add_psm_q_value(test_pd_no_q.copy(), "calibrated_confidence")
     raw_pd_no_q = raw_df.to_pandas().drop(

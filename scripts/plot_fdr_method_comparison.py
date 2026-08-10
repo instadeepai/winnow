@@ -197,30 +197,20 @@ def _fit_database_grounded_fdr(
     df: pd.DataFrame,
     correct_col: str,
     confidence_col: str,
-    residue_masses: dict[str, float],
     *,
     drop: int = _DB_GROUNDED_DROP,
 ) -> DatabaseGroundedFDRControl:
-    """Fit ``DatabaseGroundedFDRControl`` (proteome shortcut or labelled sequence fit)."""
+    """Fit ``DatabaseGroundedFDRControl`` from per-row correctness labels."""
     ctrl = DatabaseGroundedFDRControl(
         confidence_feature=confidence_col,
-        residue_masses=residue_masses,
         drop=drop,
     )
-    if correct_col == "proteome_hit":
-        sorted_df = df.sort_values(confidence_col, ascending=False)
-        labels = sorted_df[correct_col].astype(float).to_numpy()
-        conf = sorted_df[confidence_col].to_numpy()
-        precision = np.cumsum(labels) / np.arange(1, len(labels) + 1)
-        ctrl._fdr_values = np.array(1.0 - precision)[drop:]
-        ctrl._confidence_scores = conf[drop:]
-    else:
-        fit_df = df.copy()
-        if "sequence" not in fit_df.columns or "prediction" not in fit_df.columns:
-            raise ValueError(
-                "Labelled database-grounded FDR requires 'sequence' and 'prediction' columns"
-            )
-        ctrl.fit(dataset=fit_df, correct_column=correct_col)
+    sorted_df = df.sort_values(confidence_col, ascending=False)
+    labels = sorted_df[correct_col].astype(float).to_numpy()
+    conf = sorted_df[confidence_col].to_numpy()
+    precision = np.cumsum(labels) / np.arange(1, len(labels) + 1)
+    ctrl._fdr_values = np.array(1.0 - precision)[drop:]
+    ctrl._confidence_scores = conf[drop:]
     return ctrl
 
 
@@ -332,7 +322,6 @@ def _add_database_grounded_qvalues(
         reference,
         correct_col,
         confidence_col,
-        residue_masses,
         drop=_effective_db_grounded_drop(len(reference), drop),
     )
     return _assign_q_values_fast(work, confidence_col, ctrl, out_col)

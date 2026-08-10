@@ -131,9 +131,9 @@ def load_dataset_timed(
             data_path=spectrum_path,
             predictions_path=predictions_path,
         )
-        from winnow.scripts.main import filter_dataset
+        from winnow.scripts.main import _filter_dataset
 
-        dataset = filter_dataset(dataset)
+        dataset = _filter_dataset(dataset)
 
     return dataset, m["wall_time_s"]
 

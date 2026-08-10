@@ -127,8 +127,6 @@ REDUCED_FEATURE_COMPUTE_OVERRIDES: list[str] = [
     "~calibrator.features.mass_error",
     "+calibrator.features.mass_error_da._target_=winnow.calibration.calibration_features.MassErrorDaFeature",
     "+calibrator.features.mass_error_da.residue_masses=${residue_masses}",
-    "+calibrator.features.fragment_match_features.excluded_columns=[spectral_angle,xcorr,complementary_ion_count,max_ion_gap]",
-    "+calibrator.features.beam_features.excluded_columns=[edit_distance]",
 ]
 
 
@@ -315,10 +313,7 @@ def _feature_compute_overrides(reference_model_dir: Path | None) -> list[str]:
     ref_cols = _reference_model_columns(reference_model_dir)
     if ref_cols and MASS_ERROR_DA in ref_cols:
         return list(REDUCED_FEATURE_COMPUTE_OVERRIDES)
-    return [
-        "+calibrator.features.fragment_match_features.excluded_columns=[spectral_angle,xcorr,complementary_ion_count,max_ion_gap]",
-        "+calibrator.features.beam_features.excluded_columns=[edit_distance]",
-    ]
+    return []
 
 
 def _compute_eval_features_for_dataset(
@@ -402,7 +397,6 @@ def _compute_eval_features_for_dataset(
         data_loader,
         calibrator,
         labelled=True,
-        filter_empty=True,
     )
 
     combined_metadata = pd.concat(all_metadata, ignore_index=True)
@@ -562,7 +556,8 @@ def _column_slice_to_feature_dataset(
         )
     features = df.select(columns).to_numpy().astype(np.float32)
     labels = df["correct"].to_numpy().astype(np.float32)
-    return FeatureDataset(features=features, labels=labels)
+    non_confidence = [c for c in columns if c != "confidence"]
+    return FeatureDataset(features=features, labels=labels, columns=non_confidence)
 
 
 def _config_dir_name(config_name: str) -> str:
@@ -993,8 +988,6 @@ def plot_fdr_vs_confidence(
     n_configs = len(results)
     fig, axes = plt.subplots(1, n_configs, figsize=(5 * n_configs, 4), squeeze=False)
 
-    residue_masses = _get_residue_masses()
-
     for i, r in enumerate(results):
         ax = axes[0, i]
 
@@ -1011,10 +1004,17 @@ def plot_fdr_vs_confidence(
         if has_sequence:
             dbg_fdr = DatabaseGroundedFDRControl(
                 confidence_feature="calibrated_confidence",
-                residue_masses=residue_masses,
             )
             try:
-                dbg_fdr.fit(dataset=r.eval_df.copy())
+                sorted_df = r.eval_df.sort_values(
+                    "calibrated_confidence", ascending=False
+                )
+                labels = sorted_df["correct"].astype(float).to_numpy()
+                conf = sorted_df["calibrated_confidence"].to_numpy()
+                drop = 10
+                precision = np.cumsum(labels) / np.arange(1, len(labels) + 1)
+                dbg_fdr._fdr_values = np.array(1.0 - precision)[drop:]
+                dbg_fdr._confidence_scores = conf[drop:]
                 dbg_metrics = dbg_fdr.add_psm_fdr(
                     r.eval_df.copy(), confidence_col="calibrated_confidence"
                 )

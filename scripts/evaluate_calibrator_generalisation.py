@@ -100,10 +100,13 @@ def initialise_calibrator(
     train_project: Optional[str] = None,
 ) -> ProbabilityCalibrator:
     """Create a fresh calibrator matching train-extra-small-mass-error-da."""
-    koina_kwargs: Dict = {}
-    if koina_server_url is not None:
-        koina_kwargs["koina_server_url"] = koina_server_url
-        koina_kwargs["koina_ssl"] = koina_ssl
+    if koina_server_url is not None or not koina_ssl:
+        logger.warning(
+            "Ignoring koina_server_url/koina_ssl; Koina server overrides are no "
+            "longer supported (url=%s, ssl=%s).",
+            koina_server_url,
+            koina_ssl,
+        )
 
     irt_train_fraction = _IRT_TRAIN_FRACTION_OVERRIDES.get(train_project or "", 0.1)
 
@@ -123,15 +126,14 @@ def initialise_calibrator(
     calibrator.add_feature(MassErrorDaFeature(residue_masses=RESIDUE_MASSES))
     calibrator.add_feature(
         FragmentMatchFeatures(
-            mz_tolerance_ppm=20,
+            mz_tolerance=20,
+            mz_tolerance_unit="ppm",
             learn_from_missing=False,
             intensity_model_name=_INTENSITY_MODEL,
             max_precursor_charge=_MAX_PRECURSOR_CHARGE,
             max_peptide_length=_MAX_PEPTIDE_LENGTH,
             unsupported_residues=_UNSUPPORTED_RESIDUES,
             model_input_constants=_KOINA_INPUT_CONSTANTS,
-            excluded_columns=_EXTRA_SMALL_FRAGMENT_EXCLUDE,
-            **koina_kwargs,
         )
     )
     calibrator.add_feature(
@@ -142,11 +144,18 @@ def initialise_calibrator(
             irt_model_name=_IRT_MODEL,
             max_peptide_length=_MAX_PEPTIDE_LENGTH,
             unsupported_residues=_UNSUPPORTED_RESIDUES,
-            **koina_kwargs,
         )
     )
-    calibrator.add_feature(BeamFeatures(excluded_columns=_EXTRA_SMALL_BEAM_EXCLUDE))
+    calibrator.add_feature(BeamFeatures())
     calibrator.add_feature(TokenScoreFeatures())
+    # Former excluded_columns behaviour: train on a reduced feature subset.
+    training_columns = [
+        col
+        for col in calibrator.columns
+        if col not in _EXTRA_SMALL_FRAGMENT_EXCLUDE
+        and col not in _EXTRA_SMALL_BEAM_EXCLUDE
+    ]
+    calibrator.set_training_feature_columns(training_columns)
     return calibrator
 
 

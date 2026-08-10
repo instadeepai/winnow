@@ -619,9 +619,11 @@ def main(
     calibrator = ProbabilityCalibrator.load(model_path)
 
     if koina_url is not None or not koina_ssl:
-        calibrator.apply_koina_server_overrides(
-            server_url=koina_url,
-            ssl=koina_ssl,
+        logger.warning(
+            "Ignoring --koina-url/--koina-ssl; Koina server overrides are no longer "
+            "supported on ProbabilityCalibrator (url=%s, ssl=%s).",
+            koina_url,
+            koina_ssl,
         )
 
     koina_constants = _parse_koina_constants(koina_input_constant)

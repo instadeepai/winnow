@@ -523,7 +523,6 @@ def _plot_nontryptic_score_by_terminus(
             linewidth=0.8,
         )
         ax.set_xlabel("")
-        pct = int(fdr_t * 100)
         ax.set_title(_nontryptic_full_search_panel_title(fdr_t, len(retained)))
         ax.grid(False)
         _spine_fmt(ax)
@@ -925,7 +924,6 @@ def _plot_nontryptic_delta_by_terminus(
         )
         ax.axhline(0.0, ls="--", color=_IDEAL_LINE_COLOUR, lw=1)
         ax.set_xlabel("")
-        pct = int(fdr_t * 100)
         ax.set_title(_nontryptic_full_search_panel_title(fdr_t, len(retained)))
         ax.grid(False)
         _spine_fmt(ax)

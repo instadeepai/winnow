@@ -229,6 +229,19 @@ def _is_labelled_preds_folder(folder: Path) -> bool:
     return required.issubset(header)
 
 
+def _register_labelled_folder(results: dict[str, Path], key: str, folder: Path) -> None:
+    """Register *folder* under *key*, warning on duplicate keys."""
+    if key in results:
+        logger.warning(
+            "Duplicate labelled project key %r: %s and %s",
+            key,
+            results[key],
+            folder,
+        )
+        return
+    results[key] = folder
+
+
 def _discover_labelled_folders(root: Path) -> dict[str, Path]:
     """Find folders with labelled ``preds_and_fdr_metrics.csv``.
 
@@ -239,28 +252,19 @@ def _discover_labelled_folders(root: Path) -> dict[str, Path]:
     if not root.is_dir():
         return results
 
-    def _register(key: str, folder: Path) -> None:
-        if key in results:
-            logger.warning(
-                "Duplicate labelled project key %r: %s and %s",
-                key,
-                results[key],
-                folder,
-            )
-            return
-        results[key] = folder
-
     for child in sorted(root.iterdir()):
         if not child.is_dir():
             continue
         if _is_labelled_preds_folder(child):
-            _register(_project_key_from_folder(child.name), child)
+            _register_labelled_folder(
+                results, _project_key_from_folder(child.name), child
+            )
             continue
         if not child.name.startswith(_PXD_ACCESSION_PREFIX):
             continue
         for run_dir in sorted(child.iterdir()):
             if run_dir.is_dir() and _is_labelled_preds_folder(run_dir):
-                _register(run_dir.name, run_dir)
+                _register_labelled_folder(results, run_dir.name, run_dir)
     return results
 
 

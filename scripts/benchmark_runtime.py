@@ -168,9 +168,9 @@ def load_dataset(
         predictions_path=predictions_path,
     )
 
-    from winnow.scripts.main import filter_dataset
+    from winnow.scripts.main import _filter_dataset
 
-    dataset = filter_dataset(dataset)
+    dataset = _filter_dataset(dataset)
     return dataset
 
 
@@ -315,10 +315,6 @@ def run_benchmark(
 
     # Load calibrator
     calibrator = ProbabilityCalibrator.load(pretrained_model_name_or_path=model_path)
-
-    # Apply Koina server overrides if provided
-    if koina_url is not None or koina_ssl is not None:
-        calibrator.apply_koina_server_overrides(server_url=koina_url, ssl=koina_ssl)
 
     # Remove Prosit features if requested
     if not include_prosit:

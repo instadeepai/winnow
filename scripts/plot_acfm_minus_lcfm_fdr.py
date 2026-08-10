@@ -47,6 +47,19 @@ def _safe_basename(project: str) -> str:
 _PXD_RUN_PARENTS: tuple[str, ...] = ("PXD004452", "PXD006939", "PXD013868")
 
 
+def _add_preds_candidate(
+    candidates: list[Path],
+    seen: set[Path],
+    root: Path,
+    *relative: str,
+    fname: str,
+) -> None:
+    path = root.joinpath(*relative, fname)
+    if path not in seen:
+        seen.add(path)
+        candidates.append(path)
+
+
 def _preds_csv_candidates(root: Path, project: str, *, role: str) -> list[Path]:
     """Paths to try for ``preds_and_fdr_metrics.csv`` under *root*.
 
@@ -62,32 +75,40 @@ def _preds_csv_candidates(root: Path, project: str, *, role: str) -> list[Path]:
     candidates: list[Path] = []
 
     def add(*relative: str) -> None:
-        path = root.joinpath(*relative, fname)
-        if path not in seen:
-            seen.add(path)
-            candidates.append(path)
+        _add_preds_candidate(candidates, seen, root, *relative, fname=fname)
 
     add(project)
     base = project.split("/")[-1]
     add(f"{base}{role_suffix}")
     if "/" in project:
         add(*project.split("/"))
+        return candidates
 
     # S3 and download-new-eval-results: {root}/PXD*/{run}/; legacy flat {root}/{run}/.
-    if "/" not in project:
-        pxd_seen: set[str] = set()
-        for pxd in _PXD_RUN_PARENTS:
-            add(pxd, project)
-            add(pxd, f"{project}{role_suffix}")
-            pxd_seen.add(pxd)
-        if root.is_dir():
-            for child in sorted(root.iterdir()):
-                if child.is_dir() and child.name.startswith("PXD"):
-                    if child.name not in pxd_seen:
-                        add(child.name, project)
-                        add(child.name, f"{project}{role_suffix}")
+    pxd_seen: set[str] = set()
+    for pxd in _PXD_RUN_PARENTS:
+        add(pxd, project)
+        add(pxd, f"{project}{role_suffix}")
+        pxd_seen.add(pxd)
+    if root.is_dir():
+        for child in sorted(root.iterdir()):
+            if child.is_dir() and child.name.startswith("PXD"):
+                if child.name not in pxd_seen:
+                    add(child.name, project)
+                    add(child.name, f"{project}{role_suffix}")
 
     return candidates
+
+
+def _collect_alt_roots(root: Path, alt_roots: list[Path] | None) -> list[Path]:
+    """Build ordered list of roots to search, deduplicating by resolve()."""
+    roots_to_try: list[Path] = [root]
+    if not alt_roots:
+        return roots_to_try
+    for alt in alt_roots:
+        if alt.resolve() != root.resolve() and alt not in roots_to_try:
+            roots_to_try.append(alt)
+    return roots_to_try
 
 
 def _resolve_preds_csv(
@@ -98,25 +119,20 @@ def _resolve_preds_csv(
     alt_roots: list[Path] | None = None,
 ) -> Path:
     """Resolve ``preds_and_fdr_metrics.csv`` for lcfm (labelled) or acfm (unlabelled)."""
-    roots_to_try: list[Path] = [root]
-    if alt_roots:
-        for alt in alt_roots:
-            if alt.resolve() != root.resolve() and alt not in roots_to_try:
-                roots_to_try.append(alt)
-
     tried: list[Path] = []
-    for base in roots_to_try:
+    for base in _collect_alt_roots(root, alt_roots):
         for path in _preds_csv_candidates(base, project, role=role):
             tried.append(path)
-            if path.is_file():
-                if base.resolve() != root.resolve():
-                    logger.info(
-                        "Using %s predictions at %s (not under %s)",
-                        role,
-                        path,
-                        root,
-                    )
-                return path
+            if not path.is_file():
+                continue
+            if base.resolve() != root.resolve():
+                logger.info(
+                    "Using %s predictions at %s (not under %s)",
+                    role,
+                    path,
+                    root,
+                )
+            return path
 
     hint = ""
     if root.is_dir():
@@ -145,6 +161,27 @@ def _infer_predictions_root(
     )
 
 
+def _resolve_explicit_tree_root(
+    predictions_root: Path,
+    explicit: Path,
+    *,
+    sub: str,
+) -> tuple[Path, list[Path]]:
+    """Resolve an explicit tree path that may be relative to *predictions_root*."""
+    alt_roots: list[Path] = []
+    if len(explicit.parts) == 1:
+        under_predictions = predictions_root / explicit
+        if under_predictions.is_dir():
+            root = under_predictions
+            if explicit.is_dir() and explicit.resolve() != root.resolve():
+                alt_roots.append(explicit)
+            nested = predictions_root / sub
+            if nested.is_dir() and nested.resolve() != root.resolve():
+                alt_roots.append(nested)
+            return root, alt_roots
+    return explicit, alt_roots
+
+
 def _resolve_tree_root(
     predictions_root: Path | None,
     explicit: Path | None,
@@ -157,16 +194,8 @@ def _resolve_tree_root(
     alt_roots: list[Path] = []
 
     if explicit is not None:
-        if predictions_root is not None and len(explicit.parts) == 1:
-            under_predictions = predictions_root / explicit
-            if under_predictions.is_dir():
-                root = under_predictions
-                if explicit.is_dir() and explicit.resolve() != root.resolve():
-                    alt_roots.append(explicit)
-                nested = predictions_root / sub
-                if nested.is_dir() and nested.resolve() != root.resolve():
-                    alt_roots.append(nested)
-                return root, alt_roots
+        if predictions_root is not None:
+            return _resolve_explicit_tree_root(predictions_root, explicit, sub=sub)
         return explicit, alt_roots
 
     if predictions_root is None:
