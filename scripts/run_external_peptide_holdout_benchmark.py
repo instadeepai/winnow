@@ -26,6 +26,17 @@ fits on the evaluation labels.
 NovoBoard peptide FDR uses max-target → twin-decoy TDC. Winnow uses max
 calibrated confidence then nonparametric FDR (PSM-calibrator proxy). Glissade
 uses native bootstrap FDR with NumPy seeded from the benchmark RNG.
+
+External tool checkouts for local results:
+
+- ``--novoboard-root``: ``{root}/{dataset}/novoboard/`` target/decoy CSVs (the
+  ``datasets`` dir of a NovoBoard checkout). Local runs used fork
+  ``git@github.com:JemmaLDaniel/NovoBoard.git``, branch
+  ``feat/adapt-to-instanovo`` at
+  ``a9faab3ef1af06987599c2f01e6ba96072c80172``.
+- ``--glissade-repo``: clone root with importable ``glissade.glissade``. Local
+  runs used fork ``git@github.com:JemmaLDaniel/glissade.git``, branch
+  ``winnow-benchmark`` at ``6ee11b51b5f21ba8fdc1eb5821608352b082a533``.
 """
 
 from __future__ import annotations
@@ -70,7 +81,6 @@ from scripts.fdr_tool_comparison_summaries import (  # noqa: E402
 from scripts.plot_eval_results import _PALETTE, _display_name, _save_fig, _style_ax  # noqa: E402
 from scripts.plot_fdr_method_comparison import (  # noqa: E402
     DEFAULT_MODEL_ROOT,
-    DEFAULT_NOVOBOARD_ROOT,
     DEFAULT_WINNOW_RESULTS,
     build_dataset_configs,
     load_novoboard_target_decoy,
@@ -82,7 +92,6 @@ logger = logging.getLogger(__name__)
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
 DEFAULT_OUTPUT_DIR = _REPO_ROOT / "results/external_peptide_holdout_benchmark_v2"
-DEFAULT_GLISSADE_REPO = Path("/home/j-daniel/repos/glissade")
 DEFAULT_DATASETS = ["helaqc", "celegans"]
 DEFAULT_Q_THRESHOLDS = [round(float(x), 2) for x in np.linspace(0.0, 0.25, 26)]
 DEFAULT_PI0_GRID = [0.5, 0.6, 0.7, 0.8, 0.9]
@@ -224,7 +233,9 @@ def build_shared_score_tables(
         nb_decoy_combined: namespaced twin-valid decoys for twin TDC.
         glissade_reference: training-split matched scores for Glissade's anchor.
     """
-    cfg = build_dataset_configs(winnow_results, novoboard_root, model_root)[dataset]
+    cfg = build_dataset_configs(
+        winnow_results, novoboard_root=novoboard_root, model_root=model_root
+    )[dataset]
 
     winnow_test = _load_winnow_with_raw_confidence(
         cfg.winnow_test, cfg.fasta, "labelled"
@@ -976,6 +987,31 @@ def write_holdout_summary_tables(
 
 @app.command()
 def main(
+    novoboard_root: Annotated[
+        Path,
+        typer.Option(
+            "--novoboard-root",
+            help=(
+                "Root of NovoBoard per-dataset tables: "
+                "{root}/{dataset}/novoboard/ with annotated_test*.csv and "
+                "raw_unlabelled*.csv target/decoy pairs (the datasets/ dir of "
+                "a NovoBoard checkout). Local runs used fork "
+                "JemmaLDaniel/NovoBoard, branch feat/adapt-to-instanovo "
+                "(commit a9faab3ef1af06987599c2f01e6ba96072c80172)."
+            ),
+        ),
+    ],
+    glissade_repo: Annotated[
+        Path,
+        typer.Option(
+            "--glissade-repo",
+            help=(
+                "Glissade clone root (must import as glissade.glissade). Local "
+                "runs used fork JemmaLDaniel/glissade, branch winnow-benchmark "
+                "(commit 6ee11b51b5f21ba8fdc1eb5821608352b082a533)."
+            ),
+        ),
+    ],
     output_dir: Annotated[
         Path,
         typer.Option("--output-dir", help="Directory for benchmark outputs."),
@@ -1016,10 +1052,6 @@ def main(
         Path,
         typer.Option("--winnow-results", help="Winnow results directory."),
     ] = DEFAULT_WINNOW_RESULTS,
-    novoboard_root: Annotated[
-        Path,
-        typer.Option("--novoboard-root", help="NovoBoard datasets root."),
-    ] = DEFAULT_NOVOBOARD_ROOT,
     model_root: Annotated[
         Path,
         typer.Option(
@@ -1027,10 +1059,6 @@ def main(
             help="Per-dataset calibrator directories, used for Glissade's anchor.",
         ),
     ] = DEFAULT_MODEL_ROOT,
-    glissade_repo: Annotated[
-        Path,
-        typer.Option("--glissade-repo", help="Glissade repository root."),
-    ] = DEFAULT_GLISSADE_REPO,
     n_bootstraps: Annotated[
         int,
         typer.Option(

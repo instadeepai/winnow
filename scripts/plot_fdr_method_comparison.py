@@ -13,6 +13,16 @@ filters.
 
 A long-form ``fdr_method_comparison_curves.csv`` (per spectrum x method) is
 written so plots and summary tables can be regenerated with ``--summarise-only``.
+
+External NovoBoard inputs (``--novoboard-root``) must follow
+``{root}/{dataset}/novoboard/`` with target/decoy CSVs such as
+``annotated_test.csv``, ``annotated_test_decoy_{rate}.csv``,
+``raw_unlabelled.csv`` and ``raw_unlabelled_decoy_{rate}.csv``. Point
+``--novoboard-root`` at the ``datasets`` directory of a NovoBoard checkout.
+Local results were produced from the fork
+``git@github.com:JemmaLDaniel/NovoBoard.git``, branch
+``feat/adapt-to-instanovo`` at commit
+``a9faab3ef1af06987599c2f01e6ba96072c80172``.
 """
 
 from __future__ import annotations
@@ -86,7 +96,6 @@ sns.set_theme(style="white", palette=_PALETTE, context="paper", font_scale=1.5)
 FDR_THRESHOLDS = [0.01, 0.05, 0.10]
 _DB_GROUNDED_DROP = 10
 
-DEFAULT_NOVOBOARD_ROOT = Path("/home/j-daniel/repos/NovoBoard/datasets")
 DEFAULT_WINNOW_RESULTS = _REPO_ROOT / "results"
 DEFAULT_MODEL_ROOT = _REPO_ROOT / "models"
 DEFAULT_OUTPUT_DIR = _REPO_ROOT / "results/fdr_method_comparison_psm"
@@ -139,7 +148,8 @@ class DatasetConfig:
 
 def build_dataset_configs(
     winnow_results: Path = DEFAULT_WINNOW_RESULTS,
-    novoboard_root: Path = DEFAULT_NOVOBOARD_ROOT,
+    *,
+    novoboard_root: Path,
     model_root: Path = DEFAULT_MODEL_ROOT,
 ) -> dict[str, DatasetConfig]:
     """Build per-dataset path bundles from repo roots."""
@@ -1011,6 +1021,20 @@ def process_dataset(cfg: DatasetConfig, output_dir: Path) -> pd.DataFrame:
 
 @app.command()
 def main(
+    novoboard_root: Annotated[
+        Path,
+        typer.Option(
+            "--novoboard-root",
+            help=(
+                "Root of NovoBoard per-dataset tables: "
+                "{root}/{dataset}/novoboard/ with annotated_test*.csv and "
+                "raw_unlabelled*.csv target/decoy pairs (the datasets/ dir of "
+                "a NovoBoard checkout). Local runs used fork "
+                "JemmaLDaniel/NovoBoard, branch feat/adapt-to-instanovo "
+                "(commit a9faab3ef1af06987599c2f01e6ba96072c80172)."
+            ),
+        ),
+    ],
     output_dir: Annotated[
         Path,
         typer.Option("--output-dir", help="Directory for PNG/PDF outputs."),
@@ -1019,10 +1043,6 @@ def main(
         Optional[list[str]],
         typer.Option("--datasets", help="Dataset keys to plot."),
     ] = None,
-    novoboard_root: Annotated[
-        Path,
-        typer.Option("--novoboard-root", help="NovoBoard datasets root."),
-    ] = DEFAULT_NOVOBOARD_ROOT,
     winnow_results: Annotated[
         Path,
         typer.Option("--winnow-results", help="Winnow results directory."),
@@ -1064,7 +1084,7 @@ def main(
         return
 
     dataset_keys = datasets if datasets is not None else list(DEFAULT_DATASETS)
-    configs = build_dataset_configs(winnow_results, novoboard_root)
+    configs = build_dataset_configs(winnow_results, novoboard_root=novoboard_root)
 
     curve_parts: list[pd.DataFrame] = []
     for key in dataset_keys:
