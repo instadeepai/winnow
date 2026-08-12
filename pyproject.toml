@@ -65,6 +65,13 @@ notebook = [
     "seaborn>=0.13.2",
     "tqdm>=4.67.1",
 ]
+# Paper reproduction extras (not published as package extras).
+paper = [
+    "glissade",
+]
+
+[tool.uv.sources]
+glissade = { git = "https://github.com/JemmaLDaniel/glissade.git", rev = "7c723a2af4a88fda84a6bd4f223b351179bd36da" }
 
 [project.scripts]
 winnow='winnow.scripts.main:app'
