@@ -285,6 +285,8 @@ training (`calibrator.yaml` includes `defaults: - koina`) and explicitly for inf
 
 ```yaml
 koina:
+  server_url: koina.wilhelmlab.org:443
+  ssl: true
   intensity_model: Prosit_2025_intensity_22PTM
   irt_model: Prosit_2025_irt_22PTM
   input_constants:
@@ -299,9 +301,32 @@ koina:
 
 **Key parameters:**
 
+- `server_url` / `ssl`: Koina inference server to call. Defaults to the public endpoint; see [Self-hosting Koina](#self-hosting-koina) below
 - `intensity_model` / `irt_model`: Koina model identifiers (used when instantiating features at train time; saved in the checkpoint)
 - `input_constants` / `input_columns`: Collision energy and fragmentation type — **required at predict time** (not persisted in the checkpoint). Override with e.g. `koina.input_constants.collision_energies=30`
 - `constraints.*`: Validity filters interpolated into feature configs at train time
+
+#### Self-hosting Koina
+
+Every intensity and iRT feature is one call to a Koina server, so scoring a large dataset
+sends a great many predictions to the public endpoint. For bulk work, run your own
+[Koina](https://github.com/wilhelm-lab/koina) instance and point Winnow at it:
+
+```bash
+winnow predict \
+    koina.server_url=localhost:8500 \
+    koina.ssl=false \
+    dataset.spectrum_path_or_directory=data/spectra.mgf \
+    dataset.predictions_path=data/preds.csv
+```
+
+`ssl=false` is needed because a self-hosted Triton serves gRPC without TLS, whereas the
+public endpoint requires it. The same two overrides work for `train`, `compute-features`
+and `diagnose-calibration`.
+
+These settings are applied to features restored from a checkpoint as well as to features
+built from config, so a calibrator trained against the public endpoint -- including the
+pretrained general model -- can be used against a local server without retraining.
 
 ### Koina model input validation
 
