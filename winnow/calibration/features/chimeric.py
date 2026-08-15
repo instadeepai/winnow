@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import koinapy
 
+from winnow.calibration.features.constants import DEFAULT_KOINA_SERVER_URL
 from winnow.calibration.features.base import CalibrationFeatures, FeatureDependency
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.calibration.features.utils import (
@@ -37,6 +38,8 @@ class ChimericFeatures(CalibrationFeatures):
         unsupported_residues: Optional[List[str]] = None,
         model_input_constants: Optional[Dict[str, Any]] = None,
         model_input_columns: Optional[Dict[str, str]] = None,
+        koina_server_url: Optional[str] = None,
+        koina_ssl: bool = True,
     ) -> None:
         """Initialize ChimericFeatures.
 
@@ -65,6 +68,13 @@ class ChimericFeatures(CalibrationFeatures):
                 metadata column name that provides per-row values
                 (e.g. {"collision_energies": "nce_col"}). Defaults to None.
 
+            koina_server_url (Optional[str]): URL of the Koina inference server
+                (e.g. "localhost:8500" for a self-hosted instance). When None, the
+                public endpoint at koina.wilhelmlab.org:443 is used. Defaults to None.
+            koina_ssl (bool): Whether to use SSL when talking to the Koina server. Set
+                to False for a self-hosted server, which Triton serves without TLS.
+                Defaults to True.
+
         Raises:
             ValueError: If ``mz_tolerance`` is not numeric, ``mz_tolerance_unit`` is invalid,
                 or the same key appears in both model_input_constants and model_input_columns.
@@ -82,6 +92,8 @@ class ChimericFeatures(CalibrationFeatures):
         self.max_peptide_length = max_peptide_length
         self.model_input_constants = model_input_constants
         self.model_input_columns = model_input_columns
+        self.koina_server_url = koina_server_url
+        self.koina_ssl = koina_ssl
 
     @property
     def dependencies(self) -> List[FeatureDependency]:
@@ -270,7 +282,11 @@ class ChimericFeatures(CalibrationFeatures):
         )
         inputs.index = valid_chimeric_prosit_input.metadata["spectrum_id"]
 
-        model = koinapy.Koina(self.prosit_intensity_model_name)
+        model = koinapy.Koina(
+            self.prosit_intensity_model_name,
+            server_url=self.koina_server_url or DEFAULT_KOINA_SERVER_URL,
+            ssl=self.koina_ssl,
+        )
         inputs = resolve_model_inputs(
             inputs=inputs,
             metadata=valid_chimeric_prosit_input.metadata,
