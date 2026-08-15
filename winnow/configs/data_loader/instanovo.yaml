@@ -33,12 +33,12 @@ residue_remapping:  # Used to map InstaNovo legacy notations to UNIMOD tokens.
 # Required columns per beam (where N is 0, 1, 2, ...):
 #   - {sequence}N         → peptide sequence for beam N (e.g., "predictions_beam_0")
 #   - {log_probability}N  → log probability for beam N  (e.g., "predictions_log_probability_beam_0")
-#   - {token_log_probabilities}N → per-token log probs  (e.g., "predictions_token_log_probabilities_0")
+#   - {token_log_probabilities}N → per-token log probs  (e.g., "predictions_token_log_probabilities_beam_0")
 #
 # Example CSV columns for 3 beams:
 #   predictions_beam_0, predictions_beam_1, predictions_beam_2,
 #   predictions_log_probability_beam_0, predictions_log_probability_beam_1, predictions_log_probability_beam_2,
-#   predictions_token_log_probabilities_0, predictions_token_log_probabilities_1, predictions_token_log_probabilities_2
+#   predictions_token_log_probabilities_beam_0, predictions_token_log_probabilities_beam_1, predictions_token_log_probabilities_beam_2
 #
 # Set `beam_columns` to null to disable beam loading entirely.
 # Column name mapping for the top-1 predictions CSV.
