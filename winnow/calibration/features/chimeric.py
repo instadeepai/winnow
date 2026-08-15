@@ -26,6 +26,12 @@ class ChimericFeatures(CalibrationFeatures):
     Predicts ion intensities for runner-up (second-best) peptide sequences using a Koina intensity model.
     """
 
+    # Class-level defaults so instances unpickled from checkpoints that predate these
+    # settings still resolve them, rather than raising AttributeError on first use.
+    # Instances set their own values in __init__; assignment still overrides per feature.
+    koina_server_url: Optional[str] = None
+    koina_ssl: bool = True
+
     def __init__(
         self,
         *,
