@@ -8,6 +8,7 @@ import numpy as np
 import warnings
 import koinapy
 
+from winnow.calibration.features.constants import DEFAULT_KOINA_SERVER_URL
 from winnow.calibration.features.base import CalibrationFeatures, FeatureDependency
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.utils.peptide import as_token_list, tokens_to_proforma
@@ -22,6 +23,12 @@ class RetentionTimeFeature(CalibrationFeatures):
     inference time using self-supervised data (no database labels needed).
     """
 
+    # Class-level defaults so instances unpickled from checkpoints that predate these
+    # settings still resolve them, rather than raising AttributeError on first use.
+    # Instances set their own values in __init__; assignment still overrides per feature.
+    koina_server_url: Optional[str] = None
+    koina_ssl: bool = True
+
     def __init__(
         self,
         train_fraction: float = 0.1,
@@ -31,6 +38,8 @@ class RetentionTimeFeature(CalibrationFeatures):
         irt_model_name: str = "Prosit_2019_irt",
         max_peptide_length: int = 30,
         unsupported_residues: Optional[List[str]] = None,
+        koina_server_url: Optional[str] = None,
+        koina_ssl: bool = True,
     ) -> None:
         """Initialize RetentionTimeFeature.
 
@@ -63,6 +72,8 @@ class RetentionTimeFeature(CalibrationFeatures):
         )
         self.irt_model_name = irt_model_name
         self.max_peptide_length = max_peptide_length
+        self.koina_server_url = koina_server_url
+        self.koina_ssl = koina_ssl
         self.irt_predictors: Dict[str, LinearRegression] = {}
         self._loaded_experiment_names: Set[str] = set()
         self._skipped_experiments: List[str] = []
@@ -257,7 +268,11 @@ class RetentionTimeFeature(CalibrationFeatures):
             [tokens_to_proforma(peptide) for peptide in all_train["prediction"]]
         )
 
-        koina_model = koinapy.Koina(self.irt_model_name)
+        koina_model = koinapy.Koina(
+            self.irt_model_name,
+            server_url=self.koina_server_url or DEFAULT_KOINA_SERVER_URL,
+            ssl=self.koina_ssl,
+        )
         irt_predictions = koina_model.predict(inputs)
         all_irt = irt_predictions["irt"].values
 
@@ -313,7 +328,11 @@ class RetentionTimeFeature(CalibrationFeatures):
         )
         inputs.index = valid_irt_input.metadata["spectrum_id"]
 
-        koina_model = koinapy.Koina(self.irt_model_name)
+        koina_model = koinapy.Koina(
+            self.irt_model_name,
+            server_url=self.koina_server_url or DEFAULT_KOINA_SERVER_URL,
+            ssl=self.koina_ssl,
+        )
         predictions = koina_model.predict(inputs)
         predictions["spectrum_id"] = predictions.index
 
