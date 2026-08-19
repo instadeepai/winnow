@@ -68,6 +68,9 @@ notebook = [
 # Paper reproduction extras (not published as package extras).
 paper = [
     "glissade",
+    "matplotlib-venn>=1.1.1",
+    "shap>=0.44.0",
+    "xgboost>=3.2.0",
 ]
 
 [tool.uv.sources]
