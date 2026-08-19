@@ -222,7 +222,7 @@ This produces the `proteome_hit` column consumed by `diagnose-calibration` with 
 **Configuration:** see [Proteome-hit annotation configuration](configuration.md#proteome-hit-annotation-configuration).
 
 ```bash
-# Annotate an InstantNovo holdout and save a Winnow dataset directory
+# Annotate an InstaNovo holdout and save a Winnow dataset directory
 winnow annotate-proteome-hits \
   data_loader=instanovo \
   dataset.spectrum_path_or_directory=holdout/spectra.mgf \
