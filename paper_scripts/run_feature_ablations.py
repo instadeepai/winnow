@@ -68,11 +68,11 @@ _PALETTE = ["#4477AA", "#EE6677", "#228833", "#CCBB44", "#66CCEE", "#AA3377", "#
 sns.set_theme(style="white", palette=_PALETTE, context="paper", font_scale=1.5)
 
 DATASET_DISPLAY_NAMES: dict[str, str] = {
-    "HCT116": "Human colon",
     "gluc": "HeLa degradome",
     "helaqc": "HeLa single shot",
     "herceptin": "Herceptin",
     "immuno": "Immunopeptidomics-1",
+    "immuno2": "Immunopeptidomics-2",
     "celegans": "$\\it{C.\\;elegans}$",
     "sbrodae": "$\\it{Scalindua\\;brodae}$",
     "PXD019483": "HepG2",
@@ -85,9 +85,9 @@ DATASET_DISPLAY_NAMES: dict[str, str] = {
     "astral": "Astral $\\it{E.\\;coli}$",
     "01747_C01_P018218_S00_I00_N03_R1": "$\\it{Arabidopsis\\;thaliana}$",
     "Arabidopsis": "$\\it{Arabidopsis\\;thaliana}$",
+    "athaliana": "$\\it{Arabidopsis\\;thaliana}$",
     "20150708_QE3_UPLC8_DBJ_QC_HELA_39frac_Chymotrypsin": "HeLa chymotrypsin",
     "20151020_QE3_UPLC8_DBJ_SA_A549_Rep2_46": "Human lung",
-    "20151020_QE3_UPLC8_DBJ_SA_HCT116_Rep2_46": "Human colon",
     "20170303_QEh1_LC2_FaMa_ChCh_SA_HLApI_JY_R1_exp2": "HLA Class I (JY cells)",
     "20170609_QEh1_LC1_ChCh_FAMA_SA_HLAIIp_JY_all_R1": "HLA Class II (JY cells)",
 }
@@ -268,25 +268,19 @@ def train_hyperparams_from_model(model_dir: Path) -> dict[str, object]:
 
 
 EVAL_DATASETS = {
-    "HCT116": {
-        "label": "Human colon",
-        "spectra": "new_eval_data/lcfm/PXD004452/20151020_QE3_UPLC8_DBJ_SA_HCT116_Rep2_46.parquet",
-        "predictions": "new_eval_data/lcfm/PXD004452/20151020_QE3_UPLC8_DBJ_SA_HCT116_Rep2_46.csv",
-        "koina_mode": "columns",
-    },
-    "Arabidopsis": {
+    "athaliana": {
         "label": "Arabidopsis",
-        "spectra": "new_eval_data/lcfm/PXD013868/01747_C01_P018218_S00_I00_N03_R1.parquet",
-        "predictions": "new_eval_data/lcfm/PXD013868/01747_C01_P018218_S00_I00_N03_R1.csv",
+        "stem": "athaliana",
         "koina_mode": "columns",
     },
-    "PXD023064": {
+    "immuno2": {
         "label": "Immunopeptidomics-2",
-        "spectra": "held_out_projects/lcfm/PXD023064/",
-        "predictions": "held_out_projects/lcfm/PXD023064_predictions/PXD023064.csv",
-        "koina_mode": "columns",
+        "stem": "immuno2",
+        "koina_mode": "constants",
     },
 }
+
+_DEFAULT_EVAL_ROOT = Path("paper_data/winnow-ms-datasets/general_model_evaluation")
 
 # Residue masses for DatabaseGroundedFDRControl (loaded from config at runtime)
 _RESIDUE_MASSES: dict[str, float] | None = None
@@ -443,6 +437,39 @@ def _compute_eval_features_for_dataset(
     return cache_path
 
 
+def _resolve_eval_dataset_paths(
+    name: str,
+    info: dict[str, str],
+    eval_root: Path,
+    overrides: dict[str, Path],
+) -> tuple[str, str]:
+    """Return ``(spectra_path, predictions_path)`` for an eval dataset."""
+    stem = info["stem"]
+    if name in overrides:
+        labelled_dir = overrides[name]
+        spectra = labelled_dir / f"{stem}.parquet"
+        preds = labelled_dir / f"{stem}_preds.csv"
+    else:
+        labelled_dir = eval_root / stem / "labelled"
+        spectra = labelled_dir / f"{stem}.parquet"
+        preds = labelled_dir / f"{stem}_preds.csv"
+    if not spectra.exists():
+        raise FileNotFoundError(f"Missing eval spectra for {name}: {spectra}")
+    if not preds.is_file():
+        raise FileNotFoundError(f"Missing eval predictions for {name}: {preds}")
+    return str(spectra), str(preds)
+
+
+def _require_cached_eval_features(cache_dir: Path, name: str) -> Path:
+    """Return the cached eval Parquet, or raise if ``--skip-feature-compute``."""
+    cache_path = cache_dir / f"{name}.parquet"
+    if not cache_path.exists():
+        raise FileNotFoundError(
+            f"--skip-feature-compute set but cache not found: {cache_path}"
+        )
+    return cache_path
+
+
 def compute_all_eval_features(
     output_dir: Path,
     koina_url: str,
@@ -451,25 +478,27 @@ def compute_all_eval_features(
     astral_predictions: str | None,
     skip_feature_compute: bool,
     reference_model_dir: Path | None = None,
+    eval_root: Path | None = None,
+    eval_dir_overrides: dict[str, Path] | None = None,
 ) -> dict[str, Path]:
     """Compute (or locate cached) eval feature Parquets for all datasets."""
     cache_dir = output_dir / "eval_feature_cache"
     result: dict[str, Path] = {}
     feature_overrides = _feature_compute_overrides(reference_model_dir)
+    root = eval_root if eval_root is not None else _DEFAULT_EVAL_ROOT
+    overrides = eval_dir_overrides or {}
 
     for name, info in EVAL_DATASETS.items():
         if skip_feature_compute:
-            cache_path = cache_dir / f"{name}.parquet"
-            if not cache_path.exists():
-                raise FileNotFoundError(
-                    f"--skip-feature-compute set but cache not found: {cache_path}"
-                )
-            result[name] = cache_path
+            result[name] = _require_cached_eval_features(cache_dir, name)
         else:
+            spectra_path, predictions_path = _resolve_eval_dataset_paths(
+                name, info, root, overrides
+            )
             result[name] = _compute_eval_features_for_dataset(
                 name,
-                info["spectra"],
-                info["predictions"],
+                spectra_path,
+                predictions_path,
                 cache_dir,
                 koina_url,
                 koina_ssl,
@@ -480,12 +509,7 @@ def compute_all_eval_features(
     if astral_spectra and astral_predictions:
         name = "Astral"
         if skip_feature_compute:
-            cache_path = cache_dir / f"{name}.parquet"
-            if not cache_path.exists():
-                raise FileNotFoundError(
-                    f"--skip-feature-compute set but cache not found: {cache_path}"
-                )
-            result[name] = cache_path
+            result[name] = _require_cached_eval_features(cache_dir, name)
         else:
             result[name] = _compute_eval_features_for_dataset(
                 name,
@@ -1462,7 +1486,7 @@ def main(
         Optional[Path],
         typer.Option(
             help="Use training hyperparameters from this saved calibrator directory "
-            "(e.g. HPO best model). Reads config.json.",
+            "Reads config.json.",
         ),
     ] = None,
     plots_only: Annotated[
@@ -1473,6 +1497,26 @@ def main(
             "(no feature compute, training, or evaluation).",
         ),
     ] = False,
+    eval_root: Annotated[
+        Path,
+        typer.Option(
+            "--eval-root",
+            help=(
+                "Root of HF general_model_evaluation trees "
+                "(each stem under <root>/<stem>/labelled/)."
+            ),
+        ),
+    ] = _DEFAULT_EVAL_ROOT,
+    override_eval_dir: Annotated[
+        Optional[list[str]],
+        typer.Option(
+            "--override-eval-dir",
+            help=(
+                "Override labelled dir for a dataset as name=/path/to/labelled "
+                "(repeatable). Path must contain <stem>.parquet and <stem>_preds.csv."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Run feature ablation study for the Winnow calibrator."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1492,6 +1536,21 @@ def main(
     plots_dir = output_dir / "plots"
     plots_dir.mkdir(parents=True, exist_ok=True)
 
+    eval_dir_overrides: dict[str, Path] = {}
+    for item in override_eval_dir or []:
+        if "=" not in item:
+            raise typer.BadParameter(
+                f"--override-eval-dir expects name=path, got {item!r}"
+            )
+        name, path_str = item.split("=", 1)
+        name = name.strip()
+        if name not in EVAL_DATASETS:
+            raise typer.BadParameter(
+                f"Unknown eval dataset {name!r}; expected one of "
+                f"{sorted(EVAL_DATASETS)}"
+            )
+        eval_dir_overrides[name] = Path(path_str.strip())
+
     logger.info("Step 1: Computing eval features...")
     eval_parquets = compute_all_eval_features(
         output_dir,
@@ -1501,6 +1560,8 @@ def main(
         astral_predictions,
         skip_feature_compute,
         reference_model_dir=hyperparams_from_model,
+        eval_root=eval_root,
+        eval_dir_overrides=eval_dir_overrides,
     )
 
     logger.info("Step 2: Loading Parquets...")

@@ -96,7 +96,6 @@ DATASET_DISPLAY_NAMES: dict[str, str] = {
     "01747_C01_P018218_S00_I00_N03_R1": "$\\it{Arabidopsis\\;thaliana}$",
     "20150708_QE3_UPLC8_DBJ_QC_HELA_39frac_Chymotrypsin": "HeLa chymotrypsin",
     "20151020_QE3_UPLC8_DBJ_SA_A549_Rep2_46": "Human lung",
-    "20151020_QE3_UPLC8_DBJ_SA_HCT116_Rep2_46": "Human colon",
     "20170303_QEh1_LC2_FaMa_ChCh_SA_HLApI_JY_R1_exp2": "HLA Class I (JY cells)",
     "20170609_QEh1_LC1_ChCh_FAMA_SA_HLAIIp_JY_all_R1": "HLA Class II (JY cells)",
     "PXD004732": "ProteomeTools-1",

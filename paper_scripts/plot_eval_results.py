@@ -55,7 +55,6 @@ DATASET_DISPLAY_NAMES: dict[str, str] = {
     "01747_C01_P018218_S00_I00_N03_R1": "$\\it{Arabidopsis\\;thaliana}$",
     "20150708_QE3_UPLC8_DBJ_QC_HELA_39frac_Chymotrypsin": "HeLa chymotrypsin",
     "20151020_QE3_UPLC8_DBJ_SA_A549_Rep2_46": "Human lung",
-    "20151020_QE3_UPLC8_DBJ_SA_HCT116_Rep2_46": "Human colon",
     "20170303_QEh1_LC2_FaMa_ChCh_SA_HLApI_JY_R1_exp2": "HLA Class I (JY cells)",
     "20170609_QEh1_LC1_ChCh_FAMA_SA_HLAIIp_JY_all_R1": "HLA Class II (JY cells)",
 }
@@ -833,6 +832,37 @@ def _compute_diagnostics(
 # ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
+_PXD_ACCESSION_PREFIX = "PXD"
+
+
+def _resolve_project_folder(predictions_root: Path, project: str) -> Path:
+    """Resolve a project key to a preds folder under ``predictions_root``.
+
+    Accepts nested keys (``PXD004452/<run>``), flat leaf folders
+    (``PXD004732``), or leaf run names under ``PXD*/<run>/``.
+    """
+    direct = predictions_root / project
+    if (direct / "preds_and_fdr_metrics.csv").is_file():
+        return direct
+
+    leaf = project.rsplit("/", 1)[-1]
+    leaf_direct = predictions_root / leaf
+    if (leaf_direct / "preds_and_fdr_metrics.csv").is_file():
+        return leaf_direct
+
+    if predictions_root.is_dir():
+        for child in sorted(predictions_root.iterdir()):
+            if not child.is_dir() or not child.name.startswith(_PXD_ACCESSION_PREFIX):
+                continue
+            candidate = child / leaf
+            if (candidate / "preds_and_fdr_metrics.csv").is_file():
+                return candidate
+
+    raise FileNotFoundError(
+        f"No preds folder for project {project!r} under {predictions_root}"
+    )
+
+
 def _load_project_data(
     predictions_root: Path,
     project: str,
@@ -840,8 +870,7 @@ def _load_project_data(
     eval_type: str,
 ) -> pd.DataFrame:
     """Load and merge metadata.csv and preds_and_fdr_metrics.csv for a project."""
-    # folder = predictions_root / f"{project}_{suffix}"
-    folder = predictions_root / f"{project}"
+    folder = _resolve_project_folder(predictions_root, project)
     preds_path = folder / "preds_and_fdr_metrics.csv"
     meta_path = folder / "metadata.csv"
     if not preds_path.is_file():

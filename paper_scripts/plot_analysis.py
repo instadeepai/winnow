@@ -1150,6 +1150,11 @@ def main(
     )
 
     logger.info("Annotating with proteome hits from %s", fasta)
+    if not fasta.is_file():
+        raise FileNotFoundError(
+            f"Missing FASTA {fasta}; run download-paper-datasets "
+            "(or set --fasta to an existing proteome)."
+        )
     haystack = load_proteome_haystack(str(fasta))
     df = filter_and_annotate_preds(df, haystack, metrics, min_residue_length=7)
     df_raw_conf = _df_for_raw_confidence_plots(df)

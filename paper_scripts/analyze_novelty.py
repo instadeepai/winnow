@@ -1112,6 +1112,15 @@ def _nontryptic_digest_analysis(
     plots_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Loading predictions from {predictions_dir}")
+    if not (predictions_dir / "preds_and_fdr_metrics.csv").is_file():
+        raise FileNotFoundError(
+            f"Missing preds_and_fdr_metrics.csv under {predictions_dir}"
+        )
+    if not fasta.is_file():
+        raise FileNotFoundError(
+            f"Missing FASTA {fasta}; run download-paper-datasets "
+            "(or set --fasta to an existing proteome)."
+        )
     df_pl = _load_data(predictions_dir)
     print(f"  {df_pl.height:,} rows loaded")
 

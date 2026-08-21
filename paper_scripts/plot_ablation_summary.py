@@ -52,7 +52,6 @@ _ABLATION_PALETTE = [
 _ABLATION_DATASET_KEYS: dict[str, str] = {
     "Arabidopsis": "01747_C01_P018218_S00_I00_N03_R1",
     "Astral": "astral",
-    "HCT116": "20151020_QE3_UPLC8_DBJ_SA_HCT116_Rep2_46",
 }
 
 logger = logging.getLogger(__name__)
