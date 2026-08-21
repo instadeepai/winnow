@@ -1,0 +1,744 @@
+# Paper results / plots reproduction suite (Figshare 30147601 v7).
+# Usage: make -f Makefile.paper <target>
+#
+# Naming: paper-plot-* = Figshare deposits (or a deterministic local transform).
+#         paper-recompute-* = redo predict / train / benchmark.
+# See paper_scripts/README.md for the full guide.
+
+UV ?= uv run
+PYTHON := $(UV) python
+WINNOW := $(UV) winnow
+HF := $(UV) hf
+PAPER_SCRIPTS := paper_scripts
+
+# Keep all PSMs in predict outputs (default CLI filters at 5% FDR). Paper plots
+# and deposits need FDR metrics on the full table, not a filtered subset.
+PREDICT_FDR_THRESHOLD ?= 1.0
+
+# Koina CE / fragmentation inputs (mirrors revisions intent + docs/configuration.md).
+# HeLa Single Shot tiles CE=27 + HCD. Most general-model stems null those package
+# defaults so predict resolves to metadata columns collision_energy / frag_type
+# (see resolve_feature_model_inputs in winnow.utils.koina_intensity_config).
+# immuno2 / PXD023064 is the exception: the Figshare deposit used tiled CE=27 + HCD
+# (verified by recompute match); override via GENERAL_KOINA_immuno2 below.
+KOINA_FRAGMENT_MATCH_CONSTANTS = \
+	koina.input_constants.collision_energies=27 \
+	koina.input_constants.fragmentation_types=HCD
+KOINA_FRAGMENT_MATCH_COLUMNS = \
+	koina.input_constants.collision_energies=null \
+	koina.input_constants.fragmentation_types=null
+
+PAPER_DATA_DIR ?= paper_data
+PAPER_RESULTS_DIR ?= paper_results
+PAPER_PLOTS_DIR ?= paper_plots
+HF_DATASETS_DIR ?= $(PAPER_DATA_DIR)/winnow-ms-datasets
+HF_MODELS_DIR ?= $(PAPER_DATA_DIR)/models
+
+FIGSHARE_ARTICLE_ID ?= 30147601
+FIGSHARE_ARTICLE_VERSION ?= 7
+FIGSHARE_HELA_MODELS_ID ?= 32744946
+FIGSHARE_HELA_MODELS_VERSION ?= 2
+
+HF_DATASETS_REV ?= 659802319d618a359de5ab90ec6b0195681e94a6
+HF_GENERAL_MODEL_REV ?= e2089330dd59adb9685e5b3d7d61f0cd69a3bbb0
+HF_HELAQC_MODEL_REV ?= d56542b961eac7d896e51bf0716a242fc394ab1f
+GLISSADE_GIT_SHA ?= 7c723a2af4a88fda84a6bd4f223b351179bd36da
+NOVOBOARD_GIT_SHA ?= a9faab3ef1af06987599c2f01e6ba96072c80172
+
+FASTA_HUMAN ?= $(HF_DATASETS_DIR)/fasta/human.fasta
+FASTA_CELEGANS ?= $(HF_DATASETS_DIR)/fasta/celegans.fasta
+FASTA_ATHALIANA ?= $(HF_DATASETS_DIR)/fasta/athaliana.fasta
+FASTA_ARABIDOPSIS ?= $(FASTA_ATHALIANA)
+FASTA_ECOLI ?= $(HF_DATASETS_DIR)/fasta/ecoli_zorya.fasta
+
+GENERAL_EVAL_DIR ?= $(HF_DATASETS_DIR)/general_model_evaluation
+
+# Leave-one-out calibrator generalisation (full retrain; needs Koina + GPU).
+GENERALISATION_TRAIN_PARQUET ?= $(HF_DATASETS_DIR)/general_model_training_set/train.parquet
+GENERALISATION_TRAIN_PREDS ?= $(HF_DATASETS_DIR)/general_model_training_set/train_preds.csv
+GENERALISATION_MODELS_DIR ?= $(PAPER_RESULTS_DIR)/generalisation/models
+GENERALISATION_RESULTS_DIR ?= $(PAPER_RESULTS_DIR)/generalisation
+
+FDR_INPUTS ?= $(PAPER_DATA_DIR)/fdr_benchmark_inputs
+NOVOBOARD_ROOT ?= $(FDR_INPUTS)/novoboard
+WINNOW_FDR_RESULTS ?= $(FDR_INPUTS)/winnow_results
+FDR_MODEL_ROOT ?= $(FDR_INPUTS)/models
+
+HELAQC_MODEL ?= $(HF_MODELS_DIR)/instanovo_helaqc
+GENERAL_MODEL ?= $(HF_MODELS_DIR)/winnow-general-model
+CASANOVO_HELAQC_MODEL ?= $(HF_MODELS_DIR)/casanovo_helaqc
+PRIMENOVO_HELAQC_MODEL ?= $(HF_MODELS_DIR)/primenovo_helaqc
+
+HELAQC_DATA ?= $(HF_DATASETS_DIR)/helaqc
+FEATURE_MATRIX_DIR ?= $(PAPER_RESULTS_DIR)/models/instanovo_helaqc
+SCALING_DUMMY_MODEL ?= $(PAPER_RESULTS_DIR)/scaling/dummy_model
+RUNTIME_RESULTS_DIR ?= $(PAPER_RESULTS_DIR)/runtime
+FEATURE_IMPORTANCE_RESULTS_DIR ?= $(PAPER_RESULTS_DIR)/feature_importance/PXD014877
+FEATURE_IMPORTANCE_PLOTS_DIR ?= $(PAPER_PLOTS_DIR)/feature_importance/PXD014877
+ABLATIONS_RESULTS_DIR ?= $(PAPER_RESULTS_DIR)/ablations
+CELEGANS_LABELLED_DIR ?= $(GENERAL_EVAL_DIR)/celegans/labelled
+
+# Leaf folder names under general_results/{labelled,full}/ (nested runs use the
+# run folder name). Used by plot_eval_results and FDR overlap.
+GENERAL_PROJECTS := \
+	20150708_QE3_UPLC8_DBJ_QC_HELA_39frac_Chymotrypsin \
+	20151020_QE3_UPLC8_DBJ_SA_A549_Rep2_46 \
+	PXD004732 \
+	20170303_QEh1_LC2_FaMa_ChCh_SA_HLApI_JY_R1_exp2 \
+	20170609_QEh1_LC1_ChCh_FAMA_SA_HLAIIp_JY_all_R1 \
+	01747_C01_P018218_S00_I00_N03_R1 \
+	PXD014877 \
+	PXD023064 \
+	astral
+
+GENERAL_PROJECTS_FLAG := --projects "$(strip $(GENERAL_PROJECTS))"
+
+# HF general_model_evaluation/ stems (Make-safe suffixes for per-dataset targets).
+GENERAL_STEMS := \
+	hela_chymotrypsin \
+	human_lung \
+	proteometools1 \
+	HLA_I \
+	HLA_II \
+	athaliana \
+	celegans \
+	immuno2 \
+	astral
+
+# Local labelled recompute default (override with GENERAL_RECOMPUTE_STEMS=...).
+GENERAL_RECOMPUTE_STEMS ?= immuno2 hela_chymotrypsin human_lung
+
+GENERAL_FULL_SMALL_STEMS ?= \
+	hela_chymotrypsin \
+	human_lung \
+	HLA_I \
+	HLA_II \
+	athaliana \
+	immuno2
+
+GENERAL_FULL_LARGE_STEMS ?= astral celegans proteometools1
+
+# Match revisions Makefile: PXD023064 / immuno2 only used these RAW runs.
+PXD023064_FILES := MSB33410B MSB33411A MSB33659A MSB33663B MSB37876A MSB37878A MSB37880A MSB37884A
+GENERAL_EXPERIMENT_FILTER_immuno2 := $(PXD023064_FILES)
+# Deposit used tiled CE=27 / HCD, not per-row collision_energy / frag_type.
+GENERAL_KOINA_immuno2 := $(KOINA_FRAGMENT_MATCH_CONSTANTS)
+GENERAL_SUBSET_DIR ?= $(PAPER_RESULTS_DIR)/_subset
+
+HELAQC_SPLITS := test unlabelled raw_less_train
+HELAQC_DNS := instanovo casanovo primenovo
+# Default: all three DNS tools (matches paper-plot-helaqc-analysis).
+HELAQC_DNS_TOOLS ?= instanovo casanovo primenovo
+
+HELAQC_DNS_LABEL_instanovo := InstaNovo
+HELAQC_DNS_MODEL_instanovo := $(HELAQC_MODEL)
+HELAQC_DNS_LABEL_casanovo := Casanovo
+HELAQC_DNS_MODEL_casanovo := $(CASANOVO_HELAQC_MODEL)
+HELAQC_DNS_LABEL_primenovo := pi-PrimeNovo
+HELAQC_DNS_MODEL_primenovo := $(PRIMENOVO_HELAQC_MODEL)
+
+# FDR tool recompute datasets. Laptop keeps helaqc only (celegans holdout >5 min).
+FDR_RECOMPUTE_DATASETS_LAPTOP ?= helaqc
+FDR_RECOMPUTE_DATASETS_HEAVY ?= helaqc celegans
+FDR_RECOMPUTE_DATASETS ?= $(FDR_RECOMPUTE_DATASETS_LAPTOP)
+
+# FDR overlap: default is all projects. Light umbrella uses immuno2 only.
+FDR_OVERLAP_immuno2 := PXD023064
+FDR_OVERLAP_PROJECTS ?= $(GENERAL_PROJECTS)
+
+.PHONY: help \
+	download-paper-artefacts download-paper-datasets download-paper-models paper-check-artefacts \
+	paper-sync-group-paper \
+	paper-setup paper-plot-light paper-recompute-laptop paper-recompute-heavy \
+	paper-plot-helaqc-analysis paper-plot-general-labelled paper-plot-general-full \
+	paper-plot-fdr-method-comparison paper-plot-external-peptide-holdout \
+	paper-plot-generalisation paper-plot-feature-importance \
+	paper-plot-novelty paper-plot-upscored-fps paper-plot-fdr-overlap \
+	paper-recompute-helaqc paper-recompute-general-labelled \
+	paper-recompute-general-full-small paper-recompute-general-full-large \
+	paper-recompute-general-print \
+	paper-recompute-feature-investigation paper-recompute-scaling \
+	paper-recompute-runtime \
+	paper-recompute-feature-importance \
+	paper-recompute-fdr-method-comparison paper-recompute-external-peptide-holdout \
+	paper-recompute-generalisation paper-recompute-ablations
+
+help:
+	@echo "Paper reproduction (make -f Makefile.paper <target>)"
+	@echo "See paper_scripts/README.md for the full guide."
+	@echo ""
+	@echo "Umbrellas:"
+	@echo "  paper-setup                 download Figshare + HF datasets + models, then check"
+	@echo "  paper-plot-light            replot from deposits"
+	@echo "  paper-recompute-laptop      no GPU / no large datasets"
+	@echo "  paper-recompute-heavy       large datasets, may include GPU usage"
+	@echo ""
+	@echo "Downloads: download-paper-artefacts | download-paper-datasets | download-paper-models"
+	@echo "  paper-check-artefacts | paper-sync-group-paper"
+	@echo ""
+	@echo "Plot (from deposits): paper-plot-<group>"
+	@echo "  helaqc-analysis, general-labelled, general-full (slow),"
+	@echo "  fdr-method-comparison, external-peptide-holdout, generalisation,"
+	@echo "  feature-importance, novelty, upscored-fps, fdr-overlap"
+	@echo ""
+	@echo "Recompute (predict / Koina / train / benchmark): paper-recompute-<group>"
+	@echo "  helaqc | general-labelled | general-full-small | general-full-large"
+	@echo "  general-{labelled,full}-<stem> | general-<stem> | general-print"
+	@echo "  feature-investigation | fdr-method-comparison | external-peptide-holdout"
+	@echo "  feature-importance | generalisation [GPU] | ablations [GPU]"
+	@echo "  runtime [GPU] | scaling [GPU]"
+	@echo "  stems: $(GENERAL_STEMS)"
+
+################################################################################
+# Downloads / setup / umbrellas
+################################################################################
+
+download-paper-artefacts:
+	$(PYTHON) $(PAPER_SCRIPTS)/download_figshare_article.py \
+		--article-id $(FIGSHARE_ARTICLE_ID) \
+		--version $(FIGSHARE_ARTICLE_VERSION) \
+		--output-dir $(PAPER_DATA_DIR)
+
+download-paper-datasets:
+	mkdir -p $(HF_DATASETS_DIR)
+	$(HF) download InstaDeepAI/winnow-ms-datasets \
+		--repo-type dataset \
+		--revision $(HF_DATASETS_REV) \
+		--local-dir $(HF_DATASETS_DIR)
+
+download-paper-models:
+	mkdir -p $(HF_MODELS_DIR)/instanovo_helaqc $(HF_MODELS_DIR)/winnow-general-model
+	$(HF) download InstaDeepAI/winnow-helaqc-model \
+		--revision $(HF_HELAQC_MODEL_REV) \
+		--local-dir $(HELAQC_MODEL)
+	$(HF) download InstaDeepAI/winnow-general-model \
+		--revision $(HF_GENERAL_MODEL_REV) \
+		--local-dir $(GENERAL_MODEL)
+	$(PYTHON) $(PAPER_SCRIPTS)/download_figshare_article.py \
+		--article-id $(FIGSHARE_HELA_MODELS_ID) \
+		--version $(FIGSHARE_HELA_MODELS_VERSION) \
+		--output-dir $(HF_MODELS_DIR)
+
+# Soft check of key deposited paths (extend --require as needed).
+paper-check-artefacts:
+	$(PYTHON) $(PAPER_SCRIPTS)/download_figshare_article.py \
+		--article-id $(FIGSHARE_ARTICLE_ID) \
+		--version $(FIGSHARE_ARTICLE_VERSION) \
+		--output-dir $(PAPER_DATA_DIR) \
+		--check-only \
+		--require helaqc_results/instanovo/test/preds_and_fdr_metrics.csv \
+		--require general_results/labelled/PXD023064/preds_and_fdr_metrics.csv \
+		--require fdr_tool_comparison/fdr_method_comparison_curves.csv \
+		--require external_peptide_holdout_benchmark/external_peptide_holdout_results.csv \
+		--require ablations/ablation_summary_arabidopsis.csv \
+		--require ablations/ablation_summary_astral.csv \
+		--require fdr_benchmark_inputs/novoboard/helaqc/novoboard/annotated_test.csv
+
+paper-sync-group-paper:
+	uv sync --group paper --group notebook --group docs --group dev
+
+paper-setup: download-paper-artefacts download-paper-datasets download-paper-models \
+	paper-check-artefacts
+
+paper-plot-light: paper-plot-helaqc-analysis paper-plot-general-labelled \
+	paper-plot-fdr-method-comparison \
+	paper-plot-external-peptide-holdout paper-plot-generalisation \
+	paper-plot-feature-importance \
+	paper-plot-novelty paper-plot-upscored-fps
+	$(MAKE) -f Makefile.paper --no-print-directory \
+		FDR_OVERLAP_PROJECTS='$(FDR_OVERLAP_immuno2)' paper-plot-fdr-overlap
+
+paper-recompute-laptop: paper-recompute-helaqc \
+	paper-recompute-general-labelled \
+	paper-recompute-feature-investigation \
+	paper-recompute-fdr-method-comparison \
+	paper-recompute-external-peptide-holdout
+
+paper-recompute-heavy: paper-recompute-general-full-small \
+	paper-recompute-general-full-large \
+	paper-recompute-feature-importance paper-recompute-generalisation \
+	paper-recompute-ablations paper-recompute-runtime paper-recompute-scaling \
+	paper-plot-general-full paper-plot-fdr-overlap
+	$(MAKE) -f Makefile.paper --no-print-directory \
+		FDR_RECOMPUTE_DATASETS='$(FDR_RECOMPUTE_DATASETS_HEAVY)' \
+		paper-recompute-fdr-method-comparison paper-recompute-external-peptide-holdout
+
+################################################################################
+# 1. Feature investigation
+################################################################################
+
+# Feature investigation needs the InstaNovo HeLa feature stack.
+HELAQC_FEATURE_INVESTIGATION_OVERRIDES = \
+	+calibrator.features.beam_features._target_=winnow.calibration.calibration_features.BeamFeatures \
+	+calibrator.features.token_score_features._target_=winnow.calibration.calibration_features.TokenScoreFeatures \
+	calibrator.features.retention_time_feature.min_train_points=5
+
+paper-recompute-feature-investigation:
+	mkdir -p $(FEATURE_MATRIX_DIR)
+	$(WINNOW) compute-features \
+		data_loader=instanovo \
+		labelled=true \
+		dataset.spectrum_path_or_directory=$(HELAQC_DATA)/train.parquet \
+		dataset.predictions_path=$(HELAQC_DATA)/instanovo/train_preds.csv \
+		$(KOINA_FRAGMENT_MATCH_CONSTANTS) \
+		$(HELAQC_FEATURE_INVESTIGATION_OVERRIDES) \
+		metadata_output_path=$(FEATURE_MATRIX_DIR)/metadata_train.parquet \
+		training_matrix_output_path=$(FEATURE_MATRIX_DIR)/features_train.parquet
+	$(WINNOW) compute-features \
+		data_loader=instanovo \
+		labelled=true \
+		dataset.spectrum_path_or_directory=$(HELAQC_DATA)/val.parquet \
+		dataset.predictions_path=$(HELAQC_DATA)/instanovo/val_preds.csv \
+		$(KOINA_FRAGMENT_MATCH_CONSTANTS) \
+		$(HELAQC_FEATURE_INVESTIGATION_OVERRIDES) \
+		metadata_output_path=$(FEATURE_MATRIX_DIR)/metadata_val.parquet \
+		training_matrix_output_path=$(FEATURE_MATRIX_DIR)/features_val.parquet
+	mkdir -p $(PAPER_PLOTS_DIR)/feature_investigation
+	$(PYTHON) $(PAPER_SCRIPTS)/plot_feature_investigation.py \
+		--features-train $(FEATURE_MATRIX_DIR)/features_train.parquet \
+		--features-val $(FEATURE_MATRIX_DIR)/features_val.parquet \
+		--metadata-train $(FEATURE_MATRIX_DIR)/metadata_train.parquet \
+		--metadata-val $(FEATURE_MATRIX_DIR)/metadata_val.parquet \
+		--plots-dir $(PAPER_PLOTS_DIR)/feature_investigation
+
+################################################################################
+# 2. HeLa DNS
+################################################################################
+
+define HELAQC_PLOT_TOOL_RULE
+.PHONY: paper-plot-helaqc-$(1)
+paper-plot-helaqc-$(1):
+	@mkdir -p $$(PAPER_PLOTS_DIR)/helaqc_analysis
+	$$(PYTHON) $$(PAPER_SCRIPTS)/plot_analysis.py \
+		--predictions-dir $$(PAPER_DATA_DIR)/helaqc_results/$(1)/test \
+		--split test --label-mode labelled --fasta $$(FASTA_HUMAN) \
+		--dns-model '$$(HELAQC_DNS_LABEL_$(1))' \
+		--model-dir $$(HELAQC_DNS_MODEL_$(1)) \
+		--plots-dir $$(PAPER_PLOTS_DIR)/helaqc_analysis/$(1)_test
+	$$(PYTHON) $$(PAPER_SCRIPTS)/plot_analysis.py \
+		--predictions-dir $$(PAPER_DATA_DIR)/helaqc_results/$(1)/raw_less_train \
+		--split raw_less_train --label-mode unlabelled --fasta $$(FASTA_HUMAN) \
+		--dns-model '$$(HELAQC_DNS_LABEL_$(1))' \
+		--plots-dir $$(PAPER_PLOTS_DIR)/helaqc_analysis/$(1)_raw_less_train
+endef
+
+$(foreach t,$(HELAQC_DNS),$(eval $(call HELAQC_PLOT_TOOL_RULE,$(t))))
+
+paper-plot-helaqc-analysis: $(foreach t,$(HELAQC_DNS),paper-plot-helaqc-$(t))
+
+paper-recompute-helaqc:
+	@mkdir -p $(PAPER_RESULTS_DIR)
+	@for tool in $(HELAQC_DNS_TOOLS); do \
+	  for split in $(HELAQC_SPLITS); do \
+	    out=$(PAPER_RESULTS_DIR)/$${tool}_helaqc_predictions_$${split}; \
+	    echo "Predict $${tool} $${split} -> $${out}"; \
+	    case $${tool} in \
+	      instanovo) loader=instanovo; model=$(HELAQC_MODEL); preds=$(HELAQC_DATA)/instanovo/$${split}_preds.csv ;; \
+	      casanovo) loader=mztab; model=$(CASANOVO_HELAQC_MODEL); preds=$(HELAQC_DATA)/casanovo/$${split}_preds.csv ;; \
+	      primenovo) loader=primenovo; model=$(PRIMENOVO_HELAQC_MODEL); preds=$(HELAQC_DATA)/primenovo/$${split}_preds.csv ;; \
+	      *) echo "Unknown tool $${tool}"; exit 1 ;; \
+	    esac; \
+	    spectra=$(HELAQC_DATA)/$${split}.parquet; \
+	    $(WINNOW) predict \
+	      data_loader=$${loader} \
+	      dataset.spectrum_path_or_directory=$${spectra} \
+	      dataset.predictions_path=$${preds} \
+	      calibrator.pretrained_model_name_or_path=$${model} \
+	      fdr_control.fdr_threshold=$(PREDICT_FDR_THRESHOLD) \
+	      $(KOINA_FRAGMENT_MATCH_CONSTANTS) \
+	      output_folder=$${out}; \
+	  done; \
+	done
+
+################################################################################
+# 3. FDR method comparison
+################################################################################
+
+paper-plot-fdr-method-comparison:
+	mkdir -p $(PAPER_RESULTS_DIR)/fdr_method_comparison \
+		$(PAPER_PLOTS_DIR)/fdr_method_comparison
+	$(PYTHON) $(PAPER_SCRIPTS)/plot_fdr_method_comparison.py \
+		--summarise-only $(PAPER_DATA_DIR)/fdr_tool_comparison/fdr_method_comparison_curves.csv \
+		--results-dir $(PAPER_RESULTS_DIR)/fdr_method_comparison \
+		--plots-dir $(PAPER_PLOTS_DIR)/fdr_method_comparison
+
+paper-recompute-fdr-method-comparison:
+	mkdir -p $(PAPER_RESULTS_DIR)/fdr_method_comparison \
+		$(PAPER_PLOTS_DIR)/fdr_method_comparison
+	$(PYTHON) $(PAPER_SCRIPTS)/plot_fdr_method_comparison.py \
+		--novoboard-root $(NOVOBOARD_ROOT) \
+		--winnow-results $(WINNOW_FDR_RESULTS) \
+		$(foreach d,$(FDR_RECOMPUTE_DATASETS),--datasets $(d)) \
+		--results-dir $(PAPER_RESULTS_DIR)/fdr_method_comparison \
+		--plots-dir $(PAPER_PLOTS_DIR)/fdr_method_comparison
+
+################################################################################
+# 4. External peptide holdout
+################################################################################
+
+paper-plot-external-peptide-holdout:
+	mkdir -p $(PAPER_RESULTS_DIR)/external_peptide_holdout \
+		$(PAPER_PLOTS_DIR)/external_peptide_holdout
+	$(PYTHON) $(PAPER_SCRIPTS)/run_external_peptide_holdout_benchmark.py \
+		--summarise-only $(PAPER_DATA_DIR)/external_peptide_holdout_benchmark/external_peptide_holdout_results.csv \
+		--results-dir $(PAPER_RESULTS_DIR)/external_peptide_holdout \
+		--plots-dir $(PAPER_PLOTS_DIR)/external_peptide_holdout
+
+paper-recompute-external-peptide-holdout:
+	mkdir -p $(PAPER_RESULTS_DIR)/external_peptide_holdout \
+		$(PAPER_PLOTS_DIR)/external_peptide_holdout
+	$(PYTHON) $(PAPER_SCRIPTS)/run_external_peptide_holdout_benchmark.py \
+		--novoboard-root $(NOVOBOARD_ROOT) \
+		--winnow-results $(WINNOW_FDR_RESULTS) \
+		--model-root $(FDR_MODEL_ROOT) \
+		$(foreach d,$(FDR_RECOMPUTE_DATASETS),--datasets $(d)) \
+		--results-dir $(PAPER_RESULTS_DIR)/external_peptide_holdout \
+		--plots-dir $(PAPER_PLOTS_DIR)/external_peptide_holdout
+
+################################################################################
+# 5. General-model evaluation
+################################################################################
+
+paper-plot-general-labelled:
+	mkdir -p $(PAPER_RESULTS_DIR)/general_labelled $(PAPER_PLOTS_DIR)/general_labelled
+	$(PYTHON) $(PAPER_SCRIPTS)/plot_eval_results.py \
+		--predictions-root $(PAPER_DATA_DIR)/general_results/labelled \
+		--eval-type labelled \
+		$(GENERAL_PROJECTS_FLAG) \
+		--results-dir $(PAPER_RESULTS_DIR)/general_labelled \
+		--plots-dir $(PAPER_PLOTS_DIR)/general_labelled
+
+paper-plot-general-full:
+	mkdir -p $(PAPER_RESULTS_DIR)/general_full $(PAPER_PLOTS_DIR)/general_full
+	$(PYTHON) $(PAPER_SCRIPTS)/plot_eval_results.py \
+		--predictions-root $(PAPER_DATA_DIR)/general_results/full \
+		--eval-type unlabelled \
+		$(GENERAL_PROJECTS_FLAG) \
+		--results-dir $(PAPER_RESULTS_DIR)/general_full \
+		--plots-dir $(PAPER_PLOTS_DIR)/general_full
+
+# Nested Figshare output paths (and proteome FASTA) per HF stem.
+GENERAL_PROJECT_hela_chymotrypsin := PXD004452/20150708_QE3_UPLC8_DBJ_QC_HELA_39frac_Chymotrypsin
+GENERAL_FASTA_hela_chymotrypsin := $(FASTA_HUMAN)
+GENERAL_PROJECT_human_lung := PXD004452/20151020_QE3_UPLC8_DBJ_SA_A549_Rep2_46
+GENERAL_FASTA_human_lung := $(FASTA_HUMAN)
+GENERAL_PROJECT_proteometools1 := PXD004732
+GENERAL_FASTA_proteometools1 := $(FASTA_HUMAN)
+GENERAL_PROJECT_HLA_I := PXD006939/20170303_QEh1_LC2_FaMa_ChCh_SA_HLApI_JY_R1_exp2
+GENERAL_FASTA_HLA_I := $(FASTA_HUMAN)
+GENERAL_PROJECT_HLA_II := PXD006939/20170609_QEh1_LC1_ChCh_FAMA_SA_HLAIIp_JY_all_R1
+GENERAL_FASTA_HLA_II := $(FASTA_HUMAN)
+GENERAL_PROJECT_athaliana := PXD013868/01747_C01_P018218_S00_I00_N03_R1
+GENERAL_FASTA_athaliana := $(FASTA_ATHALIANA)
+GENERAL_PROJECT_celegans := PXD014877
+GENERAL_FASTA_celegans := $(FASTA_CELEGANS)
+GENERAL_PROJECT_immuno2 := PXD023064
+GENERAL_FASTA_immuno2 := $(FASTA_HUMAN)
+GENERAL_PROJECT_astral := astral
+GENERAL_FASTA_astral := $(FASTA_ECOLI)
+
+# If GENERAL_EXPERIMENT_FILTER_<stem> is set, materialise a filtered parquet/CSV
+# under GENERAL_SUBSET_DIR (subset for immuno2).
+# Expanded via $(call ...) from stem recipes (single $$ → shell $).
+define GENERAL_MAYBE_SUBSET
+filter="$(strip $(GENERAL_EXPERIMENT_FILTER_$(1)))"; \
+spectra_src=$(GENERAL_EVAL_DIR)/$(1)/$(2)/$(1).parquet; \
+preds_src=$(GENERAL_EVAL_DIR)/$(1)/$(2)/$(1)_preds.csv; \
+test -f "$$spectra_src" || (echo "Missing $$spectra_src" && exit 1); \
+test -f "$$preds_src" || (echo "Missing $$preds_src" && exit 1); \
+if [ -n "$$filter" ]; then \
+  subset_dir=$(GENERAL_SUBSET_DIR)/$(1)/$(2); \
+  mkdir -p "$$subset_dir"; \
+  echo "Subset $(1)/$(2) to experiments: $$filter"; \
+  exp_args=""; \
+  for exp in $$filter; do exp_args="$$exp_args --experiment $$exp"; done; \
+  $(PYTHON) $(PAPER_SCRIPTS)/subset_eval_by_experiment.py \
+    --spectra "$$spectra_src" \
+    --preds "$$preds_src" \
+    --output-dir "$$subset_dir" \
+    --stem $(1) \
+    $$exp_args; \
+  spectra="$$subset_dir/$(1).parquet"; \
+  preds="$$subset_dir/$(1)_preds.csv"; \
+else \
+  spectra="$$spectra_src"; \
+  preds="$$preds_src"; \
+fi
+endef
+
+define GENERAL_LABELLED_STEM_RULE
+.PHONY: paper-recompute-general-labelled-$(1)
+paper-recompute-general-labelled-$(1):
+	@$$(call GENERAL_MAYBE_SUBSET,$(1),labelled); \
+	out=$$(PAPER_RESULTS_DIR)/general_results/labelled/$$(GENERAL_PROJECT_$(1)); \
+	mkdir -p "$$$$out"; \
+	echo "Predict labelled $(1) -> $$$$out"; \
+	$$(WINNOW) predict \
+	  data_loader=instanovo \
+	  dataset.spectrum_path_or_directory=$$$$spectra \
+	  dataset.predictions_path=$$$$preds \
+	  calibrator.pretrained_model_name_or_path=$$(GENERAL_MODEL) \
+	  fdr_control.fdr_threshold=$$(PREDICT_FDR_THRESHOLD) \
+	  $$(if $$(GENERAL_KOINA_$(1)),$$(GENERAL_KOINA_$(1)),$$(KOINA_FRAGMENT_MATCH_COLUMNS)) \
+	  output_folder=$$$$out
+endef
+
+define GENERAL_FULL_STEM_RULE
+.PHONY: paper-recompute-general-full-$(1)
+paper-recompute-general-full-$(1):
+	@$$(call GENERAL_MAYBE_SUBSET,$(1),full); \
+	out=$$(PAPER_RESULTS_DIR)/general_results/full/$$(GENERAL_PROJECT_$(1)); \
+	fasta=$$(GENERAL_FASTA_$(1)); \
+	mkdir -p "$$$$out"; \
+	echo "Predict full $(1) -> $$$$out"; \
+	$$(WINNOW) predict \
+	  data_loader=instanovo \
+	  dataset.spectrum_path_or_directory=$$$$spectra \
+	  dataset.predictions_path=$$$$preds \
+	  calibrator.pretrained_model_name_or_path=$$(GENERAL_MODEL) \
+	  fdr_control.fdr_threshold=$$(PREDICT_FDR_THRESHOLD) \
+	  $$(if $$(GENERAL_KOINA_$(1)),$$(GENERAL_KOINA_$(1)),$$(KOINA_FRAGMENT_MATCH_COLUMNS)) \
+	  output_folder=$$$$out; \
+	echo "Annotate proteome hits $$(GENERAL_PROJECT_$(1)) (fasta=$$$$fasta)"; \
+	$$(PYTHON) $$(PAPER_SCRIPTS)/annotate_preds_proteome_hits.py \
+	  "$$(GENERAL_PROJECT_$(1))" \
+	  --predictions-root $$(PAPER_RESULTS_DIR)/general_results/full \
+	  --fasta $$$$fasta
+endef
+
+define GENERAL_BOTH_STEM_RULE
+.PHONY: paper-recompute-general-$(1)
+paper-recompute-general-$(1): paper-recompute-general-labelled-$(1) paper-recompute-general-full-$(1)
+endef
+
+$(foreach s,$(GENERAL_STEMS),$(eval $(call GENERAL_LABELLED_STEM_RULE,$(s))))
+$(foreach s,$(GENERAL_STEMS),$(eval $(call GENERAL_FULL_STEM_RULE,$(s))))
+$(foreach s,$(GENERAL_STEMS),$(eval $(call GENERAL_BOTH_STEM_RULE,$(s))))
+
+paper-recompute-general-labelled:
+	@mkdir -p $(PAPER_RESULTS_DIR)/general_results/labelled
+	@for stem in $(GENERAL_RECOMPUTE_STEMS); do \
+	  $(MAKE) -f Makefile.paper --no-print-directory paper-recompute-general-labelled-$${stem}; \
+	done
+
+paper-recompute-general-full-small:
+	@mkdir -p $(PAPER_RESULTS_DIR)/general_results/full
+	@for stem in $(GENERAL_FULL_SMALL_STEMS); do \
+	  $(MAKE) -f Makefile.paper --no-print-directory paper-recompute-general-full-$${stem}; \
+	done
+
+paper-recompute-general-full-large:
+	@mkdir -p $(PAPER_RESULTS_DIR)/general_results/full
+	@for stem in $(GENERAL_FULL_LARGE_STEMS); do \
+	  $(MAKE) -f Makefile.paper --no-print-directory paper-recompute-general-full-$${stem}; \
+	done
+
+# Echo exact recipes for all nine stems × labelled/full (immuno2 always subsets).
+paper-recompute-general-print:
+	@echo "# General-model recompute commands (pins from Makefile.paper)"
+	@echo "# Requires: download-paper-datasets download-paper-models; Koina network for predict"
+	@echo "# immuno2 inputs always subsetted to the Figshare cohort before predict."
+	@echo ""
+	@$(foreach s,$(GENERAL_STEMS), \
+		echo "# --- $(s) (labelled) ---"; \
+		$(if $(strip $(GENERAL_EXPERIMENT_FILTER_$(s))), \
+			echo "$(PYTHON) $(PAPER_SCRIPTS)/subset_eval_by_experiment.py \\"; \
+			echo "  --spectra $(GENERAL_EVAL_DIR)/$(s)/labelled/$(s).parquet \\"; \
+			echo "  --preds $(GENERAL_EVAL_DIR)/$(s)/labelled/$(s)_preds.csv \\"; \
+			echo "  --output-dir $(GENERAL_SUBSET_DIR)/$(s)/labelled \\"; \
+			echo "  --stem $(s) $(foreach exp,$(GENERAL_EXPERIMENT_FILTER_$(s)),--experiment $(exp))"; \
+			echo "$(WINNOW) predict \\"; \
+			echo "  data_loader=instanovo \\"; \
+			echo "  dataset.spectrum_path_or_directory=$(GENERAL_SUBSET_DIR)/$(s)/labelled/$(s).parquet \\"; \
+			echo "  dataset.predictions_path=$(GENERAL_SUBSET_DIR)/$(s)/labelled/$(s)_preds.csv \\"; \
+		, \
+			echo "$(WINNOW) predict \\"; \
+			echo "  data_loader=instanovo \\"; \
+			echo "  dataset.spectrum_path_or_directory=$(GENERAL_EVAL_DIR)/$(s)/labelled/$(s).parquet \\"; \
+			echo "  dataset.predictions_path=$(GENERAL_EVAL_DIR)/$(s)/labelled/$(s)_preds.csv \\"; \
+		) \
+		echo "  calibrator.pretrained_model_name_or_path=$(GENERAL_MODEL) \\"; \
+		echo "  fdr_control.fdr_threshold=$(PREDICT_FDR_THRESHOLD) \\"; \
+		echo "  $(if $(GENERAL_KOINA_$(s)),$(GENERAL_KOINA_$(s)),$(KOINA_FRAGMENT_MATCH_COLUMNS)) \\"; \
+		echo "  output_folder=$(PAPER_RESULTS_DIR)/general_results/labelled/$(GENERAL_PROJECT_$(s))"; \
+		echo ""; \
+		echo "# --- $(s) (full: predict then post-annotate) ---"; \
+		$(if $(strip $(GENERAL_EXPERIMENT_FILTER_$(s))), \
+			echo "$(PYTHON) $(PAPER_SCRIPTS)/subset_eval_by_experiment.py \\"; \
+			echo "  --spectra $(GENERAL_EVAL_DIR)/$(s)/full/$(s).parquet \\"; \
+			echo "  --preds $(GENERAL_EVAL_DIR)/$(s)/full/$(s)_preds.csv \\"; \
+			echo "  --output-dir $(GENERAL_SUBSET_DIR)/$(s)/full \\"; \
+			echo "  --stem $(s) $(foreach exp,$(GENERAL_EXPERIMENT_FILTER_$(s)),--experiment $(exp))"; \
+			echo "$(WINNOW) predict \\"; \
+			echo "  data_loader=instanovo \\"; \
+			echo "  dataset.spectrum_path_or_directory=$(GENERAL_SUBSET_DIR)/$(s)/full/$(s).parquet \\"; \
+			echo "  dataset.predictions_path=$(GENERAL_SUBSET_DIR)/$(s)/full/$(s)_preds.csv \\"; \
+		, \
+			echo "$(WINNOW) predict \\"; \
+			echo "  data_loader=instanovo \\"; \
+			echo "  dataset.spectrum_path_or_directory=$(GENERAL_EVAL_DIR)/$(s)/full/$(s).parquet \\"; \
+			echo "  dataset.predictions_path=$(GENERAL_EVAL_DIR)/$(s)/full/$(s)_preds.csv \\"; \
+		) \
+		echo "  calibrator.pretrained_model_name_or_path=$(GENERAL_MODEL) \\"; \
+		echo "  fdr_control.fdr_threshold=$(PREDICT_FDR_THRESHOLD) \\"; \
+		echo "  $(if $(GENERAL_KOINA_$(s)),$(GENERAL_KOINA_$(s)),$(KOINA_FRAGMENT_MATCH_COLUMNS)) \\"; \
+		echo "  output_folder=$(PAPER_RESULTS_DIR)/general_results/full/$(GENERAL_PROJECT_$(s))"; \
+		echo "$(PYTHON) $(PAPER_SCRIPTS)/annotate_preds_proteome_hits.py \\"; \
+		echo "  $(GENERAL_PROJECT_$(s)) \\"; \
+		echo "  --predictions-root $(PAPER_RESULTS_DIR)/general_results/full \\"; \
+		echo "  --fasta $(GENERAL_FASTA_$(s))"; \
+		echo ""; \
+	)
+
+################################################################################
+# 6. Feature importance
+################################################################################
+
+# Replot from Figshare pickles (skips SHAP bar / correlation matrix).
+paper-plot-feature-importance:
+	mkdir -p $(FEATURE_IMPORTANCE_PLOTS_DIR)
+	$(PYTHON) $(PAPER_SCRIPTS)/analyze_features.py \
+		--replot-dir $(PAPER_DATA_DIR)/feature_importance/PXD014877 \
+		--output-dir $(FEATURE_IMPORTANCE_PLOTS_DIR)
+
+paper-recompute-feature-importance:
+	mkdir -p $(FEATURE_IMPORTANCE_RESULTS_DIR) $(FEATURE_IMPORTANCE_PLOTS_DIR)
+	$(PYTHON) $(PAPER_SCRIPTS)/analyze_features.py \
+		--model-path $(GENERAL_MODEL) \
+		--data-dir $(CELEGANS_LABELLED_DIR) \
+		--train-spectra celegans.parquet \
+		--train-preds celegans_preds.csv \
+		--test-spectra celegans.parquet \
+		--test-preds celegans_preds.csv \
+		--koina-input-constant collision_energies=27 \
+		--koina-input-constant fragmentation_types=HCD \
+		--n-background-samples 200 \
+		--n-test-samples 500 \
+		--output-dir $(FEATURE_IMPORTANCE_RESULTS_DIR)
+
+################################################################################
+# 7. Generalisation [GPU]
+################################################################################
+
+paper-plot-generalisation:
+	mkdir -p $(PAPER_PLOTS_DIR)/generalisation
+	$(PYTHON) $(PAPER_SCRIPTS)/plot_calibrator_generalisation_heatmap.py \
+		--results-path $(PAPER_DATA_DIR)/generalisation/calibrator_generalisation_results.csv \
+		--plots-dir $(PAPER_PLOTS_DIR)/generalisation
+
+# Full retrain of leave-one-source-out calibrators on HF general_model_training_set.
+paper-recompute-generalisation:
+	mkdir -p $(GENERALISATION_MODELS_DIR) $(GENERALISATION_RESULTS_DIR)
+	$(PYTHON) $(PAPER_SCRIPTS)/evaluate_calibrator_generalisation.py \
+		--train-parquet $(GENERALISATION_TRAIN_PARQUET) \
+		--train-predictions $(GENERALISATION_TRAIN_PREDS) \
+		--model-output-dir $(GENERALISATION_MODELS_DIR) \
+		--results-output-dir $(GENERALISATION_RESULTS_DIR)
+
+################################################################################
+# 8. Feature ablations [GPU] (recompute only; plots written by the script)
+################################################################################
+
+paper-recompute-ablations: paper-recompute-feature-investigation
+	@$(call GENERAL_MAYBE_SUBSET,immuno2,labelled); \
+	mkdir -p $(ABLATIONS_RESULTS_DIR); \
+	$(PYTHON) $(PAPER_SCRIPTS)/run_feature_ablations.py \
+		--train-features $(FEATURE_MATRIX_DIR)/features_train.parquet \
+		--val-features $(FEATURE_MATRIX_DIR)/features_val.parquet \
+		--eval-root $(GENERAL_EVAL_DIR) \
+		--override-eval-dir immuno2=$(GENERAL_SUBSET_DIR)/immuno2/labelled \
+		--output-dir $(ABLATIONS_RESULTS_DIR)
+
+################################################################################
+# 9. Upscored FPs (plot from deposited general_results/labelled)
+################################################################################
+
+paper-plot-upscored-fps:
+	mkdir -p $(PAPER_RESULTS_DIR)/upscored_fps $(PAPER_PLOTS_DIR)/upscored_fps
+	$(PYTHON) $(PAPER_SCRIPTS)/analyze_upscored_fps.py \
+		--predictions-root $(PAPER_DATA_DIR)/general_results/labelled \
+		--results-dir $(PAPER_RESULTS_DIR)/upscored_fps \
+		--plots-dir $(PAPER_PLOTS_DIR)/upscored_fps
+
+################################################################################
+# 10. Novelty (plot from deposited general_results)
+################################################################################
+
+paper-plot-novelty:
+	mkdir -p $(PAPER_RESULTS_DIR)/novelty/chymotrypsin \
+		$(PAPER_RESULTS_DIR)/novelty/proteometools \
+		$(PAPER_PLOTS_DIR)/novelty/chymotrypsin \
+		$(PAPER_PLOTS_DIR)/novelty/proteometools
+	$(PYTHON) $(PAPER_SCRIPTS)/analyze_novelty.py nontryptic-digest \
+		--predictions-dir $(PAPER_DATA_DIR)/general_results/full/PXD004452/20150708_QE3_UPLC8_DBJ_QC_HELA_39frac_Chymotrypsin \
+		--fasta $(FASTA_HUMAN) \
+		--results-dir $(PAPER_RESULTS_DIR)/novelty/chymotrypsin \
+		--plots-dir $(PAPER_PLOTS_DIR)/novelty/chymotrypsin \
+		--file-prefix chymotrypsin \
+		--dataset-label "HeLa chymotrypsin"
+	$(PYTHON) $(PAPER_SCRIPTS)/analyze_novelty.py proteometools \
+		--lcfm-predictions-dir $(PAPER_DATA_DIR)/general_results/labelled/PXD004732 \
+		--acfm-predictions-dir $(PAPER_DATA_DIR)/general_results/full/PXD004732 \
+		--results-dir $(PAPER_RESULTS_DIR)/novelty/proteometools \
+		--plots-dir $(PAPER_PLOTS_DIR)/novelty/proteometools
+
+################################################################################
+# 11. FDR overlap (plot from deposited general_results)
+################################################################################
+
+# Default FDR_OVERLAP_PROJECTS is all projects, but this is slow. Overrides to lighter immuno2:
+#   FDR_OVERLAP_PROJECTS='$(FDR_OVERLAP_immuno2)' make -f Makefile.paper paper-plot-fdr-overlap
+paper-plot-fdr-overlap:
+	mkdir -p $(PAPER_RESULTS_DIR)/fdr_overlap $(PAPER_PLOTS_DIR)/fdr_overlap
+	$(PYTHON) $(PAPER_SCRIPTS)/analyze_fdr_overlap.py \
+		--labelled-dir $(PAPER_DATA_DIR)/general_results/labelled \
+		--unlabelled-dir $(PAPER_DATA_DIR)/general_results/full \
+		--results-dir $(PAPER_RESULTS_DIR)/fdr_overlap \
+		--plots-dir $(PAPER_PLOTS_DIR)/fdr_overlap \
+		--projects "$(strip $(FDR_OVERLAP_PROJECTS))"
+
+################################################################################
+# 12. Runtime [GPU]
+################################################################################
+
+# Trains a dummy model with GPU and requires Koina for full feature benchmark.
+paper-recompute-runtime:
+	mkdir -p $(RUNTIME_RESULTS_DIR) $(SCALING_DUMMY_MODEL)
+	$(PYTHON) $(PAPER_SCRIPTS)/benchmark_runtime.py \
+		--spectrum-path $(HELAQC_DATA)/train.parquet \
+		--predictions-path $(HELAQC_DATA)/instanovo/train_preds.csv \
+		--spectrum-path $(HELAQC_DATA)/raw_less_train.parquet \
+		--predictions-path $(HELAQC_DATA)/instanovo/raw_less_train_preds.csv \
+		--model-path $(HELAQC_MODEL) \
+		--model-path-no-prosit $(SCALING_DUMMY_MODEL) \
+		--train-spectrum-path $(HELAQC_DATA)/train.parquet \
+		--train-predictions-path $(HELAQC_DATA)/instanovo/train_preds.csv \
+		--val-spectrum-path $(HELAQC_DATA)/val.parquet \
+		--val-predictions-path $(HELAQC_DATA)/instanovo/val_preds.csv \
+		--data-loader instanovo \
+		--koina-input-constant collision_energies=27 \
+		--koina-input-constant fragmentation_types=HCD \
+		--output-json $(RUNTIME_RESULTS_DIR)/benchmark_results.json \
+		--output-text $(RUNTIME_RESULTS_DIR)/benchmark_results.txt
+
+################################################################################
+# 13. Scaling [GPU]
+################################################################################
+
+# Trains a dummy model with GPU
+paper-recompute-scaling:
+	mkdir -p $(PAPER_RESULTS_DIR)/scaling $(PAPER_PLOTS_DIR)/scaling
+	$(PYTHON) $(PAPER_SCRIPTS)/benchmark_scaling.py \
+		--spectrum-path $(HELAQC_DATA)/train.parquet \
+		--predictions-path $(HELAQC_DATA)/instanovo/train_preds.csv \
+		--spectrum-path $(HELAQC_DATA)/raw_less_train.parquet \
+		--predictions-path $(HELAQC_DATA)/instanovo/raw_less_train_preds.csv \
+		--train-spectrum-path $(HELAQC_DATA)/train.parquet \
+		--train-predictions-path $(HELAQC_DATA)/instanovo/train_preds.csv \
+		--val-spectrum-path $(HELAQC_DATA)/val.parquet \
+		--val-predictions-path $(HELAQC_DATA)/instanovo/val_preds.csv \
+		--model-output-dir $(SCALING_DUMMY_MODEL) \
+		--data-loader instanovo \
+		--fractions 0.1 --fractions 0.5 --fractions 1.0 \
+		--results-dir $(PAPER_RESULTS_DIR)/scaling \
+		--plots-dir $(PAPER_PLOTS_DIR)/scaling
