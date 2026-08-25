@@ -164,3 +164,29 @@ predict-sample:
 ## Clean output directories (does not delete sample data)
 clean:
 	rm -rf models/ results/
+
+#################################################################################
+## Paper analyses commands													#
+#################################################################################
+
+# Match Makefile.paper defaults
+PAPER_DATA_DIR ?= paper_data
+PAPER_RESULTS_DIR ?= paper_results
+PAPER_PLOTS_DIR ?= paper_plots
+
+.PHONY: clean-paper-recompute clean-paper-plots clean-paper-data clean-paper
+
+## Remove paper-recompute-* outputs
+clean-paper-recompute:
+	rm -rf $(PAPER_RESULTS_DIR)/
+
+## Remove paper-plot-* figures
+clean-paper-plots:
+	rm -rf $(PAPER_PLOTS_DIR)/
+
+## Remove paper-setup downloads
+clean-paper-data:
+	rm -rf $(PAPER_DATA_DIR)/
+
+## Remove paper plot and recompute outputs (keeps paper_data/)
+clean-paper-outputs: clean-paper-recompute clean-paper-plots
