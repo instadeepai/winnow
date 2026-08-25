@@ -94,7 +94,7 @@ DATASET_DISPLAY_NAMES: dict[str, str] = {
 
 _FOLDER_SUFFIXES = ("_annotated", "_labelled", "_raw", "_unlabelled")
 
-# new_eval_sets_results layout: lcfm/PXD004452/<run>/preds_and_fdr_metrics.csv
+# Figshare general_results/labelled layout: PXD004452/<run>/preds_and_fdr_metrics.csv
 _PXD_ACCESSION_PREFIX = "PXD"
 
 FEATURE_COLUMNS_OF_INTEREST = [
@@ -212,7 +212,7 @@ def _strip_mods(seq: str) -> str:
 
 
 def _project_key_from_folder(folder_name: str) -> str:
-    """Strip a known eval suffix to get the project key (e.g. ``gluc_raw`` -> ``gluc``)."""
+    """Strip a known eval suffix to get the project key (e.g. ``PXD014877_labelled`` -> ``PXD014877``)."""
     for suffix in _FOLDER_SUFFIXES:
         if folder_name.endswith(suffix):
             return folder_name[: -len(suffix)]

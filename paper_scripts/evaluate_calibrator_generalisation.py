@@ -39,7 +39,7 @@ if str(_PAPER_SCRIPTS) not in sys.path:
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
-logger = logging.getLogger("winnow.evaluate_generalization")
+logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 logger.propagate = False
 logger.addHandler(RichHandler())
@@ -84,21 +84,21 @@ _IRT_TRAIN_FRACTION_OVERRIDES: Dict[str, float] = {
     "herceptin": 0.15,
 }
 
-# Mirrors Makefile train-extra-small-mass-error-da / EXTRA_SMALL_* overrides.
-_EXTRA_SMALL_FRAGMENT_EXCLUDE = [
+# Paper general-model feature set: reduced fragment/beam columns.
+_REDUCED_FRAGMENT_EXCLUDE = [
     "spectral_angle",
     "xcorr",
     "complementary_ion_count",
     "max_ion_gap",
 ]
-_EXTRA_SMALL_BEAM_EXCLUDE = ["edit_distance"]
+_REDUCED_BEAM_EXCLUDE = ["edit_distance"]
 
 
 def initialise_calibrator(
     *,
     train_project: Optional[str] = None,
 ) -> ProbabilityCalibrator:
-    """Create a fresh calibrator matching train-extra-small-mass-error-da."""
+    """Create a fresh calibrator with the paper general-model feature set."""
     irt_train_fraction = _IRT_TRAIN_FRACTION_OVERRIDES.get(train_project or "", 0.1)
 
     calibrator = ProbabilityCalibrator(
@@ -139,19 +139,18 @@ def initialise_calibrator(
     )
     calibrator.add_feature(BeamFeatures())
     calibrator.add_feature(TokenScoreFeatures())
-    # Former excluded_columns behaviour: train on a reduced feature subset.
+    # Train on a reduced feature subset (exclude some fragment/beam columns).
     training_columns = [
         col
         for col in calibrator.columns
-        if col not in _EXTRA_SMALL_FRAGMENT_EXCLUDE
-        and col not in _EXTRA_SMALL_BEAM_EXCLUDE
+        if col not in _REDUCED_FRAGMENT_EXCLUDE and col not in _REDUCED_BEAM_EXCLUDE
     ]
     calibrator.set_training_feature_columns(training_columns)
     return calibrator
 
 
 def load_dataset(data_path: Path, predictions_path: Path) -> CalibrationDataset:
-    """Load the combined train_extra_small dataset."""
+    """Load the HF general_model_training_set (or equivalent) dataset."""
     logger.info("Loading dataset from %s and %s", data_path, predictions_path)
     loader = InstaNovoDatasetLoader(
         residue_masses=RESIDUE_MASSES,
@@ -250,10 +249,14 @@ def evaluate_model(
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
-_DEFAULT_MODEL_OUTPUT_DIR = Path("models/generalisation")
-_DEFAULT_RESULTS_OUTPUT_DIR = Path("results/generalisation")
-_DEFAULT_TRAIN_PARQUET = Path("train_extra_small/train.parquet")
-_DEFAULT_TRAIN_PREDS = Path("train_extra_small/train_preds.csv")
+_DEFAULT_MODEL_OUTPUT_DIR = Path("paper_results/generalisation/models")
+_DEFAULT_RESULTS_OUTPUT_DIR = Path("paper_results/generalisation")
+_DEFAULT_TRAIN_PARQUET = Path(
+    "paper_data/winnow-ms-datasets/general_model_training_set/train.parquet"
+)
+_DEFAULT_TRAIN_PREDS = Path(
+    "paper_data/winnow-ms-datasets/general_model_training_set/train_preds.csv"
+)
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 

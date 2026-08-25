@@ -136,7 +136,7 @@ def _display_name(key: str) -> str:
 
 
 def _project_key_from_folder(folder_name: str) -> str:
-    """Strip a known eval suffix to get the project key (e.g. ``gluc_raw`` -> ``gluc``)."""
+    """Strip a known eval suffix to get the project key (e.g. ``PXD014877_unlabelled`` -> ``PXD014877``)."""
     for suffix in _FOLDER_SUFFIXES:
         if folder_name.endswith(suffix):
             return folder_name[: -len(suffix)]
@@ -948,14 +948,20 @@ def main(
         Path,
         typer.Option(
             "--unlabelled-dir",
-            help="Root with per-project full-search folders (e.g. gluc_raw/, PXD014877_unlabelled/).",
+            help=(
+                "Root with per-project full-search folders "
+                "(e.g. paper_data/general_results/full/)."
+            ),
         ),
     ],
     labelled_dir: Annotated[
         Path,
         typer.Option(
             "--labelled-dir",
-            help="Root with per-project database-search folders (e.g. gluc_annotated/, PXD014877_labelled/).",
+            help=(
+                "Root with per-project database-search folders "
+                "(e.g. paper_data/general_results/labelled/)."
+            ),
         ),
     ],
     results_dir: Annotated[

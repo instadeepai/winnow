@@ -124,10 +124,10 @@ REDUCED_FRAGMENT_COLUMNS = [
     c for c in FRAGMENT_MATCH_COLUMNS if c not in _EXCLUDED_REDUCED
 ]
 
-# Default training matrix columns (train_extra_small_matrix.parquet).
+# Default training matrix columns.
 REDUCED_TRAIN_COLUMNS: list[str] = FEATURE_SUBSETS["no_fragment_similarity"]["columns"]
 
-# Hydra overrides aligned with Makefile ANALYSIS_REDUCED_FEATURE_OVERRIDES (mass_error_da model).
+# Hydra overrides for mass_error_da instead of mass_error_ppm.
 REDUCED_FEATURE_COMPUTE_OVERRIDES: list[str] = [
     "~calibrator.features.mass_error",
     "+calibrator.features.mass_error_da._target_=winnow.calibration.calibration_features.MassErrorDaFeature",
