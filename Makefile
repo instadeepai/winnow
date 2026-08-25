@@ -174,7 +174,7 @@ PAPER_DATA_DIR ?= paper_data
 PAPER_RESULTS_DIR ?= paper_results
 PAPER_PLOTS_DIR ?= paper_plots
 
-.PHONY: clean-paper-recompute clean-paper-plots clean-paper-data clean-paper
+.PHONY: clean-paper-recompute clean-paper-plots clean-paper-data clean-paper-outputs
 
 ## Remove paper-recompute-* outputs
 clean-paper-recompute:
