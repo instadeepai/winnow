@@ -250,6 +250,7 @@ def build_shared_score_tables(
         novoboard_root=novoboard_root,
         model_root=model_root,
         fasta_root=fasta_root,
+        datasets=[dataset],
     )[dataset]
 
     winnow_test = _load_winnow_with_raw_confidence(

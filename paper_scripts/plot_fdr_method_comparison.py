@@ -126,16 +126,6 @@ _DATASET_META = {
         "novoboard_decoy": "0.70",
         "winnow_suffix": "celegans",
     },
-    "sbrodae": {
-        "fasta": "fasta/Sb_proteome.fasta",
-        "novoboard_decoy": "0.50",
-        "winnow_suffix": "sbrodae",
-    },
-    "PXD019483": {
-        "fasta": "fasta/human.fasta",
-        "novoboard_decoy": "0.70",
-        "winnow_suffix": "pxd019483",
-    },
 }
 
 
@@ -184,10 +174,21 @@ def build_dataset_configs(
     novoboard_root: Path,
     model_root: Path = DEFAULT_MODEL_ROOT,
     fasta_root: Path = DEFAULT_FASTA_ROOT,
+    datasets: list[str] | None = None,
 ) -> dict[str, DatasetConfig]:
-    """Build per-dataset path bundles from repo roots."""
+    """Build per-dataset path bundles from repo roots.
+
+    FASTA paths are resolved only for the requested ``datasets`` keys (default:
+    all entries in ``_DATASET_META``).
+    """
+    keys = list(datasets) if datasets is not None else list(_DATASET_META)
     configs: dict[str, DatasetConfig] = {}
-    for key, meta in _DATASET_META.items():
+    for key in keys:
+        if key not in _DATASET_META:
+            raise ValueError(
+                f"Unknown dataset {key!r}. Known keys: {sorted(_DATASET_META)}"
+            )
+        meta = _DATASET_META[key]
         suffix = meta["winnow_suffix"]
         configs[key] = DatasetConfig(
             key=key,
@@ -1138,14 +1139,18 @@ def main(
         )
 
     dataset_keys = datasets if datasets is not None else list(DEFAULT_DATASETS)
-    configs = build_dataset_configs(
-        winnow_results, novoboard_root=novoboard_root, fasta_root=fasta_root
-    )
+    try:
+        configs = build_dataset_configs(
+            winnow_results,
+            novoboard_root=novoboard_root,
+            fasta_root=fasta_root,
+            datasets=dataset_keys,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
     curve_parts: list[pd.DataFrame] = []
     for key in dataset_keys:
-        if key not in configs:
-            raise typer.BadParameter(f"Unknown dataset {key!r}")
         logger.info("Processing %s", key)
         curve_parts.append(process_dataset(configs[key], plots_dir))
 
