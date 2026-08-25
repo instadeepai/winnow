@@ -85,6 +85,7 @@ from fdr_tool_comparison_summaries import (  # noqa: E402
 )
 from plot_eval_results import _PALETTE, _display_name, _save_fig, _style_ax  # noqa: E402
 from plot_fdr_method_comparison import (  # noqa: E402
+    DEFAULT_FASTA_ROOT,
     DEFAULT_MODEL_ROOT,
     DEFAULT_WINNOW_RESULTS,
     build_dataset_configs,
@@ -223,6 +224,7 @@ def build_shared_score_tables(
     winnow_results: Path,
     novoboard_root: Path,
     model_root: Path = DEFAULT_MODEL_ROOT,
+    fasta_root: Path = DEFAULT_FASTA_ROOT,
     unlabelled_min_length: int = MIN_PEPTIDE_LENGTH,
     labelled_min_length: int = LABELLED_MIN_PEPTIDE_LENGTH,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -244,7 +246,10 @@ def build_shared_score_tables(
         glissade_reference: training-split matched scores for Glissade's anchor.
     """
     cfg = build_dataset_configs(
-        winnow_results, novoboard_root=novoboard_root, model_root=model_root
+        winnow_results,
+        novoboard_root=novoboard_root,
+        model_root=model_root,
+        fasta_root=fasta_root,
     )[dataset]
 
     winnow_test = _load_winnow_with_raw_confidence(
@@ -1059,6 +1064,16 @@ def main(
             help="Per-dataset calibrator directories, used for Glissade's anchor.",
         ),
     ] = DEFAULT_MODEL_ROOT,
+    fasta_root: Annotated[
+        Path,
+        typer.Option(
+            "--fasta-root",
+            help=(
+                "Root of the local Hugging Face winnow-ms-datasets snapshot "
+                "(FASTA paths are relative to this directory)."
+            ),
+        ),
+    ] = DEFAULT_FASTA_ROOT,
     n_bootstraps: Annotated[
         int,
         typer.Option(
@@ -1127,6 +1142,7 @@ def main(
             winnow_results=winnow_results,
             novoboard_root=novoboard_root,
             model_root=model_root,
+            fasta_root=fasta_root,
             unlabelled_min_length=min_peptide_length,
             labelled_min_length=LABELLED_MIN_PEPTIDE_LENGTH,
         )

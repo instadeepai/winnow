@@ -102,8 +102,10 @@ _DB_GROUNDED_DROP = 10
 
 DEFAULT_WINNOW_RESULTS = _REPO_ROOT / "results"
 DEFAULT_MODEL_ROOT = _REPO_ROOT / "models"
+DEFAULT_FASTA_ROOT = _REPO_ROOT / "paper_data/winnow-ms-datasets"
 DEFAULT_OUTPUT_DIR = _REPO_ROOT / "results/fdr_method_comparison_psm"
 DEFAULT_DATASETS = ["helaqc", "celegans"]
+_HF_DATASETS_ID = "InstaDeepAI/winnow-ms-datasets"
 _METHOD_COLOURS = {
     PRIMARY_METHOD: _MAIN_LINE_COLOUR,
     DB_CAL_METHOD: _RAW_LINE_COLOUR,
@@ -150,11 +152,38 @@ class DatasetConfig:
     calibrator_train_metadata: Path
 
 
+def _resolve_fasta(fasta_root: Path, relative_fasta: str) -> Path:
+    """Resolve a FASTA under the Hugging Face datasets snapshot.
+
+    Args:
+        fasta_root: Root of the local ``winnow-ms-datasets`` snapshot
+            (``HF_DATASETS_DIR`` / ``paper_data/winnow-ms-datasets``).
+        relative_fasta: Path relative to that root (e.g. ``fasta/human.fasta``).
+
+    Returns:
+        Absolute path to an existing FASTA file.
+
+    Raises:
+        FileNotFoundError: If the file is missing.
+    """
+    fasta = (fasta_root / relative_fasta).resolve()
+    if not fasta.is_file():
+        raise FileNotFoundError(
+            f"Missing FASTA {fasta}. Proteomes ship in the Hugging Face "
+            f"dataset {_HF_DATASETS_ID} under fasta/. Run "
+            "`make -f Makefile.paper download-paper-datasets` "
+            "(or `hf download … --include 'fasta/**'` as in "
+            "paper_scripts/README.md)."
+        )
+    return fasta
+
+
 def build_dataset_configs(
     winnow_results: Path = DEFAULT_WINNOW_RESULTS,
     *,
     novoboard_root: Path,
     model_root: Path = DEFAULT_MODEL_ROOT,
+    fasta_root: Path = DEFAULT_FASTA_ROOT,
 ) -> dict[str, DatasetConfig]:
     """Build per-dataset path bundles from repo roots."""
     configs: dict[str, DatasetConfig] = {}
@@ -162,7 +191,7 @@ def build_dataset_configs(
         suffix = meta["winnow_suffix"]
         configs[key] = DatasetConfig(
             key=key,
-            fasta=_REPO_ROOT / meta["fasta"],
+            fasta=_resolve_fasta(fasta_root, meta["fasta"]),
             winnow_unlabelled=winnow_results
             / f"instanovo_{suffix}_predictions_unlabelled",
             winnow_test=winnow_results / f"instanovo_{suffix}_predictions_test",
@@ -1056,6 +1085,16 @@ def main(
         Path,
         typer.Option("--winnow-results", help="Winnow results directory."),
     ] = DEFAULT_WINNOW_RESULTS,
+    fasta_root: Annotated[
+        Path,
+        typer.Option(
+            "--fasta-root",
+            help=(
+                "Root of the local Hugging Face winnow-ms-datasets snapshot "
+                "(FASTA paths are relative to this directory)."
+            ),
+        ),
+    ] = DEFAULT_FASTA_ROOT,
     summarise_only: Annotated[
         Optional[Path],
         typer.Option(
@@ -1099,7 +1138,9 @@ def main(
         )
 
     dataset_keys = datasets if datasets is not None else list(DEFAULT_DATASETS)
-    configs = build_dataset_configs(winnow_results, novoboard_root=novoboard_root)
+    configs = build_dataset_configs(
+        winnow_results, novoboard_root=novoboard_root, fasta_root=fasta_root
+    )
 
     curve_parts: list[pd.DataFrame] = []
     for key in dataset_keys:
