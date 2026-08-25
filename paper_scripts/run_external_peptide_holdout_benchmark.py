@@ -697,16 +697,11 @@ def _evaluate_mixture_methods(
     for method, estimator in estimators.items():
         try:
             q_table = estimator(mixed, estimator_reference)  # type: ignore[operator]
-        except Exception as exc:  # noqa: BLE001 - boundary around external tool
-            logger.warning(
-                "%s FDR failed dataset=%s pi0=%.3g iter=%d: %s",
-                method,
-                dataset,
-                pi0,
-                iteration,
-                exc,
-            )
-            continue
+        except Exception as exc:
+            raise RuntimeError(
+                f"{method} FDR failed for dataset={dataset} pi0={pi0:.3g} "
+                f"iter={iteration}: {exc}"
+            ) from exc
         scored_keys = set(q_table["peptide_key"].astype(str))
         if scored_keys != mixture_keys:
             raise AssertionError(
