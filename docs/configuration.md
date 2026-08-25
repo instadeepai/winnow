@@ -175,7 +175,7 @@ dataset:
   predictions_path: data/predictions.csv
 
 metadata_output_path: results/metadata.csv
-# training_matrix_output_path: results/training_matrix.parquet
+training_matrix_output_path: results/training_matrix.parquet
 labelled: true
 ```
 
