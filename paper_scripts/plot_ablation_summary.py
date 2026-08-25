@@ -124,8 +124,8 @@ FDR_BIAS_COLUMN_BY_THRESHOLD: dict[float, str] = {
     0.10: "fdr_bias@10%FDR",
 }
 
-_DEFAULT_SUMMARY = Path("results/ablations/ablation_summary.csv")
-_DEFAULT_OUTPUT_DIR = Path("results/ablations/plots")
+_DEFAULT_SUMMARY = Path("paper_results/ablations/ablation_summary.csv")
+_DEFAULT_OUTPUT_DIR = Path("paper_results/ablations/plots")
 
 
 def load_ablation_summary(path: Path) -> pd.DataFrame:

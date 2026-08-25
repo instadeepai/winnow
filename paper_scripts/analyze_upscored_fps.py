@@ -596,9 +596,9 @@ def _levenshtein(s: str, t: str) -> int:
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
-_DEFAULT_PREDICTIONS_ROOT = Path("predictions/general_model")
-_DEFAULT_RESULTS_DIR = Path("analysis/upscored_fps")
-_DEFAULT_PLOTS_DIR = Path("analysis/upscored_fps/plots")
+_DEFAULT_PREDICTIONS_ROOT = Path("paper_data/general_results/labelled")
+_DEFAULT_RESULTS_DIR = Path("paper_results/upscored_fps")
+_DEFAULT_PLOTS_DIR = Path("paper_plots/upscored_fps")
 
 
 @app.command()

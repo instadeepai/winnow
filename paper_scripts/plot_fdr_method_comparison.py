@@ -100,10 +100,11 @@ sns.set_theme(style="white", palette=_PALETTE, context="paper", font_scale=1.5)
 FDR_THRESHOLDS = [0.01, 0.05, 0.10]
 _DB_GROUNDED_DROP = 10
 
-DEFAULT_WINNOW_RESULTS = _REPO_ROOT / "results"
-DEFAULT_MODEL_ROOT = _REPO_ROOT / "models"
-DEFAULT_FASTA_ROOT = _REPO_ROOT / "paper_data/winnow-ms-datasets"
-DEFAULT_OUTPUT_DIR = _REPO_ROOT / "results/fdr_method_comparison_psm"
+DEFAULT_WINNOW_RESULTS = Path("paper_data/fdr_benchmark_inputs/winnow_results")
+DEFAULT_MODEL_ROOT = Path("paper_data/fdr_benchmark_inputs/models")
+DEFAULT_FASTA_ROOT = Path("paper_data/winnow-ms-datasets")
+DEFAULT_RESULTS_DIR = Path("paper_results/fdr_method_comparison")
+DEFAULT_PLOTS_DIR = Path("paper_plots/fdr_method_comparison")
 DEFAULT_DATASETS = ["helaqc", "celegans"]
 _HF_DATASETS_ID = "InstaDeepAI/winnow-ms-datasets"
 _METHOD_COLOURS = {
@@ -1073,11 +1074,11 @@ def main(
     results_dir: Annotated[
         Path,
         typer.Option("--results-dir", help="Directory for curves/summary CSVs."),
-    ] = DEFAULT_OUTPUT_DIR,
+    ] = DEFAULT_RESULTS_DIR,
     plots_dir: Annotated[
         Path,
         typer.Option("--plots-dir", help="Directory for png/pdf figures."),
-    ] = DEFAULT_OUTPUT_DIR,
+    ] = DEFAULT_PLOTS_DIR,
     datasets: Annotated[
         Optional[list[str]],
         typer.Option("--datasets", help="Dataset keys to plot."),

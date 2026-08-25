@@ -1276,7 +1276,7 @@ def build_summary_table(all_results: list[EvalResult]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-_DEFAULT_OUTPUT_DIR = Path("analysis/hpo_ablation")
+_DEFAULT_OUTPUT_DIR = Path("paper_results/ablations")
 
 
 def _validate_training_inputs(

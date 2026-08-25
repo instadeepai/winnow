@@ -97,7 +97,8 @@ from winnow.fdr.nonparametric import NonParametricFDRControl  # noqa: E402
 logger = logging.getLogger(__name__)
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
-DEFAULT_OUTPUT_DIR = _REPO_ROOT / "results/external_peptide_holdout_benchmark"
+DEFAULT_RESULTS_DIR = Path("paper_results/external_peptide_holdout")
+DEFAULT_PLOTS_DIR = Path("paper_plots/external_peptide_holdout")
 DEFAULT_DATASETS = ["helaqc", "celegans"]
 DEFAULT_Q_THRESHOLDS = [round(float(x), 2) for x in np.linspace(0.0, 0.25, 26)]
 DEFAULT_PI0_GRID = [0.5, 0.6, 0.7, 0.8, 0.9]
@@ -1014,7 +1015,7 @@ def main(
     results_dir: Annotated[
         Path,
         typer.Option("--results-dir", help="Directory for results/summary CSVs."),
-    ] = DEFAULT_OUTPUT_DIR,
+    ] = DEFAULT_RESULTS_DIR,
     plots_dir: Annotated[
         Optional[Path],
         typer.Option(
@@ -1106,7 +1107,7 @@ def main(
 
     if plot:
         if plots_dir is None:
-            plots_dir = DEFAULT_OUTPUT_DIR / "plots"
+            plots_dir = DEFAULT_PLOTS_DIR
         results_dir.mkdir(parents=True, exist_ok=True)
         plots_dir.mkdir(parents=True, exist_ok=True)
     else:

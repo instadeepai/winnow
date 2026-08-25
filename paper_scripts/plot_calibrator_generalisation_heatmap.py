@@ -238,7 +238,7 @@ def create_comparison_heatmaps(results_path: Path, output_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
-_DEFAULT_OUTPUT_DIR = Path("results/generalisation/plots")
+_DEFAULT_OUTPUT_DIR = Path("paper_plots/generalisation")
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 

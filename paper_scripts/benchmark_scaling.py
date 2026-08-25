@@ -52,8 +52,8 @@ sns.set_theme(style="white", palette=_PALETTE, context="paper", font_scale=1.5)
 DEFAULT_FRACTIONS = [0.1, 0.5, 1.0]
 _SEED = 42
 _DEFAULT_MODEL_OUTPUT_DIR = Path("paper_results/scaling/dummy_model")
-_DEFAULT_RESULTS_DIR = Path("analysis")
-_DEFAULT_PLOTS_DIR = Path("analysis")
+_DEFAULT_RESULTS_DIR = Path("paper_results/scaling")
+_DEFAULT_PLOTS_DIR = Path("paper_plots/scaling")
 
 
 @contextmanager
