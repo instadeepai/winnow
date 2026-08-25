@@ -10,8 +10,6 @@ import polars as pl
 
 logger = logging.getLogger(__name__)
 
-HEPG2_SOURCE = "PXD019483"
-
 SPECIES_NAME_MAPPING: dict[str, str] = {
     "gluc": "HeLa degradome",
     "helaqc": "HeLa single shot",
@@ -19,7 +17,7 @@ SPECIES_NAME_MAPPING: dict[str, str] = {
     "immuno": "Immunopeptidomics-1",
     "celegans": "$\\it{C.\\;elegans}$",
     "sbrodae": "$\\it{Scalindua\\;brodae}$",
-    HEPG2_SOURCE: "HepG2",
+    "PXD019483": "HepG2",
     "hepg2": "HepG2",
     "snakevenoms": "Snake venomics",
     "tplantibodies": "Therapeutic nanobodies",
@@ -64,52 +62,3 @@ def build_experiment_source_mapping(biological_validation_dir: Path) -> dict[str
         len(parquet_files),
     )
     return mapping
-
-
-def annotate_train_source_labels(
-    train_parquet: Path,
-    train_predictions: Path,
-    biological_validation_dir: Path,
-) -> None:
-    """Add a ``source`` column to the train parquet and predictions CSV.
-
-    Experiments found in ``biological_validation_dir`` inherit that project name.
-    All other experiments are labelled as HepG2 (``PXD019483``).
-    """
-    experiment_to_source = build_experiment_source_mapping(biological_validation_dir)
-    lookup = pl.DataFrame(
-        {
-            "experiment_name": list(experiment_to_source.keys()),
-            "source": list(experiment_to_source.values()),
-        }
-    )
-
-    spectra = pl.read_parquet(train_parquet)
-    if "source" not in spectra.columns:
-        spectra = spectra.join(lookup, on="experiment_name", how="left").with_columns(
-            pl.col("source").fill_null(HEPG2_SOURCE)
-        )
-        spectra.write_parquet(train_parquet)
-        logger.info("Wrote source labels to %s", train_parquet)
-    else:
-        logger.info(
-            "Parquet already has source column, leaving %s unchanged", train_parquet
-        )
-
-    predictions = pl.read_csv(train_predictions)
-    if "source" not in predictions.columns:
-        source_by_spectrum = spectra.select("spectrum_id", "source")
-        predictions = predictions.join(source_by_spectrum, on="spectrum_id", how="left")
-        missing = predictions.filter(pl.col("source").is_null())
-        if len(missing) > 0:
-            raise ValueError(
-                f"{len(missing)} prediction rows in {train_predictions} have no matching "
-                "spectrum_id in the train parquet"
-            )
-        predictions.write_csv(train_predictions)
-        logger.info("Wrote source labels to %s", train_predictions)
-    else:
-        logger.info(
-            "Predictions CSV already has source column, leaving %s unchanged",
-            train_predictions,
-        )
