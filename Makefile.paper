@@ -132,10 +132,16 @@ HELAQC_DNS_TOOLS ?= instanovo casanovo primenovo
 
 HELAQC_DNS_LABEL_instanovo := InstaNovo
 HELAQC_DNS_MODEL_instanovo := $(HELAQC_MODEL)
+HELAQC_DNS_LOADER_instanovo := instanovo
+HELAQC_DNS_PREDS_DIR_instanovo := instanovo
 HELAQC_DNS_LABEL_casanovo := Casanovo
 HELAQC_DNS_MODEL_casanovo := $(CASANOVO_HELAQC_MODEL)
+HELAQC_DNS_LOADER_casanovo := mztab
+HELAQC_DNS_PREDS_DIR_casanovo := casanovo
 HELAQC_DNS_LABEL_primenovo := pi-PrimeNovo
 HELAQC_DNS_MODEL_primenovo := $(PRIMENOVO_HELAQC_MODEL)
+HELAQC_DNS_LOADER_primenovo := primenovo
+HELAQC_DNS_PREDS_DIR_primenovo := primenovo
 
 # FDR tool recompute datasets. Laptop keeps helaqc only (celegans holdout >5 min).
 FDR_RECOMPUTE_DATASETS_LAPTOP ?= helaqc
@@ -326,29 +332,27 @@ $(foreach t,$(HELAQC_DNS),$(eval $(call HELAQC_PLOT_TOOL_RULE,$(t))))
 
 paper-plot-helaqc-analysis: $(foreach t,$(HELAQC_DNS),paper-plot-helaqc-$(t))
 
-paper-recompute-helaqc:
-	@mkdir -p $(PAPER_RESULTS_DIR)
-	@for tool in $(HELAQC_DNS_TOOLS); do \
-	  for split in $(HELAQC_SPLITS); do \
-	    out=$(PAPER_RESULTS_DIR)/$${tool}_helaqc_predictions_$${split}; \
-	    echo "Predict $${tool} $${split} -> $${out}"; \
-	    case $${tool} in \
-	      instanovo) loader=instanovo; model=$(HELAQC_MODEL); preds=$(HELAQC_DATA)/instanovo/$${split}_preds.csv ;; \
-	      casanovo) loader=mztab; model=$(CASANOVO_HELAQC_MODEL); preds=$(HELAQC_DATA)/casanovo/$${split}_preds.csv ;; \
-	      primenovo) loader=primenovo; model=$(PRIMENOVO_HELAQC_MODEL); preds=$(HELAQC_DATA)/primenovo/$${split}_preds.csv ;; \
-	      *) echo "Unknown tool $${tool}"; exit 1 ;; \
-	    esac; \
-	    spectra=$(HELAQC_DATA)/$${split}.parquet; \
-	    $(WINNOW) predict \
-	      data_loader=$${loader} \
-	      dataset.spectrum_path_or_directory=$${spectra} \
-	      dataset.predictions_path=$${preds} \
-	      calibrator.pretrained_model_name_or_path=$${model} \
-	      fdr_control.fdr_threshold=$(PREDICT_FDR_THRESHOLD) \
-	      $(KOINA_FRAGMENT_MATCH_CONSTANTS) \
-	      output_folder=$${out}; \
-	  done; \
-	done
+# $(1) = tool (instanovo|casanovo|primenovo), $(2) = split (test|unlabelled|raw_less_train)
+define HELAQC_RECOMPUTE_TOOL_SPLIT_RULE
+.PHONY: paper-recompute-helaqc-$(1)-$(2)
+paper-recompute-helaqc-$(1)-$(2):
+	@mkdir -p $$(PAPER_RESULTS_DIR)
+	@out=$$(PAPER_RESULTS_DIR)/$(1)_helaqc_predictions_$(2); \
+	echo "Predict $(1) $(2) -> $$$$out"; \
+	$$(WINNOW) predict \
+	  data_loader=$$(HELAQC_DNS_LOADER_$(1)) \
+	  dataset.spectrum_path_or_directory=$$(HELAQC_DATA)/$(2).parquet \
+	  dataset.predictions_path=$$(HELAQC_DATA)/$$(HELAQC_DNS_PREDS_DIR_$(1))/$(2)_preds.csv \
+	  calibrator.pretrained_model_name_or_path=$$(HELAQC_DNS_MODEL_$(1)) \
+	  fdr_control.fdr_threshold=$$(PREDICT_FDR_THRESHOLD) \
+	  $$(KOINA_FRAGMENT_MATCH_CONSTANTS) \
+	  output_folder=$$$$out
+endef
+
+$(foreach t,$(HELAQC_DNS),$(foreach s,$(HELAQC_SPLITS),$(eval $(call HELAQC_RECOMPUTE_TOOL_SPLIT_RULE,$(t),$(s)))))
+
+paper-recompute-helaqc: \
+	$(foreach t,$(HELAQC_DNS_TOOLS),$(foreach s,$(HELAQC_SPLITS),paper-recompute-helaqc-$(t)-$(s)))
 
 ################################################################################
 # 3. FDR method comparison
@@ -368,6 +372,7 @@ paper-recompute-fdr-method-comparison:
 	$(PYTHON) $(PAPER_SCRIPTS)/plot_fdr_method_comparison.py \
 		--novoboard-root $(NOVOBOARD_ROOT) \
 		--winnow-results $(WINNOW_FDR_RESULTS) \
+		--fasta-root $(HF_DATASETS_DIR) \
 		$(foreach d,$(FDR_RECOMPUTE_DATASETS),--datasets $(d)) \
 		--results-dir $(PAPER_RESULTS_DIR)/fdr_method_comparison \
 		--plots-dir $(PAPER_PLOTS_DIR)/fdr_method_comparison
@@ -391,6 +396,7 @@ paper-recompute-external-peptide-holdout:
 		--novoboard-root $(NOVOBOARD_ROOT) \
 		--winnow-results $(WINNOW_FDR_RESULTS) \
 		--model-root $(FDR_MODEL_ROOT) \
+		--fasta-root $(HF_DATASETS_DIR) \
 		$(foreach d,$(FDR_RECOMPUTE_DATASETS),--datasets $(d)) \
 		--results-dir $(PAPER_RESULTS_DIR)/external_peptide_holdout \
 		--plots-dir $(PAPER_PLOTS_DIR)/external_peptide_holdout
@@ -515,23 +521,14 @@ $(foreach s,$(GENERAL_STEMS),$(eval $(call GENERAL_LABELLED_STEM_RULE,$(s))))
 $(foreach s,$(GENERAL_STEMS),$(eval $(call GENERAL_FULL_STEM_RULE,$(s))))
 $(foreach s,$(GENERAL_STEMS),$(eval $(call GENERAL_BOTH_STEM_RULE,$(s))))
 
-paper-recompute-general-labelled:
-	@mkdir -p $(PAPER_RESULTS_DIR)/general_results/labelled
-	@for stem in $(GENERAL_RECOMPUTE_STEMS); do \
-	  $(MAKE) -f Makefile.paper --no-print-directory paper-recompute-general-labelled-$${stem}; \
-	done
+paper-recompute-general-labelled: \
+	$(foreach s,$(GENERAL_RECOMPUTE_STEMS),paper-recompute-general-labelled-$(s))
 
-paper-recompute-general-full-small:
-	@mkdir -p $(PAPER_RESULTS_DIR)/general_results/full
-	@for stem in $(GENERAL_FULL_SMALL_STEMS); do \
-	  $(MAKE) -f Makefile.paper --no-print-directory paper-recompute-general-full-$${stem}; \
-	done
+paper-recompute-general-full-small: \
+	$(foreach s,$(GENERAL_FULL_SMALL_STEMS),paper-recompute-general-full-$(s))
 
-paper-recompute-general-full-large:
-	@mkdir -p $(PAPER_RESULTS_DIR)/general_results/full
-	@for stem in $(GENERAL_FULL_LARGE_STEMS); do \
-	  $(MAKE) -f Makefile.paper --no-print-directory paper-recompute-general-full-$${stem}; \
-	done
+paper-recompute-general-full-large: \
+	$(foreach s,$(GENERAL_FULL_LARGE_STEMS),paper-recompute-general-full-$(s))
 
 # Echo exact recipes for all nine stems × labelled/full (immuno2 always subsets).
 paper-recompute-general-print:
