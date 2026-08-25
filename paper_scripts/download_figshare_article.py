@@ -74,18 +74,44 @@ def _http_get_json(url: str) -> dict[str, Any]:
     return data
 
 
+def _latest_article_version(article_id: int) -> int | None:
+    """Latest published version from the unversioned article endpoint.
+
+    Used only for error messages. Never used as a download source.
+    """
+    try:
+        article = _http_get_json(_article_url(article_id, None))
+    except RuntimeError:
+        return None
+    version = article.get("version")
+    if isinstance(version, int):
+        return version
+    if isinstance(version, str) and version.isdigit():
+        return int(version)
+    return None
+
+
 def _fetch_article(article_id: int, version: int | None) -> dict[str, Any]:
-    """Load article metadata, preferring the versioned endpoint when set."""
-    if version is not None:
-        url = _article_url(article_id, version)
-        try:
-            return _http_get_json(url)
-        except RuntimeError as exc:
-            logger.warning(
-                "Versioned endpoint failed (%s); falling back to current article metadata.",
-                exc,
-            )
-    return _http_get_json(_article_url(article_id, None))
+    """Load article metadata for an exact version pin when ``version`` is set.
+
+    When ``version`` is set, only the versioned endpoint is used for files.
+    """
+    if version is None:
+        return _http_get_json(_article_url(article_id, None))
+
+    url = _article_url(article_id, version)
+    try:
+        return _http_get_json(url)
+    except RuntimeError as exc:
+        latest = _latest_article_version(article_id)
+        if latest is not None:
+            latest_clause = f" Latest published version is {latest}."
+        else:
+            latest_clause = " Latest published version could not be determined."
+        raise RuntimeError(
+            f"Figshare article {article_id} version {version} is not available "
+            f"({exc}).{latest_clause}"
+        ) from exc
 
 
 def _relative_path(file_info: dict[str, Any], folder_structure: dict[str, Any]) -> str:
