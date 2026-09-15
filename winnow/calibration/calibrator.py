@@ -524,6 +524,36 @@ class ProbabilityCalibrator:
         calibrator._validate_loaded_checkpoint(input_dim)
         return calibrator
 
+    def apply_koina_server_overrides(
+        self,
+        server_url: Optional[str] = None,
+        ssl: Optional[bool] = None,
+    ) -> None:
+        """Override the Koina inference server on every Koina-using feature.
+
+        Lets a self-hosted Koina/Triton instance be targeted without retraining, since
+        features restored from a checkpoint carry whatever server was configured when
+        the calibrator was trained.
+
+        Args:
+            server_url: Koina inference server URL (e.g. "localhost:8500"). When None,
+                features keep their current value.
+            ssl: Whether to use SSL when talking to the Koina server. When None,
+                features keep their current value.
+        """
+        if server_url is None and ssl is None:
+            return
+
+        for feature in self.feature_dict.values():
+            if not (
+                hasattr(feature, "koina_server_url") and hasattr(feature, "koina_ssl")
+            ):
+                continue
+            if server_url is not None:
+                feature.koina_server_url = server_url
+            if ssl is not None:
+                feature.koina_ssl = ssl
+
     def apply_koina_model_input_overrides(
         self,
         model_input_constants: Optional[Dict[str, Any]] = None,
