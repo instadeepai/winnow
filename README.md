@@ -109,10 +109,7 @@ conda install -c conda-forge -c bioconda winnow-fdr
 
 ### Container
 
-The Bioconda recipe also produces a
-[Biocontainer](https://quay.io/repository/biocontainers/winnow-fdr?tab=tags), which is convenient
-if you run Winnow from a workflow manager such as Nextflow, Snakemake or Galaxy. Tags are
-`<version>--<build>`, for example:
+The Bioconda recipe also produces a [Biocontainer](https://quay.io/repository/biocontainers/winnow-fdr?tab=tags), which is convenient if you run Winnow from a workflow manager such as Nextflow, Snakemake or Galaxy. Tags are `<version>--<build>`, for example:
 
 ```bash
 docker pull quay.io/biocontainers/winnow-fdr:2.0.0--pyh106432d_0
