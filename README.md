@@ -85,16 +85,34 @@ Winnow provides both a CLI and a Python package, offering flexibility in perform
 <!-- GETTING STARTED -->
 ## Installation
 
+### pip
+
 Winnow is published on PyPI as **`winnow-fdr`**. Install with `pip` or a `pip`-compatible tool (e.g. `uv pip install`):
 
-```python
+```bash
 pip install winnow-fdr
 ```
 
 or
 
-```python
+```bash
 uv pip install winnow-fdr
+```
+
+### conda
+
+Winnow is also packaged for [Bioconda](https://bioconda.github.io/recipes/winnow-fdr/README.html):
+
+```bash
+conda install -c conda-forge -c bioconda winnow-fdr
+```
+
+### Container
+
+The Bioconda recipe also produces a [Biocontainer](https://quay.io/repository/biocontainers/winnow-fdr?tab=tags), which is convenient if you run Winnow from a workflow manager such as Nextflow, Snakemake or Galaxy. Tags are `<version>--<build>`, for example:
+
+```bash
+docker pull quay.io/biocontainers/winnow-fdr:2.0.0--pyh106432d_0
 ```
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
