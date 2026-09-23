@@ -6,7 +6,12 @@ from omegaconf import OmegaConf
 
 
 def test_default_mztab_config_loads_beams_when_calibrator_needs_them() -> None:
-    """Beam-dependent calibrator features require MZTab beam loading to be enabled."""
+    """Beam-dependent calibrator features must not be blocked by MZTab beam loading.
+
+    ``load_beams: null`` auto-detects (beams for Casanovo mzTab, none for
+    database-search mzTab), so it satisfies beam-dependent features for the input
+    that can actually supply beams. Only an explicit ``false`` is incompatible.
+    """
     config_dir = Path(__file__).parents[2] / "winnow" / "configs"
     calibrator_cfg = OmegaConf.load(config_dir / "calibrator.yaml")
     mztab_cfg = OmegaConf.load(config_dir / "data_loader" / "mztab.yaml")
@@ -16,4 +21,4 @@ def test_default_mztab_config_loads_beams_when_calibrator_needs_them() -> None:
         "beam_features" in default_features or "chimeric_features" in default_features
     )
 
-    assert not needs_beams or mztab_cfg.load_beams is True
+    assert not needs_beams or mztab_cfg.load_beams is not False

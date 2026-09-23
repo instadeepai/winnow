@@ -28,7 +28,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         min_train_points: int = 10,
         learn_from_missing: bool = True,
         seed: int = 42,
-        irt_model_name: str = "Prosit_2019_irt",
+        irt_model_name: str = "Prosit_2025_irt_22PTM",
         max_peptide_length: int = 30,
         unsupported_residues: Optional[List[str]] = None,
     ) -> None:
@@ -46,7 +46,7 @@ class RetentionTimeFeature(CalibrationFeatures):
                 silently filtered out with a warning. Defaults to True.
             seed (int): Random seed for reproducibility. Defaults to 42.
             irt_model_name (str): The name of the Koina iRT model to use.
-                Defaults to "Prosit_2019_irt".
+                Defaults to "Prosit_2025_irt_22PTM".
             max_peptide_length (int): Maximum peptide length (residue token count) accepted
                 by the Koina iRT model. Predictions exceeding this are treated as missing.
                 Defaults to 30.

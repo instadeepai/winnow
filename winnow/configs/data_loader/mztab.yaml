@@ -4,8 +4,10 @@ _target_: winnow.datasets.data_loaders.MZTabDatasetLoader
 residue_masses: ${residue_masses}
 
 # Build ScoredSequence beam lists from Casanovo mzTab (multiple PSMs per spectrum).
-# Set false for traditional database-search mzTab (loader raises if true).
-load_beams: false
+# null (default) auto-detects from the file's search_engine field: beams for Casanovo
+# mzTab, no beams for traditional database-search mzTab. Set true/false to force it
+# (true raises on database-search mzTab, which has no beam candidates).
+load_beams: null
 
 # Maps logical roles to mzTab PSM column headers. Missing columns fail at load with
 # the configured name and available headers listed. No silent fallbacks.

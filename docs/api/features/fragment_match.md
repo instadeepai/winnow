@@ -17,7 +17,7 @@ False identifications often show poor spectral agreement even when the *de novo*
 
 ### Step 1: Theoretical Spectrum Generation
 
-We call a Koina intensity prediction model (e.g., `Prosit_2020_intensity_HCD`) with:
+We call a Koina intensity prediction model (e.g., `Prosit_2025_intensity_22PTM`) with:
 
 - Predicted peptide sequence
 - Precursor charge
@@ -82,7 +82,7 @@ feature = FragmentMatchFeatures(
     mz_tolerance=20,
     mz_tolerance_unit="ppm",
     unsupported_residues=["N[UNIMOD:7]", "Q[UNIMOD:7]"],
-    intensity_model_name="Prosit_2020_intensity_HCD",
+    intensity_model_name="Prosit_2025_intensity_22PTM",
     max_precursor_charge=6,
     max_peptide_length=30,
     model_input_constants={"collision_energies": 25},
@@ -98,7 +98,7 @@ calibrator.add_feature(feature)
 | `mz_tolerance` | `float` | (required) | Tolerance magnitude for matching fragment ions. |
 | `mz_tolerance_unit` | `str` | (required) | Unit for `mz_tolerance`: `"ppm"` or `"da"` (case-insensitive). |
 | `unsupported_residues` | `List[str]` | `[]` | Residue tokens not supported by the Koina model |
-| `intensity_model_name` | `str` | `"Prosit_2020_intensity_HCD"` | Name of the Koina intensity model |
+| `intensity_model_name` | `str` | `"Prosit_2025_intensity_22PTM"` | Name of the Koina intensity model |
 | `max_precursor_charge` | `int` | `6` | Maximum charge state supported by the model |
 | `max_peptide_length` | `int` | `30` | Maximum peptide length supported by the model |
 | `model_input_constants` | `Dict` | `{}` | Constant values for model inputs (e.g., collision energy) |

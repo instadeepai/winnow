@@ -56,3 +56,23 @@ calibrator:
       irt_model_name: ${koina.irt_model}  # The name of the Koina iRT model to use.
       max_peptide_length: ${koina.constraints.max_peptide_length}      # Maximum peptide length accepted by the Koina iRT model.
       unsupported_residues: ${koina.constraints.unsupported_residues}  # Residues unsupported by the configured Koina iRT model.
+
+    # Requires beam predictions (runner-up candidates). Works with Casanovo mzTab and
+    # InstaNovo beam columns. Database-search mzTab has no beams, so remove this block
+    # for such inputs: winnow train ... '~calibrator.features.chimeric_features'
+    chimeric_features:
+      _target_: winnow.calibration.calibration_features.ChimericFeatures
+      mz_tolerance: 20
+      mz_tolerance_unit: ppm
+      learn_from_missing: false  # If True, impute missing features and add an indicator column. If False, filter invalid entries with a warning.
+      prosit_intensity_model_name: ${koina.intensity_model}  # The name of the Koina intensity model to use.
+      max_precursor_charge: ${koina.constraints.max_precursor_charge}  # Maximum precursor charge accepted by the Koina intensity model.
+      max_peptide_length: ${koina.constraints.max_peptide_length}      # Maximum peptide length accepted by the Koina intensity model. Applied to the runner-up (second-best) sequence.
+      unsupported_residues: ${koina.constraints.unsupported_residues}  # Residues unsupported by the configured Koina intensity model.
+      model_input_constants: ${koina.input_constants}  # Shared Koina model inputs (e.g. collision_energies, fragmentation_types).
+      # model_input_columns: ${koina.input_columns}  # Uncomment to use per-row metadata columns instead.
+
+    # Requires beam predictions (see chimeric_features above). Remove for
+    # database-search mzTab: winnow train ... '~calibrator.features.beam_features'
+    beam_features:
+      _target_: winnow.calibration.calibration_features.BeamFeatures

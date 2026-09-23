@@ -11,16 +11,23 @@ Candidate ranking
 ~~~~~~~~~~~~~~~~~
 All PSM rows sharing an ``index`` are sorted by raw engine score descending
 (negatives last for Casanovo de novo). Metadata always receives the top row per
-``index``. Casanovo beams (when ``load_beams=True``) include every row per
+``index``. Casanovo beams (when beam loading is active) include every row per
 ``index`` in that same order. Scores are transformed to log-probabilities only
 after sorting.
+
+Beam loading
+~~~~~~~~~~~~
+``load_beams`` defaults to ``None``, meaning auto-detect: beams are built for
+Casanovo mzTab and skipped for database-search mzTab, so one config serves both.
+Set it to ``True``/``False`` to force the behaviour (``True`` raises on
+database-search input).
 
 Modes
 ~~~~~
 * **Casanovo** — detected via ``search_engine`` (``MS:1003281`` / ``Casanovo``):
   recovered probabilities for metadata confidence; beams with token scores.
 * **Database search** — raw engine scores in metadata; ``predictions`` is always
-  ``None``. ``load_beams=True`` raises at load time.
+  ``None``. An explicit ``load_beams=True`` raises at load time.
 
 Score assumptions (Casanovo)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -68,7 +75,7 @@ class MZTabDatasetLoader(DatasetLoader):
         residue_masses: dict[str, float],
         residue_remapping: dict[str, str],
         isotope_error_range: Tuple[int, int] = (0, 1),
-        load_beams: bool = True,
+        load_beams: Optional[bool] = None,
         column_mapping: Optional[dict[str, Optional[str]]] = None,
     ) -> None:
         """Initialise the MZTabDatasetLoader.
@@ -78,8 +85,11 @@ class MZTabDatasetLoader(DatasetLoader):
             residue_remapping: Input notation to ProForma mapping.
             isotope_error_range: Isotope error range for mass matching.
             load_beams: Build ``ScoredSequence`` beam lists for Casanovo mzTab.
-                Must be ``False`` for traditional database-search mzTab (raises if
-                ``True``). When ``False`` on Casanovo, metadata is still loaded.
+                ``None`` (the default) auto-detects: beams are loaded for Casanovo
+                mzTab and skipped for traditional database-search mzTab. ``True``
+                forces beam loading and raises on database-search mzTab, which has
+                no beam candidates. ``False`` never loads beams; on Casanovo,
+                metadata is still loaded.
             column_mapping: Maps logical roles to mzTab column headers. See
                 module docstring and ``_DEFAULT_COLUMN_MAPPING``. Missing mapped
                 columns fail fast with available headers listed.
@@ -189,14 +199,36 @@ class MZTabDatasetLoader(DatasetLoader):
         return float(np.log(max(float(score), MZTabDatasetLoader._LOG_PROB_EPSILON)))
 
     @staticmethod
-    def _validate_load_beams_supported(is_casanovo: bool, load_beams: bool) -> None:
-        """Raise if beam loading is requested for a non-Casanovo mzTab file."""
+    def _validate_load_beams_supported(
+        is_casanovo: bool, load_beams: Optional[bool]
+    ) -> None:
+        """Raise if beam loading is explicitly requested for a non-Casanovo mzTab file.
+
+        ``load_beams=None`` means auto-detect and never raises; see
+        :meth:`_resolve_load_beams`.
+        """
         if not is_casanovo and load_beams:
             raise ValueError(
                 "load_beams=True is only supported for Casanovo mzTab files (search_engine "
                 "contains MS:1003281 or Casanovo). Traditional database-search mzTab does not "
-                "provide beam candidates; set load_beams=false in mztab.yaml."
+                "provide beam candidates; set load_beams=null in mztab.yaml to auto-detect."
             )
+
+    @staticmethod
+    def _resolve_load_beams(is_casanovo: bool, load_beams: Optional[bool]) -> bool:
+        """Resolve the configured ``load_beams`` against the detected mzTab flavour.
+
+        Args:
+            is_casanovo: Whether the PSM table was detected as Casanovo output.
+            load_beams: The configured setting; ``None`` auto-detects.
+
+        Returns:
+            bool: Whether beams should be built for this file.
+        """
+        MZTabDatasetLoader._validate_load_beams_supported(is_casanovo, load_beams)
+        if load_beams is None:
+            return is_casanovo
+        return load_beams
 
     @staticmethod
     def _load_dataset(predictions_path: Path | str) -> pl.DataFrame:
@@ -320,7 +352,7 @@ class MZTabDatasetLoader(DatasetLoader):
         raw_predictions = self._load_dataset(predictions_path)
         is_casanovo = self._is_casanovo_mztab(raw_predictions)
 
-        self._validate_load_beams_supported(is_casanovo, self.load_beams)
+        load_beams = self._resolve_load_beams(is_casanovo, self.load_beams)
 
         predictions = self._process_predictions(
             raw_predictions,
@@ -351,7 +383,7 @@ class MZTabDatasetLoader(DatasetLoader):
         metadata_pd = metadata.to_pandas()
 
         beam_predictions: Optional[List[Optional[List[ScoredSequence]]]] = None
-        if is_casanovo and self.load_beams:
+        if load_beams:
             ordered_indices = metadata.get_column("index").to_list()
             beam_predictions = self._create_casanovo_beam_predictions(
                 predictions, ordered_indices

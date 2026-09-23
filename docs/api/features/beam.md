@@ -50,6 +50,12 @@ calibrator.add_feature(feature)
 
 The dataset must have beam predictions available (`dataset.predictions` must not be `None`). Each prediction should be a list of `ScoredSequence` objects with `sequence_log_probability` attributes.
 
+Beam-dependent features raise rather than skip when beams are absent. This feature is
+part of Winnow's default feature set, which targets de novo rescoring; for inputs
+without beam candidates (e.g. database-search mzTab) remove it with
+`'~calibrator.features.beam_features'`. See
+[Beam-dependent features](../../configuration.md#beam-dependent-features).
+
 ## Notes
 
 - A warning is emitted if any beam search results have fewer than two sequences

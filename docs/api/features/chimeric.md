@@ -72,7 +72,7 @@ calibrator.add_feature(feature)
 | `mz_tolerance` | `float` | (required) | Tolerance magnitude for matching fragment ions. |
 | `mz_tolerance_unit` | `str` | (required) | Unit for `mz_tolerance`: `"ppm"` or `"da"` (case-insensitive). |
 | `unsupported_residues` | `List[str]` | `[]` | Residue tokens not supported by the Koina model |
-| `intensity_model_name` | `str` | `"Prosit_2020_intensity_HCD"` | Name of the Koina intensity model |
+| `prosit_intensity_model_name` | `str` | `"Prosit_2025_intensity_22PTM"` | Name of the Koina intensity model |
 | `max_precursor_charge` | `int` | `6` | Maximum charge state supported by the model |
 | `max_peptide_length` | `int` | `30` | Maximum peptide length (applied to runner-up) |
 | `model_input_constants` | `Dict` | `{}` | Constant values for model inputs |
@@ -84,6 +84,12 @@ calibrator.add_feature(feature)
 The dataset must have:
 
 - Beam predictions with at least 2 sequences (`dataset.predictions[i]` must have length ≥ 2)
+
+Beam-dependent features raise rather than skip when beams are absent. This feature is
+part of Winnow's default feature set, which targets de novo rescoring; for inputs
+without beam candidates (e.g. database-search mzTab) remove it with
+`'~calibrator.features.chimeric_features'`. See
+[Beam-dependent features](../../configuration.md#beam-dependent-features).
 - `precursor_charge`: Precursor charge state
 - `mz_array`: Observed m/z values
 - `intensity_array`: Observed intensities

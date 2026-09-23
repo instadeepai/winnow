@@ -192,6 +192,28 @@ The feature set is the `calibrator.features` block from `calibrator.yaml` (share
 
 Controls model architecture and calibration features:
 
+!!! warning "The default feature set targets de novo rescoring"
+
+    Winnow's default `calibrator.features` block is tuned for **de novo rescoring**
+    (Casanovo, InstaNovo). Two of its features — `chimeric_features` and
+    `beam_features` — need **beam predictions**, i.e. runner-up candidate sequences
+    per spectrum.
+
+    Beam-dependent features **raise** when beams are absent; they are not silently
+    skipped. So if your input has no beam candidates — traditional database-search
+    mzTab is the common case — default training will fail with a `ValueError` from
+    `require_beam_predictions`. Remove both blocks:
+
+    ```bash
+    winnow train data_loader=mztab \
+      '~calibrator.features.chimeric_features' \
+      '~calibrator.features.beam_features'
+    ```
+
+    This is a deliberate trade-off: de novo rescoring is Winnow's primary use case, so
+    it gets the zero-config path, and database-search users add one override. See
+    [Beam-dependent features](#beam-dependent-features) for which inputs supply beams.
+
 ```yaml
 calibrator:
   _target_: winnow.calibration.calibrator.ProbabilityCalibrator
@@ -246,7 +268,7 @@ calibrator:
       mz_tolerance: 20
       mz_tolerance_unit: ppm
       learn_from_missing: false  # If True, impute missing features and add an indicator column. If False, filter invalid entries with a warning.
-      intensity_model_name: ${koina.intensity_model}  # The name of the Koina intensity model to use.
+      prosit_intensity_model_name: ${koina.intensity_model}  # The name of the Koina intensity model to use.
       max_precursor_charge: ${koina.constraints.max_precursor_charge}  # Maximum precursor charge accepted by the Koina intensity model. Applied to the runner-up sequence.
       max_peptide_length: ${koina.constraints.max_peptide_length}      # Maximum peptide length accepted by the Koina intensity model. Applied to the runner-up (second-best) sequence.
       unsupported_residues: ${koina.constraints.unsupported_residues}  # Residues unsupported by the configured Koina intensity model.
@@ -640,7 +662,7 @@ winnow train data_loader.beam_columns=null
 ```yaml
 _target_: winnow.datasets.data_loaders.MZTabDatasetLoader
 residue_masses: ${residue_masses}
-load_beams: false  # Set to false for database-search mzTab or metadata-only features
+load_beams: null  # Auto-detect: beams for Casanovo mzTab, none for database search
 residue_remapping:
   "M+15.995": "M[UNIMOD:35]"
   "C+57.021": "C[UNIMOD:4]"
@@ -649,8 +671,22 @@ residue_remapping:
 ```
 
 The `load_beams` parameter controls whether beam predictions are created from multiple
-predictions per spectrum. Set to `false` for traditional database-search mzTab or if you
-only need metadata features. Spectrum inputs may be Parquet, IPC, or MGF.
+predictions per spectrum. mzTab covers two different input classes, and the loader tells
+them apart from the file's `search_engine` field:
+
+| `load_beams` | Casanovo mzTab | Database-search mzTab |
+| ------------ | -------------- | --------------------- |
+| `null` (default) | Beams loaded | No beams |
+| `true` | Beams loaded | Raises at load time |
+| `false` | No beams (metadata only) | No beams |
+
+Leaving it `null` means one config serves both input types, which matters because
+beam-dependent calibration features (`ChimericFeatures`, `BeamFeatures`) need beams when
+they are available. Set `false` to skip beams even for Casanovo input when you only need
+metadata features. Spectrum inputs may be Parquet, IPC, or MGF.
+
+See [Beam-dependent features](#beam-dependent-features) below for how this interacts
+with the default feature set.
 
 **PointNovo** (`configs/data_loader/pointnovo.yaml`):
 
@@ -666,6 +702,48 @@ _target_: winnow.datasets.data_loaders.WinnowDatasetLoader
 residue_masses: ${residue_masses}
 # Internal format uses UNIMOD tokens directly, no remapping needed
 ```
+
+### Beam-dependent features
+
+Winnow's default `calibrator.features` set targets **de novo rescoring**, so it includes
+two features that require beam predictions (runner-up candidate sequences per spectrum):
+
+| Feature | Needs beams | What it measures |
+| ------- | ----------- | ---------------- |
+| `chimeric_features` | Yes | Spectrum match quality of the runner-up sequence |
+| `beam_features` | Yes | Margin, entropy, z-score and edit distance across the beam |
+| `fragment_match_features` | No | Fragment-ion match quality of the top-1 sequence |
+| `retention_time_feature` | No | Observed vs. Koina-predicted iRT |
+| `mass_error` | No | Precursor mass error |
+
+`TokenScoreFeatures` also requires beams, but is not part of the default set.
+
+Whether beams are available depends on the data loader and the input file:
+
+| Loader | Beams available? |
+| ------ | ---------------- |
+| InstaNovo (`instanovo.yaml`) | Yes, when `beam_columns` is set (the default); `null` disables |
+| MZTab (`mztab.yaml`) — Casanovo output | Yes, auto-detected from `search_engine` |
+| MZTab (`mztab.yaml`) — database search | **No** — the format has no runner-up candidates |
+| Winnow (`winnow.yaml`) | Yes, when the dataset directory contains `predictions.pkl` |
+| PrimeNovo (`primenovo.yaml`) | **No** — pi-PrimeNovo does not emit beams |
+| PointNovo (`pointnovo.yaml`) | Not applicable — loader is not yet implemented |
+
+**Beam-dependent features raise rather than skip.** If `dataset.predictions` is `None`,
+`require_beam_predictions` raises a `ValueError` naming the feature; the calibrator runs
+every registered feature unconditionally and has no skip mechanism. Training on an input
+without beams therefore needs both blocks removed:
+
+```bash
+winnow train data_loader=mztab \
+  '~calibrator.features.chimeric_features' \
+  '~calibrator.features.beam_features'
+```
+
+This is an intentional trade-off. De novo rescoring is Winnow's primary use case, so it
+gets the zero-configuration path; database-search workflows add one Hydra override. The
+alternative — silently skipping features whose inputs are missing — would make the
+trained feature set depend on the data in ways that are easy to miss when comparing runs.
 
 ## Config interpolation
 

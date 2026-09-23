@@ -16,7 +16,7 @@ By comparing predicted vs observed retention times, the calibrator gains an inde
 
 ### Step 1: Koina iRT Prediction
 
-We call a Koina iRT model (e.g., `Prosit_2019_irt`) with the predicted peptide sequences. The model returns predicted indexed retention time (iRT) values on a standardised scale.
+We call a Koina iRT model (e.g., `Prosit_2025_irt_22PTM`) with the predicted peptide sequences. The model returns predicted indexed retention time (iRT) values on a standardised scale.
 
 ### Step 2: Per-experiment linear calibration
 
@@ -96,7 +96,7 @@ feature = RetentionTimeFeature(
     min_train_points=10,
     unsupported_residues=["N[UNIMOD:7]", "Q[UNIMOD:7]"],
     max_peptide_length=30,
-    irt_model_name="Prosit_2019_irt",
+    irt_model_name="Prosit_2025_irt_22PTM",
     learn_from_missing=True,
 )
 calibrator.add_feature(feature)
@@ -111,7 +111,7 @@ calibrator.add_feature(feature)
 | `seed` | `int` | `42` | Random seed for reproducibility |
 | `unsupported_residues` | `List[str]` | `[]` | Residue tokens not supported by the Koina model |
 | `max_peptide_length` | `int` | `30` | Maximum peptide length supported by the model |
-| `irt_model_name` | `str` | `"Prosit_2019_irt"` | Name of the Koina iRT model |
+| `irt_model_name` | `str` | `"Prosit_2025_irt_22PTM"` | Name of the Koina iRT model |
 | `learn_from_missing` | `bool` | `True` | Whether to impute missing features or filter invalid rows |
 
 ## Requirements

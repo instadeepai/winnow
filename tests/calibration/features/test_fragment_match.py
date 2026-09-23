@@ -84,7 +84,7 @@ class TestFragmentMatchFeatures:
         )
         assert feature.mz_tolerance == 0.01
         assert feature.mz_tolerance_unit == "da"
-        assert feature.intensity_model_name == "Prosit_2020_intensity_HCD"
+        assert feature.intensity_model_name == "Prosit_2025_intensity_22PTM"
         assert feature.model_input_constants == {"collision_energies": 25}
         assert feature.model_input_columns is None
 

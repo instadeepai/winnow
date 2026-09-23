@@ -111,10 +111,15 @@ def require_beam_predictions(dataset: CalibrationDataset, feature_name: str) -> 
     if dataset.predictions is None:
         raise ValueError(
             f"{feature_name} requires beam predictions, but dataset.predictions is None. "
-            "This dataset was loaded without beam predictions. "
-            "To use this feature, ensure your data loader is configured to load beams: "
-            "for InstaNovo, set beam_columns in instanovo.yaml; "
-            "for MZTab, set load_beams: true in mztab.yaml."
+            "This dataset was loaded without beam predictions. Winnow's default calibrator "
+            "config targets de novo rescoring, so it enables beam-dependent features.\n"
+            "Either configure your data loader to load beams: for InstaNovo, set "
+            "beam_columns in instanovo.yaml; for MZTab, ensure the input is Casanovo mzTab "
+            "and load_beams is not false in mztab.yaml.\n"
+            "Or, if your input genuinely has no beam candidates (e.g. traditional "
+            "database-search mzTab), remove the beam-dependent feature blocks:\n"
+            "  winnow train ... '~calibrator.features.chimeric_features' "
+            "'~calibrator.features.beam_features'"
         )
 
 

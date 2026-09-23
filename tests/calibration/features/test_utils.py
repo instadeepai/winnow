@@ -19,6 +19,7 @@ from winnow.calibration.features.utils import (
     compute_spectral_angle,
     compute_xcorr,
     parse_mz_tolerance_unit,
+    require_beam_predictions,
     _validate_mz_tolerance,
 )
 from winnow.calibration.features.fragment_match import FragmentMatchFeatures
@@ -1082,3 +1083,30 @@ class TestXcorr:
         """A single observed peak matching a single theoretical ion should score positive."""
         score = compute_xcorr([300.0], [5000.0], [300.0])
         assert score > 0.0
+
+
+class TestRequireBeamPredictions:
+    """The beam-requirement error must tell the user how to proceed."""
+
+    def test_passes_when_beams_present(self):
+        metadata = pd.DataFrame({"confidence": [0.9], "prediction": [["A"]]})
+        dataset = CalibrationDataset(metadata=metadata, predictions=[[]])
+        require_beam_predictions(dataset, "ChimericFeatures")
+
+    def test_error_names_feature_and_documented_override(self):
+        """Database-search users rely on this message to find the Hydra override.
+
+        The default calibrator config targets de novo rescoring, so beam-dependent
+        features are enabled by default and raise on beam-free input. The message
+        must name both blocks that have to be removed.
+        """
+        metadata = pd.DataFrame({"confidence": [0.9], "prediction": [["A"]]})
+        dataset = CalibrationDataset(metadata=metadata, predictions=None)
+        with pytest.raises(
+            ValueError, match="ChimericFeatures requires beam predictions"
+        ) as excinfo:
+            require_beam_predictions(dataset, "ChimericFeatures")
+
+        message = str(excinfo.value)
+        assert "~calibrator.features.chimeric_features" in message
+        assert "~calibrator.features.beam_features" in message

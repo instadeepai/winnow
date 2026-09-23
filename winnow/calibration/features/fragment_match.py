@@ -31,7 +31,7 @@ class FragmentMatchFeatures(CalibrationFeatures):
         mz_tolerance: float,
         mz_tolerance_unit: str,
         learn_from_missing: bool = True,
-        intensity_model_name: str = "Prosit_2020_intensity_HCD",
+        intensity_model_name: str = "Prosit_2025_intensity_22PTM",
         max_precursor_charge: int = 6,
         max_peptide_length: int = 30,
         unsupported_residues: Optional[List[str]] = None,
@@ -48,7 +48,7 @@ class FragmentMatchFeatures(CalibrationFeatures):
                 zeros, allowing the calibrator to learn from missingness. When False,
                 invalid entries are filtered out with a warning. Defaults to True.
             intensity_model_name (str): The name of the Koina intensity model to use.
-                Defaults to "Prosit_2020_intensity_HCD".
+                Defaults to "Prosit_2025_intensity_22PTM".
             max_precursor_charge (int): Maximum precursor charge accepted by the Koina
                 intensity model. Predictions exceeding this are treated as missing.
                 Defaults to 6.

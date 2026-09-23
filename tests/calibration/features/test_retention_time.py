@@ -67,7 +67,7 @@ class TestRetentionTimeFeature:
         )
         assert feature.train_fraction == 0.8
         assert feature.min_train_points == 5
-        assert feature.irt_model_name == "Prosit_2019_irt"
+        assert feature.irt_model_name == "Prosit_2025_irt_22PTM"
         assert isinstance(feature.irt_predictors, dict)
         assert len(feature.irt_predictors) == 0
 

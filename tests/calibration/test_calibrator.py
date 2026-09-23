@@ -983,7 +983,7 @@ class TestProbabilityCalibrator:
         feature_config = config["features"]["Fragment Match Features"]
         for key in KOINA_RUNTIME_CONFIG_KEYS:
             assert key not in feature_config
-        assert feature_config["intensity_model_name"] == "Prosit_2020_intensity_HCD"
+        assert feature_config["intensity_model_name"] == "Prosit_2025_intensity_22PTM"
 
     def test_load_strips_legacy_koina_runtime_keys(self, tmp_path):
         """Loading old checkpoints ignores baked-in Koina input presets."""

@@ -793,6 +793,38 @@ class TestMZTabDatasetLoader:
                 is_casanovo=False, load_beams=True
             )
 
+    def test_load_beams_defaults_to_auto_detect(
+        self, full_residue_masses, standard_remapping
+    ):
+        """The constructor default is auto-detect, not a fixed boolean."""
+        loader = MZTabDatasetLoader(
+            residue_masses=full_residue_masses,
+            residue_remapping=standard_remapping,
+        )
+        assert loader.load_beams is None
+
+    @pytest.mark.parametrize(
+        ("is_casanovo", "load_beams", "expected"),
+        [
+            # Auto-detect follows the detected mzTab flavour.
+            (True, None, True),
+            (False, None, False),
+            # Explicit settings are honoured.
+            (True, True, True),
+            (True, False, False),
+            (False, False, False),
+        ],
+    )
+    def test_resolve_load_beams(self, is_casanovo, load_beams, expected):
+        assert (
+            MZTabDatasetLoader._resolve_load_beams(is_casanovo, load_beams) is expected
+        )
+
+    def test_resolve_load_beams_raises_for_forced_beams_on_db_search(self):
+        """Auto-detect never raises, but an explicit True on database search does."""
+        with pytest.raises(ValueError, match="load_beams=True is only supported"):
+            MZTabDatasetLoader._resolve_load_beams(is_casanovo=False, load_beams=True)
+
     def test_merge_data_picks_higher_scoring_psm(self, db_loader):
         raw = pl.DataFrame(
             {
