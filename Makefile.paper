@@ -164,7 +164,7 @@ FDR_OVERLAP_PROJECTS ?= $(GENERAL_PROJECTS)
 	paper-recompute-general-full-small paper-recompute-general-full-large \
 	paper-recompute-general-print \
 	paper-recompute-feature-investigation paper-recompute-scaling \
-	paper-recompute-runtime \
+	paper-recompute-runtime paper-recompute-tool-runtime \
 	paper-recompute-feature-importance \
 	paper-recompute-fdr-method-comparison paper-recompute-external-peptide-holdout \
 	paper-recompute-generalisation paper-recompute-ablations
@@ -192,7 +192,7 @@ help:
 	@echo "  general-{labelled,full}-<stem> | general-<stem> | general-print"
 	@echo "  feature-investigation | fdr-method-comparison | external-peptide-holdout"
 	@echo "  feature-importance | generalisation [GPU] | ablations [GPU]"
-	@echo "  runtime [GPU] | scaling [GPU]"
+	@echo "  runtime [GPU] | scaling [GPU] | tool-runtime"
 	@echo "  stems: $(GENERAL_STEMS)"
 
 ################################################################################
@@ -258,7 +258,8 @@ paper-recompute-laptop: paper-recompute-helaqc \
 	paper-recompute-general-labelled \
 	paper-recompute-feature-investigation \
 	paper-recompute-fdr-method-comparison \
-	paper-recompute-external-peptide-holdout
+	paper-recompute-external-peptide-holdout \
+	paper-recompute-tool-runtime
 
 paper-recompute-heavy: paper-recompute-general-full-small \
 	paper-recompute-general-full-large \
@@ -739,3 +740,30 @@ paper-recompute-scaling:
 		--fractions 0.1 --fractions 0.5 --fractions 1.0 \
 		--results-dir $(PAPER_RESULTS_DIR)/scaling \
 		--plots-dir $(PAPER_PLOTS_DIR)/scaling
+
+################################################################################
+# 14. Cross-tool CLI runtime
+################################################################################
+
+# Requires Python >=3.12 for the paper-extra NovoBoard pin.
+paper-recompute-tool-runtime:
+	@GLISSADE_BIN=$$(uv run which glissade) || \
+		(echo "glissade not installed; run: make -f Makefile.paper paper-sync-group-paper" && exit 1); \
+	NOVOBOARD_BIN=$$(uv run which novoboard) || \
+		(echo "novoboard not installed (needs Python >=3.12); run: make -f Makefile.paper paper-sync-group-paper" && exit 1); \
+	mkdir -p $(RUNTIME_RESULTS_DIR)/glissade_helaqc_inputs \
+		$(RUNTIME_RESULTS_DIR)/scratch_helaqc; \
+	$(PYTHON) $(PAPER_SCRIPTS)/benchmark_tool_runtime.py \
+		--winnow-repo $(CURDIR) \
+		--winnow-model $(GENERAL_MODEL) \
+		--spectrum-path $(HELAQC_DATA)/unlabelled.parquet \
+		--predictions-path $(HELAQC_DATA)/instanovo/unlabelled_preds.csv \
+		--train-preds-path $(HELAQC_DATA)/instanovo/train_preds.csv \
+		--train-spectrum-path $(HELAQC_DATA)/train.parquet \
+		--fasta $(FASTA_HUMAN) \
+		--novoboard-dir $(NOVOBOARD_ROOT)/helaqc/novoboard \
+		--glissade-dir $(RUNTIME_RESULTS_DIR)/glissade_helaqc_inputs \
+		--glissade-bin $$GLISSADE_BIN \
+		--novoboard-bin $$NOVOBOARD_BIN \
+		--scratch-dir $(RUNTIME_RESULTS_DIR)/scratch_helaqc \
+		--output-dir $(RUNTIME_RESULTS_DIR)

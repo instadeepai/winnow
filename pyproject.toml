@@ -66,8 +66,10 @@ notebook = [
     "tqdm>=4.67.1",
 ]
 # Paper reproduction extras (not published as package extras).
+# NovoBoard requires Python >=3.12 (paper-recompute-tool-runtime).
 paper = [
     "glissade",
+    "novoboard ; python_version >= '3.12'",
     "matplotlib-venn>=1.1.1",
     "shap>=0.44.0",
     "xgboost>=3.2.0",
@@ -75,6 +77,7 @@ paper = [
 
 [tool.uv.sources]
 glissade = { git = "https://github.com/JemmaLDaniel/glissade.git", rev = "7c723a2af4a88fda84a6bd4f223b351179bd36da" }
+novoboard = { git = "https://github.com/JemmaLDaniel/NovoBoard.git", rev = "a9faab3ef1af06987599c2f01e6ba96072c80172" }
 
 [project.scripts]
 winnow='winnow.scripts.main:app'

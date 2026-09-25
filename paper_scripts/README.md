@@ -57,8 +57,8 @@ Laptop vs heavy is about workload size and hardware requirements.
 | --- | --- | --- |
 | `paper-setup` | acquire | `download-paper-artefacts`, `download-paper-datasets`, `download-paper-models`, `paper-check-artefacts` |
 | `paper-plot-light` | deposit replot without the largest datasets | HeLa DNS, general labelled, FDR method / holdout, generalisation heatmap, feature importance, novelty, upscored FPs, FDR overlap (**immuno2** only) |
-| `paper-recompute-laptop` | no GPU; no unlabelled / large cohorts | HeLa DNS predict, general **labelled** (default stems), feature investigation, FDR method / holdout for **helaqc** |
-| `paper-recompute-heavy` | large cohorts, GPU | `general-full-*`, feature-importance, generalisation, ablations, runtime, scaling, FDR tools including **celegans**, `paper-plot-general-full`, FDR overlap (**all** projects) |
+| `paper-recompute-laptop` | no GPU; no unlabelled / large cohorts | HeLa DNS predict, general **labelled** (default stems), feature investigation, FDR method / holdout for **helaqc**, cross-tool CLI runtime |
+| `paper-recompute-heavy` | large cohorts, GPU | `general-full-*`, feature-importance, generalisation, ablations, pipeline runtime and scaling, FDR tools including **celegans**, `paper-plot-general-full`, FDR overlap (**all** projects) |
 
 ## 2. Public pins
 
@@ -70,7 +70,7 @@ Laptop vs heavy is about workload size and hardware requirements.
 | Hugging Face [winnow-helaqc-model](https://huggingface.co/InstaDeepAI/winnow-helaqc-model) | `d56542b961eac7d896e51bf0716a242fc394ab1f` |
 | Figshare [Additional HeLa Single Shot models](https://doi.org/10.6084/m9.figshare.32744946.v2) | `32744946` v2 (Casanovo / π-PrimeNovo calibrators) |
 | Glissade ([JemmaLDaniel/glissade](https://github.com/JemmaLDaniel/glissade), branch `winnow-benchmark`) | `7c723a2af4a88fda84a6bd4f223b351179bd36da` via `uv sync --group paper` |
-| NovoBoard (only if regenerating decoy CSVs from MGFs) | `a9faab3ef1af06987599c2f01e6ba96072c80172` |
+| NovoBoard ([JemmaLDaniel/NovoBoard](https://github.com/JemmaLDaniel/NovoBoard), branch `feat/adapt-to-instanovo`) | `a9faab3ef1af06987599c2f01e6ba96072c80172` via `uv sync --group paper` (Python ≥3.12; also used if regenerating decoy CSVs from MGFs) |
 
 ## 3. What each analysis does
 
@@ -82,6 +82,7 @@ Laptop vs heavy is about workload size and hardware requirements.
 | General-model feature importance (*C. elegans*) | `paper-plot-feature-importance` (no SHAP bar / correlations) | `paper-recompute-feature-importance` | Koina | `analyze_features.py` |
 | Pipeline scaling excluding Koina features | n/a (JSON not deposited; script writes plots) | `paper-recompute-scaling` | GPU + Koina | `benchmark_scaling.py` |
 | Pipeline runtime table (full + no-Prosit) | n/a (JSON not deposited) | `paper-recompute-runtime` | GPU + Koina | `benchmark_runtime.py` |
+| Cross-tool CLI runtime (Winnow / Glissade / NovoBoard on HeLa Single Shot) | n/a (JSON not deposited) | `paper-recompute-tool-runtime` | paper extra (Python ≥3.12); calls Koina | `benchmark_tool_runtime.py` |
 | PSM-level FDR vs NovoBoard | `paper-plot-fdr-method-comparison` (`--summarise-only`) | `paper-recompute-fdr-method-comparison` | CPU | `plot_fdr_method_comparison.py` |
 | External peptide score-mixture (Winnow / NovoBoard / Glissade) | `paper-plot-external-peptide-holdout` | `paper-recompute-external-peptide-holdout` | CPU | `run_external_peptide_holdout_benchmark.py` |
 | Feature ablations | n/a (deposit lacks tail ECE for top 10% PSMs; script writes plots) | `paper-recompute-ablations` | GPU + Koina | `run_feature_ablations.py` |
@@ -217,6 +218,25 @@ For both PSM-level comparison and the peptide holdout:
 NovoBoard’s twin-decoy competition is reimplemented here against those CSVs. Glissade’s bootstrap FDR is imported from the package installed by `uv sync --group paper`.
 We do not cover reproducing decoy spectra here, but this can be done using standard NovoBoard decoy generation commands and the per-dataset decoy generation strategies described in the paper.
 
+### Cross-tool CLI runtime (`benchmark_tool_runtime`)
+
+One-shot wall times for each tool’s CLI on HeLa Single Shot inputs:
+
+| Tool | What is timed | Inputs |
+| --- | --- | --- |
+| Winnow | `winnow predict` | Hugging Face `helaqc/unlabelled` spectra + InstaNovo preds; general model |
+| Glissade | `glissade --n_bootstraps=10 --parquet` | Parquets prepared from Hugging Face train + unlabelled preds |
+| NovoBoard | `novoboard fdr` only | Figshare `fdr_benchmark_inputs/novoboard/helaqc/novoboard/` target + decoy CSVs |
+
+Decoy MGF generation and DNS on decoys are omitted, but both steps typically dominate runtime.
+Wall times are hardware-bound; compare order of magnitude, not exact seconds.
+
+```bash
+make -f Makefile.paper paper-sync-group-paper   # installs glissade + novoboard (Python ≥3.12)
+make -f Makefile.paper paper-recompute-tool-runtime
+# JSON: paper_results/runtime/tool_runtime_helaqc_oneshot.json
+```
+
 ## 6. Entrypoints
 
 | Script | Role |
@@ -226,6 +246,7 @@ We do not cover reproducing decoy spectra here, but this can be done using stand
 | `plot_feature_investigation.py` | Feature distributions / investigation (after recompute matrices) |
 | `benchmark_scaling.py` | Runtime vs dataset size (trains/reuses a no-Prosit dummy, then times the pipeline) **[GPU]** |
 | `benchmark_runtime.py` | Stage-wise wall-time / memory table (full Prosit + no-Prosit; same dummy as scaling) **[GPU]** |
+| `benchmark_tool_runtime.py` | One-shot Winnow / Glissade / NovoBoard CLI wall times on HeLa Single Shot |
 | `no_prosit_dummy.py` | Shared train-or-reuse helper for the no-Prosit dummy calibrator |
 | `plot_fdr_method_comparison.py` | Winnow vs NovoBoard PSM FDR |
 | `run_external_peptide_holdout_benchmark.py` | Controlled-π₀ peptide mixture benchmark |
