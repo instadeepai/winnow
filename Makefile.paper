@@ -1,4 +1,4 @@
-# Paper results / plots reproduction suite (Figshare 30147601 v7).
+# Paper results / plots reproduction suite (Figshare 30147601 v8).
 # Usage: make -f Makefile.paper <target>
 #
 # Naming: paper-plot-* = Figshare deposits (or a deterministic local transform).
@@ -35,7 +35,7 @@ HF_DATASETS_DIR ?= $(PAPER_DATA_DIR)/winnow-ms-datasets
 HF_MODELS_DIR ?= $(PAPER_DATA_DIR)/models
 
 FIGSHARE_ARTICLE_ID ?= 30147601
-FIGSHARE_ARTICLE_VERSION ?= 7
+FIGSHARE_ARTICLE_VERSION ?= 8
 FIGSHARE_HELA_MODELS_ID ?= 32744946
 FIGSHARE_HELA_MODELS_VERSION ?= 2
 

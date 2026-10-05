@@ -303,6 +303,8 @@ def main(
     # Train-on-each, evaluate-on-all
     all_results: List[pd.DataFrame] = []
     for train_project in datasets:
+        if train_project != "hepg2":
+            continue
         logger.info("=== Training on %s ===", train_project)
 
         train_ds, in_dist_test_ds = create_train_test_split(datasets[train_project])
@@ -362,7 +364,7 @@ def main(
     if array_cols:
         combined = combined.drop(columns=array_cols)
 
-    results_path = results_output_dir / "calibrator_generalisation_results.csv"
+    results_path = results_output_dir / "calibrator_generalisation_results_hepg2.csv"
     combined.to_csv(results_path, index=False)
     logger.info("Results saved to %s", results_path)
 
