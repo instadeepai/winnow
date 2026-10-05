@@ -310,7 +310,7 @@ def plot_mirror_spectrum(
                 )
 
     ax.axhline(0, color="black", linewidth=0.5)
-    ax.set_xlabel("m/z")
+    ax.set_xlabel("Mass-to-charge ratio (m/z)")
     ax.set_ylabel("Relative intensity (%)")
     ax.set_title(title)
 
