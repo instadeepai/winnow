@@ -1,5 +1,7 @@
 """Generate feature investigation plots from calibrator training feature matrices.
 
+Paper Makefile passes train and val parquets so all figures use **train + val**.
+Omit ``--features-val`` / ``--metadata-val`` to restrict to the training split only.
 Produces KDE, scatter, violin, correlation, discriminative-power, pairplot,
 mirror-spectrum, retention-time, token-stem, and beam-stem figures matching the
 style of ``analysis/feature_investigation_new.ipynb``.
@@ -1205,8 +1207,8 @@ def main(
         typer.Option(
             "--features-val",
             help=(
-                "Optional path to validation features parquet.  When provided the "
-                "train and val splits are concatenated for richer plots."
+                "Optional validation features parquet. When omitted, plots use the "
+                "training split only; when set, train and val rows are concatenated."
             ),
         ),
     ] = None,
@@ -1261,7 +1263,9 @@ def main(
         logger.info("Loading validation features from %s", features_val)
         df_val = pl.read_parquet(features_val).to_pandas()
         df = pd.concat([df, df_val], ignore_index=True)
-        logger.info("Combined dataset: %s spectra", f"{len(df):,}")
+        logger.info("Combined train+val dataset: %s spectra", f"{len(df):,}")
+    else:
+        logger.info("Using training split only: %s spectra", f"{len(df):,}")
 
     df["hue"] = df["correct"].map({True: HUE_LABEL_CORRECT, False: HUE_LABEL_INCORRECT})
 

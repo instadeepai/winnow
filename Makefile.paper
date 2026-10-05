@@ -125,7 +125,7 @@ GENERAL_EXPERIMENT_FILTER_immuno2 := $(PXD023064_FILES)
 GENERAL_KOINA_immuno2 := $(KOINA_FRAGMENT_MATCH_CONSTANTS)
 GENERAL_SUBSET_DIR ?= $(PAPER_RESULTS_DIR)/_subset
 
-HELAQC_SPLITS := test unlabelled raw_less_train
+HELAQC_SPLITS := test train unlabelled raw_less_train
 HELAQC_DNS := instanovo casanovo primenovo
 # Default: all three DNS tools (matches paper-plot-helaqc-analysis).
 HELAQC_DNS_TOOLS ?= instanovo casanovo primenovo
@@ -175,7 +175,7 @@ help:
 	@echo ""
 	@echo "Umbrellas:"
 	@echo "  paper-setup                 download Figshare + HF datasets + models, then check"
-	@echo "  paper-plot-light            replot from deposits"
+	@echo "  paper-plot-light            replot from deposits (HeLa PCA needs train+val predict; see README)"
 	@echo "  paper-recompute-laptop      no GPU / no large datasets"
 	@echo "  paper-recompute-heavy       large datasets, may include GPU usage"
 	@echo ""
@@ -316,11 +316,21 @@ define HELAQC_PLOT_TOOL_RULE
 .PHONY: paper-plot-helaqc-$(1)
 paper-plot-helaqc-$(1):
 	@mkdir -p $$(PAPER_PLOTS_DIR)/helaqc_analysis
+	@train_pca=$$(PAPER_RESULTS_DIR)/$(1)_helaqc_predictions_train/preds_and_fdr_metrics.csv; \
+	val_pca=$$(PAPER_RESULTS_DIR)/$(1)_helaqc_predictions_val/preds_and_fdr_metrics.csv; \
+	if [ ! -f "$$$$train_pca" ] || [ ! -f "$$$$val_pca" ]; then \
+	  echo "Missing train/val predict outputs (PCA uses HeLa train + val)."; \
+	  echo "Run: make -f Makefile.paper paper-recompute-helaqc-$(1)-train paper-recompute-helaqc-$(1)-val"; \
+	  exit 1; \
+	fi
 	$$(PYTHON) $$(PAPER_SCRIPTS)/plot_analysis.py \
 		--predictions-dir $$(PAPER_DATA_DIR)/helaqc_results/$(1)/test \
 		--split test --label-mode labelled --fasta $$(FASTA_HUMAN) \
 		--dns-model '$$(HELAQC_DNS_LABEL_$(1))' \
 		--model-dir $$(HELAQC_DNS_MODEL_$(1)) \
+		--pca-predictions-dir $$(PAPER_RESULTS_DIR)/$(1)_helaqc_predictions_train \
+		--pca-predictions-dir $$(PAPER_RESULTS_DIR)/$(1)_helaqc_predictions_val \
+		--pca-split train_val \
 		--plots-dir $$(PAPER_PLOTS_DIR)/helaqc_analysis/$(1)_test
 	$$(PYTHON) $$(PAPER_SCRIPTS)/plot_analysis.py \
 		--predictions-dir $$(PAPER_DATA_DIR)/helaqc_results/$(1)/raw_less_train \

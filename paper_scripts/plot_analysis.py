@@ -11,7 +11,10 @@ import logging
 import sys
 import warnings
 from pathlib import Path
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Literal, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from instanovo.utils.metrics import Metrics
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -35,6 +38,7 @@ if str(_PAPER_SCRIPTS) not in sys.path:
 from fdr_tool_comparison_preprocess import (  # noqa: E402
     filter_and_annotate_preds,
 )
+from plot_feature_investigation import _nice_label  # noqa: E402
 from winnow.utils.proteome import load_proteome_haystack  # noqa: E402
 from winnow.calibration.calibrator import TrainingHistory  # noqa: E402
 from winnow.fdr.database_grounded import DatabaseGroundedFDRControl  # noqa: E402
@@ -677,6 +681,8 @@ def plot_pca_features(
     )
     ax.set_xlabel(f"PC 1 ({pca.explained_variance_ratio_[0]:.1%} variance)")
     ax.set_ylabel(f"PC 2 ({pca.explained_variance_ratio_[1]:.1%} variance)")
+    ax.set_xlim(-7, 3)
+    ax.set_ylim(-6, 5)
     ax.set_title(title)
     ax.legend(loc="upper left")
     _spine_fmt(ax)
@@ -689,28 +695,9 @@ def plot_pca_loadings(
     title: str,
 ) -> plt.Figure:
     """PCA loadings for PC1 and PC2, ordered by |PC1|."""
-    pretty = {
-        "confidence": "Raw confidence",
-        "mass_error_ppm": "Log absolute mass error (ppm)",
-        "mass_error_da": "Mass error (Da)",
-        "ion_matches": "Ion matches",
-        "ion_match_intensity": "Ion match intensity",
-        "complementary_ion_count": "Complementary ion count",
-        "max_ion_gap": "Maximum ion gap",
-        "spectral_angle": "Spectral angle",
-        "xcorr": "Cross-correlation",
-        "irt_error": "Retention time error",
-        "margin": "Margin",
-        "median_margin": "Median margin",
-        "entropy": "Entropy",
-        "z-score": "Z-score",
-        "edit_distance": "Edit distance",
-        "min_token_probability": "Minimum token probability",
-        "std_token_probability": "Token probability std. dev.",
-    }
     pc1 = pca.components_[0]
     pc2 = pca.components_[1]
-    names = [pretty.get(c, c) for c in feature_names]
+    names = [_nice_label(c) for c in feature_names]
     order = np.argsort(np.abs(pc1))[::-1]
 
     y = np.arange(len(names))
@@ -791,7 +778,67 @@ def _load_data(predictions_dir: Path) -> pl.DataFrame:
     return preds
 
 
+def _annotate_predictions(
+    df: pl.DataFrame,
+    haystack: str,
+    metrics: Metrics,
+    *,
+    labelled: bool,
+) -> pl.DataFrame:
+    """Add ``proteome_hit``; drop short peptides only for unlabelled evaluation."""
+    min_residue_length = 1 if labelled else 7
+    return filter_and_annotate_preds(
+        df, haystack, metrics, min_residue_length=min_residue_length
+    )
+
+
+def _load_annotated_predictions(
+    predictions_dir: Path,
+    haystack: str,
+    metrics: Metrics,
+    *,
+    labelled: bool,
+) -> pl.DataFrame:
+    """Load one predict output folder and apply the same proteome annotation as ``main``."""
+    return _annotate_predictions(
+        _load_data(predictions_dir), haystack, metrics, labelled=labelled
+    )
+
+
+def _concat_labelled_pca_frames(
+    frames: list[pl.DataFrame],
+    feature_cols: list[str],
+    label_col: str = "correct",
+) -> pl.DataFrame:
+    """Merge predict folders for PCA using only calibrator input columns."""
+    if not frames:
+        raise ValueError("No prediction frames to merge for PCA.")
+    if any(label_col not in frame.columns for frame in frames):
+        raise ValueError(f"Every PCA frame must include {label_col!r}.")
+    available = [c for c in feature_cols if all(c in frame.columns for frame in frames)]
+    missing = [c for c in feature_cols if c not in available]
+    if missing:
+        logger.warning(
+            "PCA merge omitting columns absent from some folders: %s", missing
+        )
+    if len(available) < 2:
+        raise ValueError(
+            f"Need at least 2 shared trained feature columns for PCA merge; found {available}"
+        )
+    parts: list[pl.DataFrame] = []
+    for frame in frames:
+        parts.append(
+            frame.select(
+                [pl.col(c).cast(pl.Float64) for c in available] + [pl.col(label_col)]
+            )
+        )
+    return pl.concat(parts)
+
+
 _SPLIT_DISPLAY_NAMES = {
+    "train": "training set",
+    "val": "validation set",
+    "train_val": "training and validation sets",
     "test": "test set",
     "unlabelled": "unlabelled space",
     "raw_less_train": "full search space",
@@ -972,6 +1019,8 @@ def _plot_labelled_diagnostics(
     out_dir: Path,
     dns_model: str | None = None,
     model_dir: Path | None = None,
+    df_pca: pl.DataFrame | None = None,
+    pca_split: str | None = None,
 ) -> None:
     split_label = _split_display(split)
     title_split = _split_title(split_label, dns_model)
@@ -1055,20 +1104,32 @@ def _plot_labelled_diagnostics(
         )
         _save(fig, out_dir, f"scatter_cal_confidence_vs_margin_{split}")
 
+    pca_df = df_pca if df_pca is not None else df
+    pca_split_id = pca_split if pca_split is not None else split
+    pca_title_split = (
+        _split_title(_split_display(pca_split_id), dns_model)
+        if pca_split is not None
+        else title_split
+    )
     pca_feature_cols = _resolve_pca_feature_columns(model_dir)
     logger.info("PCA using trained feature columns: %s", pca_feature_cols)
+    logger.info(
+        "PCA on %d PSMs (%s)",
+        len(pca_df),
+        pca_split_id if pca_split is not None else split,
+    )
     fig, pca_model, feat_names = plot_pca_features(
-        df,
+        pca_df,
         label_col,
-        f"PCA of calibrator features for {title_split}",
+        f"PCA of calibrator features for {pca_title_split}",
         feature_cols=pca_feature_cols,
     )
-    _save(fig, out_dir, f"pca_features_{split}")
+    _save(fig, out_dir, f"pca_features_{pca_split_id}")
 
     fig = plot_pca_loadings(
         pca_model, feat_names, "PCA loadings for first two principal components"
     )
-    _save(fig, out_dir, f"pca_loadings_pc1_pc2_{split}")
+    _save(fig, out_dir, f"pca_loadings_pc1_pc2_{pca_split_id}")
 
 
 @app.command()
@@ -1128,6 +1189,28 @@ def main(
             ),
         ),
     ] = None,
+    pca_predictions_dirs: Annotated[
+        Optional[list[Path]],
+        typer.Option(
+            "--pca-predictions-dir",
+            help=(
+                "Predict output folder(s) for PCA only (repeat flag). Listed dirs are "
+                "merged for PCA scatter and loadings; other plots still use "
+                "--predictions-dir."
+            ),
+        ),
+    ] = None,
+    pca_split: Annotated[
+        Optional[str],
+        typer.Option(
+            "--pca-split",
+            help=(
+                "Label for PCA output filenames and titles when using "
+                "--pca-predictions-dir (default: pca). Ignored if PCA uses "
+                "--predictions-dir only."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Load predictions, annotate proteome hits, and write analysis plots."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -1137,9 +1220,6 @@ def main(
 
     labelled = label_mode == "labelled"
     residue_masses = _load_residue_masses()
-
-    logger.info("Loading predictions from %s", predictions_dir)
-    df = _load_data(predictions_dir)
 
     from instanovo.utils.metrics import Metrics
     from instanovo.utils.residues import ResidueSet
@@ -1156,8 +1236,33 @@ def main(
             "(or set --fasta to an existing proteome)."
         )
     haystack = load_proteome_haystack(str(fasta))
-    df = filter_and_annotate_preds(df, haystack, metrics, min_residue_length=7)
+
+    logger.info("Loading predictions from %s", predictions_dir)
+    df = _load_annotated_predictions(
+        predictions_dir, haystack, metrics, labelled=labelled
+    )
     df_raw_conf = _df_for_raw_confidence_plots(df)
+
+    df_pca: pl.DataFrame | None = None
+    pca_split_id: str | None = None
+    if pca_predictions_dirs:
+        pca_dirs = list(pca_predictions_dirs)
+        seen: set[str] = set()
+        pca_parts: list[pl.DataFrame] = []
+        for pca_dir in pca_dirs:
+            resolved = str(pca_dir.resolve())
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            logger.info("Loading PCA predictions from %s", pca_dir)
+            pca_parts.append(
+                _load_annotated_predictions(
+                    pca_dir, haystack, metrics, labelled=labelled
+                )
+            )
+        pca_feature_cols = _resolve_pca_feature_columns(model_dir)
+        df_pca = _concat_labelled_pca_frames(pca_parts, pca_feature_cols)
+        pca_split_id = pca_split if pca_split is not None else "pca"
 
     if model_dir is not None:
         _save_training_history_plot(model_dir, out_dir)
@@ -1181,6 +1286,8 @@ def main(
             out_dir,
             dns_model=dns_model,
             model_dir=model_dir,
+            df_pca=df_pca,
+            pca_split=pca_split_id,
         )
     else:
         # Unlabelled / full-search: ranked q-value against proteome mapping.
