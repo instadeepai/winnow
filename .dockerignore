@@ -20,6 +20,7 @@
 
 # To run scripts
 !scripts
+!paper_scripts
 
 # To run Make commands
 !Makefile
