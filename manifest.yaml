@@ -22,5 +22,11 @@ spec:
     worker:
       count: 1
       resources:
-        cpus: 4
-        ramRatio: 2 # >= 2
+        cpus: 6
+        ramRatio: 8 # >= 2
+
+        accelerators:
+          gpu:
+            count: 1
+            type: gpu
+            product: NVIDIA-H100-80GB-HBM3-MIG-3g.40gb
