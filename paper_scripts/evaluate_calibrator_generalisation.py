@@ -10,7 +10,7 @@ import logging
 import re
 import sys
 from pathlib import Path
-from typing import Annotated, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -18,7 +18,7 @@ import yaml
 from rich.logging import RichHandler
 import typer
 
-from winnow.calibration.calibrator import ProbabilityCalibrator
+from winnow.calibration.calibrator import ProbabilityCalibrator, TrainingHistory
 from winnow.calibration.features import (
     BeamFeatures,
     FragmentMatchFeatures,
@@ -62,6 +62,7 @@ with open(_CONFIGS_DIR / "data_loader" / "instanovo.yaml") as _f:
 
 with open(_CONFIGS_DIR / "calibrator.yaml") as _f:
     _calibrator_cfg = yaml.safe_load(_f)
+_CALIBRATOR_TRAIN_CFG: dict = _calibrator_cfg["calibrator"]
 with open(_CONFIGS_DIR / "koina.yaml") as _f:
     _KOINA_CFG = yaml.safe_load(_f)["koina"]
 _KOINA_CONSTRAINTS = _KOINA_CFG["constraints"]
@@ -106,13 +107,16 @@ def initialise_calibrator(
         dropout=0.3,
         learning_rate=0.0001,
         weight_decay=0.001,
+        # Cap matches shipped general / HeLa checkpoints (early stopping usually stops earlier).
         max_epochs=1000,
         batch_size=1024,
-        n_iter_no_change=10,
-        tol=0.0001,
+        n_iter_no_change=int(_CALIBRATOR_TRAIN_CFG.get("n_iter_no_change", 10)),
+        tol=float(_CALIBRATOR_TRAIN_CFG.get("tol", 0.0001)),
         seed=SEED,
-        val_early_stopping_max_psms=None,
-        val_subsample_seed=None,
+        val_early_stopping_max_psms=_CALIBRATOR_TRAIN_CFG.get(
+            "val_early_stopping_max_psms"
+        ),
+        val_subsample_seed=_CALIBRATOR_TRAIN_CFG.get("val_subsample_seed"),
     )
     calibrator.add_feature(MassErrorDaFeature(residue_masses=RESIDUE_MASSES))
     calibrator.add_feature(
@@ -228,15 +232,136 @@ def create_train_test_split(
     return subset_dataset(dataset, train_idx), subset_dataset(dataset, test_idx)
 
 
+def subset_dataset_by_spectrum_ids(
+    dataset: CalibrationDataset,
+    spectrum_ids: set[str],
+) -> CalibrationDataset:
+    """Return rows whose ``spectrum_id`` is in *spectrum_ids* (order preserved)."""
+    mask = dataset.metadata["spectrum_id"].astype(str).isin(spectrum_ids).values
+    return subset_dataset(dataset, np.where(mask)[0])
+
+
+def fit_calibrator_on_peptide_split(
+    calibrator: ProbabilityCalibrator,
+    full_source: CalibrationDataset,
+    train_ds: CalibrationDataset,
+    val_ds: CalibrationDataset,
+) -> tuple[CalibrationDataset, CalibrationDataset, TrainingHistory]:
+    """Featurise the full source once, then train with the peptide holdout as val.
+
+    Matches ``winnow train`` single-phase behaviour (features before split) so
+    Koina filtering does not empty small validation folds.
+    """
+    featurized = clone_calibration_dataset(full_source)
+    calibrator.compute_features(featurized)
+
+    train_ids = set(train_ds.metadata["spectrum_id"].astype(str))
+    val_ids = set(val_ds.metadata["spectrum_id"].astype(str))
+    train_featurized = subset_dataset_by_spectrum_ids(featurized, train_ids)
+    val_featurized = subset_dataset_by_spectrum_ids(featurized, val_ids)
+
+    train_fd = calibrator.to_feature_dataset(train_featurized)
+    val_fd = calibrator.to_feature_dataset(val_featurized)
+    val_for_fit = val_fd if len(val_fd) > 0 else None
+    if val_for_fit is None:
+        logger.warning(
+            "Validation fold has no labelled rows after featurisation; "
+            "training without early stopping."
+        )
+
+    history = calibrator.fit_from_features(
+        train_fd,
+        val_for_fit,
+        progress_bar=True,
+    )
+    return train_featurized, val_featurized, history
+
+
+def clone_calibration_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
+    """Shallow copy of metadata and predictions for independent predict passes."""
+    preds = dataset.predictions
+    return CalibrationDataset(
+        metadata=dataset.metadata.copy(),
+        predictions=list(preds) if preds is not None else None,
+    )
+
+
+def _align_predictions_to_metadata(
+    metadata: pd.DataFrame,
+    raw_dataset: CalibrationDataset,
+) -> Optional[List[Any]]:
+    """Return beam predictions aligned to metadata row order by ``spectrum_id``."""
+    if raw_dataset.predictions is None:
+        return None
+    id_to_idx = dict(
+        zip(
+            raw_dataset.metadata["spectrum_id"].astype(str),
+            range(len(raw_dataset.metadata)),
+        )
+    )
+    indices = [id_to_idx[str(sid)] for sid in metadata["spectrum_id"].astype(str)]
+    return [raw_dataset.predictions[i] for i in indices]
+
+
+def _ood_feature_cache_path(cache_dir: Path, source: str) -> Path:
+    return cache_dir / f"{source}_ood_featurized.parquet"
+
+
+def featurize_full_source_for_ood(
+    source: str,
+    raw_dataset: CalibrationDataset,
+    cache_dir: Path | None,
+) -> CalibrationDataset:
+    """Compute OOD features once per source (full source, RT fit on all rows).
+
+    Out-of-distribution evaluation uses the same featurised rows for every trainer,
+    so results are cached in memory and optionally on disk under cache_dir.
+    """
+    cache_file = _ood_feature_cache_path(cache_dir, source) if cache_dir else None
+    if cache_file is not None and cache_file.is_file():
+        logger.info("Loading OOD feature cache for %s from %s", source, cache_file)
+        meta = pd.read_parquet(cache_file)
+        preds = _align_predictions_to_metadata(meta, raw_dataset)
+        return CalibrationDataset(metadata=meta, predictions=preds)
+
+    logger.info(
+        "Featurising full source %s for OOD cache (%d rows)", source, len(raw_dataset)
+    )
+    featurized = clone_calibration_dataset(raw_dataset)
+    calibrator = initialise_calibrator(train_project=source)
+    calibrator.compute_features(featurized)
+    if cache_file is not None:
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        featurized.metadata.to_parquet(cache_file, index=False)
+        logger.info("Wrote OOD feature cache for %s (%d rows)", source, len(featurized))
+    return featurized
+
+
+def build_ood_feature_caches(
+    datasets: Dict[str, CalibrationDataset],
+    cache_dir: Path | None,
+) -> Dict[str, CalibrationDataset]:
+    """Featurise each source once for reuse across all trainers."""
+    caches: Dict[str, CalibrationDataset] = {}
+    for source in sorted(datasets):
+        caches[source] = featurize_full_source_for_ood(
+            source, datasets[source], cache_dir
+        )
+    return caches
+
+
 def evaluate_model(
     model: ProbabilityCalibrator,
     test_dataset: CalibrationDataset,
     train_project: str,
     test_project: str,
     evaluation_type: str,
+    *,
+    features_precomputed: bool = False,
 ) -> pd.DataFrame:
     """Run prediction and tag the results."""
-    model.compute_features(test_dataset)
+    if not features_precomputed:
+        model.compute_features(test_dataset)
     model.predict(test_dataset)
 
     results = test_dataset.metadata.copy()
@@ -275,10 +400,30 @@ def main(
     results_output_dir: Annotated[
         Path, typer.Option(help="Directory to save evaluation results.")
     ] = _DEFAULT_RESULTS_OUTPUT_DIR,
+    feature_cache_dir: Annotated[
+        Optional[Path],
+        typer.Option(
+            help="Directory for per-source OOD feature Parquet caches.",
+        ),
+    ] = None,
+    no_disk_feature_cache: Annotated[
+        bool,
+        typer.Option(
+            "--no-disk-feature-cache",
+            help="Keep OOD caches in memory only (no Parquet under results).",
+        ),
+    ] = False,
 ) -> None:
     """Evaluate calibrator generalisation across source-labelled training datasets."""
     model_output_dir.mkdir(parents=True, exist_ok=True)
     results_output_dir.mkdir(parents=True, exist_ok=True)
+
+    if no_disk_feature_cache:
+        disk_cache_dir: Path | None = None
+    elif feature_cache_dir is not None:
+        disk_cache_dir = feature_cache_dir
+    else:
+        disk_cache_dir = results_output_dir / "ood_feature_cache"
 
     if not train_parquet.exists():
         logger.error("Train parquet not found: %s", train_parquet)
@@ -300,11 +445,12 @@ def main(
     for source, dataset in datasets.items():
         logger.info("  %s: %d samples", source, len(dataset.metadata))
 
+    logger.info("Building OOD feature caches (one featurisation pass per source)")
+    ood_feature_caches = build_ood_feature_caches(datasets, disk_cache_dir)
+
     # Train-on-each, evaluate-on-all
     all_results: List[pd.DataFrame] = []
     for train_project in datasets:
-        if train_project != "hepg2":
-            continue
         logger.info("=== Training on %s ===", train_project)
 
         train_ds, in_dist_test_ds = create_train_test_split(datasets[train_project])
@@ -315,7 +461,18 @@ def main(
         )
 
         calibrator = initialise_calibrator(train_project=train_project)
-        calibrator.fit(train_ds)
+        _, in_dist_test_ds, history = fit_calibrator_on_peptide_split(
+            calibrator,
+            datasets[train_project],
+            train_ds,
+            in_dist_test_ds,
+        )
+        logger.info(
+            "  Training finished: %d epochs (best epoch %d); in-dist eval rows %d",
+            history.epochs_trained,
+            history.best_epoch,
+            len(in_dist_test_ds.metadata),
+        )
 
         model_path = model_output_dir / f"trained_on_{train_project}"
         ProbabilityCalibrator.save(calibrator, model_path)
@@ -326,13 +483,15 @@ def main(
             train_project,
             len(in_dist_test_ds.metadata),
         )
+        in_dist_eval = clone_calibration_dataset(in_dist_test_ds)
         all_results.append(
             evaluate_model(
                 calibrator,
-                in_dist_test_ds,
+                in_dist_eval,
                 train_project,
                 train_project,
                 "in_distribution",
+                features_precomputed=True,
             )
         )
 
@@ -346,13 +505,15 @@ def main(
                 test_project,
                 len(test_ds.metadata),
             )
+            ood_ds = clone_calibration_dataset(ood_feature_caches[test_project])
             all_results.append(
                 evaluate_model(
                     calibrator,
-                    test_ds,
+                    ood_ds,
                     train_project,
                     test_project,
                     "out_of_distribution",
+                    features_precomputed=True,
                 )
             )
 
@@ -364,7 +525,7 @@ def main(
     if array_cols:
         combined = combined.drop(columns=array_cols)
 
-    results_path = results_output_dir / "calibrator_generalisation_results_hepg2.csv"
+    results_path = results_output_dir / "calibrator_generalisation_results.csv"
     combined.to_csv(results_path, index=False)
     logger.info("Results saved to %s", results_path)
 
