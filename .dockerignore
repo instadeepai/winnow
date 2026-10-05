@@ -24,6 +24,7 @@
 
 # To run Make commands
 !Makefile
+!Makefile.paper
 
 # To parse the number of GPUs
 !manifest.yaml
