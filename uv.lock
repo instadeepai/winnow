@@ -5944,6 +5944,7 @@ paper = [
     { name = "glissade" },
     { name = "matplotlib-venn" },
     { name = "novoboard", marker = "python_full_version >= '3.12'" },
+    { name = "seaborn" },
     { name = "shap", version = "0.49.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "shap", version = "0.51.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "shap", version = "0.52.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
@@ -5994,6 +5995,7 @@ paper = [
     { name = "glissade", git = "https://github.com/JemmaLDaniel/glissade.git?rev=7c723a2af4a88fda84a6bd4f223b351179bd36da" },
     { name = "matplotlib-venn", specifier = ">=1.1.1" },
     { name = "novoboard", marker = "python_full_version >= '3.12'", git = "https://github.com/JemmaLDaniel/NovoBoard.git?rev=a9faab3ef1af06987599c2f01e6ba96072c80172" },
+    { name = "seaborn", specifier = ">=0.13.2" },
     { name = "shap", specifier = ">=0.44.0" },
     { name = "xgboost", specifier = ">=3.2.0" },
 ]

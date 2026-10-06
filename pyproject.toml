@@ -71,6 +71,7 @@ paper = [
     "glissade",
     "novoboard ; python_version >= '3.12'",
     "matplotlib-venn>=1.1.1",
+    "seaborn>=0.13.2",
     "shap>=0.44.0",
     "xgboost>=3.2.0",
 ]
