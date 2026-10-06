@@ -10,6 +10,19 @@ import polars as pl
 
 logger = logging.getLogger(__name__)
 
+
+def scan_generalisation_results(results_path: Path) -> pl.LazyFrame:
+    """Lazy-scan full or slim generalisation results (CSV or Parquet)."""
+    suffix = results_path.suffix.lower()
+    if suffix == ".parquet":
+        return pl.scan_parquet(results_path)
+    if suffix == ".csv":
+        return pl.scan_csv(results_path)
+    raise ValueError(
+        f"Unsupported generalisation results format {suffix!r} (expected .csv or .parquet)"
+    )
+
+
 SPECIES_NAME_MAPPING: dict[str, str] = {
     "gluc": "HeLa degradome",
     "helaqc": "HeLa single shot",

@@ -193,7 +193,9 @@ Orders of magnitude for Figshare v7 outputs (metadata + prediction CSVs unless n
 | `general_results/labelled/` (nine projects) | ~2 GB |
 | `general_results/full/` | ~5 GB (astral ~2 GB; *C. elegans* ~1.8 GB) |
 | `fdr_benchmark_inputs/` | ~1 GB+ (includes HeLa MGFs for twin pairing) |
-| Generalisation results CSV | ~6.8 GB |
+| Generalisation results (slim Parquet, upload default) | ~300 MB |
+| Generalisation results (wide CSV, optional legacy) | ~6.8 GB |
+| `ood_feature_cache/` (nine featurised sources) | ~1.1 GB |
 | Remaining analysis CSVs / HeLa result trees | much smaller |
 
 Approximate HF input sizes (parquet + InstaNovo preds) for recompute:

@@ -25,7 +25,10 @@ if str(_PAPER_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_PAPER_SCRIPTS))
 
 
-from calibrator_generalisation_utils import SPECIES_NAME_MAPPING  # noqa: E402
+from calibrator_generalisation_utils import (  # noqa: E402
+    SPECIES_NAME_MAPPING,
+    scan_generalisation_results,
+)
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -147,7 +150,7 @@ def create_auc_heatmap(
 def create_comparison_heatmaps(results_path: Path, output_dir: Path) -> None:
     """Create heatmaps comparing raw vs calibrated confidence PR-AUC values."""
     logger.info("Scanning results from %s", results_path)
-    results = pl.scan_csv(results_path)
+    results = scan_generalisation_results(results_path)
 
     trained_datasets = sorted(
         results.select(pl.col("trained_on_dataset"))
@@ -246,7 +249,8 @@ app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 @app.command()
 def main(
     results_path: Annotated[
-        Path, typer.Option(help="Path to calibrator generalisation results CSV.")
+        Path,
+        typer.Option(help="Generalisation results CSV or slim Parquet."),
     ],
     plots_dir: Annotated[
         Path,

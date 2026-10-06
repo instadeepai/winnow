@@ -35,7 +35,6 @@ _PAPER_SCRIPTS = Path(__file__).resolve().parent
 if str(_PAPER_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_PAPER_SCRIPTS))
 
-
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -49,6 +48,19 @@ logger.addHandler(RichHandler())
 # ---------------------------------------------------------------------------
 SEED = 42
 TEST_SIZE = 0.2
+
+_GENERALISATION_SLIM_COLUMNS: tuple[str, ...] = (
+    "spectrum_id",
+    "prediction_id",
+    "confidence",
+    "calibrated_confidence",
+    "correct",
+    "trained_on_dataset",
+    "test_dataset",
+    "evaluation_type",
+)
+
+_MOD_RE = re.compile(r"\[UNIMOD:\d+\]")
 
 _CONFIGS_DIR = Path(__file__).resolve().parent.parent / "winnow" / "configs"
 
@@ -190,9 +202,6 @@ def split_dataset_by_source(
         idx = np.where(dataset.metadata["source"].values == source)[0]
         datasets[source] = subset_dataset(dataset, idx)
     return datasets
-
-
-_MOD_RE = re.compile(r"\[UNIMOD:\d+\]")
 
 
 def _peptide_key(tokens: object) -> str:
@@ -386,45 +395,22 @@ _DEFAULT_TRAIN_PREDS = Path(
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
 
-@app.command()
-def main(
-    train_parquet: Annotated[
-        Path, typer.Option(help="Combined train parquet with a source column.")
-    ] = _DEFAULT_TRAIN_PARQUET,
-    train_predictions: Annotated[
-        Path, typer.Option(help="Combined train predictions CSV.")
-    ] = _DEFAULT_TRAIN_PREDS,
-    model_output_dir: Annotated[
-        Path, typer.Option(help="Directory to save trained models.")
-    ] = _DEFAULT_MODEL_OUTPUT_DIR,
-    results_output_dir: Annotated[
-        Path, typer.Option(help="Directory to save evaluation results.")
-    ] = _DEFAULT_RESULTS_OUTPUT_DIR,
-    feature_cache_dir: Annotated[
-        Optional[Path],
-        typer.Option(
-            help="Directory for per-source OOD feature Parquet caches.",
-        ),
-    ] = None,
-    no_disk_feature_cache: Annotated[
-        bool,
-        typer.Option(
-            "--no-disk-feature-cache",
-            help="Keep OOD caches in memory only (no Parquet under results).",
-        ),
-    ] = False,
-) -> None:
-    """Evaluate calibrator generalisation across source-labelled training datasets."""
-    model_output_dir.mkdir(parents=True, exist_ok=True)
-    results_output_dir.mkdir(parents=True, exist_ok=True)
-
+def _resolve_disk_cache_dir(
+    results_output_dir: Path,
+    feature_cache_dir: Path | None,
+    no_disk_feature_cache: bool,
+) -> Path | None:
     if no_disk_feature_cache:
-        disk_cache_dir: Path | None = None
-    elif feature_cache_dir is not None:
-        disk_cache_dir = feature_cache_dir
-    else:
-        disk_cache_dir = results_output_dir / "ood_feature_cache"
+        return None
+    if feature_cache_dir is not None:
+        return feature_cache_dir
+    return results_output_dir / "ood_feature_cache"
 
+
+def _load_source_datasets(
+    train_parquet: Path,
+    train_predictions: Path,
+) -> Dict[str, CalibrationDataset]:
     if not train_parquet.exists():
         logger.error("Train parquet not found: %s", train_parquet)
         raise typer.Exit(1)
@@ -444,11 +430,14 @@ def main(
     logger.info("Found %d source datasets: %s", len(datasets), list(datasets.keys()))
     for source, dataset in datasets.items():
         logger.info("  %s: %d samples", source, len(dataset.metadata))
+    return datasets
 
-    logger.info("Building OOD feature caches (one featurisation pass per source)")
-    ood_feature_caches = build_ood_feature_caches(datasets, disk_cache_dir)
 
-    # Train-on-each, evaluate-on-all
+def _train_and_collect_results(
+    datasets: Dict[str, CalibrationDataset],
+    ood_feature_caches: Dict[str, CalibrationDataset],
+    model_output_dir: Path,
+) -> List[pd.DataFrame]:
     all_results: List[pd.DataFrame] = []
     for train_project in datasets:
         logger.info("=== Training on %s ===", train_project)
@@ -477,7 +466,6 @@ def main(
         model_path = model_output_dir / f"trained_on_{train_project}"
         ProbabilityCalibrator.save(calibrator, model_path)
 
-        # In-distribution evaluation
         logger.info(
             "  Evaluating in-distribution on %s (%d samples)",
             train_project,
@@ -495,7 +483,6 @@ def main(
             )
         )
 
-        # Out-of-distribution evaluation
         for test_project in datasets:
             if test_project == train_project:
                 continue
@@ -516,20 +503,29 @@ def main(
                     features_precomputed=True,
                 )
             )
+    return all_results
 
-    # Combine and save
-    combined = pd.concat(all_results, ignore_index=True)
 
-    # Drop large array columns to save space
-    array_cols = [c for c in ["mz_array", "intensity_array"] if c in combined.columns]
-    if array_cols:
-        combined = combined.drop(columns=array_cols)
+def _persist_generalisation_results(
+    combined: pd.DataFrame,
+    results_output_dir: Path,
+    *,
+    write_full_results_csv: bool,
+) -> None:
+    slim = combined[list(_GENERALISATION_SLIM_COLUMNS)]
+    slim_path = results_output_dir / "calibrator_generalisation_results_slim.parquet"
+    slim.to_parquet(slim_path, index=False)
+    logger.info("Slim results saved to %s (%d rows)", slim_path, len(slim))
 
-    results_path = results_output_dir / "calibrator_generalisation_results.csv"
-    combined.to_csv(results_path, index=False)
-    logger.info("Results saved to %s", results_path)
+    if write_full_results_csv:
+        wide = combined
+        array_cols = [c for c in ["mz_array", "intensity_array"] if c in wide.columns]
+        if array_cols:
+            wide = wide.drop(columns=array_cols)
+        results_path = results_output_dir / "calibrator_generalisation_results.csv"
+        wide.to_csv(results_path, index=False)
+        logger.info("Full results saved to %s", results_path)
 
-    # Summary
     logger.info("Evaluation summary:")
     summary = (
         combined.groupby(["trained_on_dataset", "test_dataset", "evaluation_type"])
@@ -544,6 +540,64 @@ def main(
             row["evaluation_type"],
             row["num_samples"],
         )
+
+
+@app.command()
+def main(
+    train_parquet: Annotated[
+        Path, typer.Option(help="Combined train parquet with a source column.")
+    ] = _DEFAULT_TRAIN_PARQUET,
+    train_predictions: Annotated[
+        Path, typer.Option(help="Combined train predictions CSV.")
+    ] = _DEFAULT_TRAIN_PREDS,
+    model_output_dir: Annotated[
+        Path, typer.Option(help="Directory to save trained models.")
+    ] = _DEFAULT_MODEL_OUTPUT_DIR,
+    results_output_dir: Annotated[
+        Path, typer.Option(help="Directory to save evaluation results.")
+    ] = _DEFAULT_RESULTS_OUTPUT_DIR,
+    feature_cache_dir: Annotated[
+        Optional[Path],
+        typer.Option(
+            help="Directory for per-source OOD feature Parquet caches.",
+        ),
+    ] = None,
+    no_disk_feature_cache: Annotated[
+        bool,
+        typer.Option(
+            "--no-disk-feature-cache",
+            help="Keep OOD caches in memory only (no Parquet under results).",
+        ),
+    ] = False,
+    write_full_results_csv: Annotated[
+        bool,
+        typer.Option(
+            "--write-full-results-csv/--no-write-full-results-csv",
+            help="Write the wide per-PSM CSV (~6 GB); slim Parquet is always written.",
+        ),
+    ] = False,
+) -> None:
+    """Evaluate calibrator generalisation across source-labelled training datasets."""
+    model_output_dir.mkdir(parents=True, exist_ok=True)
+    results_output_dir.mkdir(parents=True, exist_ok=True)
+
+    disk_cache_dir = _resolve_disk_cache_dir(
+        results_output_dir, feature_cache_dir, no_disk_feature_cache
+    )
+    datasets = _load_source_datasets(train_parquet, train_predictions)
+
+    logger.info("Building OOD feature caches (one featurisation pass per source)")
+    ood_feature_caches = build_ood_feature_caches(datasets, disk_cache_dir)
+
+    all_results = _train_and_collect_results(
+        datasets, ood_feature_caches, model_output_dir
+    )
+    combined = pd.concat(all_results, ignore_index=True)
+    _persist_generalisation_results(
+        combined,
+        results_output_dir,
+        write_full_results_csv=write_full_results_csv,
+    )
 
 
 if __name__ == "__main__":
