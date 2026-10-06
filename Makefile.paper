@@ -1,4 +1,4 @@
-# Paper results / plots reproduction suite (Figshare 30147601 v8).
+# Paper results / plots reproduction suite (Figshare 30147601 v9).
 # Usage: make -f Makefile.paper <target>
 #
 # Naming: paper-plot-* = Figshare deposits (or a deterministic local transform).

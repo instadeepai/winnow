@@ -64,7 +64,7 @@ Laptop vs heavy is about workload size and hardware requirements.
 
 | Resource | Pin |
 | --- | --- |
-| Figshare [Analysis outputs](https://figshare.com/articles/dataset/Analysis_outputs/30147601) | article `30147601` v8 (`10.6084/m9.figshare.30147601.v8`) |
+| Figshare [Analysis outputs](https://figshare.com/articles/dataset/Analysis_outputs/30147601) | article `30147601` v9 (`10.6084/m9.figshare.30147601.v9`) |
 | Hugging Face [winnow-ms-datasets](https://huggingface.co/datasets/InstaDeepAI/winnow-ms-datasets) | `659802319d618a359de5ab90ec6b0195681e94a6` |
 | Hugging Face [winnow-general-model](https://huggingface.co/InstaDeepAI/winnow-general-model) | `e2089330dd59adb9685e5b3d7d61f0cd69a3bbb0` |
 | Hugging Face [winnow-helaqc-model](https://huggingface.co/InstaDeepAI/winnow-helaqc-model) | `d56542b961eac7d896e51bf0716a242fc394ab1f` |
@@ -188,7 +188,7 @@ Reviewers who follow only `docs/cli.md` will get a different order and can diffe
 
 ## 4. Approximate deposit sizes
 
-Orders of magnitude for Figshare v7 outputs (metadata + prediction CSVs unless noted):
+Orders of magnitude for Figshare v9 outputs (metadata + prediction CSVs unless noted):
 
 | Tree | Size |
 | --- | --- |
