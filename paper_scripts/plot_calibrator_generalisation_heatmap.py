@@ -1,7 +1,7 @@
 """Plot PR-AUC heatmaps for calibrator generalisation results.
 
-Reads the combined CSV produced by ``evaluate_calibrator_generalisation.py``
-and creates heatmaps comparing raw vs calibrated confidence PR-AUC values.
+Reads slim Parquet or legacy wide CSV from ``evaluate_calibrator_generalisation.py``
+and plots raw vs calibrated PR-AUC.
 """
 
 import logging
@@ -250,7 +250,7 @@ app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 def main(
     results_path: Annotated[
         Path,
-        typer.Option(help="Generalisation results CSV or slim Parquet."),
+        typer.Option("--results-path", help="Slim Parquet or legacy wide CSV."),
     ],
     plots_dir: Annotated[
         Path,

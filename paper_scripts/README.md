@@ -64,11 +64,12 @@ Laptop vs heavy is about workload size and hardware requirements.
 
 | Resource | Pin |
 | --- | --- |
-| Figshare [Analysis outputs](https://figshare.com/articles/dataset/Analysis_outputs/30147601) | article `30147601` **v8** (`10.6084/m9.figshare.30147601.v8`) |
+| Figshare [Analysis outputs](https://figshare.com/articles/dataset/Analysis_outputs/30147601) | article `30147601` v8 (`10.6084/m9.figshare.30147601.v8`) |
 | Hugging Face [winnow-ms-datasets](https://huggingface.co/datasets/InstaDeepAI/winnow-ms-datasets) | `659802319d618a359de5ab90ec6b0195681e94a6` |
 | Hugging Face [winnow-general-model](https://huggingface.co/InstaDeepAI/winnow-general-model) | `e2089330dd59adb9685e5b3d7d61f0cd69a3bbb0` |
 | Hugging Face [winnow-helaqc-model](https://huggingface.co/InstaDeepAI/winnow-helaqc-model) | `d56542b961eac7d896e51bf0716a242fc394ab1f` |
-| Figshare [Additional HeLa Single Shot models](https://doi.org/10.6084/m9.figshare.32744946.v2) | `32744946` v2 (Casanovo / π-PrimeNovo calibrators) |
+| Figshare [Leave-one-out analysis models and cached test set features](https://figshare.com/articles/software/Hold-one-out_generalisation_models/30147364) | article `30147364` v3 (`10.6084/m9.figshare.30147364.v3`) |
+| Figshare [Additional HeLa Single Shot models](https://doi.org/10.6084/m9.figshare.32744946.v2) | article `32744946` v2 (Casanovo / π-PrimeNovo calibrators) |
 | Glissade ([JemmaLDaniel/glissade](https://github.com/JemmaLDaniel/glissade), branch `winnow-benchmark`) | `7c723a2af4a88fda84a6bd4f223b351179bd36da` via `uv sync --group paper` |
 | NovoBoard ([JemmaLDaniel/NovoBoard](https://github.com/JemmaLDaniel/NovoBoard), branch `feat/adapt-to-instanovo`) | `a9faab3ef1af06987599c2f01e6ba96072c80172` via `uv sync --group paper` (Python ≥3.12; also used if regenerating decoy CSVs from MGFs) |
 
@@ -86,7 +87,8 @@ Laptop vs heavy is about workload size and hardware requirements.
 | PSM-level FDR vs NovoBoard | `paper-plot-fdr-method-comparison` (`--summarise-only`) | `paper-recompute-fdr-method-comparison` | CPU | `plot_fdr_method_comparison.py` |
 | External peptide score-mixture (Winnow / NovoBoard / Glissade) | `paper-plot-external-peptide-holdout` | `paper-recompute-external-peptide-holdout` | CPU | `run_external_peptide_holdout_benchmark.py` |
 | Feature ablations | n/a (deposit lacks tail ECE for top 10% PSMs; script writes plots) | `paper-recompute-ablations` | GPU + Koina | `run_feature_ablations.py` |
-| Calibrator generalisation heatmap | `paper-plot-generalisation` | `paper-recompute-generalisation` | GPU + Koina | `evaluate_calibrator_generalisation.py`, `plot_calibrator_generalisation_heatmap.py` |
+| Calibrator generalisation heatmap | `paper-plot-generalisation` (slim results on the analysis deposit) | `paper-recompute-generalisation` (full retrain) | GPU + Koina | `evaluate_calibrator_generalisation.py`, `plot_calibrator_generalisation_heatmap.py` |
+| Calibrator generalisation heatmap (re-predict) | n/a | `paper-repredict-generalisation` | Figshare LOO models and OOD caches; HF training matrix for the peptide holdout. No GPU and no Koina | same scripts; `download-paper-generalisation-loo` |
 | Upscored FPs | `paper-plot-upscored-fps` | n/a (uses deposited labelled `general_results/`) | CPU | `analyze_upscored_fps.py` |
 | FDR overlap | `paper-plot-fdr-overlap` | n/a (uses deposited labelled + full trees) | CPU | `analyze_fdr_overlap.py` |
 | Novelty | `paper-plot-novelty` | n/a (uses deposited chymotrypsin / ProteomeTools trees) | CPU | `analyze_novelty.py` |
@@ -193,9 +195,8 @@ Orders of magnitude for Figshare v7 outputs (metadata + prediction CSVs unless n
 | `general_results/labelled/` (nine projects) | ~2 GB |
 | `general_results/full/` | ~5 GB (astral ~2 GB; *C. elegans* ~1.8 GB) |
 | `fdr_benchmark_inputs/` | ~1 GB+ (includes HeLa MGFs for twin pairing) |
-| Generalisation results (slim Parquet, upload default) | ~300 MB |
-| Generalisation results (wide CSV, optional legacy) | ~6.8 GB |
-| `ood_feature_cache/` (nine featurised sources) | ~1.1 GB |
+| `generalisation/calibrator_generalisation_results_slim.parquet` (replot default) | ~50 MB |
+| Leave-one-out analysis article `30147364` (`trained_on_*` + `ood_feature_cache/`) | ~1.1 GB |
 | Remaining analysis CSVs / HeLa result trees | much smaller |
 
 Approximate HF input sizes (parquet + InstaNovo preds) for recompute:
@@ -255,7 +256,7 @@ make -f Makefile.paper paper-recompute-tool-runtime
 | `run_feature_ablations.py` | Feature-subset calibrator training + eval **[GPU]** |
 | `plot_ablation_summary.py` | Ablation bar summaries (from recompute outputs, not Figshare alone) |
 | `plot_calibrator_generalisation_heatmap.py` | Hold-one-out generalisation heatmap |
-| `evaluate_calibrator_generalisation.py` | Full retrain leave-one-source-out results CSV **[GPU]** |
+| `evaluate_calibrator_generalisation.py` | Full retrain leave-one-source-out; writes slim Parquet result file by default **[GPU]** |
 | `analyze_features.py` | Feature importance / SHAP (supports `--replot-dir` from Figshare pickles) |
 | `analyze_upscored_fps.py`, `analyze_fdr_overlap.py`, `analyze_novelty.py` | Downstream analyses of deposited `general_results/` |
 | `annotate_preds_proteome_hits.py` | Post-predict proteome hits for full-search recompute |

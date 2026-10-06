@@ -10,7 +10,7 @@ import logging
 import re
 import sys
 from pathlib import Path
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, Iterable, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -31,9 +31,6 @@ from winnow.datasets.data_loaders import InstaNovoDatasetLoader
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
-_PAPER_SCRIPTS = Path(__file__).resolve().parent
-if str(_PAPER_SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(_PAPER_SCRIPTS))
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -48,6 +45,8 @@ logger.addHandler(RichHandler())
 # ---------------------------------------------------------------------------
 SEED = 42
 TEST_SIZE = 0.2
+
+_SLIM_RESULTS_FILENAME = "calibrator_generalisation_results_slim.parquet"
 
 _GENERALISATION_SLIM_COLUMNS: tuple[str, ...] = (
     "spectrum_id",
@@ -239,6 +238,20 @@ def create_train_test_split(
     test_idx = np.where(~train_mask)[0]
 
     return subset_dataset(dataset, train_idx), subset_dataset(dataset, test_idx)
+
+
+def in_distribution_rows_from_ood_cache(
+    raw_source: CalibrationDataset,
+    ood_cache: CalibrationDataset,
+) -> CalibrationDataset:
+    """Return peptide-holdout rows from a full-source OOD feature cache.
+
+    The holdout is taken from the loaded source, matching training. Rows dropped
+    during featurisation are missing from the cache and are left out.
+    """
+    _, holdout = create_train_test_split(raw_source)
+    holdout_ids = set(holdout.metadata["spectrum_id"].astype(str))
+    return subset_dataset_by_spectrum_ids(ood_cache, holdout_ids)
 
 
 def subset_dataset_by_spectrum_ids(
@@ -506,6 +519,78 @@ def _train_and_collect_results(
     return all_results
 
 
+def _require_ood_caches_on_disk(cache_dir: Path, sources: Iterable[str]) -> None:
+    missing = [
+        source
+        for source in sources
+        if not _ood_feature_cache_path(cache_dir, source).is_file()
+    ]
+    if missing:
+        logger.error(
+            "Missing OOD feature caches under %s: %s",
+            cache_dir,
+            ", ".join(sorted(missing)),
+        )
+        raise typer.Exit(1)
+
+
+def _repredict_and_collect_results(
+    datasets: Dict[str, CalibrationDataset],
+    ood_feature_caches: Dict[str, CalibrationDataset],
+    model_input_dir: Path,
+) -> List[pd.DataFrame]:
+    all_results: List[pd.DataFrame] = []
+    for train_project in sorted(datasets):
+        model_path = model_input_dir / f"trained_on_{train_project}"
+        if not model_path.is_dir():
+            logger.error("Missing calibrator checkpoint: %s", model_path)
+            raise typer.Exit(1)
+
+        logger.info("=== Repredict with model trained on %s ===", train_project)
+        calibrator = ProbabilityCalibrator.load(model_path)
+
+        in_dist = in_distribution_rows_from_ood_cache(
+            datasets[train_project],
+            ood_feature_caches[train_project],
+        )
+        logger.info(
+            "  Evaluating in-distribution on %s (%d samples)",
+            train_project,
+            len(in_dist.metadata),
+        )
+        all_results.append(
+            evaluate_model(
+                calibrator,
+                clone_calibration_dataset(in_dist),
+                train_project,
+                train_project,
+                "in_distribution",
+                features_precomputed=True,
+            )
+        )
+
+        for test_project in sorted(datasets):
+            if test_project == train_project:
+                continue
+            logger.info(
+                "  Evaluating out-of-distribution on %s (%d samples)",
+                test_project,
+                len(ood_feature_caches[test_project].metadata),
+            )
+            ood_ds = clone_calibration_dataset(ood_feature_caches[test_project])
+            all_results.append(
+                evaluate_model(
+                    calibrator,
+                    ood_ds,
+                    train_project,
+                    test_project,
+                    "out_of_distribution",
+                    features_precomputed=True,
+                )
+            )
+    return all_results
+
+
 def _persist_generalisation_results(
     combined: pd.DataFrame,
     results_output_dir: Path,
@@ -513,7 +598,7 @@ def _persist_generalisation_results(
     write_full_results_csv: bool,
 ) -> None:
     slim = combined[list(_GENERALISATION_SLIM_COLUMNS)]
-    slim_path = results_output_dir / "calibrator_generalisation_results_slim.parquet"
+    slim_path = results_output_dir / _SLIM_RESULTS_FILENAME
     slim.to_parquet(slim_path, index=False)
     logger.info("Slim results saved to %s (%d rows)", slim_path, len(slim))
 
@@ -576,22 +661,51 @@ def main(
             help="Write the wide per-PSM CSV (~6 GB); slim Parquet is always written.",
         ),
     ] = False,
+    repredict_only: Annotated[
+        bool,
+        typer.Option(
+            "--repredict-only",
+            help="Predict with deposited checkpoints and OOD caches (no training or Koina).",
+        ),
+    ] = False,
+    model_input_dir: Annotated[
+        Optional[Path],
+        typer.Option(
+            help="Directory with trained_on_* calibrators (--repredict-only)."
+        ),
+    ] = None,
 ) -> None:
     """Evaluate calibrator generalisation across source-labelled training datasets."""
-    model_output_dir.mkdir(parents=True, exist_ok=True)
     results_output_dir.mkdir(parents=True, exist_ok=True)
-
-    disk_cache_dir = _resolve_disk_cache_dir(
-        results_output_dir, feature_cache_dir, no_disk_feature_cache
-    )
     datasets = _load_source_datasets(train_parquet, train_predictions)
 
-    logger.info("Building OOD feature caches (one featurisation pass per source)")
-    ood_feature_caches = build_ood_feature_caches(datasets, disk_cache_dir)
+    if repredict_only:
+        if model_input_dir is None:
+            logger.error("--repredict-only requires --model-input-dir")
+            raise typer.Exit(1)
+        if feature_cache_dir is None:
+            logger.error("--repredict-only requires --feature-cache-dir")
+            raise typer.Exit(1)
+        if no_disk_feature_cache:
+            logger.error("--no-disk-feature-cache cannot be used with --repredict-only")
+            raise typer.Exit(1)
+        _require_ood_caches_on_disk(feature_cache_dir, datasets)
+        logger.info("Loading OOD feature caches from %s", feature_cache_dir)
+        ood_feature_caches = build_ood_feature_caches(datasets, feature_cache_dir)
+        all_results = _repredict_and_collect_results(
+            datasets, ood_feature_caches, model_input_dir
+        )
+    else:
+        model_output_dir.mkdir(parents=True, exist_ok=True)
+        disk_cache_dir = _resolve_disk_cache_dir(
+            results_output_dir, feature_cache_dir, no_disk_feature_cache
+        )
+        logger.info("Building OOD feature caches (one featurisation pass per source)")
+        ood_feature_caches = build_ood_feature_caches(datasets, disk_cache_dir)
+        all_results = _train_and_collect_results(
+            datasets, ood_feature_caches, model_output_dir
+        )
 
-    all_results = _train_and_collect_results(
-        datasets, ood_feature_caches, model_output_dir
-    )
     combined = pd.concat(all_results, ignore_index=True)
     _persist_generalisation_results(
         combined,

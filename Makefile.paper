@@ -38,6 +38,8 @@ FIGSHARE_ARTICLE_ID ?= 30147601
 FIGSHARE_ARTICLE_VERSION ?= 8
 FIGSHARE_HELA_MODELS_ID ?= 32744946
 FIGSHARE_HELA_MODELS_VERSION ?= 2
+FIGSHARE_GENERALISATION_LOO_ID ?= 30147364
+FIGSHARE_GENERALISATION_LOO_VERSION ?= 3
 
 HF_DATASETS_REV ?= 659802319d618a359de5ab90ec6b0195681e94a6
 HF_GENERAL_MODEL_REV ?= e2089330dd59adb9685e5b3d7d61f0cd69a3bbb0
@@ -53,11 +55,16 @@ FASTA_ECOLI ?= $(HF_DATASETS_DIR)/fasta/ecoli_zorya.fasta
 
 GENERAL_EVAL_DIR ?= $(HF_DATASETS_DIR)/general_model_evaluation
 
-# Leave-one-out calibrator generalisation (full retrain; needs Koina + GPU).
+# Leave-one-out calibrator generalisation.
 GENERALISATION_TRAIN_PARQUET ?= $(HF_DATASETS_DIR)/general_model_training_set/train.parquet
 GENERALISATION_TRAIN_PREDS ?= $(HF_DATASETS_DIR)/general_model_training_set/train_preds.csv
+GENERALISATION_DEPOSIT_DIR ?= $(PAPER_DATA_DIR)/generalisation
+GENERALISATION_SLIM_RESULTS ?= $(GENERALISATION_DEPOSIT_DIR)/calibrator_generalisation_results_slim.parquet
+GENERALISATION_LOO_DIR ?= $(PAPER_DATA_DIR)/calibrator_generalisation_loo
+GENERALISATION_LOO_OOD_CACHE ?= $(GENERALISATION_LOO_DIR)/ood_feature_cache
 GENERALISATION_MODELS_DIR ?= $(PAPER_RESULTS_DIR)/generalisation/models
 GENERALISATION_RESULTS_DIR ?= $(PAPER_RESULTS_DIR)/generalisation
+GENERALISATION_REPREDICT_SLIM ?= $(GENERALISATION_RESULTS_DIR)/calibrator_generalisation_results_slim.parquet
 
 FDR_INPUTS ?= $(PAPER_DATA_DIR)/fdr_benchmark_inputs
 NOVOBOARD_ROOT ?= $(FDR_INPUTS)/novoboard
@@ -167,7 +174,8 @@ FDR_OVERLAP_PROJECTS ?= $(GENERAL_PROJECTS)
 	paper-recompute-runtime paper-recompute-tool-runtime \
 	paper-recompute-feature-importance \
 	paper-recompute-fdr-method-comparison paper-recompute-external-peptide-holdout \
-	paper-recompute-generalisation paper-recompute-ablations
+	paper-recompute-generalisation paper-repredict-generalisation \
+	download-paper-generalisation-loo paper-recompute-ablations
 
 help:
 	@echo "Paper reproduction (make -f Makefile.paper <target>)"
@@ -191,7 +199,8 @@ help:
 	@echo "  helaqc | general-labelled | general-full-small | general-full-large"
 	@echo "  general-{labelled,full}-<stem> | general-<stem> | general-print"
 	@echo "  feature-investigation | fdr-method-comparison | external-peptide-holdout"
-	@echo "  feature-importance | generalisation [GPU] | ablations [GPU]"
+	@echo "  feature-importance | generalisation [GPU] | repredict-generalisation"
+	@echo "  ablations [GPU]"
 	@echo "  runtime [GPU] | scaling [GPU] | tool-runtime"
 	@echo "  stems: $(GENERAL_STEMS)"
 
@@ -211,6 +220,13 @@ download-paper-datasets:
 		--repo-type dataset \
 		--revision $(HF_DATASETS_REV) \
 		--local-dir $(HF_DATASETS_DIR)
+
+download-paper-generalisation-loo:
+	mkdir -p $(GENERALISATION_LOO_DIR)
+	$(PYTHON) $(PAPER_SCRIPTS)/download_figshare_article.py \
+		--article-id $(FIGSHARE_GENERALISATION_LOO_ID) \
+		--version $(FIGSHARE_GENERALISATION_LOO_VERSION) \
+		--output-dir $(GENERALISATION_LOO_DIR)
 
 download-paper-models:
 	mkdir -p $(HF_MODELS_DIR)/instanovo_helaqc $(HF_MODELS_DIR)/winnow-general-model
@@ -238,7 +254,8 @@ paper-check-artefacts:
 		--require external_peptide_holdout_benchmark/external_peptide_holdout_results.csv \
 		--require ablations/ablation_summary_arabidopsis.csv \
 		--require ablations/ablation_summary_astral.csv \
-		--require fdr_benchmark_inputs/novoboard/helaqc/novoboard/annotated_test.csv
+		--require fdr_benchmark_inputs/novoboard/helaqc/novoboard/annotated_test.csv \
+		--require generalisation/calibrator_generalisation_results_slim.parquet
 
 paper-sync-group-paper:
 	uv sync --group paper --group notebook --group docs --group dev
@@ -625,13 +642,13 @@ paper-recompute-feature-importance:
 		--output-dir $(FEATURE_IMPORTANCE_RESULTS_DIR)
 
 ################################################################################
-# 7. Generalisation [GPU]
+# 7. Generalisation
 ################################################################################
 
 paper-plot-generalisation:
 	mkdir -p $(PAPER_PLOTS_DIR)/generalisation
 	$(PYTHON) $(PAPER_SCRIPTS)/plot_calibrator_generalisation_heatmap.py \
-		--results-path $(PAPER_DATA_DIR)/generalisation/calibrator_generalisation_results.csv \
+		--results-path $(GENERALISATION_SLIM_RESULTS) \
 		--plots-dir $(PAPER_PLOTS_DIR)/generalisation
 
 # Full retrain of leave-one-source-out calibrators on HF general_model_training_set.
@@ -642,6 +659,21 @@ paper-recompute-generalisation:
 		--train-predictions $(GENERALISATION_TRAIN_PREDS) \
 		--model-output-dir $(GENERALISATION_MODELS_DIR) \
 		--results-output-dir $(GENERALISATION_RESULTS_DIR)
+
+# Uses deposited LOO models + OOD featurised dataset caches.
+# Still needs the HF general_model_training_set so the peptide holdout matches training.
+paper-repredict-generalisation: download-paper-generalisation-loo
+	mkdir -p $(GENERALISATION_RESULTS_DIR) $(PAPER_PLOTS_DIR)/generalisation
+	$(PYTHON) $(PAPER_SCRIPTS)/evaluate_calibrator_generalisation.py \
+		--repredict-only \
+		--train-parquet $(GENERALISATION_TRAIN_PARQUET) \
+		--train-predictions $(GENERALISATION_TRAIN_PREDS) \
+		--model-input-dir $(GENERALISATION_LOO_DIR) \
+		--feature-cache-dir $(GENERALISATION_LOO_OOD_CACHE) \
+		--results-output-dir $(GENERALISATION_RESULTS_DIR)
+	$(PYTHON) $(PAPER_SCRIPTS)/plot_calibrator_generalisation_heatmap.py \
+		--results-path $(GENERALISATION_REPREDICT_SLIM) \
+		--plots-dir $(PAPER_PLOTS_DIR)/generalisation
 
 ################################################################################
 # 8. Feature ablations [GPU] (recompute only; plots written by the script)
