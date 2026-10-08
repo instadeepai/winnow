@@ -8,7 +8,7 @@ from numpy import median
 from winnow.calibration.features.base import CalibrationFeatures, FeatureDependency
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.calibration.features.utils import require_beam_predictions
-from winnow.datasets.data_loaders.utils import _normalize_leucine_tokens
+from winnow.datasets.data_loaders.utils import replace_isoleucine_with_leucine
 
 
 def _beam_len(beam: Optional[List]) -> int:
@@ -75,8 +75,8 @@ def _beam_edit_distance(beam: Optional[List]) -> float:
     if not top_seq and not second_seq:
         return 1.0
     return _normalised_levenshtein(
-        _normalize_leucine_tokens(top_seq),
-        _normalize_leucine_tokens(second_seq),
+        replace_isoleucine_with_leucine(top_seq),
+        replace_isoleucine_with_leucine(second_seq),
     )
 
 

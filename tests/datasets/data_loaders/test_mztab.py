@@ -428,11 +428,10 @@ class TestMZTabDatasetLoader:
         )
         assert result["prediction_untokenised"][0] == "PEPTC[Carbamidomethyl]DE"
 
-    def test_normalize_replaces_leucine_at_token_level(self, loader):
-        tokens = _normalize_peptide(loader, "PEPTLDE")
-        assert tokens is not None
-        assert "L" not in tokens
-        assert "I" in tokens
+    def test_normalize_preserves_residues(self, loader):
+        """Normalisation canonicalises modifications, not residues."""
+        assert _normalize_peptide(loader, "PEPTLDE") == list("PEPTLDE")
+        assert _normalize_peptide(loader, "PEPTIDE") == list("PEPTIDE")
 
     def test_process_predictions_without_aa_scores_creates_null_token_scores(
         self, db_loader, minimal_predictions_df
@@ -504,8 +503,10 @@ class TestMZTabDatasetLoader:
         tokens = _normalize_peptide(loader, "GEEHC[Carbamidomethyl]GHLLQAHK")
         assert tokens is not None
         assert "C[UNIMOD:4]" in tokens
-        assert "L" not in tokens
-        assert tokens.count("I") == 2
+        # The L in "Carbamidomethyl" must not leak into the residues, and the
+        # sequence's own residues are reported as given.
+        assert tokens.count("L") == 2
+        assert "I" not in tokens
 
     def test_normalize_unmodified_sequence_passes_through(self, loader):
         assert _normalize_peptide(loader, "ACGM") == ["A", "C", "G", "M"]
