@@ -87,11 +87,17 @@ dataset.save(Path("output_directory"))
 - **Filtering**: Removes invalid tokens and unsupported modifications
 - **Evaluation**: Computes correctness labels when ground truth available
 
+#### Leucine and isoleucine
+
+Winnow treats leucine and isoleucine as interchangeable when computing training labels (`correct`, `num_matches`) and beam edit distance because they are structural isomers, so standard mass spectrometry cannot differentiate them by precursor mass alone.
+
+By default, stored `prediction`, labelled `sequence`, and beam `ScoredSequence.sequence` keep the source residue (`L` or `I`). Set `output_leucine_as_isoleucine=True` on any `DatasetLoader` (or `data_loader.output_leucine_as_isoleucine=true` in the CLI) to restore the legacy behaviour of rewriting stored tokens with `L` → `I`.
+
 ### Data loaders
 
 The datasets module provides several data loaders that implement the `DatasetLoader` protocol.
 
-All loaders require `residue_masses` (ProForma residue → mass; see `configs/residues.yaml`). Loaders that ingest tool-specific peptide notation also take `residue_remapping`.
+All loaders require `residue_masses` (ProForma residue → mass; see `configs/residues.yaml`). Loaders that ingest tool-specific peptide notation also take `residue_remapping`. Each loader accepts `output_leucine_as_isoleucine` (default `false`; see above).
 
 #### InstaNovoDatasetLoader
 

@@ -215,7 +215,7 @@ Set `diagnostics.fail_on_warning=true` to exit with code 1 when $|\widehat{\math
 
 ### `winnow annotate-proteome-hits`
 
-Load spectra and *de novo* predictions via a `DatasetLoader`, drop peptides shorter than a residue threshold, and add a boolean `proteome_hit` column by matching each prediction (modifications stripped, isoleucine normalised to leucine) as a substring of a reference proteome. The annotated holdout is written as a Winnow dataset directory (`metadata.csv` plus optional `predictions.pkl`).
+Load spectra and *de novo* predictions via a `DatasetLoader`, drop peptides shorter than a residue threshold, and add a boolean `proteome_hit` column by substring matching against a reference proteome. Matching collapses leucine and isoleucine to the same residue on both the prediction (after stripping modifications) and each FASTA sequence. Stored peptide sequences in the output keep their original residue identity unless you set `data_loader.output_leucine_as_isoleucine=true`. The annotated holdout is written as a Winnow dataset directory (`metadata.csv` plus optional `predictions.pkl`).
 
 This produces the `proteome_hit` column consumed by `diagnose-calibration` with `data_loader=winnow` and `diagnostics.label_source=precomputed diagnostics.label_column=proteome_hit`. Training does not use `proteome_hit`; the column may sit alongside sequence-derived labels without changing train behaviour. Prediction accepts datasets with or without the column.
 
