@@ -35,9 +35,9 @@ class ProteomeAnnotationCounts:
 
 
 def normalize_sequence(sequence: str) -> str:
-    """Map isoleucine to leucine for I/L-equivalent substring matching."""
+    """Map leucine to isoleucine for I/L-equivalent substring matching."""
     if sequence:
-        return sequence.replace("I", "L")
+        return sequence.replace("L", "I")
     return sequence
 
 
@@ -60,9 +60,9 @@ def load_proteome_haystack(fasta_file: Path | str) -> str:
 
 
 def processed_peptide_for_match(prediction: str) -> str:
-    """Strip mods then map isoleucine to leucine for proteome substring matching.
+    """Strip mods then map leucine to isoleucine for proteome substring matching.
 
-    Modifications are removed before any ``I`` → ``L`` replacement so bracketed
+    Modifications are removed before any ``L`` → ``I`` replacement so bracketed
     names (e.g. ``UNIMOD``) are not corrupted.
 
     Modifications of the following forms are stripped:
