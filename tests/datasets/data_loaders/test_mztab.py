@@ -18,15 +18,21 @@ def _finalize(loader, metadata, *, has_labels: bool = True):
         loader.metrics,
         has_labels=has_labels,
         residue_remapping=loader.metrics.residue_set.residue_remapping,
+        output_leucine_as_isoleucine=loader.output_leucine_as_isoleucine,
     )
 
 
-def _normalize_peptide(loader, value: object) -> list[str] | None:
+def _normalize_peptide(
+    loader, value: object, *, output_leucine_as_isoleucine: bool | None = None
+) -> list[str] | None:
     """Normalize a peptide cell using loader metrics (string or token list)."""
+    if output_leucine_as_isoleucine is None:
+        output_leucine_as_isoleucine = loader.output_leucine_as_isoleucine
     return data_utils.normalize_peptide_cell(
         value,
         loader.metrics,
         residue_remapping=loader.metrics.residue_set.residue_remapping,
+        output_leucine_as_isoleucine=output_leucine_as_isoleucine,
     )
 
 
@@ -428,8 +434,15 @@ class TestMZTabDatasetLoader:
         )
         assert result["prediction_untokenised"][0] == "PEPTC[Carbamidomethyl]DE"
 
-    def test_normalize_replaces_leucine_at_token_level(self, loader):
+    def test_normalize_preserves_leucine_by_default(self, loader):
         tokens = _normalize_peptide(loader, "PEPTLDE")
+        assert tokens is not None
+        assert "L" in tokens
+
+    def test_normalize_replaces_leucine_when_legacy_flag(self, loader):
+        tokens = _normalize_peptide(
+            loader, "PEPTLDE", output_leucine_as_isoleucine=True
+        )
         assert tokens is not None
         assert "L" not in tokens
         assert "I" in tokens
@@ -504,8 +517,7 @@ class TestMZTabDatasetLoader:
         tokens = _normalize_peptide(loader, "GEEHC[Carbamidomethyl]GHLLQAHK")
         assert tokens is not None
         assert "C[UNIMOD:4]" in tokens
-        assert "L" not in tokens
-        assert tokens.count("I") == 2
+        assert tokens.count("L") == 2
 
     def test_normalize_unmodified_sequence_passes_through(self, loader):
         assert _normalize_peptide(loader, "ACGM") == ["A", "C", "G", "M"]
@@ -892,6 +904,16 @@ class TestMZTabEvaluatePredictions:
         )
         result = _finalize(loader, metadata, has_labels=True)
         assert not result["correct"][0]
+
+    def test_evaluate_correct_flag_true_on_l_vs_i_match(self, loader):
+        metadata = pl.DataFrame(
+            {
+                "sequence": [["P", "E", "P", "T", "L", "D", "E"]],
+                "prediction": [["P", "E", "P", "T", "I", "D", "E"]],
+            }
+        )
+        result = _finalize(loader, metadata, has_labels=True)
+        assert result["correct"][0]
 
     def test_evaluate_correct_flag_false_on_length_mismatch(self, loader):
         metadata = pl.DataFrame(

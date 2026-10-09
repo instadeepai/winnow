@@ -70,6 +70,7 @@ class MZTabDatasetLoader(DatasetLoader):
         isotope_error_range: Tuple[int, int] = (0, 1),
         load_beams: bool = True,
         column_mapping: Optional[dict[str, Optional[str]]] = None,
+        output_leucine_as_isoleucine: bool = False,
     ) -> None:
         """Initialise the MZTabDatasetLoader.
 
@@ -83,7 +84,12 @@ class MZTabDatasetLoader(DatasetLoader):
             column_mapping: Maps logical roles to mzTab column headers. See
                 module docstring and ``_DEFAULT_COLUMN_MAPPING``. Missing mapped
                 columns fail fast with available headers listed.
+            output_leucine_as_isoleucine: When True, rewrite ``L`` → ``I`` in returned
+                ``prediction`` / ``sequence`` token lists (legacy). Default
+                keeps source ``L`` or ``I``; ``correct`` / ``num_matches`` always
+                treat leucine and isoleucine as interchangeable.
         """
+        self.output_leucine_as_isoleucine = output_leucine_as_isoleucine
         self.metrics = Metrics(
             residue_set=ResidueSet(
                 residue_masses=residue_masses, residue_remapping=residue_remapping
@@ -337,6 +343,7 @@ class MZTabDatasetLoader(DatasetLoader):
             self.metrics,
             has_labels=False,
             residue_remapping=residue_remapping,
+            output_leucine_as_isoleucine=self.output_leucine_as_isoleucine,
         )
 
         top_predictions = self._get_top_predictions(predictions, is_casanovo)
@@ -346,6 +353,7 @@ class MZTabDatasetLoader(DatasetLoader):
             self.metrics,
             has_labels=has_labels,
             residue_remapping=residue_remapping,
+            output_leucine_as_isoleucine=self.output_leucine_as_isoleucine,
         )
 
         metadata_pd = metadata.to_pandas()

@@ -19,6 +19,7 @@ class DatasetLoader(Protocol):
         residue_masses: dict[str, float],
         residue_remapping: dict[str, str] | None = None,
         isotope_error_range: Tuple[int, int] = (0, 1),
+        output_leucine_as_isoleucine: bool = False,
     ) -> None:
         """Initialise the DatasetLoader.
 
@@ -26,6 +27,11 @@ class DatasetLoader(Protocol):
             residue_masses: The mapping of residues to their masses (ProForma notation).
             residue_remapping: Optional mapping of input notations to ProForma notation. Defaults to None.
             isotope_error_range: The range of isotope errors to consider when matching peptides. Defaults to (0, 1).
+            output_leucine_as_isoleucine: When True, rewrite ``L`` → ``I`` in ``prediction`` and
+                ``sequence`` token lists on the returned ``CalibrationDataset``
+                (legacy behaviour). When False (default), those outputs keep the
+                source residue. ``correct`` / ``num_matches`` always treat ``L``
+                and ``I`` as interchangeable regardless of this flag.
         """
         ...
 
