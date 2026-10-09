@@ -127,8 +127,16 @@ def add_index_cols(df: pl.DataFrame, fp: Path | str) -> pl.DataFrame:
 _add_index_cols_fn = add_index_cols
 
 
-def _normalize_leucine_tokens(tokens: list[str]) -> list[str]:
-    """Map leucine to isoleucine at the token level."""
+def replace_leucine_with_isoleucine(tokens: list[str]) -> list[str]:
+    """Return a copy of ``tokens`` with leucine rewritten as isoleucine since they are structural isomers that Winnow treats as equivalent when judging peptide correctness.
+
+    Args:
+        tokens: ProForma residue tokens (e.g. from :func:`normalize_peptide_cell`).
+
+    Returns:
+        A new list where each exact token ``L`` is ``I``; all other tokens are
+        unchanged.
+    """
     return ["I" if token == "L" else token for token in tokens]
 
 
@@ -136,10 +144,10 @@ def _apply_token_postprocessing(
     tokens: list[str],
     *,
     residue_remapping: dict[str, str],
-    normalize_leucine: bool = True,
+    output_leucine_as_isoleucine: bool = False,
 ) -> list[str]:
-    if normalize_leucine:
-        tokens = _normalize_leucine_tokens(tokens)
+    if output_leucine_as_isoleucine:
+        tokens = replace_leucine_with_isoleucine(tokens)
     return [residue_remapping.get(token, token) for token in tokens]
 
 
@@ -148,7 +156,7 @@ def normalize_peptide_cell(
     metrics: Metrics,
     *,
     residue_remapping: dict[str, str],
-    normalize_leucine: bool = True,
+    output_leucine_as_isoleucine: bool = False,
     require_label: bool = False,
 ) -> list[str] | None:
     """Normalize one peptide cell to ProForma token list, or ``None`` if absent/empty.
@@ -157,7 +165,8 @@ def normalize_peptide_cell(
         value: Raw or tokenized cell from pandas or polars.
         metrics: InstaNovo metrics for string tokenization.
         residue_remapping: Modification token remapping table.
-        normalize_leucine: When True, map ``L`` → ``I`` at token level.
+        output_leucine_as_isoleucine: When True, apply
+            :func:`replace_leucine_with_isoleucine` to stored token lists.
         require_label: When True, return ``None`` for cells that fail
             :func:`is_usable_peptide_label` before tokenization (ground truth).
     """
@@ -176,7 +185,7 @@ def normalize_peptide_cell(
     tokens = _apply_token_postprocessing(
         tokens,
         residue_remapping=residue_remapping,
-        normalize_leucine=normalize_leucine,
+        output_leucine_as_isoleucine=output_leucine_as_isoleucine,
     )
     return tokens if tokens else None
 
@@ -187,12 +196,14 @@ def _normalize_peptide_column_pandas(
     *,
     residue_remapping: dict[str, str],
     require_label: bool,
+    output_leucine_as_isoleucine: bool,
 ) -> pd.Series:
     return series.apply(
         lambda value: normalize_peptide_cell(
             value,
             metrics,
             residue_remapping=residue_remapping,
+            output_leucine_as_isoleucine=output_leucine_as_isoleucine,
             require_label=require_label,
         )
     )
@@ -204,12 +215,14 @@ def _normalize_peptide_column_polars(
     *,
     residue_remapping: dict[str, str],
     require_label: bool,
+    output_leucine_as_isoleucine: bool,
 ) -> pl.Series:
     return series.map_elements(
         lambda value: normalize_peptide_cell(
             value,
             metrics,
             residue_remapping=residue_remapping,
+            output_leucine_as_isoleucine=output_leucine_as_isoleucine,
             require_label=require_label,
         ),
         return_dtype=pl.List(pl.Utf8),
@@ -308,6 +321,7 @@ def _finalize_peptide_metadata_pandas(
     *,
     has_labels: bool,
     residue_remapping: dict[str, str],
+    output_leucine_as_isoleucine: bool,
     sequence_col: str,
     prediction_col: str,
     score_col: str,
@@ -317,6 +331,7 @@ def _finalize_peptide_metadata_pandas(
         metrics,
         residue_remapping=residue_remapping,
         require_label=False,
+        output_leucine_as_isoleucine=output_leucine_as_isoleucine,
     )
     metadata["valid_prediction"] = metadata[prediction_col].apply(
         is_valid_peptide_tokens
@@ -331,6 +346,7 @@ def _finalize_peptide_metadata_pandas(
         metrics,
         residue_remapping=residue_remapping,
         require_label=True,
+        output_leucine_as_isoleucine=output_leucine_as_isoleucine,
     )
     metadata["valid_sequence"] = metadata[sequence_col].apply(is_valid_peptide_tokens)
 
@@ -356,6 +372,7 @@ def _finalize_peptide_metadata_polars(
     *,
     has_labels: bool,
     residue_remapping: dict[str, str],
+    output_leucine_as_isoleucine: bool,
     sequence_col: str,
     prediction_col: str,
     score_col: str,
@@ -366,6 +383,7 @@ def _finalize_peptide_metadata_polars(
             metrics,
             residue_remapping=residue_remapping,
             require_label=False,
+            output_leucine_as_isoleucine=output_leucine_as_isoleucine,
         ).alias(prediction_col),
     ).with_columns(
         pl.col(prediction_col)
@@ -383,6 +401,7 @@ def _finalize_peptide_metadata_polars(
             metrics,
             residue_remapping=residue_remapping,
             require_label=True,
+            output_leucine_as_isoleucine=output_leucine_as_isoleucine,
         ).alias(sequence_col),
     ).with_columns(
         pl.col(sequence_col)
@@ -423,6 +442,7 @@ def finalize_peptide_metadata(
     *,
     has_labels: bool,
     residue_remapping: dict[str, str] | None = None,
+    output_leucine_as_isoleucine: bool = False,
     sequence_col: str = "sequence",
     prediction_col: str = "prediction",
     score_col: str = "confidence",
@@ -436,6 +456,27 @@ def finalize_peptide_metadata(
     When ``score_col`` is present, rows with ``None``/NaN scores are marked
     ``valid_prediction=False`` in addition to token-level checks. The score
     check is skipped if the column is absent.
+
+    Args:
+        metadata: PSM metadata with peptide columns to normalise.
+        metrics: InstaNovo metrics for tokenisation and residue matching.
+        has_labels: When True, normalise ``sequence_col``, set ``valid_sequence``,
+            and compute ``num_matches`` / ``correct``. When False, only
+            ``prediction_col`` and ``valid_prediction`` are updated.
+        residue_remapping: Input notation to ProForma token mapping. Defaults to
+            ``metrics.residue_set.residue_remapping``.
+        output_leucine_as_isoleucine: When True, apply
+            :func:`replace_leucine_with_isoleucine` to stored token lists
+            (legacy behaviour). Correctness labels always treat ``L`` and ``I``
+            as equivalent regardless of this flag.
+        sequence_col: Ground-truth peptide column name.
+        prediction_col: Predicted peptide column name.
+        score_col: Confidence or score column used to mark invalid predictions
+            when values are missing or NaN.
+
+    Returns:
+        The input frame (pandas or polars) with normalised peptide columns and
+        validity / match columns added or updated in place.
     """
     if residue_remapping is None:
         residue_remapping = metrics.residue_set.residue_remapping
@@ -446,6 +487,7 @@ def finalize_peptide_metadata(
             metrics,
             has_labels=has_labels,
             residue_remapping=residue_remapping,
+            output_leucine_as_isoleucine=output_leucine_as_isoleucine,
             sequence_col=sequence_col,
             prediction_col=prediction_col,
             score_col=score_col,
@@ -455,6 +497,7 @@ def finalize_peptide_metadata(
         metrics,
         has_labels=has_labels,
         residue_remapping=residue_remapping,
+        output_leucine_as_isoleucine=output_leucine_as_isoleucine,
         sequence_col=sequence_col,
         prediction_col=prediction_col,
         score_col=score_col,
@@ -538,10 +581,16 @@ def row_num_matches(
     sequence_valid: bool,
     prediction_valid: bool,
 ) -> int:
-    """Count residue matches between tokenized sequence and prediction."""
+    """Count residue matches between tokenized sequence and prediction.
+
+    Leucine and isoleucine are treated as equivalent (``L`` → ``I`` on copies
+    only; stored token lists are unchanged).
+    """
     if not sequence_valid or not prediction_valid or not sequence or not prediction:
         return 0
-    return metrics._novor_match(sequence, prediction)
+    sequence_for_il_match = replace_leucine_with_isoleucine(sequence)
+    prediction_for_il_match = replace_leucine_with_isoleucine(prediction)
+    return metrics._novor_match(sequence_for_il_match, prediction_for_il_match)
 
 
 def row_is_correct(

@@ -532,7 +532,7 @@ You must choose exactly one labelling mode. The command validates config before 
 
 ### Main config (`configs/annotate_proteome_hits.yaml`)
 
-Loads a *de novo* prediction dataset, filters short peptides, adds `proteome_hit` via FASTA substring matching, and writes a Winnow dataset directory. See the [CLI reference](cli.md#winnow-annotate-proteome-hits).
+Loads a *de novo* prediction dataset, filters short peptides, adds `proteome_hit` via FASTA substring matching, and writes a Winnow dataset directory, stripping post-translational modifications and treating leucine and isoleucine as equivalent. See the [CLI reference](cli.md#winnow-annotate-proteome-hits).
 
 ```yaml
 defaults:
@@ -594,6 +594,7 @@ Each data format has a dedicated loader configuration in `configs/data_loader/`:
 _target_: winnow.datasets.data_loaders.InstaNovoDatasetLoader
 add_index_cols: false  # If true, add experiment_name + spectrum_id for parquet/ipc (InstaNovo-style). MGF always gets these columns.
 residue_masses: ${residue_masses}
+output_leucine_as_isoleucine: false  # false: L/I as in source in exports; true: L shown as I in output tokens (legacy)
 residue_remapping:
   "M(ox)": "M[UNIMOD:35]"
   "C(+57.02)": "C[UNIMOD:4]"

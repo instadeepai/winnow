@@ -86,6 +86,7 @@ class PrimeNovoDatasetLoader(DatasetLoader):
         mid_sequence_n_terminal_mods: list[str],
         residue_remapping: dict[str, str],
         isotope_error_range: Tuple[int, int] = (0, 1),
+        output_leucine_as_isoleucine: bool = False,
     ) -> None:
         """Initialise the PrimeNovoDatasetLoader.
 
@@ -99,7 +100,12 @@ class PrimeNovoDatasetLoader(DatasetLoader):
             residue_remapping: Optional ProForma mapping from pi-PrimeNovo tokens.
             isotope_error_range: The range of isotope errors to consider when matching
                 peptides.
+            output_leucine_as_isoleucine: When True, rewrite ``L`` → ``I`` in returned
+                ``prediction`` / ``sequence`` token lists (legacy). Default
+                keeps source ``L`` or ``I``; ``correct`` / ``num_matches`` always
+                treat leucine and isoleucine as interchangeable.
         """
+        self.output_leucine_as_isoleucine = output_leucine_as_isoleucine
         self.metrics = Metrics(
             residue_set=ResidueSet(
                 residue_masses=residue_masses, residue_remapping=residue_remapping
@@ -201,6 +207,7 @@ class PrimeNovoDatasetLoader(DatasetLoader):
             self.metrics,
             has_labels=has_labels,
             residue_remapping=residue_remapping,
+            output_leucine_as_isoleucine=self.output_leucine_as_isoleucine,
         )
 
         metadata_pd = metadata.to_pandas()

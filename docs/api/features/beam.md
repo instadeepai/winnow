@@ -56,6 +56,6 @@ The dataset must have beam predictions available (`dataset.predictions` must not
 - When beam size is 1, margin and entropy default to 0; `edit_distance` defaults to `1.0`
 - Entropy is computed on the **normalised** runner-up probabilities (excluding top-1)
 - Z-score uses the full beam including top-1 for mean/std calculation
-- Edit distance collapses I/L via the same leucine normalisation used elsewhere in the package (`L` → `I`)
+- Edit distance collapses I/L at comparison time (`L` → `I` on copies of the top-1 and top-2 token lists); stored beam sequences are not rewritten unless `data_loader.output_leucine_as_isoleucine=true`
 - Both sequences empty is treated as undefined (`1.0`), not as raw Levenshtein zero
 - All probability values are derived from `exp(sequence_log_probability)`

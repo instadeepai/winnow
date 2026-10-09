@@ -25,8 +25,10 @@ class WinnowDatasetLoader(DatasetLoader):
         residue_masses: dict[str, float],
         residue_remapping: Optional[dict[str, str]] = None,
         isotope_error_range: Tuple[int, int] = (0, 1),
+        output_leucine_as_isoleucine: bool = False,
     ) -> None:
         """Initialise the WinnowDatasetLoader."""
+        self.output_leucine_as_isoleucine = output_leucine_as_isoleucine
         self.metrics = Metrics(
             residue_set=ResidueSet(
                 residue_masses=residue_masses, residue_remapping=residue_remapping
@@ -90,6 +92,7 @@ class WinnowDatasetLoader(DatasetLoader):
             self.metrics,
             has_labels=has_labels,
             residue_remapping=self.metrics.residue_set.residue_remapping,
+            output_leucine_as_isoleucine=self.output_leucine_as_isoleucine,
         )
 
         predictions_pkl_path = data_path / Path("predictions.pkl")

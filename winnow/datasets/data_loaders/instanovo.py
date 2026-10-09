@@ -40,6 +40,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
         beam_columns: Optional[dict[str, str]] = None,
         add_index_cols: bool = False,
         column_mapping: Optional[dict[str, str]] = None,
+        output_leucine_as_isoleucine: bool = False,
     ) -> None:
         """Initialise the InstaNovoDatasetLoader.
 
@@ -55,7 +56,14 @@ class InstaNovoDatasetLoader(DatasetLoader):
                 names produced by the InstaNovo version you are loading.  Defaults are
                 ``{"predictions": "predictions", "predictions_tokenised":
                 "predictions_tokenised", "log_probability": "log_probs"}``.
+            output_leucine_as_isoleucine: When True, rewrite ``L`` → ``I`` in ``prediction``,
+                ``sequence``, and beam token lists on the returned
+                ``CalibrationDataset`` (legacy behaviour). When False (default),
+                those outputs keep the source ``L`` or ``I``. Label matching
+                (``correct``, ``num_matches``) always treats leucine and
+                isoleucine as interchangeable regardless of this flag.
         """
+        self.output_leucine_as_isoleucine = output_leucine_as_isoleucine
         self.metrics = Metrics(
             residue_set=ResidueSet(
                 residue_masses=residue_masses, residue_remapping=residue_remapping
@@ -186,6 +194,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
             self.metrics,
             has_labels=has_labels,
             residue_remapping=residue_remapping,
+            output_leucine_as_isoleucine=self.output_leucine_as_isoleucine,
         )
 
         return CalibrationDataset(metadata=predictions, predictions=beams)
@@ -305,9 +314,11 @@ class InstaNovoDatasetLoader(DatasetLoader):
 
                 if sequence and log_prob > float("-inf"):
                     tokens = self.metrics._split_peptide(sequence)
+                    if self.output_leucine_as_isoleucine:
+                        tokens = data_utils.replace_leucine_with_isoleucine(tokens)
                     scored_sequences.append(
                         ScoredSequence(
-                            sequence=data_utils._normalize_leucine_tokens(tokens),
+                            sequence=tokens,
                             mass_error=None,
                             sequence_log_probability=log_prob,
                             token_log_probabilities=ast.literal_eval(token_log_prob)
