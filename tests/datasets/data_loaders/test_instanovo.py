@@ -542,11 +542,15 @@ class TestInstaNovoDatasetLoader:
         assert hasattr(beams[0][0], "sequence")
         assert hasattr(beams[0][0], "sequence_log_probability")
 
-    def test_process_beams_replaces_l_with_i_in_sequences(self, loader):
-        """L amino acid must be replaced with I at token level after split."""
+    def test_process_beams_replaces_i_with_l_in_sequences(self, loader):
+        """Beam sequences are compared against each other, so I is collapsed into L.
+
+        These are feature inputs, never reported, which is why collapsing them is
+        safe. The direction follows InstaNovo and the peptide registry.
+        """
         beam_df = pl.DataFrame(
             {
-                "predictions_beam_0": ["PEPTLDE"],
+                "predictions_beam_0": ["PEPTIDE"],
                 "predictions_log_probability_beam_0": [-0.5],
                 "predictions_token_log_probabilities_0": [
                     "[-0.1, -0.2, -0.3, -0.4, -0.5, -0.6, -0.7]"
@@ -555,7 +559,8 @@ class TestInstaNovoDatasetLoader:
         )
         beams = loader._process_beams(beam_df)
         assert beams[0] is not None
-        assert "L" not in beams[0][0].sequence
+        assert "I" not in beams[0][0].sequence
+        assert beams[0][0].sequence == list("PEPTLDE")
 
     def test_process_beams_returns_none_for_empty_row(self, loader):
         """A row where log_prob is -inf should produce None (no valid beam)."""
@@ -593,7 +598,7 @@ class TestInstaNovoDatasetLoader:
         beams = loader._process_beams(beam_df)
         assert beams[0] is not None
         assert len(beams[0]) == 1
-        assert beams[0][0].sequence == list("PEPTIDE")
+        assert beams[0][0].sequence == list("PEPTLDE")
 
     def test_process_beams_skips_falsy_and_compacts_beam(self, loader):
         """A falsy middle beam is dropped so the next valid candidate becomes beam[1]."""
@@ -615,7 +620,7 @@ class TestInstaNovoDatasetLoader:
         beams = loader._process_beams(beam_df)
         assert beams[0] is not None
         assert len(beams[0]) == 2
-        assert beams[0][0].sequence == list("PEPTIDE")
+        assert beams[0][0].sequence == list("PEPTLDE")
         assert beams[0][1].sequence == ["A", "C"]
 
     def test_process_beams_all_falsy_sequences_returns_none(self, loader):
@@ -799,7 +804,8 @@ class TestInstaNovoDatasetLoader:
         result = loader._process_predictions(preds_df, ["spectrum_id"])
         assert result["prediction"].iloc[0] == ["P", "E", "P", "T", "I", "D", "E"]
 
-    def test_finalize_replaces_l_with_i_in_prediction_list(self, loader):
+    def test_finalize_reports_the_prediction_as_given(self, loader):
+        """The reported prediction keeps its residues. See the I/L note in utils."""
         preds_df = pd.DataFrame(
             {
                 "spectrum_id": [1],
@@ -810,7 +816,7 @@ class TestInstaNovoDatasetLoader:
         )
         processed = loader._process_predictions(preds_df, ["spectrum_id"])
         finalized = _finalize(loader, processed, has_labels=False)
-        assert "L" not in finalized["prediction"].iloc[0]
+        assert finalized["prediction"].iloc[0] == ["P", "E", "P", "T", "L", "D", "E"]
 
     def test_process_predictions_preserves_l_in_prediction_untokenised(self, loader):
         """Untokenised strings keep source L; leucine remap is token-level only."""

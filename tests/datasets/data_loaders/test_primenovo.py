@@ -376,11 +376,12 @@ class TestPrimeNovoDatasetLoader:
         assert "M[UNIMOD:35]" in row["prediction"]
         assert "M[+15.995]" in row["prediction_untokenised"]
 
-    def test_load_applies_token_level_l_to_i(self, loader, mgf_path, tsv_path):
+    def test_load_reports_residues_as_given(self, loader, mgf_path, tsv_path):
+        """The tokenised prediction keeps its residues, like the untokenised one."""
         dataset = loader.load(data_path=mgf_path, predictions_path=tsv_path)
         meta = dataset.metadata
         row = meta.set_index("spectrum_id").loc["spectra:run_X_SCANS_1"]
-        assert "L" not in row["prediction"]
+        assert "L" in row["prediction"]
         assert "L" in row["prediction_untokenised"]
 
     def test_load_inner_join_keeps_only_matching_spectrum_ids(
