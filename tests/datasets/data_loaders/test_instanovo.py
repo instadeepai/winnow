@@ -494,6 +494,69 @@ class TestInstaNovoDatasetLoader:
         assert len(list(load_from_mgf(str(mgf_path)))) == 1
 
     # ------------------------------------------------------------------
+    # _process_predictions
+    # ------------------------------------------------------------------
+
+    def test_process_predictions_drops_incoming_confidence(self, loader):
+        """InstaNovo writes its own `confidence`; Winnow derives one by the same name."""
+        preds = pd.DataFrame(
+            {
+                "spectrum_id": ["a", "b"],
+                "predictions": ["PEP", "TIDE"],
+                "predictions_tokenised": ["P, E, P", "T, I, D, E"],
+                "log_probs": [np.log(0.5), np.log(0.25)],
+                "confidence": [0.123, 0.456],
+            }
+        )
+        result = loader._process_predictions(
+            preds, input_dataset_columns=["spectrum_id"]
+        )
+
+        assert list(result.columns).count("confidence") == 1
+        # The surviving column is exp(log_probs), not what InstaNovo supplied.
+        np.testing.assert_allclose(result["confidence"], [0.5, 0.25])
+
+    def test_process_predictions_without_collision_is_unchanged(self, loader):
+        preds = pd.DataFrame(
+            {
+                "spectrum_id": ["a"],
+                "predictions": ["PEP"],
+                "predictions_tokenised": ["P, E, P"],
+                "log_probs": [np.log(0.5)],
+            }
+        )
+        result = loader._process_predictions(
+            preds, input_dataset_columns=["spectrum_id"]
+        )
+
+        assert list(result.columns).count("confidence") == 1
+        np.testing.assert_allclose(result["confidence"], [0.5])
+
+    def test_process_predictions_keeps_column_mapped_onto_itself(
+        self, full_residue_masses, standard_remapping
+    ):
+        """A column that is its own rename target must survive, not be dropped."""
+        loader = InstaNovoDatasetLoader(
+            residue_masses=full_residue_masses,
+            residue_remapping=standard_remapping,
+            column_mapping={"log_probability": "confidence"},
+        )
+        preds = pd.DataFrame(
+            {
+                "spectrum_id": ["a"],
+                "predictions": ["PEP"],
+                "predictions_tokenised": ["P, E, P"],
+                "confidence": [np.log(0.5)],
+            }
+        )
+        result = loader._process_predictions(
+            preds, input_dataset_columns=["spectrum_id"]
+        )
+
+        assert list(result.columns).count("confidence") == 1
+        np.testing.assert_allclose(result["confidence"], [0.5])
+
+    # ------------------------------------------------------------------
     # _merge_spectrum_data
     # ------------------------------------------------------------------
 

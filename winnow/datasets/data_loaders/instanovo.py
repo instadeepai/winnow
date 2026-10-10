@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import logging
 import re
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
@@ -18,6 +19,8 @@ from winnow.compat.instanovo import ScoredSequence
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.datasets.data_loaders import utils as data_utils
 from winnow.datasets.interfaces import DatasetLoader
+
+logger = logging.getLogger(__name__)
 
 
 class InstaNovoDatasetLoader(DatasetLoader):
@@ -360,6 +363,29 @@ class InstaNovoDatasetLoader(DatasetLoader):
                 f"If you are using an older InstaNovo version, set column_mapping in "
                 f"the data_loader config to match the CSV headers."
             )
+
+        # A predictions file may already hold a column named like one of the
+        # rename targets; recent InstaNovo writes its own `confidence`. Renaming
+        # onto it would leave two columns of that name, and indexing the name
+        # afterwards yields a DataFrame rather than a Series -- the next boolean
+        # combine then fails with "cannot reindex on an axis with duplicate
+        # labels". The value derived here is the one the loader goes on to use,
+        # so the incoming column is the one that gives way. A column that is
+        # itself being renamed is left alone.
+        shadowed = [
+            target
+            for target in rename_dict.values()
+            if target in preds_dataset.columns and target not in rename_dict
+        ]
+        if shadowed:
+            logger.warning(
+                "Dropping column(s) %s from the predictions: Winnow derives its own "
+                "from %s.",
+                ", ".join(sorted(shadowed)),
+                ", ".join(sorted(rename_dict.keys())),
+            )
+            preds_dataset = preds_dataset.drop(columns=shadowed)
+
         preds_dataset.rename(rename_dict, axis=1, inplace=True)
 
         preds_dataset["confidence"] = preds_dataset["confidence"].apply(np.exp)
