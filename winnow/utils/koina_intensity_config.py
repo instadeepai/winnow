@@ -22,6 +22,8 @@ KOINA_RUNTIME_CONFIG_KEYS = frozenset(
 KOINA_INPUT_KEYS = frozenset({"collision_energies", "fragmentation_types"})
 
 UNSUPPORTED_RESIDUES_KEY = "koina.constraints.unsupported_residues"
+INTENSITY_MODEL_KEY = "koina.intensity_model"
+IRT_MODEL_KEY = "koina.irt_model"
 
 DEFAULT_KOINA_INPUT_COLUMNS: Dict[str, str] = {
     "collision_energies": "collision_energy",
@@ -100,6 +102,27 @@ def parse_unsupported_residues(koina_cfg: Any) -> Optional[List[str]]:
     if isinstance(residues, ListConfig):
         residues = OmegaConf.to_container(residues, resolve=True)
     return list(residues)
+
+
+def parse_koina_model_names(
+    koina_cfg: Any,
+    override_keys: Set[str],
+) -> Tuple[Optional[str], Optional[str]]:
+    """Extract the Koina model names that were explicitly overridden.
+
+    A name that is only the shipped default comes back as ``None``: a saved
+    calibrator's model is the one its weights were fitted against, so it is
+    changed only when asked for.
+    """
+    if koina_cfg is None:
+        return None, None
+    intensity = (
+        koina_cfg.get("intensity_model")
+        if INTENSITY_MODEL_KEY in override_keys
+        else None
+    )
+    irt = koina_cfg.get("irt_model") if IRT_MODEL_KEY in override_keys else None
+    return intensity, irt
 
 
 def _active_non_null(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -228,10 +251,27 @@ def apply_koina_intensity_config(
     )
     log_resolved_koina_intensity_config(calibrator, logger)
 
-    # Only when asked for. A saved calibrator's list is the one it was fitted
-    # with, and silently replacing it with the shipped default would narrow the
-    # exclusions for anyone who trained against a wider residue set.
-    if UNSUPPORTED_RESIDUES_KEY not in hydra_override_keys(hydra_overrides):
+    override_keys = hydra_override_keys(hydra_overrides)
+
+    # Both of the following only when asked for. A saved calibrator carries the
+    # model and the exclusion list it was fitted with, and silently replacing
+    # either with the shipped default would change results for everyone who
+    # trained against something else.
+    intensity_model, irt_model = parse_koina_model_names(koina_cfg, override_keys)
+    renamed = calibrator.apply_koina_model_name_overrides(
+        intensity_model=intensity_model,
+        irt_model=irt_model,
+    )
+    if renamed:
+        logger.warning(
+            "Asking %s for predictions from %s instead of the model this "
+            "calibrator was fitted against. Its probabilities are calibrated "
+            "for the fitted model, so refit it before trusting the FDR.",
+            ", ".join(sorted(renamed)),
+            ", ".join(name for name in (intensity_model, irt_model) if name),
+        )
+
+    if UNSUPPORTED_RESIDUES_KEY not in override_keys:
         return
     residues = parse_unsupported_residues(koina_cfg)
     updated = calibrator.apply_unsupported_residues_override(residues)
