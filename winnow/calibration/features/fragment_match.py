@@ -9,6 +9,7 @@ from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.calibration.features.utils import (
     validate_model_input_params,
     resolve_model_inputs,
+    predict_in_single_batches,
     format_intensity_prediction_outputs,
     compute_ion_identifications,
     validate_intensity_model_name,
@@ -265,7 +266,7 @@ class FragmentMatchFeatures(CalibrationFeatures):
             columns=self.model_input_columns,
             model_name=self.intensity_model_name,
         )
-        predictions_per_ion: pd.DataFrame = model.predict(inputs)
+        predictions_per_ion: pd.DataFrame = predict_in_single_batches(model, inputs)
         # This output returns one row per predicted ion, so we need to group by spectrum_id to get one row per peptide.
 
         predictions_per_peptide = format_intensity_prediction_outputs(

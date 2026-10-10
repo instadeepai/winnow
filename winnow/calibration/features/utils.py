@@ -142,6 +142,43 @@ def validate_model_input_params(
         )
 
 
+def predict_in_single_batches(model: Any, inputs: pd.DataFrame) -> pd.DataFrame:
+    """Ask a Koina model for predictions one server batch at a time.
+
+    ``koinapy`` already slices a request into batches of ``model.batchsize``,
+    but it merges the results with ``np.concatenate`` on the raw output arrays.
+    Models whose output width varies with the peptide -- AlphaPeptDeep returns
+    one column per possible fragment of the longest peptide in the batch, where
+    Prosit returns a fixed grid -- produce batches of different widths, and the
+    merge fails with a dimension mismatch before any of it reaches Winnow.
+
+    Keeping each call to one batch leaves koinapy nothing to concatenate. The
+    per-call frames are long, one row per fragment ion, so they append cleanly
+    whatever width each batch had. The requests are the same ones koinapy would
+    have made, so this costs no extra round trips.
+
+    Args:
+        model: A ``koinapy.Koina`` instance.
+        inputs: One row per peptide, indexed as the caller needs the output
+            indexed.
+
+    Returns:
+        The concatenated predictions, with the input index preserved.
+    """
+    batch_size = getattr(model, "batchsize", None)
+    # A model that does not report a usable batch size is asked in one request,
+    # which is what koinapy would have done anyway.
+    if not isinstance(batch_size, int) or batch_size < 1 or len(inputs) <= batch_size:
+        return model.predict(inputs)
+    return pd.concat(
+        [
+            model.predict(inputs.iloc[start : start + batch_size])
+            for start in range(0, len(inputs), batch_size)
+        ],
+        ignore_index=False,
+    )
+
+
 def resolve_model_inputs(
     inputs: pd.DataFrame,
     metadata: pd.DataFrame,

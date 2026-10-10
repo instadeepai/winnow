@@ -10,6 +10,7 @@ from winnow.calibration.features.utils import (
     require_beam_predictions,
     validate_model_input_params,
     resolve_model_inputs,
+    predict_in_single_batches,
     format_intensity_prediction_outputs,
     compute_ion_identifications,
     validate_intensity_model_name,
@@ -280,7 +281,7 @@ class ChimericFeatures(CalibrationFeatures):
             columns=self.model_input_columns,
             model_name=self.prosit_intensity_model_name,
         )
-        predictions_per_ion: pd.DataFrame = model.predict(inputs)
+        predictions_per_ion: pd.DataFrame = predict_in_single_batches(model, inputs)
 
         predictions_per_peptide = format_intensity_prediction_outputs(
             predictions_per_ion
