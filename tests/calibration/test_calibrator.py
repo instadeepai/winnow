@@ -1285,3 +1285,63 @@ class TestProbabilityCalibrator:
             match=r"Training and validation FeatureDataset.columns must be identical",
         ):
             calibrator.fit_from_features(train_ds, val_ds)
+
+
+# apply_unsupported_residues_override
+
+
+class _KoinaBackedFeature:
+    def __init__(self):
+        self.unsupported_residues = ["[UNIMOD:5]", "[UNIMOD:385]", "(+25.98)"]
+
+
+class _NonKoinaFeature:
+    pass
+
+
+def _calibrator_with(features):
+    calibrator = ProbabilityCalibrator()
+    calibrator.feature_dict = features
+    return calibrator
+
+
+def test_apply_unsupported_residues_override_replaces_list():
+    """Every Koina-backed feature takes the new list and is named in the result."""
+    features = {"Fragment Match Features": _KoinaBackedFeature()}
+    calibrator = _calibrator_with(features)
+    updated = calibrator.apply_unsupported_residues_override(["P[UNIMOD:425]", "U"])
+    assert updated == ["Fragment Match Features"]
+    assert features["Fragment Match Features"].unsupported_residues == [
+        "P[UNIMOD:425]",
+        "U",
+    ]
+
+
+def test_apply_unsupported_residues_override_none_is_a_noop():
+    """``None`` leaves the saved list in place."""
+    features = {"Fragment Match Features": _KoinaBackedFeature()}
+    calibrator = _calibrator_with(features)
+    assert calibrator.apply_unsupported_residues_override(None) == []
+    assert features["Fragment Match Features"].unsupported_residues == [
+        "[UNIMOD:5]",
+        "[UNIMOD:385]",
+        "(+25.98)",
+    ]
+
+
+def test_apply_unsupported_residues_override_empty_list_clears_exclusions():
+    """An empty list is a deliberate instruction to exclude nothing."""
+    features = {"Fragment Match Features": _KoinaBackedFeature()}
+    calibrator = _calibrator_with(features)
+    assert calibrator.apply_unsupported_residues_override([]) == [
+        "Fragment Match Features"
+    ]
+    assert features["Fragment Match Features"].unsupported_residues == []
+
+
+def test_apply_unsupported_residues_override_skips_other_features():
+    """Features with no exclusion list are not given one."""
+    features = {"Beam Features": _NonKoinaFeature()}
+    calibrator = _calibrator_with(features)
+    assert calibrator.apply_unsupported_residues_override(["U"]) == []
+    assert not hasattr(features["Beam Features"], "unsupported_residues")

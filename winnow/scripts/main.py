@@ -99,7 +99,9 @@ def _handle_koina_intensity_config(
     if not execute or calibrator is None:
         return
 
-    apply_koina_intensity_config(calibrator, koina_cfg, logger)
+    apply_koina_intensity_config(
+        calibrator, koina_cfg, logger, hydra_overrides=hydra_overrides
+    )
 
 
 def _handle_irt_calibration_config(
