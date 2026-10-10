@@ -21,6 +21,8 @@ KOINA_RUNTIME_CONFIG_KEYS = frozenset(
 
 KOINA_INPUT_KEYS = frozenset({"collision_energies", "fragmentation_types"})
 
+UNSUPPORTED_RESIDUES_KEY = "koina.constraints.unsupported_residues"
+
 DEFAULT_KOINA_INPUT_COLUMNS: Dict[str, str] = {
     "collision_energies": "collision_energy",
     "fragmentation_types": "frag_type",
@@ -81,6 +83,23 @@ def parse_koina_intensity_config(
     constants = _to_plain_dict(constants_cfg)
     columns = _to_plain_dict(columns_cfg)
     return constants, columns
+
+
+def parse_unsupported_residues(koina_cfg: Any) -> Optional[List[str]]:
+    """Extract ``koina.constraints.unsupported_residues`` as a plain list."""
+    if koina_cfg is None:
+        return None
+    constraints = koina_cfg.get("constraints")
+    if constraints is None:
+        return None
+    residues = constraints.get("unsupported_residues")
+    if residues is None:
+        return None
+    from omegaconf import ListConfig, OmegaConf
+
+    if isinstance(residues, ListConfig):
+        residues = OmegaConf.to_container(residues, resolve=True)
+    return list(residues)
 
 
 def _active_non_null(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -196,8 +215,9 @@ def apply_koina_intensity_config(
     calibrator: Any,
     koina_cfg: Any,
     logger: Any,
+    hydra_overrides: Optional[List[str]] = None,
 ) -> None:
-    """Apply CE/frag overrides from predict config to a calibrator."""
+    """Apply CE/frag and residue-exclusion overrides from predict config."""
     if koina_cfg is None:
         return
 
@@ -207,3 +227,17 @@ def apply_koina_intensity_config(
         model_input_columns=columns,
     )
     log_resolved_koina_intensity_config(calibrator, logger)
+
+    # Only when asked for. A saved calibrator's list is the one it was fitted
+    # with, and silently replacing it with the shipped default would narrow the
+    # exclusions for anyone who trained against a wider residue set.
+    if UNSUPPORTED_RESIDUES_KEY not in hydra_override_keys(hydra_overrides):
+        return
+    residues = parse_unsupported_residues(koina_cfg)
+    updated = calibrator.apply_unsupported_residues_override(residues)
+    if updated:
+        logger.info(
+            "Excluding %d residue(s) from Koina requests on %s.",
+            len(residues or []),
+            ", ".join(sorted(updated)),
+        )
