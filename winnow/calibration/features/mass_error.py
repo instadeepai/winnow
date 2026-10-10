@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple
+from typing import Dict, List, Set, Tuple
 
 import numpy as np
 
@@ -23,6 +23,36 @@ def _validate_dataset(dataset: CalibrationDataset) -> None:
         )
 
 
+def _require_known_residues(
+    dataset: CalibrationDataset, residue_masses: Dict[str, float]
+) -> None:
+    """Fail with the residues that have no mass rather than on the first lookup.
+
+    A prediction decoded with a residue set wider than the calibrator's carries
+    tokens the mass table has no entry for. The peptide's mass is then not
+    computable, so there is nothing to fall back to -- but the run should say
+    which residues are missing and where to supply them, not raise a bare
+    ``KeyError`` on whichever one it reached first.
+    """
+    unknown: Set[str] = set()
+    for peptide in dataset.metadata["prediction"]:
+        unknown.update(residue for residue in peptide if residue not in residue_masses)
+    if not unknown:
+        return
+    listed = ", ".join(sorted(unknown)[:10])
+    if len(unknown) > 10:
+        listed += f", ... ({len(unknown)} in total)"
+    raise ValueError(
+        f"No mass is configured for {len(unknown)} predicted residue(s): {listed}. "
+        "The mass error feature needs a mass for every residue the predictions "
+        "use. Supply the residue set they were decoded with in `residues.yaml` "
+        "and point Winnow at it with `--config-dir`; masses missing from a "
+        "loaded calibrator are taken from there. Residue tokens cannot be set "
+        "as command-line overrides because Hydra's override grammar does not "
+        "accept `[` or `:` in a key."
+    )
+
+
 def _compute_signed_mass_errors(
     dataset: CalibrationDataset,
     residue_masses: Dict[str, float],
@@ -39,6 +69,8 @@ def _compute_signed_mass_errors(
             f"{n_invalid} prediction(s) are not valid peptide sequences "
             f"(expected non-empty list of residue tokens)."
         )
+
+    _require_known_residues(dataset, residue_masses)
 
     neutral_mass = dataset.metadata["prediction"].apply(
         lambda peptide: sum(residue_masses[residue] for residue in peptide) + H2O_MASS

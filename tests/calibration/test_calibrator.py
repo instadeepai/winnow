@@ -1345,3 +1345,47 @@ def test_apply_unsupported_residues_override_skips_other_features():
     calibrator = _calibrator_with(features)
     assert calibrator.apply_unsupported_residues_override(["U"]) == []
     assert not hasattr(features["Beam Features"], "unsupported_residues")
+
+
+# add_residue_masses
+
+
+class _MassTableFeature:
+    def __init__(self, masses):
+        self.residue_masses = dict(masses)
+
+
+def test_add_residue_masses_fills_gaps_only():
+    """Missing residues are added; present ones keep their fitted mass."""
+    feature = _MassTableFeature({"G": 57.021464})
+    calibrator = _calibrator_with({"Mass Error (Da)": feature})
+    added, updated = calibrator.add_residue_masses(
+        {"G": 99.9, "W[UNIMOD:35]": 202.074228}
+    )
+    assert added == ["W[UNIMOD:35]"]
+    assert updated == ["Mass Error (Da)"]
+    assert feature.residue_masses == {"G": 57.021464, "W[UNIMOD:35]": 202.074228}
+
+
+def test_add_residue_masses_reports_nothing_when_all_present():
+    """A table that adds no residue leaves the feature out of the result."""
+    feature = _MassTableFeature({"G": 57.021464})
+    calibrator = _calibrator_with({"Mass Error (Da)": feature})
+    assert calibrator.add_residue_masses({"G": 57.021464}) == ([], [])
+
+
+def test_add_residue_masses_empty_input_is_a_noop():
+    """``None`` and an empty table change nothing."""
+    feature = _MassTableFeature({"G": 57.021464})
+    calibrator = _calibrator_with({"Mass Error (Da)": feature})
+    assert calibrator.add_residue_masses(None) == ([], [])
+    assert calibrator.add_residue_masses({}) == ([], [])
+    assert feature.residue_masses == {"G": 57.021464}
+
+
+def test_add_residue_masses_skips_features_without_a_table():
+    """Features that compute no masses are not given a table."""
+    feature = _NonKoinaFeature()
+    calibrator = _calibrator_with({"Beam Features": feature})
+    assert calibrator.add_residue_masses({"U": 150.953636}) == ([], [])
+    assert not hasattr(feature, "residue_masses")
