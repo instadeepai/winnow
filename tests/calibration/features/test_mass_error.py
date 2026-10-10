@@ -370,3 +370,43 @@ class TestMassErrorDaFeature:
         ppm = dataset.metadata.iloc[0]["mass_error_ppm"]
         da = dataset.metadata.iloc[0]["mass_error_da"]
         assert da == pytest.approx(ppm * measured_mz / 1e6 * charge, rel=1e-6)
+
+
+# residues with no configured mass
+
+
+def test_mass_error_names_every_residue_with_no_mass():
+    """An unknown residue is reported by name, not as a bare KeyError."""
+    dataset = CalibrationDataset(
+        metadata=pd.DataFrame(
+            {
+                "precursor_mz": [500.0, 600.0],
+                "precursor_charge": [2, 2],
+                "prediction": [["G", "W[UNIMOD:35]"], ["G", "U"]],
+            }
+        )
+    )
+    feature = MassErrorDaFeature(residue_masses={"G": 57.021464})
+    with pytest.raises(ValueError, match="No mass is configured") as exc:
+        feature.compute(dataset)
+    message = str(exc.value)
+    assert "W[UNIMOD:35]" in message
+    assert "residues.yaml" in message
+
+
+def test_mass_error_computes_when_every_residue_is_known():
+    """A fully covered table computes without raising."""
+    dataset = CalibrationDataset(
+        metadata=pd.DataFrame(
+            {
+                "precursor_mz": [500.0],
+                "precursor_charge": [2],
+                "prediction": [["G", "W[UNIMOD:35]"]],
+            }
+        )
+    )
+    feature = MassErrorDaFeature(
+        residue_masses={"G": 57.021464, "W[UNIMOD:35]": 202.074228}
+    )
+    feature.compute(dataset)
+    assert "mass_error_da" in dataset.metadata.columns

@@ -104,6 +104,19 @@ def _handle_koina_intensity_config(
     )
 
 
+def _handle_residue_masses_config(
+    cfg,
+    calibrator: Optional["ProbabilityCalibrator"] = None,
+) -> None:
+    """Supplement a loaded calibrator's residue masses from the config."""
+    from winnow.utils.residue_masses_config import apply_residue_masses_config
+
+    if calibrator is None:
+        return
+
+    apply_residue_masses_config(calibrator, cfg, logger)
+
+
 def _handle_irt_calibration_config(
     cfg,
     calibrator: Optional["ProbabilityCalibrator"] = None,
@@ -950,6 +963,7 @@ def predict_entry_point(
         execute=True,
         validate=False,
     )
+    _handle_residue_masses_config(cfg, calibrator)
 
     from winnow.utils.irt_calibration_config import maybe_load_irt_regressors
 
@@ -1080,6 +1094,7 @@ def diagnose_calibration_entry_point(
         execute=True,
         validate=False,
     )
+    _handle_residue_masses_config(cfg, calibrator)
 
     from winnow.utils.irt_calibration_config import maybe_load_irt_regressors
 

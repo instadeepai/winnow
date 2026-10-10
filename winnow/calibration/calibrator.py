@@ -7,7 +7,7 @@ import json
 import logging
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 import numpy as np
 from tqdm import tqdm
@@ -585,6 +585,46 @@ class ProbabilityCalibrator:
             feature.unsupported_residues = list(unsupported_residues)
             updated.append(name)
         return updated
+
+    def add_residue_masses(
+        self,
+        residue_masses: Optional[Dict[str, float]],
+    ) -> Tuple[List[str], List[str]]:
+        """Add masses for residues the features have no entry for.
+
+        Residues already present keep the mass the calibrator was fitted with:
+        that is the value its calibration was learned from, and silently moving
+        it would change results that are currently correct. Only residues with
+        no mass at all are added, which is the case that is otherwise not
+        computable.
+
+        Args:
+            residue_masses: Residue tokens mapped to monoisotopic masses.
+                ``None`` or empty leaves every feature untouched.
+
+        Returns:
+            The residues that were added, and the names of the features that
+            gained them.
+        """
+        if not residue_masses:
+            return [], []
+        added: Set[str] = set()
+        updated = []
+        for name, feature in self.feature_dict.items():
+            table = getattr(feature, "residue_masses", None)
+            if table is None:
+                continue
+            missing = {
+                residue: mass
+                for residue, mass in residue_masses.items()
+                if residue not in table
+            }
+            if not missing:
+                continue
+            feature.residue_masses = {**table, **missing}  # type: ignore[attr-defined]
+            added.update(missing)
+            updated.append(name)
+        return sorted(added), updated
 
     # ------------------------------------------------------------------
     # Public instance methods
