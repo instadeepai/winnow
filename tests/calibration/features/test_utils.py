@@ -6,6 +6,7 @@ from typing import Optional
 from unittest.mock import patch
 
 from winnow.calibration.features.utils import (
+    format_intensity_prediction_outputs,
     IonMatchResult,
     IonIdentificationResult,
     find_matching_ions,
@@ -1082,3 +1083,52 @@ class TestXcorr:
         """A single observed peak matching a single theoretical ion should score positive."""
         score = compute_xcorr([300.0], [5000.0], [300.0])
         assert score > 0.0
+
+
+# format_intensity_prediction_outputs
+
+
+def _per_ion(inputs: dict) -> pd.DataFrame:
+    """Two peptides as Koina returns them: one row per ion, indexed by spectrum."""
+    frame = pd.DataFrame(
+        {
+            **inputs,
+            "intensities": [0.2, 1.0, 0.5, 0.7],
+            "mz": [300.0, 100.0, 250.0, 150.0],
+            "annotation": ["y2+1", "b1+1", "y1+1", "b1+1"],
+        },
+        index=["s1", "s1", "s2", "s2"],
+    )
+    return frame
+
+
+@pytest.mark.parametrize(
+    "inputs",
+    [
+        pytest.param(
+            {"collision_energies": [27] * 4, "fragmentation_types": ["HCD"] * 4},
+            id="prosit",
+        ),
+        pytest.param({"instrument_types": ["QE"] * 4}, id="alphapeptdeep"),
+        pytest.param({}, id="ms2pip"),
+    ],
+)
+def test_format_intensity_outputs_takes_whatever_inputs_the_model_had(inputs):
+    """MS2PIP takes no collision energy; formatting must not demand one."""
+    per_ion = _per_ion(
+        {
+            "peptide_sequences": ["PEK"] * 2 + ["AK"] * 2,
+            "precursor_charges": [2] * 4,
+            **inputs,
+        }
+    )
+    result = format_intensity_prediction_outputs(per_ion)
+    assert list(result.index) == ["s1", "s2"]
+    assert list(result["peptide_sequences"]) == ["PEK", "AK"]
+    for column in inputs:
+        assert column in result.columns
+    # Each peptide's ions, sorted by m/z, with intensities and annotations
+    # moved in step.
+    assert list(result.loc["s1", "mz"]) == [100.0, 300.0]
+    assert list(result.loc["s1", "intensities"]) == [1.0, 0.2]
+    assert list(result.loc["s1", "annotation"]) == ["b1+1", "y2+1"]
