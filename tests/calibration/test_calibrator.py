@@ -1389,3 +1389,80 @@ def test_add_residue_masses_skips_features_without_a_table():
     calibrator = _calibrator_with({"Beam Features": feature})
     assert calibrator.add_residue_masses({"U": 150.953636}) == ([], [])
     assert not hasattr(feature, "residue_masses")
+
+
+# apply_koina_model_name_overrides
+
+
+class _IntensityFeature:
+    def __init__(self):
+        self.intensity_model_name = "Prosit_2025_intensity_22PTM"
+
+
+class _ChimericFeature:
+    def __init__(self):
+        self.prosit_intensity_model_name = "Prosit_2025_intensity_22PTM"
+
+
+class _IrtFeature:
+    def __init__(self):
+        self.irt_model_name = "Prosit_2025_irt_22PTM"
+
+
+def test_apply_koina_model_name_overrides_renames_every_intensity_feature():
+    """Both spellings of the intensity model attribute are updated."""
+    features = {
+        "Fragment Match Features": _IntensityFeature(),
+        "Chimeric Features": _ChimericFeature(),
+        "Beam Features": _NonKoinaFeature(),
+    }
+    calibrator = _calibrator_with(features)
+    updated = calibrator.apply_koina_model_name_overrides(
+        intensity_model="AlphaPeptDeep_ms2_generic"
+    )
+    assert sorted(updated) == ["Chimeric Features", "Fragment Match Features"]
+    assert (
+        features["Fragment Match Features"].intensity_model_name
+        == "AlphaPeptDeep_ms2_generic"
+    )
+    assert (
+        features["Chimeric Features"].prosit_intensity_model_name
+        == "AlphaPeptDeep_ms2_generic"
+    )
+
+
+def test_apply_koina_model_name_overrides_keeps_the_irt_model_separate():
+    """Overriding the intensity model alone leaves the iRT model as fitted."""
+    features = {
+        "Fragment Match Features": _IntensityFeature(),
+        "iRT Feature": _IrtFeature(),
+    }
+    calibrator = _calibrator_with(features)
+    updated = calibrator.apply_koina_model_name_overrides(
+        intensity_model="AlphaPeptDeep_ms2_generic"
+    )
+    assert updated == ["Fragment Match Features"]
+    assert features["iRT Feature"].irt_model_name == "Prosit_2025_irt_22PTM"
+
+
+def test_apply_koina_model_name_overrides_none_is_a_noop():
+    """``None`` for both names leaves every feature alone."""
+    features = {"Fragment Match Features": _IntensityFeature()}
+    calibrator = _calibrator_with(features)
+    assert calibrator.apply_koina_model_name_overrides() == []
+    assert (
+        features["Fragment Match Features"].intensity_model_name
+        == "Prosit_2025_intensity_22PTM"
+    )
+
+
+def test_apply_koina_model_name_overrides_rejects_an_unknown_provider():
+    """A name from no supported provider fails before any feature is touched."""
+    features = {"Fragment Match Features": _IntensityFeature()}
+    calibrator = _calibrator_with(features)
+    with pytest.raises(ValueError, match="Invalid intensity model name"):
+        calibrator.apply_koina_model_name_overrides(intensity_model="not_a_model")
+    assert (
+        features["Fragment Match Features"].intensity_model_name
+        == "Prosit_2025_intensity_22PTM"
+    )

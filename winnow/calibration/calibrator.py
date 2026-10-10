@@ -22,7 +22,10 @@ from winnow.calibration.calibration_features import (
     CalibrationFeatures,
     FeatureDependency,
 )
-from winnow.calibration.features.utils import validate_model_input_params
+from winnow.calibration.features.utils import (
+    validate_intensity_model_name,
+    validate_model_input_params,
+)
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.datasets.data_loaders.utils import (
     SEQUENCE_DERIVED_CORRECT_COLUMN,
@@ -584,6 +587,53 @@ class ProbabilityCalibrator:
                 continue
             feature.unsupported_residues = list(unsupported_residues)
             updated.append(name)
+        return updated
+
+    def apply_koina_model_name_overrides(
+        self,
+        intensity_model: Optional[str] = None,
+        irt_model: Optional[str] = None,
+    ) -> List[str]:
+        """Point the Koina-backed features at different models.
+
+        Which Koina model can represent a prediction is a property of that
+        model and of the vocabulary the predictions use, not of the
+        calibrator's learned parameters. A saved calibrator carries the model
+        it was fitted against, so scoring predictions from a wider residue set
+        with a model that covers more of them needs the name refreshed.
+
+        The calibrator's own weights were fitted against the features the
+        saved model produced, so a different model shifts their distributions
+        and the probabilities it outputs are no longer calibrated. Refit the
+        calibrator against the model being used before trusting its FDR.
+
+        Args:
+            intensity_model: Koina intensity model name. ``None`` leaves each
+                feature's saved name untouched.
+            irt_model: Koina iRT model name. ``None`` leaves it untouched.
+
+        Returns:
+            The names of the features that were updated.
+        """
+        wanted = {
+            "intensity_model_name": intensity_model,
+            "prosit_intensity_model_name": intensity_model,
+            "irt_model_name": irt_model,
+        }
+        updated = []
+        for name, feature in self.feature_dict.items():
+            changed = False
+            for attribute, value in wanted.items():
+                if value is None or not hasattr(feature, attribute):
+                    continue
+                if attribute != "irt_model_name":
+                    # The iRT feature accepts any name, so only the intensity
+                    # side has a provider list to check against.
+                    validate_intensity_model_name(value)
+                setattr(feature, attribute, value)
+                changed = True
+            if changed:
+                updated.append(name)
         return updated
 
     def add_residue_masses(
