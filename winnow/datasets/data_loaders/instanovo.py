@@ -307,7 +307,7 @@ class InstaNovoDatasetLoader(DatasetLoader):
                     tokens = self.metrics._split_peptide(sequence)
                     scored_sequences.append(
                         ScoredSequence(
-                            sequence=data_utils._normalize_leucine_tokens(tokens),
+                            sequence=data_utils.replace_isoleucine_with_leucine(tokens),
                             mass_error=None,
                             sequence_log_probability=log_prob,
                             token_log_probabilities=ast.literal_eval(token_log_prob)

@@ -107,25 +107,53 @@ class TestNormalizePeptideCell:
         )
         assert tokens == ["A", "G"]
 
-    def test_leucine_mapped_at_token_level(self, metrics: Metrics) -> None:
-        tokens = data_utils.normalize_peptide_cell(
-            ["A", "L"],
-            metrics,
-            residue_remapping=REMAPPING,
-        )
-        assert tokens == ["A", "I"]
+    def test_residues_are_reported_as_given(self, metrics: Metrics) -> None:
+        """Normalisation canonicalises modifications; it must not rewrite residues.
 
-    def test_string_leucine_mapped_without_corrupting_mod_names(
+        This column is reported. Collapsing I/L here put a residue in the output that
+        was never predicted, and a peptide correct as written then failed to match a
+        reference spelling it the other way.
+        """
+        assert data_utils.normalize_peptide_cell(
+            ["A", "L"], metrics, residue_remapping=REMAPPING
+        ) == ["A", "L"]
+        assert data_utils.normalize_peptide_cell(
+            ["A", "I"], metrics, residue_remapping=REMAPPING
+        ) == ["A", "I"]
+
+    def test_string_residues_preserved_without_corrupting_mod_names(
         self, metrics: Metrics
     ) -> None:
-        """Uppercase L inside a modification name must not be rewritten before split."""
+        """Uppercase L inside a modification name must survive, as must the residue."""
         remapping = {"C[Labelled]": "C[UniMod:999]"}
         tokens = data_utils.normalize_peptide_cell(
             "AC[Labelled]L",
             metrics,
             residue_remapping=remapping,
         )
-        assert tokens == ["A", "C[UniMod:999]", "I"]
+        assert tokens == ["A", "C[UniMod:999]", "L"]
+
+    def test_collapse_is_for_comparison_only(self, metrics: Metrics) -> None:
+        """The regression this guards: a correct prediction must stay correct.
+
+        `replace_isoleucine_with_leucine` exists so two sequences can be compared
+        despite the two residues being isobaric. Applying it to a reported column
+        rewrote predictions the model had right -- `ALAHKYH` was published as
+        `AIAHKYH`, stopped matching the protein it came from, and was reported as
+        needing an I/L substitution.
+        """
+        predicted = ["A", "L", "A", "H", "K", "Y", "H"]
+
+        reported = data_utils.normalize_peptide_cell(
+            predicted, metrics, residue_remapping=REMAPPING
+        )
+        assert reported == predicted
+
+        # The same sequence spelled the other way still compares equal.
+        other_spelling = ["A", "I", "A", "H", "K", "Y", "H"]
+        assert data_utils.replace_isoleucine_with_leucine(
+            predicted
+        ) == data_utils.replace_isoleucine_with_leucine(other_spelling)
 
     def test_modification_remapping_on_list_input(self, metrics: Metrics) -> None:
         tokens = data_utils.normalize_peptide_cell(

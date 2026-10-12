@@ -127,19 +127,26 @@ def add_index_cols(df: pl.DataFrame, fp: Path | str) -> pl.DataFrame:
 _add_index_cols_fn = add_index_cols
 
 
-def _normalize_leucine_tokens(tokens: list[str]) -> list[str]:
-    """Map leucine to isoleucine at the token level."""
-    return ["I" if token == "L" else token for token in tokens]
+def replace_isoleucine_with_leucine(tokens: list[str]) -> list[str]:
+    """Rewrite every isoleucine token as leucine.
+
+    Named for the residue that disappears, because the direction is the whole content
+    of the operation and both are in use: InstaNovo and the peptide registry collapse
+    I into L, so this follows them.
+
+    For comparing two sequences only. The collapsed form must never be reported --
+    it puts a residue in the output that was never predicted, and a peptide that is
+    correct as written then fails to match a reference that spells it the other way.
+    """
+    return ["L" if token == "I" else token for token in tokens]
 
 
 def _apply_token_postprocessing(
     tokens: list[str],
     *,
     residue_remapping: dict[str, str],
-    normalize_leucine: bool = True,
 ) -> list[str]:
-    if normalize_leucine:
-        tokens = _normalize_leucine_tokens(tokens)
+    """Canonicalise modification notation. Residues are left as they were predicted."""
     return [residue_remapping.get(token, token) for token in tokens]
 
 
@@ -148,7 +155,6 @@ def normalize_peptide_cell(
     metrics: Metrics,
     *,
     residue_remapping: dict[str, str],
-    normalize_leucine: bool = True,
     require_label: bool = False,
 ) -> list[str] | None:
     """Normalize one peptide cell to ProForma token list, or ``None`` if absent/empty.
@@ -157,7 +163,6 @@ def normalize_peptide_cell(
         value: Raw or tokenized cell from pandas or polars.
         metrics: InstaNovo metrics for string tokenization.
         residue_remapping: Modification token remapping table.
-        normalize_leucine: When True, map ``L`` → ``I`` at token level.
         require_label: When True, return ``None`` for cells that fail
             :func:`is_usable_peptide_label` before tokenization (ground truth).
     """
@@ -176,7 +181,6 @@ def normalize_peptide_cell(
     tokens = _apply_token_postprocessing(
         tokens,
         residue_remapping=residue_remapping,
-        normalize_leucine=normalize_leucine,
     )
     return tokens if tokens else None
 
@@ -228,8 +232,15 @@ def _row_evaluation_pandas(
     sequence_col: str,
     prediction_col: str,
 ) -> tuple[int, bool]:
-    sequence = as_token_list(row.get(sequence_col)) or []
-    prediction = as_token_list(row.get(prediction_col)) or []
+    # Collapsed here and nowhere else: isoleucine and leucine are isobaric, so a
+    # prediction that differs from the label only in I/L is counted correct -- but
+    # the columns themselves keep the spelling they were given.
+    sequence = replace_isoleucine_with_leucine(
+        as_token_list(row.get(sequence_col)) or []
+    )
+    prediction = replace_isoleucine_with_leucine(
+        as_token_list(row.get(prediction_col)) or []
+    )
     sequence_valid = bool(row["valid_sequence"])
     prediction_valid = bool(row["valid_prediction"])
     num_matches = row_num_matches(
@@ -256,8 +267,15 @@ def _row_evaluation_polars(
     sequence_col: str,
     prediction_col: str,
 ) -> tuple[int, bool]:
-    sequence = as_token_list(row.get(sequence_col)) or []
-    prediction = as_token_list(row.get(prediction_col)) or []
+    # Collapsed here and nowhere else: isoleucine and leucine are isobaric, so a
+    # prediction that differs from the label only in I/L is counted correct -- but
+    # the columns themselves keep the spelling they were given.
+    sequence = replace_isoleucine_with_leucine(
+        as_token_list(row.get(sequence_col)) or []
+    )
+    prediction = replace_isoleucine_with_leucine(
+        as_token_list(row.get(prediction_col)) or []
+    )
     sequence_valid = bool(row["valid_sequence"])
     prediction_valid = bool(row["valid_prediction"])
     num_matches = row_num_matches(

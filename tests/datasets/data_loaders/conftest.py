@@ -15,6 +15,7 @@ def full_residue_masses():
         "T": 101.047670,
         "C": 103.009185,
         "I": 113.084064,
+        "L": 113.084064,  # isobaric with I; the production config defines both
         "N": 114.042927,
         "D": 115.026943,
         "Q": 128.058578,
