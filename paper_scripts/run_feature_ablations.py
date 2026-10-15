@@ -127,6 +127,16 @@ REDUCED_FRAGMENT_COLUMNS = [
 # Default training matrix columns.
 REDUCED_TRAIN_COLUMNS: list[str] = FEATURE_SUBSETS["no_fragment_similarity"]["columns"]
 
+# Hydra overrides so eval features include the beam and token-score columns of the
+# training matrices (same as HELAQC_FEATURE_INVESTIGATION_OVERRIDES in Makefile.paper).
+EVAL_FEATURE_COMPUTE_OVERRIDES: list[str] = [
+    "+calibrator.features.beam_features._target_=winnow.calibration.calibration_features.BeamFeatures",
+    "+calibrator.features.token_score_features._target_=winnow.calibration.calibration_features.TokenScoreFeatures",
+    "calibrator.features.retention_time_feature.min_train_points=5",
+]
+# Cached eval Parquets missing any of these predate EVAL_FEATURE_COMPUTE_OVERRIDES.
+EVAL_CACHE_REQUIRED_COLUMNS: list[str] = [*BEAM_COLUMNS, *TOKEN_COLUMNS]
+
 # Hydra overrides for mass_error_da instead of mass_error_ppm.
 REDUCED_FEATURE_COMPUTE_OVERRIDES: list[str] = [
     "~calibrator.features.mass_error",
@@ -308,11 +318,18 @@ def _get_residue_masses() -> dict[str, float]:
 # Eval feature computation
 # ---------------------------------------------------------------------------
 def _feature_compute_overrides(reference_model_dir: Path | None) -> list[str]:
-    """Hydra overrides so eval features match a mass_error_da / reduced-feature model."""
+    """Hydra overrides so eval features match the training matrices and reference model."""
+    overrides = list(EVAL_FEATURE_COMPUTE_OVERRIDES)
     ref_cols = _reference_model_columns(reference_model_dir)
     if ref_cols and MASS_ERROR_DA in ref_cols:
-        return list(REDUCED_FEATURE_COMPUTE_OVERRIDES)
-    return []
+        overrides.extend(REDUCED_FEATURE_COMPUTE_OVERRIDES)
+    return overrides
+
+
+def _missing_cached_eval_columns(cache_path: Path) -> list[str]:
+    """Return required eval feature columns absent from a cached Parquet."""
+    cached = set(pl.read_parquet_schema(cache_path))
+    return [c for c in EVAL_CACHE_REQUIRED_COLUMNS if c not in cached]
 
 
 def _compute_eval_features_for_dataset(
@@ -332,8 +349,16 @@ def _compute_eval_features_for_dataset(
     """
     cache_path = cache_dir / f"{name}.parquet"
     if cache_path.exists():
-        logger.info("Using cached eval features for %s at %s", name, cache_path)
-        return cache_path
+        missing = _missing_cached_eval_columns(cache_path)
+        if not missing:
+            logger.info("Using cached eval features for %s at %s", name, cache_path)
+            return cache_path
+        logger.warning(
+            "Cached eval features for %s at %s lack %s; recomputing.",
+            name,
+            cache_path,
+            missing,
+        )
 
     from hydra import compose, initialize_config_dir
     from hydra.utils import instantiate
@@ -461,6 +486,12 @@ def _require_cached_eval_features(cache_dir: Path, name: str) -> Path:
     if not cache_path.exists():
         raise FileNotFoundError(
             f"--skip-feature-compute set but cache not found: {cache_path}"
+        )
+    missing = _missing_cached_eval_columns(cache_path)
+    if missing:
+        raise ValueError(
+            f"--skip-feature-compute set but cache {cache_path} lacks {missing}; "
+            "rerun without --skip-feature-compute to recompute it."
         )
     return cache_path
 
