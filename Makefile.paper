@@ -141,14 +141,17 @@ HELAQC_DNS_LABEL_instanovo := InstaNovo
 HELAQC_DNS_MODEL_instanovo := $(HELAQC_MODEL)
 HELAQC_DNS_LOADER_instanovo := instanovo
 HELAQC_DNS_PREDS_DIR_instanovo := instanovo
+HELAQC_DNS_PREDS_EXT_instanovo := csv
 HELAQC_DNS_LABEL_casanovo := Casanovo
 HELAQC_DNS_MODEL_casanovo := $(CASANOVO_HELAQC_MODEL)
 HELAQC_DNS_LOADER_casanovo := mztab
 HELAQC_DNS_PREDS_DIR_casanovo := casanovo
+HELAQC_DNS_PREDS_EXT_casanovo := mztab
 HELAQC_DNS_LABEL_primenovo := pi-PrimeNovo
 HELAQC_DNS_MODEL_primenovo := $(PRIMENOVO_HELAQC_MODEL)
 HELAQC_DNS_LOADER_primenovo := primenovo
 HELAQC_DNS_PREDS_DIR_primenovo := primenovo
+HELAQC_DNS_PREDS_EXT_primenovo := tsv
 
 # FDR tool recompute datasets. Laptop keeps helaqc only (celegans holdout >5 min).
 FDR_RECOMPUTE_DATASETS_LAPTOP ?= helaqc
@@ -370,7 +373,7 @@ paper-recompute-helaqc-$(1)-$(2):
 	$$(WINNOW) predict \
 	  data_loader=$$(HELAQC_DNS_LOADER_$(1)) \
 	  dataset.spectrum_path_or_directory=$$(HELAQC_DATA)/$(2).parquet \
-	  dataset.predictions_path=$$(HELAQC_DATA)/$$(HELAQC_DNS_PREDS_DIR_$(1))/$(2)_preds.csv \
+	  dataset.predictions_path=$$(HELAQC_DATA)/$$(HELAQC_DNS_PREDS_DIR_$(1))/$(2)_preds.$$(HELAQC_DNS_PREDS_EXT_$(1)) \
 	  calibrator.pretrained_model_name_or_path=$$(HELAQC_DNS_MODEL_$(1)) \
 	  fdr_control.fdr_threshold=$$(PREDICT_FDR_THRESHOLD) \
 	  $$(KOINA_FRAGMENT_MATCH_CONSTANTS) \
