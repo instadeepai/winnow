@@ -202,10 +202,16 @@ def resolve_all_feature_columns(
                 and MASS_ERROR_PPM in df.columns
             ):
                 cols.append(MASS_ERROR_PPM)
-            elif col in df.columns:
+            else:
                 cols.append(col)
     else:
-        cols = [c for c in REDUCED_TRAIN_COLUMNS if c in df.columns]
+        # REDUCED_TRAIN_COLUMNS names mass_error_ppm; use whichever mass-error
+        # column the data has (current matrices only have mass_error_da).
+        mass_col = _resolve_mass_error_column(df, reference_model_dir)
+        cols = [
+            mass_col if c in (MASS_ERROR_PPM, MASS_ERROR_DA) else c
+            for c in REDUCED_TRAIN_COLUMNS
+        ]
     return _columns_available(df, cols)
 
 
