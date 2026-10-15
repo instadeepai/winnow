@@ -127,6 +127,16 @@ REDUCED_FRAGMENT_COLUMNS = [
 # Default training matrix columns.
 REDUCED_TRAIN_COLUMNS: list[str] = FEATURE_SUBSETS["no_fragment_similarity"]["columns"]
 
+# Hydra overrides so eval features include the beam and token-score columns of the
+# training matrices (same as HELAQC_FEATURE_INVESTIGATION_OVERRIDES in Makefile.paper).
+EVAL_FEATURE_COMPUTE_OVERRIDES: list[str] = [
+    "+calibrator.features.beam_features._target_=winnow.calibration.calibration_features.BeamFeatures",
+    "+calibrator.features.token_score_features._target_=winnow.calibration.calibration_features.TokenScoreFeatures",
+    "calibrator.features.retention_time_feature.min_train_points=5",
+]
+# Cached eval Parquets missing any of these predate EVAL_FEATURE_COMPUTE_OVERRIDES.
+EVAL_CACHE_REQUIRED_COLUMNS: list[str] = [*BEAM_COLUMNS, *TOKEN_COLUMNS]
+
 # Hydra overrides for mass_error_da instead of mass_error_ppm.
 REDUCED_FEATURE_COMPUTE_OVERRIDES: list[str] = [
     "~calibrator.features.mass_error",
@@ -192,10 +202,16 @@ def resolve_all_feature_columns(
                 and MASS_ERROR_PPM in df.columns
             ):
                 cols.append(MASS_ERROR_PPM)
-            elif col in df.columns:
+            else:
                 cols.append(col)
     else:
-        cols = [c for c in REDUCED_TRAIN_COLUMNS if c in df.columns]
+        # REDUCED_TRAIN_COLUMNS names mass_error_ppm; use whichever mass-error
+        # column the data has (current matrices only have mass_error_da).
+        mass_col = _resolve_mass_error_column(df, reference_model_dir)
+        cols = [
+            mass_col if c in (MASS_ERROR_PPM, MASS_ERROR_DA) else c
+            for c in REDUCED_TRAIN_COLUMNS
+        ]
     return _columns_available(df, cols)
 
 
@@ -308,11 +324,18 @@ def _get_residue_masses() -> dict[str, float]:
 # Eval feature computation
 # ---------------------------------------------------------------------------
 def _feature_compute_overrides(reference_model_dir: Path | None) -> list[str]:
-    """Hydra overrides so eval features match a mass_error_da / reduced-feature model."""
+    """Hydra overrides so eval features match the training matrices and reference model."""
+    overrides = list(EVAL_FEATURE_COMPUTE_OVERRIDES)
     ref_cols = _reference_model_columns(reference_model_dir)
     if ref_cols and MASS_ERROR_DA in ref_cols:
-        return list(REDUCED_FEATURE_COMPUTE_OVERRIDES)
-    return []
+        overrides.extend(REDUCED_FEATURE_COMPUTE_OVERRIDES)
+    return overrides
+
+
+def _missing_cached_eval_columns(cache_path: Path) -> list[str]:
+    """Return required eval feature columns absent from a cached Parquet."""
+    cached = set(pl.read_parquet_schema(cache_path))
+    return [c for c in EVAL_CACHE_REQUIRED_COLUMNS if c not in cached]
 
 
 def _compute_eval_features_for_dataset(
@@ -320,8 +343,6 @@ def _compute_eval_features_for_dataset(
     spectra_path: str,
     predictions_path: str,
     cache_dir: Path,
-    koina_url: str,
-    koina_ssl: bool,
     koina_mode: str = "columns",
     feature_overrides: list[str] | None = None,
 ) -> Path:
@@ -329,13 +350,21 @@ def _compute_eval_features_for_dataset(
 
     Args:
         koina_mode: ``"columns"`` to read collision_energy / frag_type from
-            per-row metadata columns, or ``"constants"`` to use fixed values
-            (CE=27, HCD).
+            per-row metadata columns, or ``"constants"`` to use the
+            ``koina.input_constants`` defaults (CE=27, HCD).
     """
     cache_path = cache_dir / f"{name}.parquet"
     if cache_path.exists():
-        logger.info("Using cached eval features for %s at %s", name, cache_path)
-        return cache_path
+        missing = _missing_cached_eval_columns(cache_path)
+        if not missing:
+            logger.info("Using cached eval features for %s at %s", name, cache_path)
+            return cache_path
+        logger.warning(
+            "Cached eval features for %s at %s lack %s; recomputing.",
+            name,
+            cache_path,
+            missing,
+        )
 
     from hydra import compose, initialize_config_dir
     from hydra.utils import instantiate
@@ -347,19 +376,19 @@ def _compute_eval_features_for_dataset(
     logger.info("Computing features for eval dataset %s ...", name)
 
     if koina_mode == "columns":
+        # calibrator.yaml fills model_input_constants from koina.input_constants, so
+        # clear both before mapping the inputs to per-row metadata columns.
         koina_overrides = [
+            "koina.input_constants={}",
             "+koina.input_columns.collision_energies=collision_energy",
             "+koina.input_columns.fragmentation_types=frag_type",
+            "calibrator.features.fragment_match_features.model_input_constants=null",
             "+calibrator.features.fragment_match_features.model_input_columns.collision_energies=collision_energy",
             "+calibrator.features.fragment_match_features.model_input_columns.fragmentation_types=frag_type",
         ]
     else:
-        koina_overrides = [
-            "+koina.input_constants.collision_energies=27",
-            "+koina.input_constants.fragmentation_types=HCD",
-            "+calibrator.features.fragment_match_features.model_input_constants.collision_energies=27",
-            "+calibrator.features.fragment_match_features.model_input_constants.fragmentation_types=HCD",
-        ]
+        # koina.yaml already defaults input_constants to CE=27, HCD.
+        koina_overrides = []
 
     with initialize_config_dir(
         config_dir=str(primary_config_dir),
@@ -371,12 +400,9 @@ def _compute_eval_features_for_dataset(
             overrides=[
                 f"dataset.spectrum_path_or_directory={spectra_path}",
                 f"dataset.predictions_path={predictions_path}",
-                f"koina.server_url={koina_url}",
-                f"koina.ssl={koina_ssl}",
                 *koina_overrides,
                 *(feature_overrides or []),
                 "labelled=true",
-                "filter_empty_predictions=true",
             ],
         )
 
@@ -467,13 +493,17 @@ def _require_cached_eval_features(cache_dir: Path, name: str) -> Path:
         raise FileNotFoundError(
             f"--skip-feature-compute set but cache not found: {cache_path}"
         )
+    missing = _missing_cached_eval_columns(cache_path)
+    if missing:
+        raise ValueError(
+            f"--skip-feature-compute set but cache {cache_path} lacks {missing}; "
+            "rerun without --skip-feature-compute to recompute it."
+        )
     return cache_path
 
 
 def compute_all_eval_features(
     output_dir: Path,
-    koina_url: str,
-    koina_ssl: bool,
     astral_spectra: str | None,
     astral_predictions: str | None,
     skip_feature_compute: bool,
@@ -500,8 +530,6 @@ def compute_all_eval_features(
                 spectra_path,
                 predictions_path,
                 cache_dir,
-                koina_url,
-                koina_ssl,
                 koina_mode=info.get("koina_mode", "columns"),
                 feature_overrides=feature_overrides,
             )
@@ -516,8 +544,6 @@ def compute_all_eval_features(
                 astral_spectra,
                 astral_predictions,
                 cache_dir,
-                koina_url,
-                koina_ssl,
                 feature_overrides=feature_overrides,
             )
 
@@ -652,8 +678,11 @@ def train_ablation_models(
         train_ds = _column_slice_to_feature_dataset(train_df, columns)
         val_ds = _column_slice_to_feature_dataset(val_df, columns)
 
+        # No feature modules are registered (features are pre-computed), so the
+        # column subset must be set explicitly for fit_from_features' schema check.
         calibrator = ProbabilityCalibrator(
             seed=seed,
+            training_feature_columns=list(train_ds.columns),
             **hp,  # type: ignore[arg-type]
         )
         history = calibrator.fit_from_features(train_ds, val_ds)
@@ -1459,14 +1488,6 @@ def main(
         int,
         typer.Option(help="Random seed."),
     ] = 42,
-    koina_url: Annotated[
-        str,
-        typer.Option(help="Koina server URL for eval feature computation."),
-    ] = "koina.wilhelmlab.org:443",
-    koina_ssl: Annotated[
-        bool,
-        typer.Option(help="Use SSL for Koina server."),
-    ] = True,
     skip_feature_compute: Annotated[
         bool,
         typer.Option(
@@ -1554,8 +1575,6 @@ def main(
     logger.info("Step 1: Computing eval features...")
     eval_parquets = compute_all_eval_features(
         output_dir,
-        koina_url,
-        koina_ssl,
         astral_spectra,
         astral_predictions,
         skip_feature_compute,
