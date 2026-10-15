@@ -654,6 +654,7 @@ def train_ablation_models(
 
         calibrator = ProbabilityCalibrator(
             seed=seed,
+            training_feature_columns=[c for c in columns if c != "confidence"],
             **hp,  # type: ignore[arg-type]
         )
         history = calibrator.fit_from_features(train_ds, val_ds)
