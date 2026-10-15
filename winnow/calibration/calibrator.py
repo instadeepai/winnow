@@ -38,17 +38,87 @@ from winnow.utils.paths import resolve_data_path
 
 logger = logging.getLogger(__name__)
 
+# Feature config keys written by older winnow versions that current constructors no
+# longer accept. The Koina server is no longer configured per feature, and excluded
+# columns are captured by the saved ``feature_columns`` schema.
+_LEGACY_DROPPED_FEATURE_KEYS = frozenset(
+    {"koina_server_url", "koina_ssl", "excluded_columns"}
+)
+_LEGACY_MZ_TOLERANCE_KEYS = {"mz_tolerance_ppm": "ppm", "mz_tolerance_da": "da"}
+
 
 def _deserialize_calibration_feature(
     feature_config: Dict[str, Any],
 ) -> CalibrationFeatures:
     """Rebuild a feature instance from a saved ``config.json`` entry."""
     feature_config = strip_runtime_keys_from_feature_config(dict(feature_config))
+    feature_config = _migrate_legacy_feature_config(feature_config)
     target = feature_config.pop("_target_")
     module_path, class_name = target.rsplit(".", 1)
     module = importlib.import_module(module_path)
     feature_class = getattr(module, class_name)
     return feature_class(**feature_config)
+
+
+def _migrate_legacy_feature_config(feature_config: Dict[str, Any]) -> Dict[str, Any]:
+    """Map a feature config saved by an older winnow version onto current arguments.
+
+    Drops keys that are no longer constructor arguments and converts the
+    ``mz_tolerance_ppm`` / ``mz_tolerance_da`` pair into ``mz_tolerance`` plus
+    ``mz_tolerance_unit``.
+
+    Args:
+        feature_config: Saved feature config, including ``_target_``.
+
+    Returns:
+        A new config dict accepted by the current feature constructor.
+
+    Raises:
+        ValueError: If the legacy tolerance keys do not set exactly one tolerance,
+            or are combined with the current ``mz_tolerance`` keys.
+    """
+    target = feature_config.get("_target_", "<unknown>")
+    dropped = sorted(_LEGACY_DROPPED_FEATURE_KEYS & feature_config.keys())
+    legacy_tolerance_keys = sorted(
+        _LEGACY_MZ_TOLERANCE_KEYS.keys() & feature_config.keys()
+    )
+    if not dropped and not legacy_tolerance_keys:
+        return feature_config
+
+    migrated = {
+        key: value
+        for key, value in feature_config.items()
+        if key not in _LEGACY_DROPPED_FEATURE_KEYS
+        and key not in _LEGACY_MZ_TOLERANCE_KEYS
+    }
+    if legacy_tolerance_keys:
+        if "mz_tolerance" in migrated or "mz_tolerance_unit" in migrated:
+            raise ValueError(
+                f"Feature config for {target} mixes legacy keys {legacy_tolerance_keys} "
+                "with mz_tolerance / mz_tolerance_unit."
+            )
+        set_tolerances = {
+            unit: feature_config[key]
+            for key, unit in _LEGACY_MZ_TOLERANCE_KEYS.items()
+            if feature_config.get(key) is not None
+        }
+        if len(set_tolerances) != 1:
+            raise ValueError(
+                f"Feature config for {target} must set exactly one of "
+                f"mz_tolerance_ppm or mz_tolerance_da, got {set_tolerances or 'neither'}."
+            )
+        ((unit, tolerance),) = set_tolerances.items()
+        migrated["mz_tolerance"] = tolerance
+        migrated["mz_tolerance_unit"] = unit
+
+    logger.warning(
+        "Migrated legacy feature config for %s (dropped %s, converted %s). "
+        "Re-save the calibrator to update its config.json.",
+        target,
+        dropped or "nothing",
+        legacy_tolerance_keys or "nothing",
+    )
+    return migrated
 
 
 def _apply_koina_constant_overrides(

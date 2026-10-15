@@ -11,6 +11,7 @@ from winnow.calibration.calibrator import (
     CalibratorNetwork,
     ProbabilityCalibrator,
     TrainingHistory,
+    _migrate_legacy_feature_config,
 )
 from winnow.calibration.calibration_features import (
     CalibrationFeatures,
@@ -1017,6 +1018,79 @@ class TestProbabilityCalibrator:
         feat = loaded.feature_dict["Fragment Match Features"]
         assert feat.model_input_constants is None
         assert feat.model_input_columns is None
+
+    @pytest.mark.parametrize(
+        ("legacy_tolerance", "expected_tolerance", "expected_unit"),
+        [
+            ({"mz_tolerance_ppm": 20, "mz_tolerance_da": None}, 20.0, "ppm"),
+            ({"mz_tolerance_ppm": None, "mz_tolerance_da": 0.02}, 0.02, "da"),
+        ],
+    )
+    def test_load_migrates_legacy_feature_config_keys(
+        self, tmp_path, legacy_tolerance, expected_tolerance, expected_unit
+    ):
+        """Checkpoints saved before the m/z tolerance rename still load."""
+        calibrator = ProbabilityCalibrator(max_epochs=2, hidden_dims=(8,), seed=42)
+        feature = FragmentMatchFeatures(mz_tolerance=1.0, mz_tolerance_unit="da")
+        calibrator.add_feature(feature)
+        train_ds = self._feature_dataset_with_width(
+            1 + len(feature.columns), columns=list(feature.columns)
+        )
+        calibrator.fit_from_features(train_ds)
+        ProbabilityCalibrator.save(calibrator, tmp_path / "legacy_model")
+
+        with open(tmp_path / "legacy_model" / "config.json") as f:
+            config = json.load(f)
+        feature_config = config["features"]["Fragment Match Features"]
+        del feature_config["mz_tolerance"]
+        del feature_config["mz_tolerance_unit"]
+        feature_config.update(legacy_tolerance)
+        feature_config["koina_server_url"] = "koina.wilhelmlab.org:443"
+        feature_config["koina_ssl"] = True
+        feature_config["excluded_columns"] = ["spectral_angle"]
+        with open(tmp_path / "legacy_model" / "config.json", "w") as f:
+            json.dump(config, f, indent=2)
+
+        loaded = ProbabilityCalibrator.load(tmp_path / "legacy_model")
+        feat = loaded.feature_dict["Fragment Match Features"]
+        assert feat.mz_tolerance == expected_tolerance
+        assert feat.mz_tolerance_unit == expected_unit
+        assert loaded.columns == calibrator.columns
+
+    def test_migrate_legacy_feature_config_leaves_current_config_unchanged(self):
+        """Configs without legacy keys pass through as the same object."""
+        config = {
+            "_target_": "winnow.calibration.features.fragment_match.FragmentMatchFeatures",
+            "mz_tolerance": 20,
+            "mz_tolerance_unit": "ppm",
+        }
+        assert _migrate_legacy_feature_config(config) is config
+
+    def test_migrate_legacy_feature_config_drops_keys_without_tolerance(self):
+        """Features without a tolerance (e.g. iRT, beam) only lose the dropped keys."""
+        config = {
+            "_target_": "winnow.calibration.features.retention_time.RetentionTimeFeature",
+            "min_train_points": 5,
+            "koina_server_url": "koina.wilhelmlab.org:443",
+            "koina_ssl": True,
+        }
+        assert _migrate_legacy_feature_config(config) == {
+            "_target_": "winnow.calibration.features.retention_time.RetentionTimeFeature",
+            "min_train_points": 5,
+        }
+
+    @pytest.mark.parametrize(
+        "config",
+        [
+            {"mz_tolerance_ppm": None, "mz_tolerance_da": None},
+            {"mz_tolerance_ppm": 20, "mz_tolerance_da": 0.02},
+            {"mz_tolerance_ppm": 20, "mz_tolerance": 20, "mz_tolerance_unit": "ppm"},
+        ],
+    )
+    def test_migrate_legacy_feature_config_rejects_ambiguous_tolerance(self, config):
+        """Legacy tolerance keys must resolve to exactly one tolerance."""
+        with pytest.raises(ValueError, match="mz_tolerance"):
+            _migrate_legacy_feature_config({"_target_": "Feature", **config})
 
     def test_save_load_roundtrip(self, tmp_path):
         """Test that save/load produces a working calibrator with correct config."""
