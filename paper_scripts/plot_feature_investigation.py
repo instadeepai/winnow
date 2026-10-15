@@ -147,7 +147,7 @@ _NICE_LABELS: dict[str, str] = {
     "std_token_probability": "Std. token probability",
     "predicted_irt": "Regressor-predicted iRT",
     "irt": "Koina-predicted iRT",
-    "retention_time": "Retention time (s)",
+    "retention_time": "Retention time (min)",
 }
 
 
@@ -1184,6 +1184,9 @@ def _load_metadata(
         f"{len(df_meta):,}",
         len(df_meta.columns),
     )
+    # The metadata parquets store Koina / regressor iRT as "iRT" / "predicted iRT"; the plotting
+    # code (plot_irt) expects "irt" / "predicted_irt". Normalise so the iRT scatters are produced.
+    df_meta = df_meta.rename(columns={"iRT": "irt", "predicted iRT": "predicted_irt"})
     df_meta["hue"] = df_meta["correct"].map(
         {True: HUE_LABEL_CORRECT, False: HUE_LABEL_INCORRECT}
     )
