@@ -641,8 +641,11 @@ def train_ablation_models(
         train_ds = _column_slice_to_feature_dataset(train_df, columns)
         val_ds = _column_slice_to_feature_dataset(val_df, columns)
 
+        # No feature modules are registered (features are pre-computed), so the
+        # column subset must be set explicitly for fit_from_features' schema check.
         calibrator = ProbabilityCalibrator(
             seed=seed,
+            training_feature_columns=list(train_ds.columns),
             **hp,  # type: ignore[arg-type]
         )
         history = calibrator.fit_from_features(train_ds, val_ds)
