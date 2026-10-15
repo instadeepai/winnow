@@ -28,6 +28,27 @@ _MID_SEQUENCE_N_TERMINAL_MODS = [
 class TestPrimeNovoDatasetLoader:
     """Tests for PrimeNovoDatasetLoader: spectrum_id from TITLE/label, then join."""
 
+    @staticmethod
+    def _write_spectra_table(path, suffix):
+        df = pl.DataFrame(
+            {
+                "spectrum_id": ["raw:1324", "raw:1336"],
+                "experiment_name": ["raw", "raw"],
+                "scan_number": [1324, 1336],
+                "precursor_mz": [358.5, 500.0],
+                "precursor_charge": [3, 2],
+                "retention_time": [757.5, 820.0],
+                "mz_array": [[100.0, 200.0], [150.0]],
+                "intensity_array": [[1.0, 2.0], [1.5]],
+                "sequence": ["GVSREEIQR", "YEDMNNYDPTK"],
+            }
+        )
+        if suffix == ".parquet":
+            df.write_parquet(path)
+        else:
+            df.write_ipc(path)
+        return path
+
     @pytest.fixture()
     def loader(self, full_residue_masses):
         return PrimeNovoDatasetLoader(
@@ -424,3 +445,46 @@ class TestPrimeNovoDatasetLoader:
         row = meta.set_index("spectrum_id").loc["spectra:run_X_SCANS_1"]
         assert bool(row["correct"]) is True
         assert row["num_matches"] == len(row["sequence"])
+
+    @pytest.mark.parametrize("suffix", [".parquet", ".ipc"])
+    def test_load_spectrum_data_table_uses_row_order(self, loader, tmp_path, suffix):
+        path = self._write_spectra_table(tmp_path / f"spectra{suffix}", suffix)
+        df, has_labels = loader._load_spectrum_data(path)
+        assert has_labels is True
+        assert df["spectrum_id"].to_list() == ["spectra:0", "spectra:1"]
+        assert df["experiment_name"].to_list() == ["spectra", "spectra"]
+
+    @pytest.mark.parametrize("suffix", [".parquet", ".ipc"])
+    def test_load_table_joins_labels_on_row_index(self, loader, tmp_path, suffix):
+        spectra = self._write_spectra_table(tmp_path / f"spectra{suffix}", suffix)
+        preds = tmp_path / "denovo.tsv"
+        pd.DataFrame(
+            {
+                "label": [1, 0],
+                "prediction": ["YEDM[+15.995]NNYDPTK", "GVSREELQR"],
+                "charge": [2, 3],
+                "score": [0.0002, 0.9780],
+            }
+        ).to_csv(preds, sep="\t", index=False)
+
+        dataset = loader.load(data_path=spectra, predictions_path=preds)
+        meta = dataset.metadata.set_index("spectrum_id")
+        assert sorted(meta.index) == ["spectra:0", "spectra:1"]
+        assert meta.loc["spectra:0", "precursor_mz"] == 358.5
+        assert meta.loc["spectra:0", "prediction_untokenised"] == "GVSREELQR"
+        assert meta.loc["spectra:1", "precursor_mz"] == 500.0
+        assert "M[UNIMOD:35]" in meta.loc["spectra:1", "prediction"]
+
+    def test_load_table_raises_when_label_is_not_a_row_index(self, loader, tmp_path):
+        spectra = self._write_spectra_table(tmp_path / "spectra.parquet", ".parquet")
+        preds = tmp_path / "denovo.tsv"
+        pd.DataFrame(
+            {
+                "label": ["run_X_SCANS_1"],
+                "prediction": ["GVSREELQR"],
+                "charge": [3],
+                "score": [0.978],
+            }
+        ).to_csv(preds, sep="\t", index=False)
+        with pytest.raises(ValueError, match="spectrum_id values not present"):
+            loader.load(data_path=spectra, predictions_path=preds)

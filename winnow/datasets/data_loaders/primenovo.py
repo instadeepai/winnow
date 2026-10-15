@@ -1,20 +1,26 @@
-"""pi-PrimeNovo TSV + MGF dataset loader.
+"""pi-PrimeNovo TSV + MGF / Parquet / IPC dataset loader.
 
 Spectrum-prediction linking
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Spectra are loaded from ``.mgf`` with matchms. Each ion's matchms ``title`` comes
-from the MGF ``TITLE`` field and may be any non-empty string; pi-PrimeNovo copies
-that value into the TSV ``label`` column. Within one MGF file, ``TITLE`` values
-must be unique.
+Spectra are loaded from ``.mgf`` with matchms, or from ``.parquet`` / ``.ipc``.
+
+For MGF, each ion's matchms ``title`` comes from the MGF ``TITLE`` field and may be
+any non-empty string; pi-PrimeNovo copies that value into the TSV ``label`` column.
+Within one MGF file, ``TITLE`` values must be unique.
+
+For Parquet / IPC, spectra are keyed by 0-based row order (as for MZTab), so TSV
+``label`` values must be row indices into the spectrum file. This is the case when
+pi-PrimeNovo was run on an MGF exported from that file with ``TITLE`` set to the row
+index.
 
 Both sides receive the same ``spectrum_id`` form before joining:
 
 * MGF: ``{experiment_name}:{title}``
+* Parquet / IPC: ``{experiment_name}:{row_index}``
 * TSV: ``{experiment_name}:{label}``
 
 where ``experiment_name`` is the spectrum path stem (``Path(data_path).stem``).
-``TITLE`` values must be unique within one MGF file, and TSV ``label`` values
-must be unique within the predictions file. The tables are then inner-joined on
+TSV ``label`` values must be unique within the predictions file. The tables are then inner-joined on
 ``spectrum_id`` (InstaNovo standard): spectra without a prediction are dropped;
 predictions whose ``label`` does not match any spectrum ``TITLE`` raise.
 
@@ -61,11 +67,13 @@ class PrimeNovoDatasetLoader(DatasetLoader):
     """Loader for pi-PrimeNovo predictions in TSV format.
 
     pi-PrimeNovo writes predictions to a tab-separated file with fixed columns
-    ``label``, ``prediction``, ``charge``, ``score``. Spectra (``.mgf``) are loaded
-    with matchms. ``spectrum_id`` is ``{experiment_name}:{title}`` on the MGF side and
-    ``{experiment_name}:{label}`` on the TSV side (pi-PrimeNovo sets TSV ``label`` from the
-    MGF ``TITLE``). Titles and labels may be any non-empty string but must each be
-    unique within their file. Tables are inner-joined on ``spectrum_id``.
+    ``label``, ``prediction``, ``charge``, ``score``. Spectra are loaded from ``.mgf``
+    with matchms, or from ``.parquet`` / ``.ipc``. ``spectrum_id`` is
+    ``{experiment_name}:{title}`` for MGF, ``{experiment_name}:{row_index}`` for
+    Parquet / IPC, and ``{experiment_name}:{label}`` on the TSV side (pi-PrimeNovo sets
+    TSV ``label`` from the MGF ``TITLE``). Titles and labels may be any non-empty
+    string but must each be unique within their file. Tables are inner-joined on
+    ``spectrum_id``.
 
     Score values are already probabilities in ``[0, 1]`` and are stored as
     ``confidence`` without transformation. Beam predictions are not available from
@@ -164,10 +172,11 @@ class PrimeNovoDatasetLoader(DatasetLoader):
     def load(
         self, *, data_path: Path, predictions_path: Optional[Path] = None, **kwargs: Any
     ) -> CalibrationDataset:
-        """Load a CalibrationDataset from pi-PrimeNovo TSV predictions and MGF spectra.
+        """Load a CalibrationDataset from pi-PrimeNovo TSV predictions and spectra.
 
         Args:
-            data_path: Path to the spectrum data file (``.mgf`` only).
+            data_path: Path to the spectrum data file (``.mgf``, ``.parquet`` or
+                ``.ipc``).
             predictions_path: Path to the pi-PrimeNovo predictions TSV file.
             **kwargs: Not used.
 
@@ -179,7 +188,7 @@ class PrimeNovoDatasetLoader(DatasetLoader):
             ValueError: If ``predictions_path`` is None, required TSV columns are
                 missing, scores are outside ``[0, 1]``, MGF ``TITLE`` or TSV
                 ``label`` values are missing or not unique, or predictions
-                reference labels with no matching spectrum title.
+                reference labels with no matching spectrum title or row index.
         """
         if predictions_path is None:
             raise ValueError("predictions_path is required for PrimeNovoDatasetLoader")
@@ -241,7 +250,7 @@ class PrimeNovoDatasetLoader(DatasetLoader):
         if len(empty_labels) > 0:
             raise ValueError(
                 "pi-PrimeNovo predictions contain empty label values; label must equal "
-                "the corresponding MGF TITLE."
+                "the corresponding MGF TITLE or Parquet / IPC row index."
             )
 
         return predictions.with_columns(
@@ -301,25 +310,36 @@ class PrimeNovoDatasetLoader(DatasetLoader):
     def _load_spectrum_data(
         self, spectrum_path: Path | str
     ) -> Tuple[pl.DataFrame, bool]:
-        """Load MGF spectrum data and assign ``experiment_name`` / ``spectrum_id``.
+        """Load spectrum data and assign ``experiment_name`` / ``spectrum_id``.
+
+        MGF spectra are keyed by ``TITLE``; Parquet / IPC spectra are keyed by 0-based
+        row order.
 
         Args:
-            spectrum_path: Path to the spectrum data file (``.mgf`` only).
+            spectrum_path: Path to the spectrum data file (``.mgf``, ``.parquet`` or
+                ``.ipc``).
 
         Returns:
             Tuple of (DataFrame containing spectrum data, whether ground truth labels
             exist).
 
         Raises:
-            ValueError: If the suffix is not ``.mgf``, any ``TITLE`` is missing, or
-                ``TITLE`` values are not unique within the file.
+            ValueError: If the suffix is not supported, or for MGF, any ``TITLE`` is
+                missing or ``TITLE`` values are not unique within the file.
         """
         spectrum_path = Path(spectrum_path)
+
+        if spectrum_path.suffix in {".parquet", ".ipc"}:
+            df, has_labels = data_utils.load_spectrum_data(
+                spectrum_path, add_index_cols=False
+            )
+            df = data_utils.add_row_order_spectrum_ids(df, spectrum_path.stem)
+            return df, has_labels
 
         if spectrum_path.suffix != ".mgf":
             raise ValueError(
                 f"Unsupported file format for spectrum data: {spectrum_path.suffix}. "
-                "Supported format is .mgf."
+                "Supported formats are .mgf, .parquet and .ipc."
             )
 
         from matchms.importing import load_from_mgf
@@ -383,7 +403,8 @@ class PrimeNovoDatasetLoader(DatasetLoader):
         if merged.height == 0:
             raise ValueError(
                 "pi-PrimeNovo inner join on spectrum_id produced no rows. Ensure each "
-                "TSV label equals the corresponding spectrum TITLE in the MGF."
+                "TSV label equals the corresponding spectrum TITLE in the MGF, or the "
+                "row index for Parquet / IPC spectra."
             )
         if merged.height != predictions.height:
             raise ValueError(
