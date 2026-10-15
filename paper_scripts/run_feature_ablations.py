@@ -320,8 +320,6 @@ def _compute_eval_features_for_dataset(
     spectra_path: str,
     predictions_path: str,
     cache_dir: Path,
-    koina_url: str,
-    koina_ssl: bool,
     koina_mode: str = "columns",
     feature_overrides: list[str] | None = None,
 ) -> Path:
@@ -329,8 +327,8 @@ def _compute_eval_features_for_dataset(
 
     Args:
         koina_mode: ``"columns"`` to read collision_energy / frag_type from
-            per-row metadata columns, or ``"constants"`` to use fixed values
-            (CE=27, HCD).
+            per-row metadata columns, or ``"constants"`` to use the
+            ``koina.input_constants`` defaults (CE=27, HCD).
     """
     cache_path = cache_dir / f"{name}.parquet"
     if cache_path.exists():
@@ -347,19 +345,19 @@ def _compute_eval_features_for_dataset(
     logger.info("Computing features for eval dataset %s ...", name)
 
     if koina_mode == "columns":
+        # calibrator.yaml fills model_input_constants from koina.input_constants, so
+        # clear both before mapping the inputs to per-row metadata columns.
         koina_overrides = [
+            "koina.input_constants={}",
             "+koina.input_columns.collision_energies=collision_energy",
             "+koina.input_columns.fragmentation_types=frag_type",
+            "calibrator.features.fragment_match_features.model_input_constants=null",
             "+calibrator.features.fragment_match_features.model_input_columns.collision_energies=collision_energy",
             "+calibrator.features.fragment_match_features.model_input_columns.fragmentation_types=frag_type",
         ]
     else:
-        koina_overrides = [
-            "+koina.input_constants.collision_energies=27",
-            "+koina.input_constants.fragmentation_types=HCD",
-            "+calibrator.features.fragment_match_features.model_input_constants.collision_energies=27",
-            "+calibrator.features.fragment_match_features.model_input_constants.fragmentation_types=HCD",
-        ]
+        # koina.yaml already defaults input_constants to CE=27, HCD.
+        koina_overrides = []
 
     with initialize_config_dir(
         config_dir=str(primary_config_dir),
@@ -371,12 +369,9 @@ def _compute_eval_features_for_dataset(
             overrides=[
                 f"dataset.spectrum_path_or_directory={spectra_path}",
                 f"dataset.predictions_path={predictions_path}",
-                f"koina.server_url={koina_url}",
-                f"koina.ssl={koina_ssl}",
                 *koina_overrides,
                 *(feature_overrides or []),
                 "labelled=true",
-                "filter_empty_predictions=true",
             ],
         )
 
@@ -472,8 +467,6 @@ def _require_cached_eval_features(cache_dir: Path, name: str) -> Path:
 
 def compute_all_eval_features(
     output_dir: Path,
-    koina_url: str,
-    koina_ssl: bool,
     astral_spectra: str | None,
     astral_predictions: str | None,
     skip_feature_compute: bool,
@@ -500,8 +493,6 @@ def compute_all_eval_features(
                 spectra_path,
                 predictions_path,
                 cache_dir,
-                koina_url,
-                koina_ssl,
                 koina_mode=info.get("koina_mode", "columns"),
                 feature_overrides=feature_overrides,
             )
@@ -516,8 +507,6 @@ def compute_all_eval_features(
                 astral_spectra,
                 astral_predictions,
                 cache_dir,
-                koina_url,
-                koina_ssl,
                 feature_overrides=feature_overrides,
             )
 
@@ -1459,14 +1448,6 @@ def main(
         int,
         typer.Option(help="Random seed."),
     ] = 42,
-    koina_url: Annotated[
-        str,
-        typer.Option(help="Koina server URL for eval feature computation."),
-    ] = "koina.wilhelmlab.org:443",
-    koina_ssl: Annotated[
-        bool,
-        typer.Option(help="Use SSL for Koina server."),
-    ] = True,
     skip_feature_compute: Annotated[
         bool,
         typer.Option(
@@ -1554,8 +1535,6 @@ def main(
     logger.info("Step 1: Computing eval features...")
     eval_parquets = compute_all_eval_features(
         output_dir,
-        koina_url,
-        koina_ssl,
         astral_spectra,
         astral_predictions,
         skip_feature_compute,
