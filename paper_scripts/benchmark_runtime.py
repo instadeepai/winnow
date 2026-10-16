@@ -4,6 +4,11 @@
 Measures end-to-end processing time and peak memory, broken down by data loading,
 per-feature computation, MLP calibration inference, and FDR / q-value computation.
 Benchmarks full and/or no-Prosit feature configurations.
+
+Wall-clock time and peak memory are measured in SEPARATE passes (``--mode both``,
+the default): ``tracemalloc`` slows Python-heavy stages several-fold, so wall times
+come from a timer-only pass and peak memory from a second, memory-tracing pass.
+``--mode time`` or ``--mode memory`` runs a single pass.
 """
 
 from __future__ import annotations
@@ -46,6 +51,20 @@ app = typer.Typer(
 
 PROSIT_FEATURE_CLASSES = (FragmentMatchFeatures, RetentionTimeFeature)
 
+MODE_NOTES = {
+    "both": (
+        "- Wall times are from a timer-only pass (no memory tracing). Peak memory"
+        " is the per-stage peak Python allocation (tracemalloc) from a separate"
+        " pass, because tracemalloc slows execution; process peak RSS is from the"
+        " timer-only pass."
+    ),
+    "time": "- Timer-only pass: peak memory was not measured.",
+    "memory": (
+        "- Memory-tracing pass only: wall times INCLUDE tracemalloc overhead and"
+        " are not comparable with timer-only measurements."
+    ),
+}
+
 
 # ---------------------------------------------------------------------------
 # Measurement helpers
@@ -63,23 +82,42 @@ class StageResult:
     is_feature: bool = False
     is_prosit: bool = False
     columns: List[str] = field(default_factory=list)
+    traced_wall_time_s: Optional[float] = (
+        None  # time of the memory-tracing pass (not reported)
+    )
+
+
+_MEMORY_TRACING = True  # set per pass by main(); False = timer only
+
+
+def set_memory_tracing(enabled: bool) -> None:
+    """Enable/disable tracemalloc in measure() (disabled = timer-only pass)."""
+    global _MEMORY_TRACING
+    _MEMORY_TRACING = enabled
 
 
 @contextmanager
 def measure():
-    """Context manager that yields a dict populated with wall_time_s and peak_mem_mb on exit."""
+    """Yield a dict populated with wall_time_s and peak_mem_mb on exit.
+
+    With memory tracing off (timer-only pass), peak_mem_mb is NaN.
+    """
     result: Dict[str, float] = {}
-    tracemalloc.start()
-    # Reset the peak so we measure only this block
-    tracemalloc.reset_peak()
+    if _MEMORY_TRACING:
+        tracemalloc.start()
+        # Reset the peak so we measure only this block
+        tracemalloc.reset_peak()
     t0 = time.perf_counter()
     try:
         yield result
     finally:
         result["wall_time_s"] = time.perf_counter() - t0
-        _, peak = tracemalloc.get_traced_memory()
-        tracemalloc.stop()
-        result["peak_mem_mb"] = peak / (1024 * 1024)
+        if _MEMORY_TRACING:
+            _, peak = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+            result["peak_mem_mb"] = peak / (1024 * 1024)
+        else:
+            result["peak_mem_mb"] = float("nan")
 
 
 # ---------------------------------------------------------------------------
@@ -324,7 +362,8 @@ class BenchmarkRun:
     @property
     def peak_mem_mb(self) -> float:
         """Maximum peak memory across stages, in megabytes."""
-        return max(s.peak_mem_mb for s in self.stages) if self.stages else 0.0
+        vals = [s.peak_mem_mb for s in self.stages if s.peak_mem_mb == s.peak_mem_mb]
+        return max(vals) if vals else float("nan")
 
 
 def _model_matches_features(calibrator: ProbabilityCalibrator) -> bool:
@@ -443,6 +482,47 @@ def run_benchmark(
     )
 
 
+def merge_passes(
+    time_runs: List["BenchmarkRun"], mem_runs: List["BenchmarkRun"]
+) -> List["BenchmarkRun"]:
+    """Combine a timer-only pass (wall times) with a memory-tracing pass (peak memory).
+
+    Stage names/order must be identical. The traced pass's wall times are kept per
+    stage as ``traced_wall_time_s`` for transparency but are not reported.
+    """
+    merged: List[BenchmarkRun] = []
+    for tr, mr in zip(time_runs, mem_runs, strict=True):
+        if tr.config_label != mr.config_label or [s.name for s in tr.stages] != [
+            s.name for s in mr.stages
+        ]:
+            raise RuntimeError(
+                f"Timer and memory passes disagree on stages for {tr.config_label!r}"
+            )
+        stages = [
+            StageResult(
+                name=ts.name,
+                device=ts.device,
+                wall_time_s=ts.wall_time_s,
+                peak_mem_mb=ms.peak_mem_mb,
+                is_feature=ts.is_feature,
+                is_prosit=ts.is_prosit,
+                columns=ts.columns,
+                traced_wall_time_s=ms.wall_time_s,
+            )
+            for ts, ms in zip(tr.stages, mr.stages, strict=True)
+        ]
+        merged.append(
+            BenchmarkRun(
+                config_label=tr.config_label,
+                n_spectra=tr.n_spectra,
+                n_features=tr.n_features,
+                n_columns=tr.n_columns,
+                stages=stages,
+            )
+        )
+    return merged
+
+
 # ---------------------------------------------------------------------------
 # Output formatting
 # ---------------------------------------------------------------------------
@@ -482,9 +562,10 @@ def format_run(run: BenchmarkRun) -> str:
     total_time = 0.0
 
     def _row(label: str, device: str, t: float, mem: float) -> str:
+        mem_s = f"{mem:.1f}" if mem == mem else "n/a"
         return (
             f"{label:<{col_w[0]}}| {device:<{col_w[1]}}| "
-            f"{t:>{col_w[2]}.2f}| {mem:>{col_w[3]}.1f}"
+            f"{t:>{col_w[2]}.2f}| {mem_s:>{col_w[3]}}"
         )
 
     for i, s in enumerate(run.stages):
@@ -492,7 +573,8 @@ def format_run(run: BenchmarkRun) -> str:
         total_time += s.wall_time_s
         if s.is_feature:
             feat_time += s.wall_time_s
-            feat_mem = max(feat_mem, s.peak_mem_mb)
+            if s.peak_mem_mb == s.peak_mem_mb:
+                feat_mem = max(feat_mem, s.peak_mem_mb)
 
         is_last_feature = s.is_feature and not any(
             st.is_feature for st in run.stages[i + 1 :]
@@ -503,12 +585,12 @@ def format_run(run: BenchmarkRun) -> str:
                     "  Feature computation subtotal",
                     "",
                     feat_time,
-                    feat_mem,
+                    feat_mem if feat_mem > 0 else float("nan"),
                 )
             )
 
     lines.append(sep)
-    total_mem = max(s.peak_mem_mb for s in run.stages) if run.stages else 0.0
+    total_mem = run.peak_mem_mb
     lines.append(_row("End-to-end total", "", total_time, total_mem))
 
     return "\n".join(lines)
@@ -520,6 +602,9 @@ def format_full_report(
     runs: List[BenchmarkRun],
     n_spectra: int,
     spectrum_path: str,
+    *,
+    mode: str = "both",
+    peak_rss_mb: Optional[float] = None,
 ) -> str:
     """Assemble the complete benchmark report."""
     lines: List[str] = []
@@ -552,7 +637,9 @@ def format_full_report(
         "- Koina predictions are not cached to disk between runs; batching is"
         " handled internally by koinapy."
     )
-    peak_rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+    if peak_rss_mb is None:
+        peak_rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+    lines.append(MODE_NOTES[mode])
     lines.append(f"- Process peak RSS: {peak_rss_mb:.1f} MB")
     lines.append("")
     return "\n".join(lines)
@@ -564,6 +651,10 @@ def build_json_report(
     runs: List[BenchmarkRun],
     n_spectra: int,
     spectrum_path: str,
+    *,
+    mode: str = "both",
+    peak_rss_mb: Optional[float] = None,
+    peak_rss_after_memory_pass_mb: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Build a structured dict suitable for JSON serialisation."""
     report: Dict[str, Any] = {
@@ -582,12 +673,27 @@ def build_json_report(
             "n_columns": run.n_columns,
             "total_wall_time_s": run.total_wall_time_s,
             "feature_wall_time_s": run.feature_wall_time_s,
-            "stages": [asdict(s) for s in run.stages],
+            "peak_mem_mb": None
+            if run.peak_mem_mb != run.peak_mem_mb
+            else run.peak_mem_mb,
+            "stages": [
+                {
+                    k: (None if isinstance(v, float) and v != v else v)
+                    for k, v in asdict(s).items()
+                }
+                for s in run.stages
+            ],
         }
         report["configurations"].append(cfg)
+    report["measurement_mode"] = mode
     report["process_peak_rss_mb"] = (
-        resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+        peak_rss_mb
+        if peak_rss_mb is not None
+        else resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
     )
+    if peak_rss_after_memory_pass_mb is not None:
+        report["process_peak_rss_after_memory_pass_mb"] = peak_rss_after_memory_pass_mb
+    report["measurement_note"] = MODE_NOTES[mode]
     report["notes"] = {
         "koina_caching": (
             "Koina predictions are not cached to disk; each invocation "
@@ -669,6 +775,92 @@ def _ensure_no_prosit_model(
         )
         return model_path_no_prosit
     return model_path_no_prosit or model_path
+
+
+def _rss_mb() -> float:
+    """Process peak resident set size so far, in megabytes."""
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+
+
+def _probe_mlp_device(model_path: str) -> str:
+    """Load the calibrator once and report the device its MLP runs on."""
+    probe = ProbabilityCalibrator.load(pretrained_model_name_or_path=model_path)
+    if probe.network is None:
+        raise RuntimeError("Calibrator network is not loaded")
+    return str(next(probe.network.parameters()).device)
+
+
+def _run_pass(
+    *,
+    trace_memory: bool,
+    run_full: bool,
+    run_no_prosit: bool,
+    spectrum_path: str,
+    predictions_path: str,
+    model_path: str,
+    no_prosit_model: str,
+    data_loader: str,
+    koina_constants: Optional[Dict[str, Any]],
+) -> Tuple[List[BenchmarkRun], int]:
+    """Run the requested configurations once, with memory tracing on or off."""
+    set_memory_tracing(trace_memory)
+    tag = "memory (tracemalloc)" if trace_memory else "timer only"
+    configs: List[Tuple[str, str, bool]] = []
+    if run_full:
+        configs.append(("Full feature set (including Prosit)", model_path, True))
+    if run_no_prosit:
+        configs.append(("Without Prosit features", no_prosit_model, False))
+
+    runs: List[BenchmarkRun] = []
+    for label, config_model, include_prosit in configs:
+        logger.info(">>> [%s] %s ...", tag, label)
+        runs.append(
+            run_benchmark(
+                spectrum_path=spectrum_path,
+                predictions_path=predictions_path,
+                model_path=config_model,
+                data_loader_name=data_loader,
+                include_prosit=include_prosit,
+                koina_input_constants=koina_constants,
+            )
+        )
+    return runs, (runs[0].n_spectra if runs else 0)
+
+
+def _run_measurement_passes(
+    mode: str, **pass_kwargs: Any
+) -> Tuple[List[BenchmarkRun], int, float, Optional[float]]:
+    """Run the measurement pass(es) for ``mode``.
+
+    Returns ``(runs, n_spectra, peak RSS of the timer pass in MB, peak RSS after the
+    memory pass in MB or None)``. In ``both`` mode the timer-only pass runs first so
+    its RSS is not inflated by tracemalloc, then a memory pass supplies peak memory.
+    """
+    if mode != "both":
+        runs, n_spectra = _run_pass(trace_memory=(mode == "memory"), **pass_kwargs)
+        return runs, n_spectra, _rss_mb(), None
+    time_runs, n_spectra = _run_pass(trace_memory=False, **pass_kwargs)
+    rss_timer_pass = _rss_mb()
+    mem_runs, _ = _run_pass(trace_memory=True, **pass_kwargs)
+    return merge_passes(time_runs, mem_runs), n_spectra, rss_timer_pass, _rss_mb()
+
+
+def _save_outputs(
+    report: str,
+    json_report: Dict[str, Any],
+    output_text: Optional[Path],
+    output_json: Optional[Path],
+) -> None:
+    """Write the text and/or JSON reports when output paths were given."""
+    if output_text is not None:
+        output_text.parent.mkdir(parents=True, exist_ok=True)
+        output_text.write_text(report + "\n")
+        logger.info("Text report saved to %s", output_text)
+    if output_json is not None:
+        output_json.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_json, "w") as f:
+            json.dump(json_report, f, indent=2)
+        logger.info("JSON results saved to %s", output_json)
 
 
 # ---------------------------------------------------------------------------
@@ -784,6 +976,18 @@ def main(
             ),
         ),
     ] = None,
+    mode: Annotated[
+        str,
+        typer.Option(
+            "--mode",
+            help=(
+                "'both' (default): timer-only pass for wall times plus a separate "
+                "tracemalloc pass for peak memory, merged into one report. "
+                "'time': timer-only pass. 'memory': tracemalloc pass only (its "
+                "times include tracing overhead)."
+            ),
+        ),
+    ] = "both",
     output_json: Annotated[
         Optional[Path],
         typer.Option(
@@ -802,6 +1006,8 @@ def main(
     """Run configured pipeline benchmarks and print (optionally save) results."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
+    if mode not in MODE_NOTES:
+        raise typer.BadParameter(f"--mode must be one of {sorted(MODE_NOTES)}")
     hw = get_hardware_info()
     koina_constants = _parse_koina_constants(koina_input_constant)
     run_full = not no_prosit
@@ -835,32 +1041,10 @@ def main(
         spectrum_path_str = str(spectrum_file)
         predictions_path_str = str(predictions_file)
 
-        probe_calibrator = ProbabilityCalibrator.load(
-            pretrained_model_name_or_path=model_path
-        )
-        if probe_calibrator.network is None:
-            raise RuntimeError("Calibrator network is not loaded")
-        mlp_device = str(next(probe_calibrator.network.parameters()).device)
-        del probe_calibrator
+        mlp_device = _probe_mlp_device(model_path)
 
-        runs: List[BenchmarkRun] = []
-        n_spectra = 0
-
-        if run_full:
-            logger.info(">>> Benchmarking: Full feature set (including Prosit) ...")
-            result = run_benchmark(
-                spectrum_path=spectrum_path_str,
-                predictions_path=predictions_path_str,
-                model_path=model_path,
-                data_loader_name=data_loader,
-                include_prosit=True,
-                koina_input_constants=koina_constants,
-            )
-            runs.append(result)
-            n_spectra = result.n_spectra
-
+        no_prosit_model = model_path
         if run_no_prosit:
-            logger.info(">>> Benchmarking: Without Prosit features ...")
             no_prosit_model = _ensure_no_prosit_model(
                 train_all_provided=train_all_provided,
                 train_spectrum_path=train_spectrum_path,
@@ -872,33 +1056,42 @@ def main(
                 data_loader=data_loader,
                 force_retrain=force_retrain,
             )
-            result = run_benchmark(
+
+        runs, n_spectra, rss_timer_pass, rss_after_memory_pass = (
+            _run_measurement_passes(
+                mode,
+                run_full=run_full,
+                run_no_prosit=run_no_prosit,
                 spectrum_path=spectrum_path_str,
                 predictions_path=predictions_path_str,
-                model_path=no_prosit_model,
-                data_loader_name=data_loader,
-                include_prosit=False,
-                koina_input_constants=koina_constants,
+                model_path=model_path,
+                no_prosit_model=no_prosit_model,
+                data_loader=data_loader,
+                koina_constants=koina_constants,
             )
-            runs.append(result)
-            n_spectra = n_spectra or result.n_spectra
+        )
 
-        report = format_full_report(hw, mlp_device, runs, n_spectra, spectrum_label)
+        report = format_full_report(
+            hw,
+            mlp_device,
+            runs,
+            n_spectra,
+            spectrum_label,
+            mode=mode,
+            peak_rss_mb=rss_timer_pass,
+        )
         print(report)
-
-        if output_text is not None:
-            output_text.parent.mkdir(parents=True, exist_ok=True)
-            output_text.write_text(report + "\n")
-            logger.info("Text report saved to %s", output_text)
-
-        if output_json is not None:
-            json_report = build_json_report(
-                hw, mlp_device, runs, n_spectra, spectrum_label
-            )
-            output_json.parent.mkdir(parents=True, exist_ok=True)
-            with open(output_json, "w") as f:
-                json.dump(json_report, f, indent=2)
-            logger.info("JSON results saved to %s", output_json)
+        json_report = build_json_report(
+            hw,
+            mlp_device,
+            runs,
+            n_spectra,
+            spectrum_label,
+            mode=mode,
+            peak_rss_mb=rss_timer_pass,
+            peak_rss_after_memory_pass_mb=rss_after_memory_pass,
+        )
+        _save_outputs(report, json_report, output_text, output_json)
     finally:
         if tmpdir is not None:
             shutil.rmtree(tmpdir, ignore_errors=True)
