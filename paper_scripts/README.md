@@ -64,7 +64,7 @@ Laptop vs heavy is about workload size and hardware requirements.
 
 | Resource | Pin |
 | --- | --- |
-| Figshare [Analysis outputs](https://figshare.com/articles/dataset/Analysis_outputs/30147601) | article `30147601` v9 (`10.6084/m9.figshare.30147601.v9`) |
+| Figshare [Analysis outputs](https://figshare.com/articles/dataset/Analysis_outputs/30147601) | article `30147601` v10 (`10.6084/m9.figshare.30147601.v10`) |
 | Hugging Face [winnow-ms-datasets](https://huggingface.co/datasets/InstaDeepAI/winnow-ms-datasets) | `659802319d618a359de5ab90ec6b0195681e94a6` |
 | Hugging Face [winnow-general-model](https://huggingface.co/InstaDeepAI/winnow-general-model) | `e2089330dd59adb9685e5b3d7d61f0cd69a3bbb0` |
 | Hugging Face [winnow-helaqc-model](https://huggingface.co/InstaDeepAI/winnow-helaqc-model) | `d56542b961eac7d896e51bf0716a242fc394ab1f` |
@@ -80,13 +80,13 @@ Laptop vs heavy is about workload size and hardware requirements.
 | HeLa Single Shot DNS (InstaNovo, Casanovo, π-PrimeNovo × test / raw_less_train) | `paper-plot-helaqc-analysis` | `paper-recompute-helaqc` | Koina | `plot_analysis.py` |
 | General-model evaluation (nine projects, labelled and full-search) | `paper-plot-general-labelled`, `paper-plot-general-full` | tiered / per-stem `paper-recompute-general-*` | Koina | `plot_eval_results.py` |
 | Feature investigation (InstaNovo HeLa) | n/a (matrices not deposited) | `paper-recompute-feature-investigation` (compute + plot) | Koina | `plot_feature_investigation.py` |
-| General-model feature importance (*C. elegans*) | `paper-plot-feature-importance` (no SHAP bar / correlations) | `paper-recompute-feature-importance` | Koina | `analyze_features.py` |
+| Feature importance (general model on *C. elegans*; extended HeLa feature set) | `paper-plot-feature-importance` (replots both pickle sets; no SHAP bar; the correlation matrix is deposited as `feature_correlations_pearson.csv` but has no replot) | `paper-recompute-feature-importance` | Koina | `analyze_features.py` |
 | Pipeline scaling excluding Koina features | n/a (JSON not deposited; script writes plots) | `paper-recompute-scaling` | GPU + Koina | `benchmark_scaling.py` |
 | Pipeline runtime table (full + no-Prosit) | n/a (JSON not deposited) | `paper-recompute-runtime` | GPU + Koina | `benchmark_runtime.py` |
 | Cross-tool CLI runtime (Winnow / Glissade / NovoBoard on HeLa Single Shot) | n/a (JSON not deposited) | `paper-recompute-tool-runtime` | paper extra (Python ≥3.12); calls Koina | `benchmark_tool_runtime.py` |
 | PSM-level FDR vs NovoBoard | `paper-plot-fdr-method-comparison` (`--summarise-only`) | `paper-recompute-fdr-method-comparison` | CPU | `plot_fdr_method_comparison.py` |
 | External peptide score-mixture (Winnow / NovoBoard / Glissade) | `paper-plot-external-peptide-holdout` | `paper-recompute-external-peptide-holdout` | CPU | `run_external_peptide_holdout_benchmark.py` |
-| Feature ablations | n/a (deposit lacks tail ECE for top 10% PSMs; script writes plots) | `paper-recompute-ablations` | GPU + Koina | `run_feature_ablations.py` |
+| Feature ablations | `paper-plot-ablations` (per-PSM `ablations/eval_results/` and tail ECE over the top 10% of PSMs are deposited; Astral curves are slow) | `paper-recompute-ablations` | GPU + Koina | `run_feature_ablations.py`, `plot_ablation_summary.py` |
 | Calibrator generalisation heatmap | `paper-plot-generalisation` (slim results on the analysis deposit) | `paper-recompute-generalisation` (full retrain) | GPU + Koina | `evaluate_calibrator_generalisation.py`, `plot_calibrator_generalisation_heatmap.py` |
 | Calibrator generalisation heatmap (re-predict) | n/a | `paper-repredict-generalisation` | Figshare LOO models and OOD caches; HF training matrix for the peptide holdout. No GPU and no Koina | same scripts; `download-paper-generalisation-loo` |
 | Upscored FPs | `paper-plot-upscored-fps` | n/a (uses deposited labelled `general_results/`) | CPU | `analyze_upscored_fps.py` |
@@ -188,7 +188,7 @@ Reviewers who follow only `docs/cli.md` will get a different order and can diffe
 
 ## 4. Approximate deposit sizes
 
-Orders of magnitude for Figshare v9 outputs (metadata + prediction CSVs unless noted):
+Orders of magnitude for Figshare v10 outputs (metadata + prediction CSVs unless noted):
 
 | Tree | Size |
 | --- | --- |
@@ -196,6 +196,7 @@ Orders of magnitude for Figshare v9 outputs (metadata + prediction CSVs unless n
 | `general_results/full/` | ~5 GB (astral ~2 GB; *C. elegans* ~1.8 GB) |
 | `fdr_benchmark_inputs/` | ~1 GB+ (includes HeLa MGFs for twin pairing) |
 | `generalisation/calibrator_generalisation_results_slim.parquet` (replot default) | ~50 MB |
+| `ablations/eval_results/` (per-PSM ablation results, 14 Parquet files) | ~85 MB |
 | Leave-one-out analysis article `30147364` (`trained_on_*` + `ood_feature_cache/`) | ~1.1 GB |
 | Remaining analysis CSVs / HeLa result trees | much smaller |
 
@@ -254,7 +255,7 @@ make -f Makefile.paper paper-recompute-tool-runtime
 | `plot_fdr_method_comparison.py` | Winnow vs NovoBoard PSM FDR |
 | `run_external_peptide_holdout_benchmark.py` | Controlled-π₀ peptide mixture benchmark |
 | `run_feature_ablations.py` | Feature-subset calibrator training + eval **[GPU]** |
-| `plot_ablation_summary.py` | Ablation bar summaries (from recompute outputs, not Figshare alone) |
+| `plot_ablation_summary.py` | Ablation metrics (incl. tail ECE) and bar summaries, recomputed from the per-PSM `eval_results/` (Figshare or recompute outputs) |
 | `plot_calibrator_generalisation_heatmap.py` | Hold-one-out generalisation heatmap |
 | `evaluate_calibrator_generalisation.py` | Full retrain leave-one-source-out; writes slim Parquet result file by default **[GPU]** |
 | `analyze_features.py` | Feature importance / SHAP (supports `--replot-dir` from Figshare pickles) |

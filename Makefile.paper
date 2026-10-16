@@ -1,4 +1,4 @@
-# Paper results / plots reproduction suite (Figshare 30147601 v9).
+# Paper results / plots reproduction suite (Figshare 30147601 v10).
 # Usage: make -f Makefile.paper <target>
 #
 # Naming: paper-plot-* = Figshare deposits (or a deterministic local transform).
@@ -35,7 +35,7 @@ HF_DATASETS_DIR ?= $(PAPER_DATA_DIR)/winnow-ms-datasets
 HF_MODELS_DIR ?= $(PAPER_DATA_DIR)/models
 
 FIGSHARE_ARTICLE_ID ?= 30147601
-FIGSHARE_ARTICLE_VERSION ?= 9
+FIGSHARE_ARTICLE_VERSION ?= 10
 FIGSHARE_HELA_MODELS_ID ?= 32744946
 FIGSHARE_HELA_MODELS_VERSION ?= 2
 FIGSHARE_GENERALISATION_LOO_ID ?= 30147364
@@ -83,6 +83,7 @@ RUNTIME_RESULTS_DIR ?= $(PAPER_RESULTS_DIR)/runtime
 FEATURE_IMPORTANCE_RESULTS_DIR ?= $(PAPER_RESULTS_DIR)/feature_importance/PXD014877
 FEATURE_IMPORTANCE_PLOTS_DIR ?= $(PAPER_PLOTS_DIR)/feature_importance/PXD014877
 ABLATIONS_RESULTS_DIR ?= $(PAPER_RESULTS_DIR)/ablations
+ABLATIONS_REPLOT_DIR ?= $(PAPER_RESULTS_DIR)/ablations_replot
 CELEGANS_LABELLED_DIR ?= $(GENERAL_EVAL_DIR)/celegans/labelled
 
 # Leaf folder names under general_results/{labelled,full}/ (nested runs use the
@@ -165,7 +166,7 @@ FDR_OVERLAP_PROJECTS ?= $(GENERAL_PROJECTS)
 	paper-setup paper-plot-light paper-recompute-laptop paper-recompute-heavy \
 	paper-plot-helaqc-analysis paper-plot-general-labelled paper-plot-general-full \
 	paper-plot-fdr-method-comparison paper-plot-external-peptide-holdout \
-	paper-plot-generalisation paper-plot-feature-importance \
+	paper-plot-generalisation paper-plot-feature-importance paper-plot-ablations \
 	paper-plot-novelty paper-plot-upscored-fps paper-plot-fdr-overlap \
 	paper-recompute-helaqc paper-recompute-general-labelled \
 	paper-recompute-general-full-small paper-recompute-general-full-large \
@@ -193,7 +194,7 @@ help:
 	@echo "Plot (from deposits): paper-plot-<group>"
 	@echo "  helaqc-analysis, general-labelled, general-full (slow),"
 	@echo "  fdr-method-comparison, external-peptide-holdout, generalisation,"
-	@echo "  feature-importance, novelty, upscored-fps, fdr-overlap"
+	@echo "  feature-importance, ablations (slow: Astral curves), novelty, upscored-fps, fdr-overlap"
 	@echo ""
 	@echo "Recompute (predict / Koina / train / benchmark): paper-recompute-<group>"
 	@echo "  helaqc | general-labelled | general-full-small | general-full-large"
@@ -255,7 +256,11 @@ paper-check-artefacts:
 		--require ablations/ablation_summary_arabidopsis.csv \
 		--require ablations/ablation_summary_astral.csv \
 		--require fdr_benchmark_inputs/novoboard/helaqc/novoboard/annotated_test.csv \
-		--require generalisation/calibrator_generalisation_results_slim.parquet
+		--require generalisation/calibrator_generalisation_results_slim.parquet \
+		--require ablations/eval_results/Arabidopsis_all_features.parquet \
+		--require ablations/eval_results/Astral_all_features.parquet \
+		--require feature_importance/helaqc_extended_features/shap_values.pkl \
+		--require feature_importance/PXD014877/feature_correlations_pearson.csv
 
 paper-sync-group-paper:
 	uv sync --group paper --group notebook --group docs --group dev
@@ -619,12 +624,16 @@ paper-recompute-general-print:
 # 6. Feature importance
 ################################################################################
 
-# Replot from Figshare pickles (skips SHAP bar / correlation matrix).
+# Replot from Figshare pickles (skips SHAP bar / correlation matrix): the general model on
+# C. elegans (PXD014877) and the extended 16-feature HeLa Single Shot calibrator.
 paper-plot-feature-importance:
-	mkdir -p $(FEATURE_IMPORTANCE_PLOTS_DIR)
+	mkdir -p $(FEATURE_IMPORTANCE_PLOTS_DIR) $(PAPER_PLOTS_DIR)/feature_importance/helaqc_extended_features
 	$(PYTHON) $(PAPER_SCRIPTS)/analyze_features.py \
 		--replot-dir $(PAPER_DATA_DIR)/feature_importance/PXD014877 \
 		--output-dir $(FEATURE_IMPORTANCE_PLOTS_DIR)
+	$(PYTHON) $(PAPER_SCRIPTS)/analyze_features.py \
+		--replot-dir $(PAPER_DATA_DIR)/feature_importance/helaqc_extended_features \
+		--output-dir $(PAPER_PLOTS_DIR)/feature_importance/helaqc_extended_features
 
 paper-recompute-feature-importance:
 	mkdir -p $(FEATURE_IMPORTANCE_RESULTS_DIR) $(FEATURE_IMPORTANCE_PLOTS_DIR)
@@ -676,8 +685,27 @@ paper-repredict-generalisation: download-paper-generalisation-loo
 		--plots-dir $(PAPER_PLOTS_DIR)/generalisation
 
 ################################################################################
-# 8. Feature ablations [GPU] (recompute only; plots written by the script)
+# 8. Feature ablations
+#    paper-plot-ablations: from the deposited per-PSM results (CPU; the Astral curves
+#    are slow). Writes recomputed metrics (incl. tail ECE over the top 10% of PSMs),
+#    the tail-ECE bar plots and the PR / calibration / FDR curves.
+#    paper-recompute-ablations [GPU]: retrain and re-evaluate from scratch.
 ################################################################################
+
+paper-plot-ablations:
+	mkdir -p $(ABLATIONS_REPLOT_DIR) $(PAPER_PLOTS_DIR)/ablations
+	ln -sfn $(abspath $(PAPER_DATA_DIR)/ablations/eval_results) $(ABLATIONS_REPLOT_DIR)/eval_results
+	$(PYTHON) $(PAPER_SCRIPTS)/plot_ablation_summary.py recompute-summary \
+		--eval-results-dir $(ABLATIONS_REPLOT_DIR)/eval_results \
+		--output $(ABLATIONS_REPLOT_DIR)/ablation_summary_recomputed.csv
+	for ds in Arabidopsis Astral; do \
+		$(PYTHON) $(PAPER_SCRIPTS)/plot_ablation_summary.py main \
+			--summary $(ABLATIONS_REPLOT_DIR)/ablation_summary_recomputed.csv \
+			--dataset $$ds --metric tail_ECE --plots-dir $(PAPER_PLOTS_DIR)/ablations || exit 1; \
+	done
+	$(PYTHON) $(PAPER_SCRIPTS)/run_feature_ablations.py --plots-only \
+		--output-dir $(ABLATIONS_REPLOT_DIR) --plot-format both
+
 
 paper-recompute-ablations: paper-recompute-feature-investigation
 	@$(call GENERAL_MAYBE_SUBSET,immuno2,labelled); \
@@ -742,13 +770,19 @@ paper-plot-fdr-overlap:
 ################################################################################
 
 # Trains a dummy model with GPU and requires Koina for full feature benchmark.
+# Wall times come from a timer-only pass and peak memory (tracemalloc) from a
+# separate pass (--mode both, the default), so memory tracing does not inflate the times.
 paper-recompute-runtime:
 	mkdir -p $(RUNTIME_RESULTS_DIR) $(SCALING_DUMMY_MODEL)
 	$(PYTHON) $(PAPER_SCRIPTS)/benchmark_runtime.py \
 		--spectrum-path $(HELAQC_DATA)/train.parquet \
 		--predictions-path $(HELAQC_DATA)/instanovo/train_preds.csv \
-		--spectrum-path $(HELAQC_DATA)/raw_less_train.parquet \
-		--predictions-path $(HELAQC_DATA)/instanovo/raw_less_train_preds.csv \
+		--spectrum-path $(HELAQC_DATA)/val.parquet \
+		--predictions-path $(HELAQC_DATA)/instanovo/val_preds.csv \
+		--spectrum-path $(HELAQC_DATA)/test.parquet \
+		--predictions-path $(HELAQC_DATA)/instanovo/test_preds.csv \
+		--spectrum-path $(HELAQC_DATA)/unlabelled.parquet \
+		--predictions-path $(HELAQC_DATA)/instanovo/unlabelled_preds.csv \
 		--model-path $(HELAQC_MODEL) \
 		--model-path-no-prosit $(SCALING_DUMMY_MODEL) \
 		--train-spectrum-path $(HELAQC_DATA)/train.parquet \
