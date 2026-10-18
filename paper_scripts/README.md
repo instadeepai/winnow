@@ -77,7 +77,7 @@ Laptop vs heavy is about workload size and hardware requirements.
 
 | Paper analysis | Plot (from Figshare) | Recompute | Needs | Script |
 | --- | --- | --- | --- | --- |
-| HeLa Single Shot DNS (InstaNovo, Casanovo, π-PrimeNovo × test / raw_less_train) | `paper-plot-helaqc-analysis` | `paper-recompute-helaqc` | Koina | `plot_analysis.py` |
+| HeLa Single Shot DNS (InstaNovo, Casanovo, π-PrimeNovo × test / raw_less_train) | `paper-plot-helaqc-analysis` | `paper-recompute-helaqc` (π-PrimeNovo spectra converted to MGF automatically); `paper-retrain-helaqc-<tool>` retrains each HeLa calibrator, `paper-plot-helaqc-<tool>-recomputed` replots from recomputed predictions | Koina | `plot_analysis.py`, `convert_parquet_to_mgf.py` |
 | General-model evaluation (nine projects, labelled and full-search) | `paper-plot-general-labelled`, `paper-plot-general-full` | tiered / per-stem `paper-recompute-general-*` | Koina | `plot_eval_results.py` |
 | Feature investigation (InstaNovo HeLa) | n/a (matrices not deposited) | `paper-recompute-feature-investigation` (compute + plot) | Koina | `plot_feature_investigation.py` |
 | Feature importance (general model on *C. elegans*; extended HeLa feature set) | `paper-plot-feature-importance` (replots both pickle sets; no SHAP bar; the correlation matrix is deposited as `feature_correlations_pearson.csv` but has no replot) | `paper-recompute-feature-importance` | Koina | `analyze_features.py` |
@@ -86,7 +86,7 @@ Laptop vs heavy is about workload size and hardware requirements.
 | Cross-tool CLI runtime (Winnow / Glissade / NovoBoard on HeLa Single Shot) | n/a (JSON not deposited) | `paper-recompute-tool-runtime` | paper extra (Python ≥3.12); calls Koina | `benchmark_tool_runtime.py` |
 | PSM-level FDR vs NovoBoard | `paper-plot-fdr-method-comparison` (`--summarise-only`) | `paper-recompute-fdr-method-comparison` | CPU | `plot_fdr_method_comparison.py` |
 | External peptide score-mixture (Winnow / NovoBoard / Glissade) | `paper-plot-external-peptide-holdout` | `paper-recompute-external-peptide-holdout` | CPU | `run_external_peptide_holdout_benchmark.py` |
-| Feature ablations | `paper-plot-ablations` (per-PSM `ablations/eval_results/` and tail ECE over the top 10% of PSMs are deposited; Astral curves are slow) | `paper-recompute-ablations` | GPU + Koina | `run_feature_ablations.py`, `plot_ablation_summary.py` |
+| Feature ablations | `paper-plot-ablations` (per-PSM `ablations/eval_results/` and tail ECE over the top 10% of PSMs are deposited; Astral curves are slow) | `paper-recompute-ablations` evaluates the deposited models on the deposited evaluation features (exact); `paper-retrain-ablations` retrains them from the deposited training features (close, not bit-identical) | none (CPU/GPU) | `run_feature_ablations.py`, `plot_ablation_summary.py` |
 | Calibrator generalisation heatmap | `paper-plot-generalisation` (slim results on the analysis deposit) | `paper-recompute-generalisation` (full retrain) | GPU + Koina | `evaluate_calibrator_generalisation.py`, `plot_calibrator_generalisation_heatmap.py` |
 | Calibrator generalisation heatmap (re-predict) | n/a | `paper-repredict-generalisation` | Figshare LOO models and OOD caches; HF training matrix for the peptide holdout. No GPU and no Koina | same scripts; `download-paper-generalisation-loo` |
 | Upscored FPs | `paper-plot-upscored-fps` | n/a (uses deposited labelled `general_results/`) | CPU | `analyze_upscored_fps.py` |
@@ -197,6 +197,8 @@ Orders of magnitude for Figshare v10 outputs (metadata + prediction CSVs unless 
 | `fdr_benchmark_inputs/` | ~1 GB+ (includes HeLa MGFs for twin pairing) |
 | `generalisation/calibrator_generalisation_results_slim.parquet` (replot default) | ~50 MB |
 | `ablations/eval_results/` (per-PSM ablation results, 14 Parquet files) | ~85 MB |
+| `ablations/training_feature_matrix.parquet` (general-model training features for the ablations) | ~35 MB |
+| `ablations/eval_feature_cache/` (cached A. thaliana and Astral evaluation features) | ~34 MB |
 | Leave-one-out analysis article `30147364` (`trained_on_*` + `ood_feature_cache/`) | ~1.1 GB |
 | Remaining analysis CSVs / HeLa result trees | much smaller |
 
@@ -246,6 +248,7 @@ make -f Makefile.paper paper-recompute-tool-runtime
 | Script | Role |
 | --- | --- |
 | `plot_analysis.py` | HeLa DNS evaluation plots for InstaNovo, Casanovo and π-PrimeNovo |
+| `convert_parquet_to_mgf.py` | Spectrum Parquet → MGF (π-PrimeNovo loader reads MGF only) |
 | `plot_eval_results.py` | General model evaluation figures |
 | `plot_feature_investigation.py` | Feature distributions / investigation (after recompute matrices) |
 | `benchmark_scaling.py` | Runtime vs dataset size (trains/reuses a no-Prosit dummy, then times the pipeline) **[GPU]** |

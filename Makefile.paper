@@ -83,7 +83,14 @@ RUNTIME_RESULTS_DIR ?= $(PAPER_RESULTS_DIR)/runtime
 FEATURE_IMPORTANCE_RESULTS_DIR ?= $(PAPER_RESULTS_DIR)/feature_importance/PXD014877
 FEATURE_IMPORTANCE_PLOTS_DIR ?= $(PAPER_PLOTS_DIR)/feature_importance/PXD014877
 ABLATIONS_RESULTS_DIR ?= $(PAPER_RESULTS_DIR)/ablations
+ABLATIONS_DEPOSIT ?= $(PAPER_DATA_DIR)/ablations
+ABLATIONS_TRAIN_FEATURES ?= $(ABLATIONS_DEPOSIT)/training_feature_matrix.parquet
+ABLATIONS_EVAL_FEATURES ?= $(ABLATIONS_DEPOSIT)/eval_feature_cache
+ABLATIONS_MODELS ?= $(ABLATIONS_DEPOSIT)/models
+ABLATION_MODEL_NAMES := all_features confidence_only confidence_and_mass_error confidence_and_irt_error confidence_and_token-level confidence_and_beam_search confidence_and_fragment_matching
+ABLATIONS_VALIDATION_FRACTION ?= 0.1
 ABLATIONS_REPLOT_DIR ?= $(PAPER_RESULTS_DIR)/ablations_replot
+ABLATIONS_RETRAIN_DIR ?= $(PAPER_RESULTS_DIR)/ablations_retrained
 CELEGANS_LABELLED_DIR ?= $(GENERAL_EVAL_DIR)/celegans/labelled
 
 # Leaf folder names under general_results/{labelled,full}/ (nested runs use the
@@ -133,23 +140,45 @@ GENERAL_EXPERIMENT_FILTER_immuno2 := $(PXD023064_FILES)
 GENERAL_KOINA_immuno2 := $(KOINA_FRAGMENT_MATCH_CONSTANTS)
 GENERAL_SUBSET_DIR ?= $(PAPER_RESULTS_DIR)/_subset
 
-HELAQC_SPLITS := test train val unlabelled raw_less_train
+HELAQC_SPLITS := test val train unlabelled raw_less_train
 HELAQC_DNS := instanovo casanovo primenovo
 # Default: all three DNS tools (matches paper-plot-helaqc-analysis).
 HELAQC_DNS_TOOLS ?= instanovo casanovo primenovo
+
+# HeLa calibrator retraining
+HELAQC_FULL_TRAIN_COLUMNS := ion_matches,ion_match_intensity,irt_error,margin,median_margin,entropy,z-score,min_token_probability,std_token_probability,mass_error_da
+HELAQC_TRAIN_HYPERPARAMETERS = \
+	'calibrator.hidden_dims=[50,50]' calibrator.dropout=0.3 calibrator.learning_rate=0.0001 \
+	calibrator.weight_decay=0.001 calibrator.max_epochs=1000 calibrator.batch_size=1024 \
+	calibrator.n_iter_no_change=10 calibrator.tol=0.0001 calibrator.seed=42
+HELAQC_MODELS_DIR ?= $(PAPER_RESULTS_DIR)/models
 
 HELAQC_DNS_LABEL_instanovo := InstaNovo
 HELAQC_DNS_MODEL_instanovo := $(HELAQC_MODEL)
 HELAQC_DNS_LOADER_instanovo := instanovo
 HELAQC_DNS_PREDS_DIR_instanovo := instanovo
+HELAQC_DNS_PREDS_EXT_instanovo := csv
+HELAQC_DNS_FEATURE_OVERRIDES_instanovo = $(HELAQC_FEATURE_INVESTIGATION_OVERRIDES)
+HELAQC_DNS_TRAIN_COLUMNS_instanovo := $(HELAQC_FULL_TRAIN_COLUMNS)
 HELAQC_DNS_LABEL_casanovo := Casanovo
 HELAQC_DNS_MODEL_casanovo := $(CASANOVO_HELAQC_MODEL)
 HELAQC_DNS_LOADER_casanovo := mztab
+# The Casanovo calibrator uses BeamFeatures; mztab.yaml defaults to load_beams: false.
+HELAQC_DNS_LOADER_ARGS_casanovo := data_loader.load_beams=true
 HELAQC_DNS_PREDS_DIR_casanovo := casanovo
+HELAQC_DNS_PREDS_EXT_casanovo := mztab
+HELAQC_DNS_FEATURE_OVERRIDES_casanovo = $(HELAQC_FEATURE_INVESTIGATION_OVERRIDES)
+HELAQC_DNS_TRAIN_COLUMNS_casanovo := $(HELAQC_FULL_TRAIN_COLUMNS)
 HELAQC_DNS_LABEL_primenovo := pi-PrimeNovo
 HELAQC_DNS_MODEL_primenovo := $(PRIMENOVO_HELAQC_MODEL)
 HELAQC_DNS_LOADER_primenovo := primenovo
 HELAQC_DNS_PREDS_DIR_primenovo := primenovo
+HELAQC_DNS_PREDS_EXT_primenovo := tsv
+# pi-PrimeNovo returns no beams, so its calibrator has no beam / token-score features.
+HELAQC_DNS_FEATURE_OVERRIDES_primenovo := calibrator.features.retention_time_feature.min_train_points=5
+HELAQC_DNS_TRAIN_COLUMNS_primenovo := ion_matches,ion_match_intensity,irt_error,mass_error_da
+# The pi-PrimeNovo loader reads MGF only: the HeLa Parquet spectra are converted first.
+HELAQC_DNS_SPECTRA_EXT_primenovo := mgf
 
 # FDR tool recompute datasets. Laptop keeps helaqc only (celegans holdout >5 min).
 FDR_RECOMPUTE_DATASETS_LAPTOP ?= helaqc
@@ -176,7 +205,7 @@ FDR_OVERLAP_PROJECTS ?= $(GENERAL_PROJECTS)
 	paper-recompute-feature-importance \
 	paper-recompute-fdr-method-comparison paper-recompute-external-peptide-holdout \
 	paper-recompute-generalisation paper-repredict-generalisation \
-	download-paper-generalisation-loo paper-recompute-ablations
+	download-paper-generalisation-loo paper-recompute-ablations paper-retrain-ablations
 
 help:
 	@echo "Paper reproduction (make -f Makefile.paper <target>)"
@@ -257,6 +286,10 @@ paper-check-artefacts:
 		--require ablations/ablation_summary_astral.csv \
 		--require fdr_benchmark_inputs/novoboard/helaqc/novoboard/annotated_test.csv \
 		--require generalisation/calibrator_generalisation_results_slim.parquet \
+		--require ablations/training_feature_matrix.parquet \
+		$(foreach m,$(ABLATION_MODEL_NAMES),--require ablations/models/$(m)/model.safetensors) \
+		--require ablations/eval_feature_cache/Arabidopsis.parquet \
+		--require ablations/eval_feature_cache/Astral.parquet \
 		--require ablations/eval_results/Arabidopsis_all_features.parquet \
 		--require ablations/eval_results/Astral_all_features.parquet \
 		--require feature_importance/helaqc_extended_features/shap_values.pkl \
@@ -365,17 +398,82 @@ $(foreach t,$(HELAQC_DNS),$(eval $(call HELAQC_PLOT_TOOL_RULE,$(t))))
 
 paper-plot-helaqc-analysis: $(foreach t,$(HELAQC_DNS),paper-plot-helaqc-$(t))
 
+# Retrain a HeLa calibrator from scratch: compute train / val features, then train.
+# Writes features, model and training history to $(HELAQC_MODELS_DIR)/<tool>_helaqc/.
+# To predict / plot with the new model, point the model at it, e.g.
+#   make -f Makefile.paper paper-retrain-helaqc-casanovo
+#   make -f Makefile.paper HELAQC_DNS_MODEL_casanovo=paper_results/models/casanovo_helaqc \
+#     paper-recompute-helaqc-casanovo paper-plot-helaqc-casanovo-recomputed
+define HELAQC_MODEL_RULE
+.PHONY: paper-retrain-helaqc-$(1)
+paper-retrain-helaqc-$(1):
+	@out=$$(HELAQC_MODELS_DIR)/$(1)_helaqc; mkdir -p $$$$out; \
+	for split in train val; do \
+	  spectra=$$(HELAQC_DATA)/$$$$split.parquet; \
+	  preds=$$(HELAQC_DATA)/$$(HELAQC_DNS_PREDS_DIR_$(1))/$$$${split}_preds.$$(HELAQC_DNS_PREDS_EXT_$(1)); \
+	  if [ "$$(HELAQC_DNS_SPECTRA_EXT_$(1))" = "mgf" ]; then \
+	    spectra=$$(PAPER_RESULTS_DIR)/helaqc_mgf/$$$$split.mgf; \
+	    [ -f $$$$spectra ] || $$(PYTHON) $$(PAPER_SCRIPTS)/convert_parquet_to_mgf.py $$(HELAQC_DATA)/$$$$split.parquet -o $$$$spectra --annotate || exit 1; \
+	  fi; \
+	  $$(WINNOW) compute-features \
+	    data_loader=$$(HELAQC_DNS_LOADER_$(1)) $$(HELAQC_DNS_LOADER_ARGS_$(1)) labelled=true \
+	    dataset.spectrum_path_or_directory=$$$$spectra dataset.predictions_path=$$$$preds \
+	    $$(KOINA_FRAGMENT_MATCH_CONSTANTS) $$(HELAQC_DNS_FEATURE_OVERRIDES_$(1)) \
+	    metadata_output_path=$$$$out/metadata_$$$$split.parquet \
+	    training_matrix_output_path=$$$$out/features_$$$$split.parquet || exit 1; \
+	done; \
+	$$(WINNOW) train data_loader=$$(HELAQC_DNS_LOADER_$(1)) \
+	  features_path=$$$$out/features_train.parquet val_features_path=$$$$out/features_val.parquet \
+	  model_output_dir=$$$$out training_history_path=$$$$out/training_history.json \
+	  'calibrator.training_feature_columns=[$$(HELAQC_DNS_TRAIN_COLUMNS_$(1))]' \
+	  $$(HELAQC_TRAIN_HYPERPARAMETERS) $$(KOINA_FRAGMENT_MATCH_CONSTANTS) \
+	  $$(HELAQC_DNS_FEATURE_OVERRIDES_$(1))
+endef
+
+$(foreach t,$(HELAQC_DNS),$(eval $(call HELAQC_MODEL_RULE,$(t))))
+
+paper-retrain-helaqc: $(foreach t,$(HELAQC_DNS_TOOLS),paper-retrain-helaqc-$(t))
+
+# Plot HeLa DNS analysis from recomputed predictions (paper_results/<tool>_helaqc_predictions_*)
+# rather than the Figshare deposit.
+define HELAQC_PLOT_RECOMPUTED_RULE
+.PHONY: paper-plot-helaqc-$(1)-recomputed
+paper-plot-helaqc-$(1)-recomputed:
+	$$(PYTHON) $$(PAPER_SCRIPTS)/plot_analysis.py \
+		--predictions-dir $$(PAPER_RESULTS_DIR)/$(1)_helaqc_predictions_test \
+		--split test --label-mode labelled --fasta $$(FASTA_HUMAN) \
+		--dns-model '$$(HELAQC_DNS_LABEL_$(1))' \
+		--model-dir $$(HELAQC_DNS_MODEL_$(1)) \
+		--pca-predictions-dir $$(PAPER_RESULTS_DIR)/$(1)_helaqc_predictions_train \
+		--pca-predictions-dir $$(PAPER_RESULTS_DIR)/$(1)_helaqc_predictions_val \
+		--pca-split train_val \
+		--plots-dir $$(PAPER_PLOTS_DIR)/helaqc_analysis_recomputed/$(1)_test
+	$$(PYTHON) $$(PAPER_SCRIPTS)/plot_analysis.py \
+		--predictions-dir $$(PAPER_RESULTS_DIR)/$(1)_helaqc_predictions_raw_less_train \
+		--split raw_less_train --label-mode unlabelled --fasta $$(FASTA_HUMAN) \
+		--dns-model '$$(HELAQC_DNS_LABEL_$(1))' \
+		--plots-dir $$(PAPER_PLOTS_DIR)/helaqc_analysis_recomputed/$(1)_raw_less_train
+endef
+
+$(foreach t,$(HELAQC_DNS),$(eval $(call HELAQC_PLOT_RECOMPUTED_RULE,$(t))))
+
 # $(1) = tool (instanovo|casanovo|primenovo), $(2) = split (test|unlabelled|raw_less_train)
 define HELAQC_RECOMPUTE_TOOL_SPLIT_RULE
 .PHONY: paper-recompute-helaqc-$(1)-$(2)
 paper-recompute-helaqc-$(1)-$(2):
 	@mkdir -p $$(PAPER_RESULTS_DIR)
 	@out=$$(PAPER_RESULTS_DIR)/$(1)_helaqc_predictions_$(2); \
+	spectra=$$(HELAQC_DATA)/$(2).parquet; \
+	preds=$$(HELAQC_DATA)/$$(HELAQC_DNS_PREDS_DIR_$(1))/$(2)_preds.$$(HELAQC_DNS_PREDS_EXT_$(1)); \
+	if [ "$$(HELAQC_DNS_SPECTRA_EXT_$(1))" = "mgf" ]; then \
+	  spectra=$$(PAPER_RESULTS_DIR)/helaqc_mgf/$(2).mgf; \
+	  [ -f $$$$spectra ] || $$(PYTHON) $$(PAPER_SCRIPTS)/convert_parquet_to_mgf.py $$(HELAQC_DATA)/$(2).parquet -o $$$$spectra --annotate; \
+	fi; \
 	echo "Predict $(1) $(2) -> $$$$out"; \
 	$$(WINNOW) predict \
-	  data_loader=$$(HELAQC_DNS_LOADER_$(1)) \
-	  dataset.spectrum_path_or_directory=$$(HELAQC_DATA)/$(2).parquet \
-	  dataset.predictions_path=$$(HELAQC_DATA)/$$(HELAQC_DNS_PREDS_DIR_$(1))/$(2)_preds.csv \
+	  data_loader=$$(HELAQC_DNS_LOADER_$(1)) $$(HELAQC_DNS_LOADER_ARGS_$(1)) \
+	  dataset.spectrum_path_or_directory=$$$$spectra \
+	  dataset.predictions_path=$$$$preds \
 	  calibrator.pretrained_model_name_or_path=$$(HELAQC_DNS_MODEL_$(1)) \
 	  fdr_control.fdr_threshold=$$(PREDICT_FDR_THRESHOLD) \
 	  $$(KOINA_FRAGMENT_MATCH_CONSTANTS) \
@@ -689,7 +787,8 @@ paper-repredict-generalisation: download-paper-generalisation-loo
 #    paper-plot-ablations: from the deposited per-PSM results (CPU; the Astral curves
 #    are slow). Writes recomputed metrics (incl. tail ECE over the top 10% of PSMs),
 #    the tail-ECE bar plots and the PR / calibration / FDR curves.
-#    paper-recompute-ablations [GPU]: retrain and re-evaluate from scratch.
+#    paper-recompute-ablations: evaluate the deposited models on the deposited eval features.
+#    paper-retrain-ablations [GPU]: retrain them from the deposited training features, then evaluate.
 ################################################################################
 
 paper-plot-ablations:
@@ -707,15 +806,33 @@ paper-plot-ablations:
 		--output-dir $(ABLATIONS_REPLOT_DIR) --plot-format both
 
 
-paper-recompute-ablations: paper-recompute-feature-investigation
-	@$(call GENERAL_MAYBE_SUBSET,immuno2,labelled); \
-	mkdir -p $(ABLATIONS_RESULTS_DIR); \
+# Evaluate the deposited ablation models on the deposited evaluation features (no training).
+# Writes per-PSM results and the summary to $(ABLATIONS_RESULTS_DIR); replot with paper-plot-ablations.
+paper-recompute-ablations:
+	mkdir -p $(ABLATIONS_RESULTS_DIR)/eval_feature_cache
+	ln -sf $(abspath $(ABLATIONS_EVAL_FEATURES))/Arabidopsis.parquet $(ABLATIONS_RESULTS_DIR)/eval_feature_cache/athaliana.parquet
+	ln -sf $(abspath $(ABLATIONS_EVAL_FEATURES))/Astral.parquet $(ABLATIONS_RESULTS_DIR)/eval_feature_cache/Astral.parquet
+	ln -sfn $(abspath $(ABLATIONS_MODELS)) $(ABLATIONS_RESULTS_DIR)/models
 	$(PYTHON) $(PAPER_SCRIPTS)/run_feature_ablations.py \
-		--train-features $(FEATURE_MATRIX_DIR)/features_train.parquet \
-		--val-features $(FEATURE_MATRIX_DIR)/features_val.parquet \
-		--eval-root $(GENERAL_EVAL_DIR) \
-		--override-eval-dir immuno2=$(GENERAL_SUBSET_DIR)/immuno2/labelled \
+		--skip-training --skip-feature-compute --skip-plots \
+		--hyperparams-from-model $(GENERAL_MODEL) \
+		--eval-datasets athaliana --eval-datasets Astral \
 		--output-dir $(ABLATIONS_RESULTS_DIR)
+
+# Retrain the ablation calibrators from the deposited training features, then evaluate.
+# Retrained weights are close to, but not bit-identical to, the deposited models
+# (device-dependent numerics), so results differ slightly from the deposit.
+paper-retrain-ablations:
+	mkdir -p $(ABLATIONS_RETRAIN_DIR)/eval_feature_cache
+	ln -sf $(abspath $(ABLATIONS_EVAL_FEATURES))/Arabidopsis.parquet $(ABLATIONS_RETRAIN_DIR)/eval_feature_cache/athaliana.parquet
+	ln -sf $(abspath $(ABLATIONS_EVAL_FEATURES))/Astral.parquet $(ABLATIONS_RETRAIN_DIR)/eval_feature_cache/Astral.parquet
+	$(PYTHON) $(PAPER_SCRIPTS)/run_feature_ablations.py \
+		--train-features $(ABLATIONS_TRAIN_FEATURES) \
+		--validation-fraction $(ABLATIONS_VALIDATION_FRACTION) \
+		--hyperparams-from-model $(GENERAL_MODEL) \
+		--skip-feature-compute --skip-plots \
+		--eval-datasets athaliana --eval-datasets Astral \
+		--output-dir $(ABLATIONS_RETRAIN_DIR)
 
 ################################################################################
 # 9. Upscored FPs (plot from deposited general_results/labelled)
