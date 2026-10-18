@@ -9,6 +9,7 @@ out-of-distribution (every other source), then saves a combined results CSV.
 import logging
 import re
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Any, Dict, Iterable, List, Optional
 
@@ -301,6 +302,8 @@ def fit_calibrator_on_peptide_split(
     val_featurized = subset_dataset_by_spectrum_ids(featurized, val_ids)
     test_featurized = subset_dataset_by_spectrum_ids(featurized, test_ids)
 
+    # The full featurised copy is no longer needed once split; free it before building the feature datasets
+    del featurized
     train_fd = calibrator.to_feature_dataset(train_featurized)
     val_fd = calibrator.to_feature_dataset(val_featurized)
     val_for_fit = val_fd if len(val_fd) > 0 else None
@@ -378,17 +381,51 @@ def featurize_full_source_for_ood(
     return featurized
 
 
+class _DiskBackedOODCaches(Mapping):
+    """OOD feature caches read from disk on access.
+
+    Holding every featurised source in memory at once needs more RAM than most machines
+    have (the largest source alone is ~200k spectra), so each cache is loaded when
+    indexed and released after use.
+    """
+
+    def __init__(
+        self, datasets: Dict[str, CalibrationDataset], cache_dir: Path
+    ) -> None:
+        self._datasets = datasets
+        self._cache_dir = cache_dir
+
+    def __getitem__(self, source: str) -> CalibrationDataset:
+        return featurize_full_source_for_ood(
+            source, self._datasets[source], self._cache_dir
+        )
+
+    def __iter__(self):
+        return iter(self._datasets)
+
+    def __len__(self) -> int:
+        return len(self._datasets)
+
+
 def build_ood_feature_caches(
     datasets: Dict[str, CalibrationDataset],
     cache_dir: Path | None,
-) -> Dict[str, CalibrationDataset]:
-    """Featurise each source once for reuse across all trainers."""
-    caches: Dict[str, CalibrationDataset] = {}
+) -> Mapping[str, CalibrationDataset]:
+    """Featurise each source once for reuse across all trainers.
+
+    With a ``cache_dir`` the caches are written to disk and loaded on demand; without
+    one (``--no-disk-feature-cache``) they are kept in memory.
+    """
+    if cache_dir is None:
+        return {
+            source: featurize_full_source_for_ood(source, datasets[source], None)
+            for source in sorted(datasets)
+        }
     for source in sorted(datasets):
-        caches[source] = featurize_full_source_for_ood(
-            source, datasets[source], cache_dir
-        )
-    return caches
+        cache_file = _ood_feature_cache_path(cache_dir, source)
+        if not cache_file.is_file():
+            featurize_full_source_for_ood(source, datasets[source], cache_dir)
+    return _DiskBackedOODCaches(datasets, cache_dir)
 
 
 def evaluate_model(
@@ -467,7 +504,7 @@ def _load_source_datasets(
 
 def _train_and_collect_results(
     datasets: Dict[str, CalibrationDataset],
-    ood_feature_caches: Dict[str, CalibrationDataset],
+    ood_feature_caches: Mapping[str, CalibrationDataset],
     model_output_dir: Path,
 ) -> List[pd.DataFrame]:
     all_results: List[pd.DataFrame] = []
@@ -560,7 +597,7 @@ def _require_ood_caches_on_disk(cache_dir: Path, sources: Iterable[str]) -> None
 
 def _repredict_and_collect_results(
     datasets: Dict[str, CalibrationDataset],
-    ood_feature_caches: Dict[str, CalibrationDataset],
+    ood_feature_caches: Mapping[str, CalibrationDataset],
     model_input_dir: Path,
 ) -> List[pd.DataFrame]:
     all_results: List[pd.DataFrame] = []
