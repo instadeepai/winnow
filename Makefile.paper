@@ -133,7 +133,7 @@ GENERAL_EXPERIMENT_FILTER_immuno2 := $(PXD023064_FILES)
 GENERAL_KOINA_immuno2 := $(KOINA_FRAGMENT_MATCH_CONSTANTS)
 GENERAL_SUBSET_DIR ?= $(PAPER_RESULTS_DIR)/_subset
 
-HELAQC_SPLITS := test train unlabelled raw_less_train
+HELAQC_SPLITS := test train val unlabelled raw_less_train
 HELAQC_DNS := instanovo casanovo primenovo
 # Default: all three DNS tools (matches paper-plot-helaqc-analysis).
 HELAQC_DNS_TOOLS ?= instanovo casanovo primenovo
