@@ -5,7 +5,7 @@ Fetches public article metadata (``files`` plus ``folder_structure``) and writes
 each file under ``output_dir`` at ``{folder}/{name}``, matching the Figshare
 folder layout used for paper reproduction artefacts.
 
-By default targets article ``30147601`` version ``10``. Use ``--check-only`` to
+By default targets article ``30147601`` version ``11``. Use ``--check-only`` to
 verify expected relative paths already exist locally without downloading.
 """
 
@@ -271,7 +271,7 @@ def main(
             "--version",
             help="Article version to fetch (uses /versions/{n} when set).",
         ),
-    ] = 10,
+    ] = 11,
     output_dir: Annotated[
         Path,
         typer.Option(

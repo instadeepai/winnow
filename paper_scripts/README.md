@@ -64,12 +64,12 @@ Laptop vs heavy is about workload size and hardware requirements.
 
 | Resource | Pin |
 | --- | --- |
-| Figshare [Analysis outputs](https://figshare.com/articles/dataset/Analysis_outputs/30147601) | article `30147601` v10 (`10.6084/m9.figshare.30147601.v10`) |
+| Figshare [Analysis outputs](https://figshare.com/articles/dataset/Analysis_outputs/30147601) | article `30147601` v11 (`10.6084/m9.figshare.30147601.v11`) |
 | Hugging Face [winnow-ms-datasets](https://huggingface.co/datasets/InstaDeepAI/winnow-ms-datasets) | `659802319d618a359de5ab90ec6b0195681e94a6` |
 | Hugging Face [winnow-general-model](https://huggingface.co/InstaDeepAI/winnow-general-model) | `e2089330dd59adb9685e5b3d7d61f0cd69a3bbb0` |
-| Hugging Face [winnow-helaqc-model](https://huggingface.co/InstaDeepAI/winnow-helaqc-model) | `d56542b961eac7d896e51bf0716a242fc394ab1f` |
-| Figshare [Leave-one-out analysis models and cached test set features](https://figshare.com/articles/software/Hold-one-out_generalisation_models/30147364) | article `30147364` v3 (`10.6084/m9.figshare.30147364.v3`) |
-| Figshare [Additional HeLa Single Shot models](https://doi.org/10.6084/m9.figshare.32744946.v2) | article `32744946` v2 (Casanovo / π-PrimeNovo calibrators) |
+| Hugging Face [winnow-helaqc-model](https://huggingface.co/InstaDeepAI/winnow-helaqc-model) | `51ebee86e6f852a0e6a762c5507f10c783e127bb` |
+| Figshare [Leave-one-out analysis models and cached test set features](https://figshare.com/articles/software/Hold-one-out_generalisation_models/30147364) | article `30147364` v4 (`10.6084/m9.figshare.30147364.v4`) |
+| Figshare [Additional HeLa Single Shot models](https://doi.org/10.6084/m9.figshare.32744946.v5) | article `32744946` v5 (Casanovo / π-PrimeNovo calibrators) |
 | Glissade ([JemmaLDaniel/glissade](https://github.com/JemmaLDaniel/glissade), branch `winnow-benchmark`) | `7c723a2af4a88fda84a6bd4f223b351179bd36da` via `uv sync --group paper` |
 | NovoBoard ([JemmaLDaniel/NovoBoard](https://github.com/JemmaLDaniel/NovoBoard), branch `feat/adapt-to-instanovo`) | `a9faab3ef1af06987599c2f01e6ba96072c80172` via `uv sync --group paper` (Python ≥3.12; also used if regenerating decoy CSVs from MGFs) |
 
@@ -188,7 +188,7 @@ Reviewers who follow only `docs/cli.md` will get a different order and can diffe
 
 ## 4. Approximate deposit sizes
 
-Orders of magnitude for Figshare v10 outputs (metadata + prediction CSVs unless noted):
+Orders of magnitude for Figshare v11 outputs (metadata + prediction CSVs unless noted):
 
 | Tree | Size |
 | --- | --- |
