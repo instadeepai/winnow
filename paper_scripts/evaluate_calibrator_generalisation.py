@@ -45,6 +45,10 @@ logger.addHandler(RichHandler())
 # ---------------------------------------------------------------------------
 SEED = 42
 TEST_SIZE = 0.2
+# Fraction of the training peptides held out for early stopping, so the
+# in-distribution test fold is never used to pick the best epoch
+# (matches winnow train's default validation_fraction).
+EARLY_STOPPING_VAL_SIZE = 0.1
 
 _SLIM_RESULTS_FILENAME = "calibrator_generalisation_results_slim.parquet"
 
@@ -217,8 +221,13 @@ def _peptide_key(tokens: object) -> str:
 
 def create_train_test_split(
     dataset: CalibrationDataset,
+    test_size: float = TEST_SIZE,
 ) -> tuple[CalibrationDataset, CalibrationDataset]:
-    """Split a dataset 80/20 by peptide so no peptide appears in both folds."""
+    """Split a dataset by peptide so no peptide appears in both folds.
+
+    The default 80/20 split defines the in-distribution test fold, and must stay
+    unchanged so ``--repredict-only`` evaluates the same holdout as training.
+    """
     meta = dataset.metadata
     n = len(meta)
     if n <= 1:
@@ -229,7 +238,7 @@ def create_train_test_split(
 
     rng = np.random.default_rng(SEED)
     perm = rng.permutation(len(unique_peptides))
-    n_train = int(len(unique_peptides) * (1 - TEST_SIZE))
+    n_train = int(len(unique_peptides) * (1 - test_size))
 
     train_peptides = set(unique_peptides[perm[:n_train]])
     train_mask = pep_keys.isin(train_peptides).values
@@ -268,19 +277,29 @@ def fit_calibrator_on_peptide_split(
     full_source: CalibrationDataset,
     train_ds: CalibrationDataset,
     val_ds: CalibrationDataset,
-) -> tuple[CalibrationDataset, CalibrationDataset, TrainingHistory]:
-    """Featurise the full source once, then train with the peptide holdout as val.
+    test_ds: CalibrationDataset,
+) -> tuple[CalibrationDataset, TrainingHistory]:
+    """Featurise the full source once, train with early stopping on *val_ds*.
 
     Matches ``winnow train`` single-phase behaviour (features before split) so
-    Koina filtering does not empty small validation folds.
+    Koina filtering does not empty small validation folds. *test_ds* is only
+    featurised and returned for in-distribution evaluation; it must be
+    peptide-disjoint from *train_ds* and *val_ds* so it plays no part in fitting
+    or epoch selection.
     """
     featurized = clone_calibration_dataset(full_source)
     calibrator.compute_features(featurized)
 
     train_ids = set(train_ds.metadata["spectrum_id"].astype(str))
     val_ids = set(val_ds.metadata["spectrum_id"].astype(str))
+    test_ids = set(test_ds.metadata["spectrum_id"].astype(str))
+    if test_ids & (train_ids | val_ids):
+        raise ValueError(
+            "In-distribution test fold overlaps the training or early-stopping fold."
+        )
     train_featurized = subset_dataset_by_spectrum_ids(featurized, train_ids)
     val_featurized = subset_dataset_by_spectrum_ids(featurized, val_ids)
+    test_featurized = subset_dataset_by_spectrum_ids(featurized, test_ids)
 
     train_fd = calibrator.to_feature_dataset(train_featurized)
     val_fd = calibrator.to_feature_dataset(val_featurized)
@@ -296,7 +315,7 @@ def fit_calibrator_on_peptide_split(
         val_for_fit,
         progress_bar=True,
     )
-    return train_featurized, val_featurized, history
+    return test_featurized, history
 
 
 def clone_calibration_dataset(dataset: CalibrationDataset) -> CalibrationDataset:
@@ -456,17 +475,22 @@ def _train_and_collect_results(
         logger.info("=== Training on %s ===", train_project)
 
         train_ds, in_dist_test_ds = create_train_test_split(datasets[train_project])
+        fit_ds, early_stopping_ds = create_train_test_split(
+            train_ds, test_size=EARLY_STOPPING_VAL_SIZE
+        )
         logger.info(
-            "  train: %d, in-dist test: %d",
-            len(train_ds.metadata),
+            "  train: %d, early-stopping val: %d, in-dist test: %d",
+            len(fit_ds.metadata),
+            len(early_stopping_ds.metadata),
             len(in_dist_test_ds.metadata),
         )
 
         calibrator = initialise_calibrator(train_project=train_project)
-        _, in_dist_test_ds, history = fit_calibrator_on_peptide_split(
+        in_dist_test_ds, history = fit_calibrator_on_peptide_split(
             calibrator,
             datasets[train_project],
-            train_ds,
+            fit_ds,
+            early_stopping_ds,
             in_dist_test_ds,
         )
         logger.info(
