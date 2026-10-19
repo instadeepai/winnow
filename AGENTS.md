@@ -22,7 +22,7 @@ Layout, conventions, CI and the release process: `docs/contributing.md`.
 - **Tasks**: `make` is the entry point (`make install-dev`, `make tests`, `make train-sample`, `make predict-sample`).
 - **Verify**: `make tests` and `pre-commit run --all-files`.
 - **Commits**: Conventional Commits (pre-commit enforces). `exp` is only for launching cluster experiments; never for core code changes, and never merged to `main`.
-- **Attribution**: do not author commits, issues or PRs as an AI agent: no `Co-Authored-By` trailer, no "Generated with" line.
+- **Attribution**: do not author commits, issues or PRs as an AI agent: no AI `Co-Authored-By` trailer, no "Generated with" line. Trailers crediting human authors are fine.
 - **Tagging**: never @-mention, tag or request a review from anyone in issues, PRs, descriptions, comments or commit messages unless the user explicitly names who.
 - **Branches**: hyphenated prefix, never a slash: `feat-amazing-feature`, `fix-calibration-bug`.
 - **Issues / PRs**: pick the matching `.github/ISSUE_TEMPLATE/` form. Read `.github/pull_request_template.md` before writing a PR body and fill every section; `gh pr create --body` bypasses templates, so paste its headings.
@@ -39,7 +39,7 @@ Prose in a PR description gets the same scrutiny as prose in a docstring.
 - No slop: binary contrasts ("not X, but Y"), throat-clearing, dramatic fragments, personification, puffery, fake-profound endings.
 - No emojis, no em dashes, sparse bolding. English spelling (colour, organise, behaviour). No Oxford commas unless needed.
 - Be critical of design when a better approach exists; no sycophancy.
-- Credit prior work (co-authored-by or a note in the PR) when reimplementing something that exists on another branch.
+- Credit prior work when reimplementing something that exists on another branch: a note in the PR description, or a `Co-Authored-By` trailer naming the human author.
 
 # Documentation
 
