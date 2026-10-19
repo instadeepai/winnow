@@ -1,0 +1,28 @@
+name: Check manifest is a safe default
+# manifest.yaml launches cluster jobs; experiment settings must not reach main.
+on:
+  pull_request:
+    branches:
+      - main
+jobs:
+  manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v5
+      - name: Check manifest.yaml
+        run: |
+          fail=0
+          check() {
+            actual=$(yq "$1" manifest.yaml)
+            if [ "$actual" != "$2" ]; then
+              echo "::error file=manifest.yaml::$1 is '$actual', expected '$2'"
+              fail=1
+            fi
+          }
+          check '.spec.command' 'make tests'
+          check '.spec.debug.vscode.enabled' 'false'
+          check '.spec.types.worker.resources.accelerators.gpu.count' '0'
+          check '.spec.types.worker.resources.cpus' '2'
+          check '.spec.types.worker.resources.ramRatio' '2'
+          exit $fail
