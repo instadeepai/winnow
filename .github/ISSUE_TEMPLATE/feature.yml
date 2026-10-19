@@ -6,18 +6,14 @@ labels: ["feature"]
 body:
   - type: textarea
     attributes:
-      label: "Summary:"
+      label: "What and why:"
       description: >
-        Provide a brief summary of the feature to be added.
+        State the feature and the problem it solves.
+    validations:
+      required: true
 
   - type: textarea
     attributes:
-      label: "Description & Purpose:"
+      label: "Notes:"
       description: >
-        Describe in more detail the feature and the purpose it will serve.
-
-  - type: textarea
-    attributes:
-      label: "Additional Notes:"
-      description: >
-        Any additional notes.
+        [OPTIONAL] Only what the above does not cover.

@@ -6,18 +6,14 @@ labels: ["refactor"]
 body:
   - type: textarea
     attributes:
-      label: "Summary:"
+      label: "What and why:"
       description: >
-        Provide a brief summary of the refactor.
+        State which code changes and why.
+    validations:
+      required: true
 
   - type: textarea
     attributes:
-      label: "Description & Purpose:"
+      label: "Notes:"
       description: >
-        Detail which parts of the codebase will be refactored and why.
-
-  - type: textarea
-    attributes:
-      label: "Additional Notes:"
-      description: >
-        Any additional notes.
+        [OPTIONAL] Only what the above does not cover.

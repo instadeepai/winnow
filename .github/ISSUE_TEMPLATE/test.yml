@@ -6,18 +6,14 @@ labels: ["test"]
 body:
   - type: textarea
     attributes:
-      label: "Summary:"
+      label: "What and why:"
       description: >
-        Provide a brief summary of the tests to be added/updated.
+        State which tests to add or update and why.
+    validations:
+      required: true
 
   - type: textarea
     attributes:
-      label: "Description & Purpose:"
+      label: "Notes:"
       description: >
-        Describe in more detail the test update.
-
-  - type: textarea
-    attributes:
-      label: "Additional Notes:"
-      description: >
-        Any additional notes.
+        [OPTIONAL] Only what the above does not cover.
