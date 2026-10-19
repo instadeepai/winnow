@@ -43,3 +43,8 @@ htmlcov/
 .coverage
 coverage.xml
 pytest.xml
+
+# Paper reproduction local downloads / outputs
+paper_data/
+paper_results/
+paper_plots/

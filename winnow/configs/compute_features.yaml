@@ -12,6 +12,6 @@ dataset:
 
 metadata_output_path: results/metadata.csv
 # Optional: write a lean numeric Parquet for model training.
-# training_matrix_output_path: results/training_matrix.parquet
+training_matrix_output_path: null
 # If true, the dataset must include ground-truth sequence labels.
 labelled: true
