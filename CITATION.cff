@@ -54,4 +54,6 @@ keywords:
   - false discovery estimation
   - peptide filtering
 license: Apache-2.0
-version: 1.0.0
+version: 2.1.1
+date-released: '2026-10-19'
+doi: 10.5281/zenodo.23469238

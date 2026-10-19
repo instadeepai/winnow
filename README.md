@@ -21,6 +21,11 @@
             alt="Test Coverage"
             style="max-width:100%;"
     ></a>
+    <a href="https://doi.org/10.5281/zenodo.23469238"><img
+            src="https://zenodo.org/badge/DOI/10.5281/zenodo.23469238.svg"
+            alt="DOI"
+            style="max-width:100%;"
+    ></a>
 </p>
 
 <!-- PROJECT LOGO -->
