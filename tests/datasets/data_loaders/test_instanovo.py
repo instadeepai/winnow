@@ -17,6 +17,7 @@ def _finalize(loader, metadata, *, has_labels: bool = True):
         loader.metrics,
         has_labels=has_labels,
         residue_remapping=loader.metrics.residue_set.residue_remapping,
+        output_leucine_as_isoleucine=loader.output_leucine_as_isoleucine,
     )
 
 
@@ -542,8 +543,33 @@ class TestInstaNovoDatasetLoader:
         assert hasattr(beams[0][0], "sequence")
         assert hasattr(beams[0][0], "sequence_log_probability")
 
-    def test_process_beams_replaces_l_with_i_in_sequences(self, loader):
-        """L amino acid must be replaced with I at token level after split."""
+    def test_process_beams_preserves_l_by_default(self, loader):
+        beam_df = pl.DataFrame(
+            {
+                "predictions_beam_0": ["PEPTLDE"],
+                "predictions_log_probability_beam_0": [-0.5],
+                "predictions_token_log_probabilities_0": [
+                    "[-0.1, -0.2, -0.3, -0.4, -0.5, -0.6, -0.7]"
+                ],
+            }
+        )
+        beams = loader._process_beams(beam_df)
+        assert beams[0] is not None
+        assert "L" in beams[0][0].sequence
+
+    def test_process_beams_replaces_l_with_i_when_legacy_flag(
+        self, full_residue_masses, standard_remapping
+    ):
+        loader = InstaNovoDatasetLoader(
+            residue_masses=full_residue_masses,
+            residue_remapping=standard_remapping,
+            output_leucine_as_isoleucine=True,
+            beam_columns={
+                "sequence": "predictions_beam_",
+                "log_probability": "predictions_log_probability_beam_",
+                "token_log_probabilities": "predictions_token_log_probabilities_",
+            },
+        )
         beam_df = pl.DataFrame(
             {
                 "predictions_beam_0": ["PEPTLDE"],
@@ -799,7 +825,27 @@ class TestInstaNovoDatasetLoader:
         result = loader._process_predictions(preds_df, ["spectrum_id"])
         assert result["prediction"].iloc[0] == ["P", "E", "P", "T", "I", "D", "E"]
 
-    def test_finalize_replaces_l_with_i_in_prediction_list(self, loader):
+    def test_finalize_preserves_l_in_prediction_list_by_default(self, loader):
+        preds_df = pd.DataFrame(
+            {
+                "spectrum_id": [1],
+                "predictions": ["PEPTLDE"],
+                "predictions_tokenised": ["P, E, P, T, L, D, E"],
+                "log_probs": [-0.5],
+            }
+        )
+        processed = loader._process_predictions(preds_df, ["spectrum_id"])
+        finalized = _finalize(loader, processed, has_labels=False)
+        assert "L" in finalized["prediction"].iloc[0]
+
+    def test_finalize_replaces_l_with_i_when_legacy_flag(
+        self, full_residue_masses, standard_remapping
+    ):
+        loader = InstaNovoDatasetLoader(
+            residue_masses=full_residue_masses,
+            residue_remapping=standard_remapping,
+            output_leucine_as_isoleucine=True,
+        )
         preds_df = pd.DataFrame(
             {
                 "spectrum_id": [1],

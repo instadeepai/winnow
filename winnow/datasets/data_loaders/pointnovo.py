@@ -20,6 +20,7 @@ class PointNovoDatasetLoader(DatasetLoader):
         residue_masses: dict[str, float],
         residue_remapping: dict[str, str] | None = None,
         isotope_error_range: tuple[int, int] = (0, 1),
+        output_leucine_as_isoleucine: bool = False,
     ) -> None:
         """Initialise the loader with the common dataset-loader options.
 
@@ -27,7 +28,12 @@ class PointNovoDatasetLoader(DatasetLoader):
         but defining the initializer makes this a concrete implementation of the
         ``DatasetLoader`` protocol on Python 3.10.
         """
-        del residue_masses, residue_remapping, isotope_error_range
+        del (
+            residue_masses,
+            residue_remapping,
+            isotope_error_range,
+            output_leucine_as_isoleucine,
+        )
 
     def load(
         self, *, data_path: Path, predictions_path: Path | None = None, **kwargs: Any

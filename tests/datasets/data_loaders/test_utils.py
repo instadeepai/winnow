@@ -16,6 +16,7 @@ RESIDUE_MASSES = {
     "P": 97.052764,
     "E": 129.042593,
     "L": 113.084064,
+    "I": 113.084064,
 }
 REMAPPING = {"M[Oxidation]": "M[UniMod:35]"}
 
@@ -107,15 +108,24 @@ class TestNormalizePeptideCell:
         )
         assert tokens == ["A", "G"]
 
-    def test_leucine_mapped_at_token_level(self, metrics: Metrics) -> None:
+    def test_leucine_preserved_by_default(self, metrics: Metrics) -> None:
         tokens = data_utils.normalize_peptide_cell(
             ["A", "L"],
             metrics,
             residue_remapping=REMAPPING,
         )
+        assert tokens == ["A", "L"]
+
+    def test_leucine_mapped_when_legacy_flag_true(self, metrics: Metrics) -> None:
+        tokens = data_utils.normalize_peptide_cell(
+            ["A", "L"],
+            metrics,
+            residue_remapping=REMAPPING,
+            output_leucine_as_isoleucine=True,
+        )
         assert tokens == ["A", "I"]
 
-    def test_string_leucine_mapped_without_corrupting_mod_names(
+    def test_string_leucine_legacy_without_corrupting_mod_names(
         self, metrics: Metrics
     ) -> None:
         """Uppercase L inside a modification name must not be rewritten before split."""
@@ -124,6 +134,7 @@ class TestNormalizePeptideCell:
             "AC[Labelled]L",
             metrics,
             residue_remapping=remapping,
+            output_leucine_as_isoleucine=True,
         )
         assert tokens == ["A", "C[UniMod:999]", "I"]
 
@@ -292,6 +303,26 @@ class TestRowEvaluation:
         )
         assert not data_utils.row_is_correct(
             1, ["A", "G"], ["A", "G"], sequence_valid=True, prediction_valid=True
+        )
+
+    def test_row_num_matches_treats_l_and_i_as_equivalent(
+        self, metrics: Metrics
+    ) -> None:
+        sequence = ["A", "L", "G"]
+        prediction = ["A", "I", "G"]
+        assert data_utils.row_num_matches(
+            sequence,
+            prediction,
+            metrics,
+            sequence_valid=True,
+            prediction_valid=True,
+        ) == len(sequence)
+        assert data_utils.row_is_correct(
+            len(sequence),
+            sequence,
+            prediction,
+            sequence_valid=True,
+            prediction_valid=True,
         )
 
 

@@ -35,14 +35,18 @@ class ProteomeAnnotationCounts:
 
 
 def normalize_sequence(sequence: str) -> str:
-    """Normalise a peptide sequence by replacing I with L."""
+    """Map leucine to isoleucine for I/L-equivalent substring matching."""
     if sequence:
-        return sequence.replace("I", "L")
+        return sequence.replace("L", "I")
     return sequence
 
 
 def load_proteome_haystack(fasta_file: Path | str) -> str:
-    """Load a FASTA file into a string for substring matching."""
+    """Load a FASTA file into a string for substring matching.
+
+    Each record is passed through :func:`normalize_sequence` so ``I`` and ``L``
+    match interchangeably against query peptides.
+    """
     path = Path(fasta_file)
     if not path.is_file():
         raise FileNotFoundError(f"FASTA file not found: {path}")
@@ -56,7 +60,10 @@ def load_proteome_haystack(fasta_file: Path | str) -> str:
 
 
 def processed_peptide_for_match(prediction: str) -> str:
-    """Strip mods and normalise I/L for proteome substring matching.
+    """Strip mods then map leucine to isoleucine for proteome substring matching.
+
+    Modifications are removed before any ``L`` → ``I`` replacement so bracketed
+    names (e.g. ``UNIMOD``) are not corrupted.
 
     Modifications of the following forms are stripped:
     - Round brackets (e.g. "(+43.006)")

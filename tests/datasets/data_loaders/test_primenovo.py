@@ -376,7 +376,24 @@ class TestPrimeNovoDatasetLoader:
         assert "M[UNIMOD:35]" in row["prediction"]
         assert "M[+15.995]" in row["prediction_untokenised"]
 
-    def test_load_applies_token_level_l_to_i(self, loader, mgf_path, tsv_path):
+    def test_load_preserves_l_in_prediction_by_default(
+        self, loader, mgf_path, tsv_path
+    ):
+        dataset = loader.load(data_path=mgf_path, predictions_path=tsv_path)
+        meta = dataset.metadata
+        row = meta.set_index("spectrum_id").loc["spectra:run_X_SCANS_1"]
+        assert "L" in row["prediction"]
+        assert "L" in row["prediction_untokenised"]
+
+    def test_load_applies_token_level_l_to_i_when_legacy_flag(
+        self, full_residue_masses, mgf_path, tsv_path
+    ):
+        loader = PrimeNovoDatasetLoader(
+            residue_masses=full_residue_masses,
+            residue_remapping=_PRIMENOVO_REMAPPING,
+            mid_sequence_n_terminal_mods=_MID_SEQUENCE_N_TERMINAL_MODS,
+            output_leucine_as_isoleucine=True,
+        )
         dataset = loader.load(data_path=mgf_path, predictions_path=tsv_path)
         meta = dataset.metadata
         row = meta.set_index("spectrum_id").loc["spectra:run_X_SCANS_1"]

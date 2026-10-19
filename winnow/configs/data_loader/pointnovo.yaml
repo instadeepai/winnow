@@ -3,3 +3,6 @@
 _target_: winnow.datasets.data_loaders.PointNovoDatasetLoader
 
 residue_masses: ${residue_masses}
+# false: prediction and sequence keep L and I from the source.
+# true: stored token lists show I wherever the source had L (legacy).
+output_leucine_as_isoleucine: false

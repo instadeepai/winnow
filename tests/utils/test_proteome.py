@@ -15,6 +15,7 @@ from winnow.scripts.main import _separate_metadata_and_predictions
 from winnow.utils.config_path import get_config_dir
 from winnow.utils.proteome import (
     annotate_calibration_dataset,
+    normalize_sequence,
     processed_peptide_for_match,
     residue_set_from_residues_yaml,
     residue_token_count,
@@ -33,16 +34,16 @@ def residue_masses(residue_set: ResidueSet) -> dict[str, float]:
 
 def test_processed_peptide_for_match_strips_mods() -> None:
     cases = [
-        ("PEP(+123.45)TIDE[UNIMOD:35]K", "PEPTLDEK"),
-        ("[UNIMOD:1]-PEP(+123.45)TIDE[UNIMOD:35]K", "PEPTLDEK"),
+        ("PEP(+123.45)TIDE[UNIMOD:35]K", "PEPTIDEK"),
+        ("[UNIMOD:1]-PEP(+123.45)TIDE[UNIMOD:35]K", "PEPTIDEK"),
         ("PEP(foo)TAGDE", "PEPTAGDE"),
         ("(+47.01)-PEPTAGDE", "PEPTAGDE"),
         ("PEPTAGDE[Carboxyl]", "PEPTAGDE"),
         ("[Acetyl]-PEPTAGDE", "PEPTAGDE"),
         ("(N-term)PEPTAGDE", "PEPTAGDE"),
-        ("PEP+15.99TIDE", "PEPTLDE"),
-        ("PEP-15.99TIDE", "PEPTLDE"),
-        ("PEP15.99TIDE", "PEPTLDE"),
+        ("PEP+15.99TIDE", "PEPTIDE"),
+        ("PEP-15.99TIDE", "PEPTIDE"),
+        ("PEP15.99TIDE", "PEPTIDE"),
         ("+42.01-PEPTAGDE", "PEPTAGDE"),
     ]
     for raw, expected in cases:
@@ -50,6 +51,44 @@ def test_processed_peptide_for_match_strips_mods() -> None:
         assert "(" not in out, raw
         assert "[" not in out, raw
         assert out == expected, raw
+
+
+def test_processed_peptide_for_match_maps_leucine_to_isoleucine() -> None:
+    assert processed_peptide_for_match("PEPTLDE") == "PEPTIDE"
+
+
+def test_processed_peptide_for_match_unimod_stripped_before_leucine_map() -> None:
+    """Bracketed UNIMOD must be removed before L → I so names are not corrupted."""
+    assert processed_peptide_for_match("PEPTC[UNIMOD:4]DE") == "PEPTCDE"
+
+
+def test_normalize_sequence_maps_leucine_to_isoleucine() -> None:
+    assert normalize_sequence("PEPTLDE") == "PEPTIDE"
+    assert normalize_sequence("PEPTIDE") == "PEPTIDE"
+
+
+def test_annotate_l_query_hits_fasta_with_isoleucine(
+    residue_set: ResidueSet, tmp_path: Path
+) -> None:
+    dataset = CalibrationDataset(
+        metadata=pd.DataFrame(
+            {
+                "spectrum_id": ["a"],
+                "prediction": [["P", "E", "P", "T", "L", "D", "E"]],
+                "prediction_untokenised": ["PEPTLDE"],
+                "confidence": [0.9],
+                "mz_array": [[100.0]],
+                "intensity_array": [[1.0]],
+            }
+        )
+    )
+    fasta_path = tmp_path / "proteome.fasta"
+    fasta_path.write_text(">prot1\nXXXXXXMKLLPEPTIDEMKLLYYYY\n")
+
+    annotated, _stats = annotate_calibration_dataset(
+        dataset, fasta_path, residue_set, min_residue_length=7
+    )
+    assert annotated.metadata["proteome_hit"].tolist() == [True]
 
 
 @pytest.mark.parametrize(
