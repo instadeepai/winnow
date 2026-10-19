@@ -1,14 +1,13 @@
 # Contributing
 
-Contributions are what make the open-source community such an amazing place to learn, inspire and create, and we welcome your support! Any contributions you make are **greatly appreciated**.
+Contributions are what make the open-source community such an amazing place to learn, inspire and create, and we welcome your support. Any contributions you make are greatly appreciated.
 
 ## Ways to contribute
 
 If you have ideas for enhancements, you can:
 
 - Fork the repository and submit a pull request
-- Open an issue and tag it with "enhancement"
-- Report bugs by opening an issue with the "bug" label
+- Open an issue using the form that matches your topic (feature, bug, docs, and so on)
 - Improve documentation
 - Add examples or tutorials
 
@@ -30,8 +29,8 @@ If you have ideas for enhancements, you can:
 3. **Set up development environment**
 
     ```bash
-    # Install development dependencies
-    uv sync --dev
+    # Install the project with development tools (uv)
+    make install-dev
 
     # Set up pre-commit hooks
     pre-commit install
@@ -47,7 +46,7 @@ If you have ideas for enhancements, you can:
 
     ```bash
     # Run tests
-    pytest
+    make tests
 
     # Check code formatting
     pre-commit run --all-files
@@ -67,64 +66,97 @@ If you have ideas for enhancements, you can:
 
 8. **Open a Pull Request**
 
-    - Provide a clear description of your changes
-    - Reference any related issues
-    - Include examples if applicable
+    The pull request template lists what to fill in. Reference any related issues and include examples if applicable.
 
-### Source layout
+## Conventions
 
-Where to look when reading or extending the code:
+These are enforced by pre-commit or CI where possible.
+
+### Branches and commits
+
+- **Branch names** use a hyphenated type prefix, not a slash: `feat-amazing-feature`, `fix-calibration-bug`.
+- **Commit messages** follow [Conventional Commits](https://www.conventionalcommits.org/). The allowed types are `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `ci`, `build`, `perf` and `style`.
+- **`exp` commits** are reserved for launching experiments on InstaDeep's internal compute cluster. They are never merged into `main`.
+
+### Issues and pull requests
+
+- Issues use the forms in `.github/ISSUE_TEMPLATE/`, one per commit type (feature, bug, refactor, test, docs, CI, build).
+- Pull requests use `.github/pull_request_template.md`.
+
+### Code and tests
+
+- **Dependencies** are managed with `uv`; `uv.lock` is committed and should only change through `uv add`, `uv remove` or `uv lock`.
+- The `torch` version range in `pyproject.toml` must stay compatible with [InstaNovo](https://github.com/instadeepai/InstaNovo), so that both install in one environment for end-to-end pipelines.
+- **Tests** live under `tests/`, mirroring the layout of `winnow/`. Files are named `test_*.py` and run with `make tests`.
+- **Linting and formatting** are configured in `.pre-commit-config.yaml`; `pre-commit run --all-files` runs them. CI runs the same checks, the tests across operating systems and Python versions, and the docs build. See `.github/workflows/`.
+
+## Repository layout
+
+The installable package is `winnow/`. The other folders support development, documentation, the paper and experiments. They are not part of the published API.
+
+### The `winnow` package
 
 | Path | Summary |
-| ---- | -------- |
-| **`winnow/datasets/`** | `CalibrationDataset`, `DatasetLoader` implementations (InstaNovo, MZTab, PointNovo, Winnow-native), PSM-oriented types. |
-| **`winnow/calibration/`** | `ProbabilityCalibrator` and `CalibrationFeatures` subclasses (rescoring features fed into calibration). |
+| ---- | ------- |
+| **`winnow/datasets/`** | `CalibrationDataset`, `FeatureDataset` and PSM types, the `DatasetLoader` interface, and the loaders for each tool's output (`data_loaders/`: InstaNovo, MZTab, PointNovo, PrimeNovo, Winnow-native). |
+| **`winnow/calibration/`** | `ProbabilityCalibrator`, the `CalibrationFeatures` base and the rescoring features (`features/`), and calibration diagnostics. |
 | **`winnow/fdr/`** | Abstract `FDRControl`, then `DatabaseGroundedFDRControl` and `NonParametricFDRControl`. |
-| **`winnow/scripts/`** | Typer CLI backing the `winnow` console command. |
-| **`winnow/configs/`** | Default Hydra YAML shipped with the package. |
-| **`winnow/utils/`**, **`winnow/compat/`** | Config and peptide helpers; compatibility shims. |
+| **`winnow/scripts/`** | The Typer CLI behind the `winnow` console command. |
+| **`winnow/configs/`** | Default Hydra YAML shipped with the package: one file per command, plus data loader and FDR method options. |
+| **`winnow/utils/`** | Config path and override helpers, Koina and iRT configuration, peptide and proteome helpers, console output. |
+| **`winnow/compat/`** | Compatibility shims (currently for InstaNovo). |
 | **`winnow/data_types.py`** | Small shared type aliases (`Peptide`, `Spectrum`) used across modules. |
 
-## Development guidelines
+### Everything else
 
-### Code style
+| Path | Summary |
+| ---- | ------- |
+| **`tests/`** | Unit tests, mirroring the layout of `winnow/`. |
+| **`docs/`**, **`mkdocs.yml`** | The documentation site (MkDocs). |
+| **`assets/`** | Images, GIFs and videos used by the docs. |
+| **`examples/`** | Example notebook and associated data files. We prefer real data cut down to a short file size over synthetic dummy data. |
+| **`scripts/`** | General one-off helpers. |
+| **`paper_scripts/`**, **`Makefile.paper`** | Reproduce the figures and tables of the associated paper from public artefacts (see `paper_scripts/README.md`). |
+| **`Makefile`** | Two roles. It holds commands that users and contributors reuse: install, tests, docs, building the package and running the examples. It also holds experiment commands, written as targets with self-explanatory names so the cluster `manifest.yaml` can call them. |
+| **`Dockerfile`**, **`.dockerignore`**, **`manifest.yaml`** | Scaffolding for launching experiments on InstaDeep's internal compute cluster. The repository is open source, so they are visible, but they only matter on an experiment branch. On `main`, `manifest.yaml` stays a harmless default, and the Manifest check enforces this on pull requests. |
+| **`.github/`** | CI workflows, issue forms, the pull request template and the pre-commit hook. |
+| **`.pre-commit-config.yaml`**, **`setup_precommit.sh`**, **`.codespell-ignore.txt`** | Pre-commit hook configuration, a setup script that installs them, and words codespell should accept. |
+| **`pyproject.toml`**, **`uv.lock`** | Package metadata and the locked dependencies. |
+| **`CITATION.cff`**, **`LICENSE.md`**, **`README.md`** | Citation metadata, the licence and the project landing page. |
 
-This project uses:
+## Documentation
 
-- **Ruff** for linting and formatting
-- **Pre-commit** hooks for automated checks
-- **Type hints** where applicable
+Good documentation depends on knowing which question each page answers. We keep each page to one purpose and each fact in one place for two reasons. Readers find an answer without comparing several overlapping pages, and a change only has to be made once.
 
-### Testing
+If you change behaviour, the CLI or configuration, update the associated documentation page in the same pull request. If you find yourself copying a paragraph from another page, link to it instead.
 
-- Write tests for new functionality using `pytest`
-- Ensure all tests pass before submitting a PR
-- Include both unit tests and integration tests where appropriate
+| Purpose | Question it answers | Where it lives |
+| ------- | ------------------- | -------------- |
+| Landing | What is Winnow and how do I install it? | `README.md` (also the docs home) |
+| Tutorial | Show me it working end to end | [Examples](examples.md) and the example notebook |
+| Reference | What exactly does this command, key or function take and return? | [CLI](cli.md), [configuration](configuration.md) (alongside the comments in `winnow/configs/`), and `docs/api/` |
+| Contributing | How do I change the code? | This page |
 
-### Documentation
+## Releases
 
-- Update docstrings for new or modified functions/classes
-- Add examples to demonstrate usage
-- Update the API documentation pages if you add new modules
+A release publishes the package to PyPI. Archived files cannot be changed, so a tag cannot be reused. If a release goes wrong, release the next version number instead.
 
-### Issues and bug reports
+### Versioning
 
-When reporting bugs, please include:
+Releases are tagged `vX.Y.Z` and follow [semantic versioning](https://semver.org/):
 
-- A clear and descriptive title
-- Steps to reproduce the issue
-- Expected vs. actual behaviour
-- Your environment details (Python version, OS, etc.)
-- Any relevant error messages or logs
+- **Patch** (`2.1.0` to `2.1.1`): bug fixes and other changes that do not alter how existing code, configs or checkpoints behave.
+- **Minor** (`2.0.0` to `2.1.0`): new, backwards-compatible functionality.
+- **Major** (`1.x` to `2.0.0`): changes that can break existing use, such as different outputs for the same inputs, checkpoints that no longer load, changed CLI or config keys, or changes to the public API. Compatibility code for the previous major version is removed at a major release.
 
-### Feature requests
+Release notes are the list of merged pull requests that GitHub generates when the release is created. There is no separate changelog file.
 
-For feature requests, please:
+### Steps
 
-- Use a clear and descriptive title
-- Explain the motivation for the feature
-- Describe the proposed solution
-- Consider alternatives you've thought about
+1. **Bump the version in a pull request.** Update `version` in `pyproject.toml`, refresh `uv.lock` with `uv lock`, and update `version` and `date-released` in `CITATION.cff`. Merge it into `main`.
+2. **Create a GitHub release from `main`** with a tag of the form `vX.Y.Z`, where `X.Y.Z` is the version from step 1.
+3. **Check the publish workflow.** It reads the version from `pyproject.toml` and fails before building if the tag does not match it, or if that version is already on PyPI. Otherwise it builds the package and uploads it to PyPI using trusted publishing.
+4. **Confirm the result** on [PyPI](https://pypi.org/project/winnow-fdr/).
 
 ## Getting help
 
