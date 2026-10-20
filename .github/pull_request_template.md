@@ -8,7 +8,7 @@
 
 ## Outputs and checkpoints
 
-<!-- Could this change outputs for existing inputs or break saved checkpoints? Write "No" or say how. -->
+<!-- Could this change outputs for existing inputs or break saved checkpoints? Write "Unchanged" or say how. -->
 
 ---
 - [ ] Every changed line traces to the issue: no unrequested refactors, renames or reformatting
