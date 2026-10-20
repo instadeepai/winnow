@@ -6,12 +6,14 @@ labels: ["documentation"]
 body:
   - type: textarea
     attributes:
-      label: "Summary:"
+      label: "What and why:"
       description: >
-        Provide a brief summary of the documentation to be added/updated.
+        State which documentation to add or fix and where.
+    validations:
+      required: true
 
   - type: textarea
     attributes:
-      label: "Additional Notes:"
+      label: "Notes:"
       description: >
-        Any additional notes.
+        [OPTIONAL] Only what the above does not cover.
