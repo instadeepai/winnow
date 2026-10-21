@@ -20,7 +20,7 @@ Layout, conventions, CI and the release process: `docs/contributing.md`.
 - **torch**: the `torch` pin in `pyproject.toml` must stay compatible with InstaNovo's, so both install in one environment for end-to-end pipelines. Check InstaNovo's torch constraint before touching it.
 - **Tasks**: `make` is the entry point (`make install-dev` sets up the environment; `make tests`, `make train-sample`, `make predict-sample`).
 - **Verify**: `make tests` and `pre-commit run --all-files`.
-- **Commits**: Conventional Commits (pre-commit enforces). `exp` is only for launching cluster experiments; never for core code changes, and never merged to `main`.
+- **Commits**: Conventional Commits (pre-commit enforces). Never use exp commits. They are a maintainer-only prefix for launching cluster experiments and are removed before merging to main.
 - **Attribution**: do not author commits, issues or PRs as an AI agent: no AI `Co-Authored-By` trailer, no "Generated with" line. Trailers crediting human authors are fine.
 - **Tagging**: never @-mention, tag or request a review from anyone in issues, PRs, descriptions, comments or commit messages unless the user explicitly names who.
 - **Branches**: hyphenated prefix, never a slash: `feat-amazing-feature`, `fix-calibration-bug`.
