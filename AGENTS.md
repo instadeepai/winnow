@@ -86,7 +86,7 @@ Google style, enforced by pydocstyle. State why, not what: the name and signatur
 # Non-negotiables
 
 - **Package boundary**: public behaviour belongs in `winnow/`. Never import from root `scripts/` or `paper_scripts/` into `winnow/`.
-- **Logging**: `logger = logging.getLogger(__name__)`. No bare print(). Rich console output goes through `winnow.utils.rich_console .
+- **Logging**: `logger = logging.getLogger(__name__)`. No bare `print()` under `winnow/`. Rich console output goes through `STDERR_CONSOLE` in `winnow.utils.rich_console` .
 - **Datasets**: load through a `DatasetLoader` (`winnow.datasets.interfaces`) into `CalibrationDataset`. Use the existing loaders rather than ad-hoc parsing.
 - **Features**: subclass `CalibrationFeatures` / `FeatureDependency` in `winnow.calibration.features` and wire through Hydra configs.
 - **FDR**: extend `FDRControl` in `winnow.fdr`; keep database-grounded and nonparametric paths explicit.
