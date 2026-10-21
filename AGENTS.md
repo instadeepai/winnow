@@ -16,10 +16,9 @@ Layout, conventions, CI and the release process: `docs/contributing.md`.
 
 # Workflow
 
-- **Deps**: `uv` (`uv.lock` committed). Use `uv add` / `uv sync`; never hand-edit `uv.lock`; no `pip`, `poetry` or `conda`.
+- **Deps**: `uv` (`uv.lock` committed). Use `uv add` / `uv sync`; never hand-edit `uv.lock`; no `pip`, `poetry` or `conda`. Run Python and tools through `uv run`.
 - **torch**: the `torch` pin in `pyproject.toml` must stay compatible with InstaNovo's, so both install in one environment for end-to-end pipelines. Check InstaNovo's torch constraint before touching it.
-- **Env**: check for `.venv/` before creating one; otherwise `uv venv && uv sync`. Run Python via `uv run`.
-- **Tasks**: `make` is the entry point (`make install-dev`, `make tests`, `make train-sample`, `make predict-sample`).
+- **Tasks**: `make` is the entry point (`make install-dev` sets up the environment; `make tests`, `make train-sample`, `make predict-sample`).
 - **Verify**: `make tests` and `pre-commit run --all-files`.
 - **Commits**: Conventional Commits (pre-commit enforces). `exp` is only for launching cluster experiments; never for core code changes, and never merged to `main`.
 - **Attribution**: do not author commits, issues or PRs as an AI agent: no AI `Co-Authored-By` trailer, no "Generated with" line. Trailers crediting human authors are fine.
@@ -59,7 +58,7 @@ One page per purpose, one home per fact. The reasoning and the table of which pa
 
 - Every changed line traces to the request. No unrequested refactor, rename, reformat or "while I'm here" cleanup.
 - If nearby code looks outdated but is not needed for the task, leave it and say so.
-- Match surrounding style, naming and patterns; do not introduce a new one.
+- Match surrounding style, naming and patterns; do not introduce a new one. The exception is type annotations: new or changed signatures use `X | None`, even in files that use `Optional`
 - **Duplicated logic**: when the same logic (not just similar-looking code) is about to exist in a second place in `winnow/`, extract it into one helper that both import, for example the Koina client construction repeated across the Koina features. Put it low enough in the import graph to avoid cycles (`winnow/utils/` or the nearest shared module).
 - **New abstraction**: do not add a base class, factory, wrapper or config indirection for fewer than 3 real callers or implementations. Extend the existing interfaces (`DatasetLoader`, `CalibrationFeatures`, `FeatureDependency`, `FDRControl`) instead of adding layers.
 - Rule of thumb: a helper at the second copy, an abstraction at the third caller.
