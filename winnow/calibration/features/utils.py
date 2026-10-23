@@ -210,24 +210,25 @@ def format_intensity_prediction_outputs(predictions: pd.DataFrame) -> pd.DataFra
         predictions: DataFrame containing intensity prediction outputs.
 
     Returns:
-        DataFrame with one row per peptide, containing the peptide sequences, precursor charges, collision energies, intensities, m/z values and annotations ordered by m/z.
+        DataFrame with one row per peptide, containing the model's inputs, and its
+        intensities, m/z values and annotations ordered by m/z.
     """
     # Group predictions by spectrum_id to get one row per peptide
     # We make a temporary column spectrum_id_col to enable grouping by spectrum_id,
     # and we name this spectrum_id_col to avoid naming conflicts with the index
     predictions["spectrum_id_col"] = predictions.index
-    grouped_predictions = predictions.groupby(
-        by="spectrum_id_col"
-    ).agg(
-        {
-            "peptide_sequences": "first",  # this is the same for all rows in the group, so we can use the first row
-            "precursor_charges": "first",
-            "collision_energies": "first",
-            "intensities": list,  # form a list of intensities for each peptide
-            "mz": list,  # form a list of m/z values for each peptide
-            "annotation": list,  # form a list of annotations for each peptide
-        }
-    )
+    # The per-ion outputs become lists; every other column is a model input,
+    # the same on each of a peptide's rows. Which inputs there are depends on
+    # the model -- Prosit takes collision energy and fragmentation type,
+    # AlphaPeptDeep an instrument type, MS2PIP neither -- so they are taken
+    # from the frame rather than named here.
+    per_ion = {"intensities", "mz", "annotation"}
+    aggregation = {
+        column: (list if column in per_ion else "first")
+        for column in predictions.columns
+        if column != "spectrum_id_col"
+    }
+    grouped_predictions = predictions.groupby(by="spectrum_id_col").agg(aggregation)
 
     # Sort intensities by m/z to match experimental data
     grouped_predictions["intensities"] = grouped_predictions.apply(
