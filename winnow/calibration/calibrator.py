@@ -556,6 +556,36 @@ class ProbabilityCalibrator:
                 model_input_columns,
             )
 
+    def apply_unsupported_residues_override(
+        self,
+        unsupported_residues: Optional[List[str]],
+    ) -> List[str]:
+        """Replace the Koina residue exclusion list on features that filter by it.
+
+        Which residues a Koina model can represent is a property of that model and
+        of the vocabulary the predictions use, not of the calibrator's learned
+        parameters. A saved calibrator carries the list that was in force when it
+        was fitted, so loading one to score predictions from a different residue
+        set needs the list refreshed; otherwise peptides the model has no
+        embedding for are sent anyway and the request fails server-side.
+
+        Args:
+            unsupported_residues: Residue tokens to exclude from Koina requests.
+                ``None`` leaves each feature's saved list untouched.
+
+        Returns:
+            The names of the features that were updated.
+        """
+        if unsupported_residues is None:
+            return []
+        updated = []
+        for name, feature in self.feature_dict.items():
+            if not hasattr(feature, "unsupported_residues"):
+                continue
+            feature.unsupported_residues = list(unsupported_residues)
+            updated.append(name)
+        return updated
+
     # ------------------------------------------------------------------
     # Public instance methods
     # ------------------------------------------------------------------
