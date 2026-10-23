@@ -4,8 +4,13 @@ RUN mkdir /aichor
 RUN curl -Lk 'https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-x64' --output /aichor/vscode_cli.tar.gz
 RUN tar -xf /aichor/vscode_cli.tar.gz -C /aichor
 
-# Use a lightweight Python image with uv pre-installed
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+# Use a lightweight Python image, and a pinned uv: uv publishes no current bookworm images.
+FROM python:3.12-slim-bookworm
+COPY --from=ghcr.io/astral-sh/uv:0.13.5 /uv /uvx /usr/local/bin/
+ENV UV_TOOL_BIN_DIR=/usr/local/bin
+
+# The base image's system pip must not trust the compromised emSign CA intermediates.
+RUN uv pip install --system --no-cache "pip>=26.2.2"
 
 # When your experiment writes result files into a bind mount (directories mirrored using -v or --volume),
 # your results will (for most containers) be read only, because docker containers run as root by default.
