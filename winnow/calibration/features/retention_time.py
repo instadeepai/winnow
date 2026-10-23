@@ -9,6 +9,7 @@ import warnings
 import koinapy
 
 from winnow.calibration.features.base import CalibrationFeatures, FeatureDependency
+from winnow.calibration.features.utils import predict_in_single_batches
 from winnow.datasets.calibration_dataset import CalibrationDataset
 from winnow.utils.peptide import as_token_list, tokens_to_proforma
 
@@ -258,7 +259,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         )
 
         koina_model = koinapy.Koina(self.irt_model_name)
-        irt_predictions = koina_model.predict(inputs)
+        irt_predictions = predict_in_single_batches(koina_model, inputs)
         all_irt = irt_predictions["irt"].values
 
         # Distribute iRT values back per experiment and fit regressors
@@ -314,7 +315,7 @@ class RetentionTimeFeature(CalibrationFeatures):
         inputs.index = valid_irt_input.metadata["spectrum_id"]
 
         koina_model = koinapy.Koina(self.irt_model_name)
-        predictions = koina_model.predict(inputs)
+        predictions = predict_in_single_batches(koina_model, inputs)
         predictions["spectrum_id"] = predictions.index
 
         dataset.metadata.index = dataset.metadata["spectrum_id"]

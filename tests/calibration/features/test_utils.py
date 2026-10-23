@@ -1,6 +1,7 @@
 """Unit tests for winnow calibration feature utility functions."""
 
 import pytest
+import numpy as np
 import pandas as pd
 from typing import Optional
 from unittest.mock import patch
@@ -12,6 +13,7 @@ from winnow.calibration.features.utils import (
     compute_ion_identifications,
     validate_model_input_params,
     resolve_model_inputs,
+    predict_in_single_batches,
     compute_longest_ion_series,
     compute_complementary_ion_count,
     compute_max_ion_gap,
@@ -1082,3 +1084,65 @@ class TestXcorr:
         """A single observed peak matching a single theoretical ion should score positive."""
         score = compute_xcorr([300.0], [5000.0], [300.0])
         assert score > 0.0
+
+
+# predict_in_single_batches
+
+
+class _RecordingModel:
+    """Koina stand-in that records how the request was split."""
+
+    def __init__(self, batchsize):
+        self.batchsize = batchsize
+        self.calls = []
+
+    def predict(self, inputs):
+        self.calls.append(len(inputs))
+        # One row per fragment ion, with a width that varies by batch the way a
+        # composition-embedding model's does.
+        width = len(self.calls)
+        return pd.DataFrame(
+            {"mz": range(len(inputs) * width)},
+            index=np.repeat(inputs.index.to_numpy(), width),
+        )
+
+
+def _peptides(n):
+    return pd.DataFrame({"peptide_sequences": ["PEPTIDEK"] * n}, index=range(n))
+
+
+def test_predict_in_single_batches_sends_one_batch_per_call():
+    """Input longer than a batch is split at exactly the server's batch size."""
+    model = _RecordingModel(batchsize=1000)
+    out = predict_in_single_batches(model, _peptides(2500))
+    assert model.calls == [1000, 1000, 500]
+    # Widths differed per batch; the long frames still append.
+    assert len(out) == 1000 * 1 + 1000 * 2 + 500 * 3
+
+
+def test_predict_in_single_batches_preserves_the_input_index():
+    """The caller indexes the result by spectrum, so the index has to survive."""
+    model = _RecordingModel(batchsize=2)
+    frame = _peptides(4)
+    frame.index = ["s1", "s2", "s3", "s4"]
+    out = predict_in_single_batches(model, frame)
+    assert set(out.index) == {"s1", "s2", "s3", "s4"}
+
+
+def test_predict_in_single_batches_passes_a_short_request_straight_through():
+    """Input that already fits in one batch is sent unsplit."""
+    model = _RecordingModel(batchsize=1000)
+    predict_in_single_batches(model, _peptides(10))
+    assert model.calls == [10]
+
+
+def test_predict_in_single_batches_handles_a_model_with_no_batchsize():
+    """A model that does not advertise a batch size is sent in one request."""
+
+    class _NoBatchSize(_RecordingModel):
+        def __init__(self):
+            super().__init__(batchsize=None)
+
+    model = _NoBatchSize()
+    predict_in_single_batches(model, _peptides(7))
+    assert model.calls == [7]
