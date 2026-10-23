@@ -5,6 +5,11 @@
 # are merged from this block (see winnow predict).
 
 koina:
+  # Inference server. Override to e.g. `localhost:8500` with `ssl: false` when running
+  # a self-hosted Koina/Triton instance; the default is the public endpoint.
+  server_url: koina.wilhelmlab.org:443
+  ssl: true
+
   # Model names
   intensity_model: Prosit_2025_intensity_22PTM
   irt_model: Prosit_2025_irt_22PTM

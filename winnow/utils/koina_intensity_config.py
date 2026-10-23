@@ -201,6 +201,12 @@ def apply_koina_intensity_config(
     if koina_cfg is None:
         return
 
+    server_url = koina_cfg.get("server_url")
+    ssl = koina_cfg.get("ssl")
+    if server_url is not None or ssl is not None:
+        logger.info("Koina server: %s (ssl=%s)", server_url, ssl)
+    calibrator.apply_koina_server_overrides(server_url=server_url, ssl=ssl)
+
     constants, columns = parse_koina_intensity_config(koina_cfg)
     calibrator.apply_koina_model_input_overrides(
         model_input_constants=constants,

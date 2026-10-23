@@ -71,6 +71,8 @@ class MockKoinaFeature(MockCalibrationFeature):
         super().__init__("mock_koina", ["kcol"])
         self.model_input_constants = {"collision_energies": 20}
         self.model_input_columns = {"fragmentation_types": "frag_col"}
+        self.koina_server_url = None
+        self.koina_ssl = True
 
 
 class DeterministicMockFeature(MockCalibrationFeature):
@@ -306,6 +308,41 @@ class TestProbabilityCalibrator:
         assert calibrator.seed == 123
         assert calibrator.val_early_stopping_max_psms is None
         assert calibrator.val_subsample_seed is None
+
+    def test_apply_koina_server_overrides(self):
+        """Inference-time Koina server overrides reach every Koina-using feature."""
+        calibrator = ProbabilityCalibrator()
+        calibrator.add_feature(MockKoinaFeature())
+        calibrator.apply_koina_server_overrides(server_url="localhost:8500", ssl=False)
+        feat = calibrator.feature_dict["mock_koina"]
+        assert feat.koina_server_url == "localhost:8500"
+        assert feat.koina_ssl is False
+
+    def test_apply_koina_server_overrides_is_a_noop_when_unset(self):
+        """Passing neither value leaves the feature untouched."""
+        calibrator = ProbabilityCalibrator()
+        calibrator.add_feature(MockKoinaFeature())
+        calibrator.apply_koina_server_overrides()
+        feat = calibrator.feature_dict["mock_koina"]
+        assert feat.koina_server_url is None
+        assert feat.koina_ssl is True
+
+    def test_apply_koina_server_overrides_accepts_one_value(self):
+        """Only the supplied value changes; the other keeps its current setting."""
+        calibrator = ProbabilityCalibrator()
+        calibrator.add_feature(MockKoinaFeature())
+        calibrator.apply_koina_server_overrides(server_url="localhost:8500")
+        feat = calibrator.feature_dict["mock_koina"]
+        assert feat.koina_server_url == "localhost:8500"
+        assert feat.koina_ssl is True
+
+    def test_apply_koina_server_overrides_skips_non_koina_features(self):
+        """Features without Koina attributes are left alone rather than raising."""
+        calibrator = ProbabilityCalibrator()
+        calibrator.add_feature(MockCalibrationFeature("plain", ["c"]))
+        calibrator.apply_koina_server_overrides(server_url="localhost:8500", ssl=False)
+        feat = calibrator.feature_dict["plain"]
+        assert not hasattr(feat, "koina_server_url")
 
     def test_apply_koina_model_input_overrides(self):
         """Inference-time Koina constant/column overrides merge into features."""
