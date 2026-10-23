@@ -24,7 +24,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
-          version: "0.6.6"
+          version: "0.13.5"
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
         run: uv sync

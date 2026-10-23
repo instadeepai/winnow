@@ -7,6 +7,9 @@ RUN tar -xf /aichor/vscode_cli.tar.gz -C /aichor
 # Use a lightweight Python image with uv pre-installed
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
+# The base image's system pip must not trust the compromised emSign CA intermediates.
+RUN uv pip install --system --no-cache "pip>=26.2.2"
+
 # When your experiment writes result files into a bind mount (directories mirrored using -v or --volume),
 # your results will (for most containers) be read only, because docker containers run as root by default.
 # This means, to clear up your result files, you need to be a root user.
