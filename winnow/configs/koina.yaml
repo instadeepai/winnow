@@ -20,6 +20,11 @@ koina:
 
   # Model constraints — adjust to match the capabilities of your Koina models.
   # See docs/configuration.md for guidance on choosing these values.
+  # At predict time these are applied to a loaded calibrator only when set
+  # explicitly on the command line: a saved calibrator carries the limits its
+  # features were fitted under, and the shipped defaults must not replace them
+  # silently. Rows a constraint rejects are dropped unless
+  # calibrator.learn_from_missing=true.
   constraints:
     max_precursor_charge: 6   # Maximum precursor charge accepted by the intensity models.
     max_peptide_length: 30    # Maximum peptide length (residue token count) accepted by the intensity/iRT models.
