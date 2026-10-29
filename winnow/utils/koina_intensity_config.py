@@ -24,6 +24,14 @@ KOINA_INPUT_KEYS = frozenset({"collision_energies", "fragmentation_types"})
 UNSUPPORTED_RESIDUES_KEY = "koina.constraints.unsupported_residues"
 INTENSITY_MODEL_KEY = "koina.intensity_model"
 IRT_MODEL_KEY = "koina.irt_model"
+MAX_PEPTIDE_LENGTH_KEY = "koina.constraints.max_peptide_length"
+MAX_PRECURSOR_CHARGE_KEY = "koina.constraints.max_precursor_charge"
+LEARN_FROM_MISSING_KEY = "calibrator.learn_from_missing"
+
+CONSTRAINT_KEYS: Dict[str, str] = {
+    MAX_PEPTIDE_LENGTH_KEY: "max_peptide_length",
+    MAX_PRECURSOR_CHARGE_KEY: "max_precursor_charge",
+}
 
 DEFAULT_KOINA_INPUT_COLUMNS: Dict[str, str] = {
     "collision_energies": "collision_energy",
@@ -123,6 +131,43 @@ def parse_koina_model_names(
     )
     irt = koina_cfg.get("irt_model") if IRT_MODEL_KEY in override_keys else None
     return intensity, irt
+
+
+def parse_koina_constraints(
+    koina_cfg: Any,
+    override_keys: Set[str],
+) -> Dict[str, int]:
+    """Extract the numeric Koina constraints that were explicitly overridden.
+
+    A constraint that is only the shipped default is left out: a saved
+    calibrator carries the limits its features were fitted under, and the
+    shipped defaults must not silently replace them.
+    """
+    if koina_cfg is None:
+        return {}
+    constraints = koina_cfg.get("constraints")
+    if constraints is None:
+        return {}
+    return {
+        attribute: int(constraints.get(attribute))
+        for key, attribute in CONSTRAINT_KEYS.items()
+        if key in override_keys and constraints.get(attribute) is not None
+    }
+
+
+def parse_learn_from_missing(cfg: Any, override_keys: Set[str]) -> Optional[bool]:
+    """Extract ``calibrator.learn_from_missing`` when it was explicitly set.
+
+    ``None`` leaves each feature's saved setting alone, which is what a run
+    that never mentions the key gets.
+    """
+    if cfg is None or LEARN_FROM_MISSING_KEY not in override_keys:
+        return None
+    calibrator_cfg = cfg.get("calibrator")
+    if calibrator_cfg is None:
+        return None
+    value = calibrator_cfg.get("learn_from_missing")
+    return None if value is None else bool(value)
 
 
 def _active_non_null(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -271,6 +316,15 @@ def apply_koina_intensity_config(
             ", ".join(name for name in (intensity_model, irt_model) if name),
         )
 
+    constraints = parse_koina_constraints(koina_cfg, override_keys)
+    constrained = calibrator.apply_koina_constraint_overrides(**constraints)
+    if constrained:
+        logger.info(
+            "Applying %s to %s.",
+            ", ".join(f"{name}={value}" for name, value in sorted(constraints.items())),
+            ", ".join(sorted(constrained)),
+        )
+
     if UNSUPPORTED_RESIDUES_KEY not in override_keys:
         return
     residues = parse_unsupported_residues(koina_cfg)
@@ -279,5 +333,35 @@ def apply_koina_intensity_config(
         logger.info(
             "Excluding %d residue(s) from Koina requests on %s.",
             len(residues or []),
+            ", ".join(sorted(updated)),
+        )
+
+
+def apply_learn_from_missing_config(
+    calibrator: Any,
+    cfg: Any,
+    logger: Any,
+    hydra_overrides: Optional[List[str]] = None,
+) -> None:
+    """Apply ``calibrator.learn_from_missing`` to a loaded calibrator."""
+    value = parse_learn_from_missing(cfg, hydra_override_keys(hydra_overrides))
+    if value is None:
+        return
+
+    updated = calibrator.apply_learn_from_missing_override(value)
+    if not updated:
+        return
+
+    if value:
+        logger.warning(
+            "Keeping rows that fail a Koina validity check on %s and imputing "
+            "their features as zero. The calibrator was fitted without such "
+            "rows, so their probabilities -- and the FDR computed from them -- "
+            "are not calibrated until it is refitted the same way.",
+            ", ".join(sorted(updated)),
+        )
+    else:
+        logger.info(
+            "Dropping rows that fail a Koina validity check on %s.",
             ", ".join(sorted(updated)),
         )

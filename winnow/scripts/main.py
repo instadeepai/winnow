@@ -89,6 +89,7 @@ def _handle_koina_intensity_config(
     """Validate and/or apply Koina intensity-model predict-time settings."""
     from winnow.utils.koina_intensity_config import (
         apply_koina_intensity_config,
+        apply_learn_from_missing_config,
         validate_koina_intensity_config,
     )
 
@@ -101,6 +102,9 @@ def _handle_koina_intensity_config(
 
     apply_koina_intensity_config(
         calibrator, koina_cfg, logger, hydra_overrides=hydra_overrides
+    )
+    apply_learn_from_missing_config(
+        calibrator, cfg, logger, hydra_overrides=hydra_overrides
     )
 
 

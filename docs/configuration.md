@@ -432,10 +432,38 @@ output_folder: results/predictions
 - `calibrator.irt_regressor_path`: Optional pre-fitted iRT regressors from training
 - `calibrator.irt_calibration.*`: Optional RT→iRT regressor fitting overrides at predict time
 - `koina.input_constants.*` / `koina.input_columns.*`: Koina collision energy and fragmentation (predict-time; match training overrides)
+- `koina.constraints.max_peptide_length` / `koina.constraints.max_precursor_charge`: Koina validity limits (predict-time; applied to the loaded calibrator only when set explicitly)
+- `calibrator.learn_from_missing`: Whether rows that fail a Koina validity check are imputed and kept or dropped (predict-time; `null` keeps the loaded calibrator's setting)
 - `fdr_method`: FDR estimation method (via defaults: `nonparametric` or `database_grounded`)
 - `fdr_control.fdr_threshold`: Target FDR threshold (e.g. 0.01 for 1%, 0.05 for 5%)
 - `fdr_control.confidence_column`: Column name with confidence scores
 - `output_folder`: Where to save results
+
+### Koina constraints at predict time
+
+A loaded calibrator rebuilds its features from the saved artifact, not from Hydra, so the
+`koina.constraints.*` values in this config are **not** applied to it by default — a saved
+calibrator carries the limits its features were fitted under, and silently replacing them
+with the shipped defaults would change results for everyone who trained against something
+else. Naming a constraint on the command line is what asks for it to be replaced:
+
+```bash
+winnow predict \
+  koina.constraints.max_peptide_length=40 \
+  calibrator.pretrained_model_name_or_path=InstaDeepAI/winnow-general-model \
+  ...
+```
+
+`calibrator.learn_from_missing` decides what happens to the rows a constraint rejects.
+The shipped general model was fitted with `learn_from_missing: false`, which **drops**
+them: they leave the run without appearing in any output, so a prediction longer than
+`max_peptide_length` is decoded and then silently discarded. Setting
+`calibrator.learn_from_missing=true` keeps them instead, imputing the Koina features as
+zero and recording the row in a missing indicator column.
+
+Doing so at predict time scores rows the calibrator never saw while fitting, so its
+probabilities — and the FDR derived from them — are not calibrated for those rows until
+the calibrator is refitted the same way. Winnow logs a warning saying so.
 
 ### FDR method configs
 

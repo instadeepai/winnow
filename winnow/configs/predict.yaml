@@ -30,6 +30,13 @@ calibrator:
   # Useful for within-experiment use cases where the unlabelled data has an unreliable confidence distribution
   # for training a new RT->iRT regressor.
   irt_regressor_path: null
+  # Whether features keep the rows they cannot send to Koina (peptide too long,
+  # precursor charge too high, unsupported residue) with zero-imputed features
+  # and a missing indicator, or drop them from the run entirely.
+  # `null` keeps whatever the loaded calibrator was fitted with.
+  # Setting this to `true` scores rows the calibrator never saw during fitting,
+  # so their probabilities -- and the FDR -- are uncalibrated until it is refit.
+  learn_from_missing: null
   # Optional predict-time RT->iRT regressor fitting overrides (when irt_regressor_path is null):
   # irt_calibration:
   #   train_fraction: 0.3

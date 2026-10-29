@@ -589,6 +589,76 @@ class ProbabilityCalibrator:
             updated.append(name)
         return updated
 
+    def apply_koina_constraint_overrides(
+        self,
+        max_peptide_length: Optional[int] = None,
+        max_precursor_charge: Optional[int] = None,
+    ) -> List[str]:
+        """Replace the numeric Koina validity limits on features that filter by them.
+
+        What a Koina model will accept is a property of that model, not of the
+        calibrator's learned parameters. A saved calibrator carries the limits
+        in force when it was fitted, so scoring predictions against a model
+        with a different ceiling needs them refreshed.
+
+        Args:
+            max_peptide_length: Maximum residue token count accepted by the
+                Koina models. ``None`` leaves each feature's saved limit
+                untouched.
+            max_precursor_charge: Maximum precursor charge accepted by the
+                Koina models. ``None`` leaves it untouched.
+
+        Returns:
+            The names of the features that were updated.
+        """
+        wanted = {
+            "max_peptide_length": max_peptide_length,
+            "max_precursor_charge": max_precursor_charge,
+        }
+        updated = []
+        for name, feature in self.feature_dict.items():
+            changed = False
+            for attribute, value in wanted.items():
+                if value is None or not hasattr(feature, attribute):
+                    continue
+                setattr(feature, attribute, int(value))
+                changed = True
+            if changed:
+                updated.append(name)
+        return updated
+
+    def apply_learn_from_missing_override(
+        self,
+        learn_from_missing: Optional[bool],
+    ) -> List[str]:
+        """Choose whether features drop or impute the rows they cannot score.
+
+        With ``learn_from_missing=False`` a feature removes every row that
+        fails one of its Koina validity checks, so those PSMs leave the run
+        without appearing in any output. With ``True`` the row is kept, its
+        features are imputed as zero and a missing indicator records it.
+
+        The calibrator's weights were fitted under one of these settings, so
+        switching at inference shifts the feature distributions it was
+        normalised against: refit before trusting the resulting FDR.
+
+        Args:
+            learn_from_missing: The setting to apply to every feature that has
+                it. ``None`` leaves each feature's saved setting untouched.
+
+        Returns:
+            The names of the features that were updated.
+        """
+        if learn_from_missing is None:
+            return []
+        updated = []
+        for name, feature in self.feature_dict.items():
+            if not hasattr(feature, "learn_from_missing"):
+                continue
+            feature.learn_from_missing = bool(learn_from_missing)
+            updated.append(name)
+        return updated
+
     def apply_koina_model_name_overrides(
         self,
         intensity_model: Optional[str] = None,

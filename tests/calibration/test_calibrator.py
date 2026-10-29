@@ -1347,6 +1347,80 @@ def test_apply_unsupported_residues_override_skips_other_features():
     assert not hasattr(features["Beam Features"], "unsupported_residues")
 
 
+# apply_koina_constraint_overrides and apply_learn_from_missing_override
+
+
+class _ConstrainedFeature:
+    def __init__(self):
+        self.max_peptide_length = 30
+        self.max_precursor_charge = 6
+        self.learn_from_missing = False
+
+
+def test_apply_koina_constraint_overrides_replaces_both_limits():
+    """Every constrained feature takes the new limits and is named in the result."""
+    features = {"Fragment Match Features": _ConstrainedFeature()}
+    calibrator = _calibrator_with(features)
+    updated = calibrator.apply_koina_constraint_overrides(
+        max_peptide_length=40, max_precursor_charge=8
+    )
+    assert updated == ["Fragment Match Features"]
+    assert features["Fragment Match Features"].max_peptide_length == 40
+    assert features["Fragment Match Features"].max_precursor_charge == 8
+
+
+def test_apply_koina_constraint_overrides_leaves_unset_limits_alone():
+    """A limit passed as ``None`` keeps the value the calibrator was fitted with."""
+    features = {"Fragment Match Features": _ConstrainedFeature()}
+    calibrator = _calibrator_with(features)
+    assert calibrator.apply_koina_constraint_overrides(max_peptide_length=40) == [
+        "Fragment Match Features"
+    ]
+    assert features["Fragment Match Features"].max_precursor_charge == 6
+
+
+def test_apply_koina_constraint_overrides_no_arguments_is_a_noop():
+    """Passing nothing changes nothing and names no feature."""
+    features = {"Fragment Match Features": _ConstrainedFeature()}
+    calibrator = _calibrator_with(features)
+    assert calibrator.apply_koina_constraint_overrides() == []
+    assert features["Fragment Match Features"].max_peptide_length == 30
+
+
+def test_apply_koina_constraint_overrides_skips_other_features():
+    """Features with no limits are not given any."""
+    features = {"Beam Features": _NonKoinaFeature()}
+    calibrator = _calibrator_with(features)
+    assert calibrator.apply_koina_constraint_overrides(max_peptide_length=40) == []
+    assert not hasattr(features["Beam Features"], "max_peptide_length")
+
+
+def test_apply_learn_from_missing_override_keeps_rejected_rows():
+    """``True`` switches every feature that has the flag to imputing."""
+    features = {"Fragment Match Features": _ConstrainedFeature()}
+    calibrator = _calibrator_with(features)
+    assert calibrator.apply_learn_from_missing_override(True) == [
+        "Fragment Match Features"
+    ]
+    assert features["Fragment Match Features"].learn_from_missing is True
+
+
+def test_apply_learn_from_missing_override_none_is_a_noop():
+    """``None`` leaves the saved setting in place."""
+    features = {"Fragment Match Features": _ConstrainedFeature()}
+    calibrator = _calibrator_with(features)
+    assert calibrator.apply_learn_from_missing_override(None) == []
+    assert features["Fragment Match Features"].learn_from_missing is False
+
+
+def test_apply_learn_from_missing_override_skips_other_features():
+    """Features without the flag are not given one."""
+    features = {"Beam Features": _NonKoinaFeature()}
+    calibrator = _calibrator_with(features)
+    assert calibrator.apply_learn_from_missing_override(True) == []
+    assert not hasattr(features["Beam Features"], "learn_from_missing")
+
+
 # add_residue_masses
 
 

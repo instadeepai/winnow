@@ -7,7 +7,10 @@ import typer
 
 from winnow.utils.koina_intensity_config import (
     apply_koina_intensity_config,
+    apply_learn_from_missing_config,
+    parse_koina_constraints,
     parse_koina_model_names,
+    parse_learn_from_missing,
     parse_unsupported_residues,
     resolve_feature_model_inputs,
     strip_runtime_keys_from_feature_config,
@@ -66,6 +69,9 @@ class _Feature:
         self.unsupported_residues = list(residues)
         self.model_input_constants = None
         self.model_input_columns = None
+        self.max_peptide_length = 30
+        self.max_precursor_charge = 6
+        self.learn_from_missing = False
         if intensity_model is not None:
             self.intensity_model_name = intensity_model
         if irt_model is not None:
@@ -108,6 +114,36 @@ class _Calibrator:
             if not hasattr(feature, "unsupported_residues"):
                 continue
             feature.unsupported_residues = list(unsupported_residues)
+            updated.append(name)
+        return updated
+
+    def apply_koina_constraint_overrides(
+        self, max_peptide_length=None, max_precursor_charge=None
+    ):
+        wanted = {
+            "max_peptide_length": max_peptide_length,
+            "max_precursor_charge": max_precursor_charge,
+        }
+        updated = []
+        for name, feature in self.feature_dict.items():
+            changed = False
+            for attribute, value in wanted.items():
+                if value is None or not hasattr(feature, attribute):
+                    continue
+                setattr(feature, attribute, int(value))
+                changed = True
+            if changed:
+                updated.append(name)
+        return updated
+
+    def apply_learn_from_missing_override(self, learn_from_missing):
+        if learn_from_missing is None:
+            return []
+        updated = []
+        for name, feature in self.feature_dict.items():
+            if not hasattr(feature, "learn_from_missing"):
+                continue
+            feature.learn_from_missing = bool(learn_from_missing)
             updated.append(name)
         return updated
 
@@ -230,3 +266,93 @@ def test_apply_leaves_saved_model_alone_without_override(calibrator):
         calibrator.feature_dict["Fragment Match Features"].intensity_model_name
         == "Prosit_2025_intensity_22PTM"
     )
+
+
+def test_parse_koina_constraints_needs_the_override_key():
+    """A limit that is only the shipped default is not a request to change it."""
+    cfg = {"constraints": {"max_peptide_length": 40, "max_precursor_charge": 8}}
+    assert parse_koina_constraints(cfg, set()) == {}
+    assert parse_koina_constraints(cfg, {"koina.constraints.max_peptide_length"}) == {
+        "max_peptide_length": 40
+    }
+    assert parse_koina_constraints(
+        cfg,
+        {
+            "koina.constraints.max_peptide_length",
+            "koina.constraints.max_precursor_charge",
+        },
+    ) == {"max_peptide_length": 40, "max_precursor_charge": 8}
+
+
+def test_parse_koina_constraints_missing_block():
+    """A config without the constraints block yields no overrides."""
+    assert parse_koina_constraints(None, {"koina.constraints.max_peptide_length"}) == {}
+    assert (
+        parse_koina_constraints(
+            {"constraints": None}, {"koina.constraints.max_peptide_length"}
+        )
+        == {}
+    )
+
+
+def test_apply_replaces_limits_when_overridden(calibrator):
+    """An explicit override replaces the limit on every constrained feature."""
+    cfg = {"constraints": {"max_peptide_length": 40, "unsupported_residues": []}}
+    apply_koina_intensity_config(
+        calibrator,
+        cfg,
+        logging.getLogger(__name__),
+        hydra_overrides=["koina.constraints.max_peptide_length=40"],
+    )
+    for name in ("Fragment Match Features", "iRT Feature"):
+        assert calibrator.feature_dict[name].max_peptide_length == 40
+        assert calibrator.feature_dict[name].max_precursor_charge == 6
+
+
+def test_apply_leaves_limits_alone_without_override(calibrator):
+    """Without the override the calibrator keeps the limits it was fitted with."""
+    cfg = {"constraints": {"max_peptide_length": 40}}
+    apply_koina_intensity_config(
+        calibrator,
+        cfg,
+        logging.getLogger(__name__),
+        hydra_overrides=["fdr_control.fdr_threshold=0.05"],
+    )
+    for name in ("Fragment Match Features", "iRT Feature"):
+        assert calibrator.feature_dict[name].max_peptide_length == 30
+
+
+def test_parse_learn_from_missing_needs_the_override_key():
+    """The shipped null default is not a request to change the saved setting."""
+    cfg = {"calibrator": {"learn_from_missing": True}}
+    assert parse_learn_from_missing(cfg, set()) is None
+    assert parse_learn_from_missing(cfg, {"calibrator.learn_from_missing"}) is True
+    assert parse_learn_from_missing({"calibrator": {}}, set()) is None
+
+
+def test_apply_learn_from_missing_keeps_rejected_rows(calibrator, caplog):
+    """Turning it on switches every feature and warns that the FDR is uncalibrated."""
+    cfg = {"calibrator": {"learn_from_missing": True}}
+    with caplog.at_level(logging.WARNING):
+        apply_learn_from_missing_config(
+            calibrator,
+            cfg,
+            logging.getLogger(__name__),
+            hydra_overrides=["calibrator.learn_from_missing=true"],
+        )
+    for name in ("Fragment Match Features", "iRT Feature"):
+        assert calibrator.feature_dict[name].learn_from_missing is True
+    assert "not calibrated" in caplog.text
+
+
+def test_apply_learn_from_missing_without_the_override(calibrator):
+    """Without the override the calibrator keeps the setting it was fitted with."""
+    cfg = {"calibrator": {"learn_from_missing": True}}
+    apply_learn_from_missing_config(
+        calibrator,
+        cfg,
+        logging.getLogger(__name__),
+        hydra_overrides=["fdr_control.fdr_threshold=0.05"],
+    )
+    for name in ("Fragment Match Features", "iRT Feature"):
+        assert calibrator.feature_dict[name].learn_from_missing is False
