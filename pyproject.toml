@@ -6,7 +6,7 @@ keywords = ["proteomics","mass spectrometry", "de novo peptide sequencing", "fal
             "false discovery estimation", "peptide filtering"]
 readme = "README.md"
 version = "2.1.1"
-requires-python = ">=3.10,<3.14"
+requires-python = ">=3.11,<3.14"
 license = "Apache-2.0"
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -14,7 +14,6 @@ classifiers = [
 ]
 dependencies = [
     "koinapy>=0.0.10",
-    "tomli>=2.2.1",
     "typer>=0.15.2",
     "instanovo>=1.1.4",
     "huggingface-hub>=0.35.3",

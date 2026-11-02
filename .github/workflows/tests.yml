@@ -11,7 +11,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13"]
     env:
       # secrets cannot be referenced in step `if:` (schema); expose a boolean via env instead.
       HAS_BOT_TOKEN: ${{ secrets.BOT_ACCESS_TOKEN != '' }}

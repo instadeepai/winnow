@@ -1,9 +1,9 @@
 <a id="readme-top"></a>
 
 <p align="center">
-    <a href="https://www.python.org/downloads/release/python-3100/"><img
-            src="https://img.shields.io/badge/python-3.10+-blue.svg"
-            alt="Python 3.10+"
+    <a href="https://www.python.org/downloads/release/python-3110/"><img
+            src="https://img.shields.io/badge/python-3.11+-blue.svg"
+            alt="Python 3.11+"
             style="max-width:100%;"
     ></a>
     <a href="https://docs.astral.sh/ruff"><img
