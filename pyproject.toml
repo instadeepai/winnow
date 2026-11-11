@@ -28,6 +28,7 @@ dependencies = [
     "polars>=1.39.3",
     "biopython>=1.87",
     "pyahocorasick>=2.3.1",
+    "numba>=0.62.1",
 ]
 
 [project.urls]

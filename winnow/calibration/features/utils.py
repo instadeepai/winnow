@@ -12,17 +12,18 @@ from typing import (
     NamedTuple,
     Optional,
     Any,
+    Sequence,
     Set,
     Tuple,
-    Iterator,
     Union,
     Literal,
 )
-import bisect
 import numpy as np
 import pandas as pd
+import polars as pl
 
 from winnow.datasets.calibration_dataset import CalibrationDataset
+from winnow.calibration.features import _kernels
 from winnow.calibration.features.constants import (
     CARBON_ISOTOPE_MASS_SHIFT,
     VALID_INTENSITY_MODEL_PROVIDERS,
@@ -246,28 +247,104 @@ def format_intensity_prediction_outputs(predictions: pd.DataFrame) -> pd.DataFra
 
 
 ########################################################
-# Peak Matching
+# Annotation parsing and dtype-matched constants
 ########################################################
 
 
-def _iter_candidates_by_distance(
-    target_mz: List[float], query_mz: float, insertion_point: int
-) -> Iterator[Tuple[int, float]]:
-    """Yield (index, distance) pairs outward from insertion point, closest first."""
-    left = insertion_point - 1
-    right = insertion_point
-    n = len(target_mz)
+class _ParsedIons(NamedTuple):
+    """Integer encodings of fragment ion annotations, one entry per ion."""
 
-    while left >= 0 or right < n:
-        left_dist = abs(target_mz[left] - query_mz) if left >= 0 else float("inf")
-        right_dist = abs(target_mz[right] - query_mz) if right < n else float("inf")
+    labels: list[str]
+    kind: np.ndarray
+    series: np.ndarray
 
-        if left_dist <= right_dist:
-            yield left, left_dist  # left neighbour is closer
-            left -= 1
-        else:
-            yield right, right_dist  # right neighbour is closer
-            right += 1
+
+def _parse_ions(annotations: Sequence[bytes | str]) -> _ParsedIons:
+    """Decode annotations and encode ion type (b, y, other) and series index (-1 if not numeric).
+
+    The ion type comes from the first character; the series index is the text
+    between it and the first ``+`` (e.g. ``"b12+2"`` -> 12), when that is all digits.
+    """
+    labels = [a.decode() if isinstance(a, bytes) else str(a) for a in annotations]
+    text = pl.Series("annotation", labels, dtype=pl.String)
+    base = text.str.split("+").list.first()
+    digits = base.str.slice(1)
+    kind = (
+        pl.when(text.str.starts_with("b"))
+        .then(_kernels.ION_B)
+        .when(text.str.starts_with("y"))
+        .then(_kernels.ION_Y)
+        .otherwise(_kernels.ION_OTHER)
+    )
+    parsed = pl.DataFrame({"text": text, "digits": digits}).select(
+        kind.cast(pl.Int8).alias("kind"),
+        pl.when(pl.col("digits").str.contains(r"^[0-9]+$"))
+        .then(pl.col("digits").cast(pl.Int64))
+        .otherwise(-1)
+        .alias("series"),
+    )
+    return _ParsedIons(labels, parsed["kind"].to_numpy(), parsed["series"].to_numpy())
+
+
+def _parse_charges(labels: list[str]) -> np.ndarray:
+    """Return the fragment charge of each annotation: the integer after the first ``+``."""
+    text = pl.Series("annotation", labels, dtype=pl.String)
+    return text.str.split("+").list.get(1, null_on_oob=False).cast(pl.Int64).to_numpy()
+
+
+def _cast(values: Sequence[float], like: np.ndarray) -> np.ndarray:
+    """Cast Python float constants to the dtype of ``like``, as NumPy does before mixed arithmetic."""
+    dtype = like.dtype if np.issubdtype(like.dtype, np.floating) else np.float64
+    return np.array(values, dtype=dtype)
+
+
+def _isotope_shift_table(max_charge: int, mz: np.ndarray) -> np.ndarray:
+    """Return isotope offsets ``i * 1.00335 / charge`` cast to the m/z dtype, indexed [charge, i]."""
+    table = np.zeros((max_charge + 1, _kernels.N_ISOTOPES + 1), dtype=np.float64)
+    for charge in range(1, max_charge + 1):
+        for isotope in range(1, _kernels.N_ISOTOPES + 1):
+            table[charge, isotope] = isotope * (CARBON_ISOTOPE_MASS_SHIFT / charge)
+    return table.astype(_cast([], mz).dtype)
+
+
+def _as_float_array(values: Sequence[float] | np.ndarray) -> np.ndarray:
+    """Return values as a float array, keeping float32 and widening anything else to float64."""
+    array = np.asarray(values)
+    return (
+        array if np.issubdtype(array.dtype, np.floating) else array.astype(np.float64)
+    )
+
+
+class _MatchConstants(NamedTuple):
+    """Tolerance and isotope constants cast to the theoretical m/z dtype."""
+
+    ppm: bool
+    tolerance_cast: np.ndarray
+    million_cast: np.ndarray
+    tolerance_da: float
+    isotope_shift: np.ndarray
+
+
+def _match_constants(
+    mz_tolerance: float,
+    unit: Literal["ppm", "da"],
+    theo_mz: np.ndarray,
+    charges: np.ndarray,
+) -> _MatchConstants:
+    """Build the constants ``_kernels.match_ions`` needs for one batch of theoretical ions."""
+    max_charge = int(charges.max()) if charges.size else 1
+    return _MatchConstants(
+        unit == "ppm",
+        _cast([mz_tolerance], theo_mz),
+        _cast([1e6], theo_mz),
+        float(mz_tolerance),
+        _isotope_shift_table(max_charge, theo_mz),
+    )
+
+
+########################################################
+# Peak Matching
+########################################################
 
 
 def parse_mz_tolerance_unit(unit: str) -> Literal["ppm", "da"]:
@@ -324,61 +401,6 @@ def _validate_mz_tolerance(
     return parse_mz_tolerance_unit(mz_tolerance_unit)
 
 
-def _resolve_tolerance(
-    query_mz: float,
-    mz_tolerance: float,
-    mz_tolerance_unit: Literal["ppm", "da"],
-) -> float:
-    """Return the absolute Da tolerance for a given query m/z.
-
-    Args:
-        query_mz: The m/z value of the query ion.
-        mz_tolerance: Tolerance magnitude.
-        mz_tolerance_unit: Unit for ``mz_tolerance``; ``"ppm"`` or ``"da"``.
-
-    Returns:
-        Absolute tolerance in Daltons.
-    """
-    if mz_tolerance_unit == "da":
-        return mz_tolerance
-    return query_mz * mz_tolerance / 1e6
-
-
-def _find_peak_index(
-    target_mz: List[float],
-    query_mz: float,
-    mz_tolerance: float,
-    excluded_indices: set[int] | None = None,
-) -> int | None:
-    """Find index of nearest unmatched peak in sorted target_mz within tolerance.
-
-    Searches outward from the binary search insertion point to find the closest
-    peak within tolerance that is not in the excluded set.
-
-    Args:
-        target_mz: Sorted list of m/z values.
-        query_mz: The m/z value to search for.
-        mz_tolerance: Tolerance for matching (Daltons).
-        excluded_indices: Set of indices to skip (already matched peaks).
-
-    Returns:
-        Index of matching peak, or None if no match found.
-    """
-    if excluded_indices is None:
-        excluded_indices = set()
-
-    insertion_point = bisect.bisect_left(target_mz, query_mz)
-
-    # Search outward from insertion point, checking candidates by distance
-    for idx, dist in _iter_candidates_by_distance(target_mz, query_mz, insertion_point):
-        if dist >= mz_tolerance:
-            return None  # out of tolerance and next candidates are further
-        if idx not in excluded_indices:
-            return idx  # valid match (within tolerance and not already matched)
-
-    return None  # no valid match found
-
-
 def find_matching_ions(
     source_mz: List[float],
     target_mz: List[float],
@@ -403,7 +425,7 @@ def find_matching_ions(
 
     Each observed peak can only be matched once. Once an observed peak is assigned to a
     theoretical ion (either as M0 or as part of its isotopic envelope), it is excluded
-    from matching subsequent theoretical ions.
+    from matching subsequent theoretical ions. ``target_mz`` must be sorted ascending.
 
     Args:
         source_mz: List of m/z values from the source (theoretical) spectrum.
@@ -425,76 +447,121 @@ def find_matching_ions(
     if isinstance(source_mz, float) and isnan(source_mz):
         return IonMatchResult(0.0, 0.0, [], [], [], [])
 
-    num_matches, matched_target_intensity = 0, 0.0
-    matched_ion_annotations = []
-    matched_ion_mz = []
-    matched_ion_intensities_incl_isotopic_env = []
-    aligned_m0_intensities: List[float] = []
-    total_target_intensity = sum(target_intensities)
+    theo_mz = _as_float_array(source_mz)
+    obs_mz = _as_float_array(target_mz)
+    obs_int = _as_float_array(target_intensities)
+    ions = _parse_ions(source_annotations)
+    charges = _parse_charges(ions.labels)
+    constants = _match_constants(mz_tolerance, normalized_unit, theo_mz, charges)
 
-    # Track matched observed peak indices
-    matched_indices: set[int] = set()
-
-    # Decode the ion annotations to strings if they are bytes
-    source_annotations = [
-        ion_annotation.decode() if isinstance(ion_annotation, bytes) else ion_annotation
-        for ion_annotation in source_annotations
-    ]
-
-    for ion_mz, ion_annotation in zip(source_mz, source_annotations):
-        # Find monoisotopic peak (M0), excluding already-matched peaks
-        source_ion_charge = extract_fragment_ion_charge(ion_annotation)
-        isotope_spacing = CARBON_ISOTOPE_MASS_SHIFT / source_ion_charge
-
-        tol = _resolve_tolerance(ion_mz, mz_tolerance, normalized_unit)
-        m0_idx = _find_peak_index(target_mz, ion_mz, tol, matched_indices)
-
-        if m0_idx is not None:
-            # Count match only for M0 (avoids noise inflation)
-            num_matches += 1
-            matched_indices.add(m0_idx)
-
-            # Add the ion annotation to the list of matched ion annotations
-            matched_ion_annotations.append(ion_annotation)
-            # Add the ion m/z to the list of matched ion m/z values
-            matched_ion_mz.append(ion_mz)
-
-            # Record M0 intensity for aligned list (used for normalised spectral angle)
-            m0_intensity = target_intensities[m0_idx]
-            aligned_m0_intensities.append(m0_intensity)
-
-            # Sum M0 intensity for total match intensity calculation
-            ion_intensity = m0_intensity
-            matched_target_intensity += ion_intensity
-
-            # Sum isotopic envelope intensities (M+1, M+2, M+3, M+4)
-            for i in range(1, 5):
-                isotope_mz = ion_mz + i * isotope_spacing
-                isotope_tol = _resolve_tolerance(
-                    isotope_mz, mz_tolerance, normalized_unit
-                )
-                iso_idx = _find_peak_index(
-                    target_mz, isotope_mz, isotope_tol, matched_indices
-                )
-                if iso_idx is not None:
-                    matched_indices.add(iso_idx)
-                    ion_intensity += target_intensities[iso_idx]
-                    matched_target_intensity += target_intensities[iso_idx]
-
-            # Record total intensity for this ion (M0 + isotopes)
-            matched_ion_intensities_incl_isotopic_env.append(ion_intensity)
-        else:
-            # No match - record 0.0 for aligned list
-            aligned_m0_intensities.append(0.0)
-
-    return IonMatchResult(
-        num_matches / len(source_mz),
-        matched_target_intensity / total_target_intensity,
-        matched_ion_annotations,
-        matched_ion_mz,
-        matched_ion_intensities_incl_isotopic_env,
-        aligned_m0_intensities,
+    matched = np.zeros(theo_mz.size, dtype=np.bool_)
+    m0_int = np.zeros(theo_mz.size, dtype=obs_int.dtype)
+    ion_int = np.zeros(theo_mz.size, dtype=obs_int.dtype)
+    num_matches, matched_total, total = _kernels.match_ions(
+        theo_mz, charges, obs_mz, obs_int, *constants, matched, m0_int, ion_int
     )
+    intensity_type = obs_int.dtype.type
+    return IonMatchResult(
+        num_matches / len(theo_mz),
+        intensity_type(matched_total) / intensity_type(total),
+        [label for label, hit in zip(ions.labels, matched) if hit],
+        [mz for mz, hit in zip(theo_mz, matched) if hit],
+        [intensity for intensity, hit in zip(ion_int, matched) if hit],
+        [intensity if hit else 0.0 for intensity, hit in zip(m0_int, matched)],
+    )
+
+
+def _flatten(
+    cells: list[Sequence[float] | np.ndarray | float], missing: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return (offsets, values) for list-like cells, with missing rows empty."""
+    present = [
+        np.asarray(cell) for cell, is_missing in zip(cells, missing) if not is_missing
+    ]
+    lengths = np.zeros(len(cells), dtype=np.int64)
+    lengths[~missing] = [array.size for array in present]
+    offsets = np.zeros(len(cells) + 1, dtype=np.int64)
+    np.cumsum(lengths, out=offsets[1:])
+    values = np.concatenate(present) if present else np.empty(0)
+    return offsets, _as_float_array(values)
+
+
+# Rows per kernel call. Each call holds flat copies of its rows' spectra, so
+# batching bounds that extra memory without changing any per-spectrum result.
+_KERNEL_BATCH_ROWS = 16_384
+
+
+class _KernelBatch(NamedTuple):
+    """Kernel outputs for a batch of rows plus the scalar types of its inputs."""
+
+    floats: np.ndarray
+    ints: np.ndarray
+    flags: np.ndarray
+    intensity_type: type[np.floating]
+    mz_type: type[np.floating]
+
+
+def _ion_identification_batch(
+    dataset: pd.DataFrame,
+    source_mz_column: str,
+    source_annotation_column: str,
+    source_intensity_column: str,
+    mz_tolerance: float,
+    normalized_unit: Literal["ppm", "da"],
+    peptides: Sequence[Sequence[str]],
+) -> _KernelBatch:
+    """Flatten one batch of rows and run the ion identification kernel on it."""
+    n_rows = len(dataset)
+    theo_mz_cells = dataset[source_mz_column].tolist()
+    missing = np.fromiter(
+        (isinstance(cell, float) for cell in theo_mz_cells),
+        dtype=np.bool_,
+        count=n_rows,
+    )
+    theo_offsets, theo_mz = _flatten(theo_mz_cells, missing)
+    int_offsets, theo_int = _flatten(dataset[source_intensity_column].tolist(), missing)
+    annotation_cells = dataset[source_annotation_column].tolist()
+    annotation_lengths = [
+        0 if is_missing else len(cell)
+        for cell, is_missing in zip(annotation_cells, missing)
+    ]
+    if not np.array_equal(int_offsets, theo_offsets):
+        raise ValueError(
+            "The intensity lists must align by m/z values.\n"
+            "This means every theoretical ion must have an observed intensity "
+            "or a zero intensity in the aligned observed intensity list."
+        )
+    if not np.array_equal(np.diff(theo_offsets), annotation_lengths):
+        raise ValueError("Each theoretical m/z value must have exactly one annotation.")
+    if np.any(~missing & (np.diff(theo_offsets) == 0)):
+        raise ZeroDivisionError("division by zero: a spectrum has no theoretical ions")
+
+    obs_offsets, obs_mz = _flatten(
+        dataset["mz_array"].tolist(), np.zeros(n_rows, np.bool_)
+    )
+    _, obs_int = _flatten(
+        dataset["intensity_array"].tolist(), np.zeros(n_rows, np.bool_)
+    )
+    ions = _parse_ions(
+        [a for cell, m in zip(annotation_cells, missing) if not m for a in cell]
+    )
+    charges = _parse_charges(ions.labels)
+    peptide_length = np.fromiter(
+        (len(p) for p in peptides), dtype=np.int64, count=n_rows
+    )
+    theo_float64 = theo_int.astype(np.float64, copy=False)
+
+    floats, ints, flags = _kernels.ion_identifications(
+        obs_offsets, obs_mz, obs_int, theo_offsets, theo_mz, theo_float64,
+        ions.kind, ions.series, charges, missing, peptide_length,
+        *_match_constants(mz_tolerance, normalized_unit, theo_mz, charges),
+        _cast([1e-8], obs_int),
+        _cast([XCORR_BIN_SIZE, XCORR_BIN_OFFSET], obs_mz),
+        _cast([XCORR_BIN_SIZE, XCORR_BIN_OFFSET], theo_mz),
+        XCORR_NUM_WINDOWS, XCORR_MAX_OFFSET, XCORR_WINDOW_NORM_VALUE,
+    )  # fmt: skip
+
+    return _KernelBatch(floats, ints, flags, obs_int.dtype.type, theo_mz.dtype.type)
 
 
 def compute_ion_identifications(
@@ -508,6 +575,10 @@ def compute_ion_identifications(
     predictions: Optional[List[str]] = None,
 ) -> IonIdentificationResult:
     """Computes the ion match rate, match intensity, longest b series, longest y series, complementary ion count, max ion gap, b/y intensity ratio, normalised spectral angle and fast cross-correlation score for each spectrum in the dataset.
+
+    Spectra are processed in parallel by a compiled kernel; set ``NUMBA_NUM_THREADS``
+    to limit the thread count. Rows whose theoretical m/z cell is a float (NaN for
+    a missing theoretical spectrum) get zeros.
 
     Args:
         dataset: DataFrame containing the mass spectrum data.
@@ -523,96 +594,73 @@ def compute_ion_identifications(
         Access fields by name; positional unpacking is no longer supported.
 
     Raises:
-        ValueError: If ``mz_tolerance`` is not numeric or ``mz_tolerance_unit`` is invalid.
+        ValueError: If ``mz_tolerance`` is not numeric or ``mz_tolerance_unit`` is invalid,
+            or if a row's theoretical m/z, intensity and annotation lists differ in length.
+        ZeroDivisionError: If a row that is not missing has no theoretical ions.
     """
-    _validate_mz_tolerance(mz_tolerance, mz_tolerance_unit)
+    normalized_unit = _validate_mz_tolerance(mz_tolerance, mz_tolerance_unit)
 
-    per_row_match_results: List[
-        Tuple[float, float, int, int, int, float, float, float, float]
-    ] = []
+    n_rows = len(dataset)
+    if n_rows == 0:
+        return IonIdentificationResult((), (), (), (), (), (), (), (), ())
 
-    for row_idx, (_, row) in enumerate(dataset.iterrows()):
-        match = find_matching_ions(
-            source_mz=row[source_mz_column],
-            target_mz=row["mz_array"],
-            target_intensities=row["intensity_array"],
-            source_annotations=row[source_annotation_column],
-            mz_tolerance=mz_tolerance,
-            mz_tolerance_unit=mz_tolerance_unit,
+    peptides = (
+        predictions if predictions is not None else dataset["prediction"].tolist()
+    )
+    batches = [
+        _ion_identification_batch(
+            dataset.iloc[start : start + _KERNEL_BATCH_ROWS],
+            source_mz_column,
+            source_annotation_column,
+            source_intensity_column,
+            mz_tolerance,
+            normalized_unit,
+            peptides[start : start + _KERNEL_BATCH_ROWS],
         )
+        for start in range(0, n_rows, _KERNEL_BATCH_ROWS)
+    ]
 
-        # Compute the longest consecutive run of matched fragment ions
-        longest_b_series = compute_longest_ion_series(
-            match.matched_ion_annotations, "b"
-        )
-        longest_y_series = compute_longest_ion_series(
-            match.matched_ion_annotations, "y"
-        )
-        # Compute the number of bond positions where both b and y ions are matched
-        peptide_length = (
-            len(predictions[row_idx])
-            if predictions is not None
-            else len(row["prediction"])
-        )
-        complementary_ion_count = compute_complementary_ion_count(
-            match.matched_ion_annotations,
-            peptide_length,
-        )
-        # Compute the largest gap between consecutive matched fragment ions
-        max_ion_gap = compute_max_ion_gap(match.matched_ion_mz)
-        # Compute the ratio of b-ion to y-ion intensities
-        b_y_intensity_ratio = compute_b_y_intensity_ratio(
-            match.matched_ion_annotations,
-            match.matched_ion_intensities_incl_isotopic_env,
-        )
-        # Compute the normalised spectral angle between theoretical and aligned matched observed intensities
-        spectral_angle = compute_spectral_angle(
-            row[source_intensity_column], match.aligned_m0_intensities
-        )
-        # Compute the fast xcorr score
-        xcorr = compute_xcorr(
-            observed_mz=row["mz_array"],
-            observed_intensities=row["intensity_array"],
-            theoretical_mz=row[source_mz_column],
-        )
+    # Values computed in the intensity or m/z dtype are returned as scalars of that
+    # dtype and the rest as Python floats, so callers that build columns from these
+    # tuples infer the same column dtype as before.
+    def _floats(column: int) -> tuple[float, ...]:
+        return tuple(v for b in batches for v in b.floats[:, column].tolist())
 
-        per_row_match_results.append(
-            (
-                match.match_rate,
-                match.match_intensity,
-                longest_b_series,
-                longest_y_series,
-                complementary_ion_count,
-                max_ion_gap,
-                b_y_intensity_ratio,
-                spectral_angle,
-                xcorr,
+    def _ints(column: int) -> tuple[int, ...]:
+        return tuple(v for b in batches for v in b.ints[:, column].tolist())
+
+    def _typed(
+        column: int, flag: int, scalar_of: str
+    ) -> tuple[float | np.floating, ...]:
+        return tuple(
+            getattr(b, scalar_of)(value) if is_typed else 0.0
+            for b in batches
+            for value, is_typed in zip(
+                b.floats[:, column].tolist(), b.flags[:, flag].tolist()
             )
         )
 
-    if not per_row_match_results:
-        return IonIdentificationResult((), (), (), (), (), (), (), (), ())
-
-    return IonIdentificationResult(*zip(*per_row_match_results))
-
-
-def extract_fragment_ion_charge(annotation: Union[bytes, str]) -> int:
-    """Extract the charge states from ion annotations.
-
-    Args:
-        annotation: Ion annotation from Koina (e.g., "b1+2", "y2+1", "b3+3").
-
-    Returns:
-        Charge of the fragment ion. (e.g. 1, 2, 3)
-    """
-    label = annotation.decode() if isinstance(annotation, bytes) else str(annotation)
-    charge = label.split("+")[1]  # e.g. "1"
-    return int(charge)
+    return IonIdentificationResult(
+        _floats(0),
+        _typed(1, 0, "intensity_type"),
+        _ints(0),
+        _ints(1),
+        _ints(2),
+        _typed(2, 1, "mz_type"),
+        _typed(3, 2, "intensity_type"),
+        _floats(4),
+        _floats(5),
+    )
 
 
 ########################################################
 # Ion Coverage Features
 ########################################################
+
+
+def _select_all(n: int) -> np.ndarray:
+    """Return a mask selecting every ion."""
+    return np.ones(n, dtype=np.bool_)
 
 
 def compute_longest_ion_series(
@@ -630,30 +678,11 @@ def compute_longest_ion_series(
     Returns:
         Length of the longest consecutive run. Returns 0 if no ions matched.
     """
-    indices = []
-    for anno in matched_ion_annotations:
-        # Handle annotations like "b2+2", "y3+3"
-        # Extract the base ion type and index
-        if anno.startswith(ion_type):
-            # Remove charge suffix if present (e.g., "b2+2" -> "b2")
-            base = anno.split("+")[0]
-            if base[1:].isdigit():
-                indices.append(int(base[1:]))
-
-    if not indices:
-        return 0
-
-    indices = sorted(set(indices))
-
-    max_run = current_run = 1
-    for i in range(1, len(indices)):
-        if indices[i] == indices[i - 1] + 1:
-            current_run += 1
-            max_run = max(max_run, current_run)
-        else:
-            current_run = 1
-
-    return max_run
+    ions = _parse_ions(matched_ion_annotations)
+    of_type = np.array(
+        [label.startswith(ion_type) for label in ions.labels], dtype=np.bool_
+    )
+    return _kernels.longest_ion_series(of_type.astype(np.int8), ions.series, of_type, 1)
 
 
 def compute_complementary_ion_count(
@@ -661,7 +690,7 @@ def compute_complementary_ion_count(
 ) -> int:
     """Count bond positions where both b and y ions are matched.
 
-    For a peptide of length n, bond position i produces b_i and y_(n-1-i).
+    For a peptide of length n, bond position i produces b_i and y_(n-i).
     Finding both ions for the same bond provides stronger evidence.
 
     Args:
@@ -671,20 +700,10 @@ def compute_complementary_ion_count(
     Returns:
         Number of bond positions where both complementary b and y ions matched.
     """
-    b_indices = set()
-    y_indices = set()
-
-    for ann in matched_ion_annotations:
-        # Handle charge states: "b1", "b2+2", "y3+3"
-        base = ann.split("+")[0]
-        if base.startswith("b") and base[1:].isdigit():
-            b_indices.add(int(base[1:]))
-        elif base.startswith("y") and base[1:].isdigit():
-            y_indices.add(int(base[1:]))
-
-    # For peptide of length n: bond i produces b_i and y_(n-i)
-    # e.g., ACDK (length 4): b1 pairs with y3, b2 pairs with y2, b3 pairs with y1
-    return sum(1 for i in b_indices if (peptide_length - i) in y_indices)
+    ions = _parse_ions(matched_ion_annotations)
+    return _kernels.complementary_ion_count(
+        ions.kind, ions.series, _select_all(len(ions.labels)), peptide_length
+    )
 
 
 def compute_max_ion_gap(matched_mz: List[float]) -> float:
@@ -696,13 +715,12 @@ def compute_max_ion_gap(matched_mz: List[float]) -> float:
         matched_mz: List of m/z values for matched fragment ions.
 
     Returns:
-        Maximum gap in Daltons. Returns 0.0 if fewer than 2 ions matched.
+        Maximum gap in Daltons, in the dtype of ``matched_mz``. Returns 0.0 if fewer than 2 ions matched.
     """
     if len(matched_mz) < 2:
         return 0.0
-
-    sorted_mz = sorted(matched_mz)
-    return max(sorted_mz[i + 1] - sorted_mz[i] for i in range(len(sorted_mz) - 1))
+    mz = _as_float_array(matched_mz)
+    return mz.dtype.type(_kernels.max_ion_gap(mz, _select_all(mz.size)))
 
 
 ########################################################
@@ -729,23 +747,20 @@ def compute_b_y_intensity_ratio(
             Defaults to 1e-8.
 
     Returns:
-        Ratio of b-ion to y-ion intensities. Returns 0.0 if no ions are matched.
+        Ratio of b-ion to y-ion intensities, in the dtype of the intensities.
+        Returns 0.0 if no ions are matched.
     """
     if not matched_ion_annotations:
         return 0.0
-
-    b_intensity = 0.0
-    y_intensity = 0.0
-
-    for annotation, intensity in zip(
-        matched_ion_annotations, matched_ion_intensities_incl_isotopic_env
-    ):
-        if annotation.startswith("b"):
-            b_intensity += intensity
-        elif annotation.startswith("y"):
-            y_intensity += intensity
-
-    return b_intensity / (y_intensity + epsilon)
+    ions = _parse_ions(matched_ion_annotations)
+    intensities = _as_float_array(matched_ion_intensities_incl_isotopic_env)
+    ratio = _kernels.b_y_intensity_ratio(
+        ions.kind,
+        intensities,
+        _select_all(len(ions.labels)),
+        _cast([epsilon], intensities),
+    )
+    return intensities.dtype.type(ratio)
 
 
 def compute_spectral_angle(
@@ -777,122 +792,21 @@ def compute_spectral_angle(
     if not theoretical_ion_intensities or not aligned_observed_ion_intensities:
         return 0.0
 
-    theoretical_arr = np.array(theoretical_ion_intensities)
-    observed_arr = np.array(aligned_observed_ion_intensities)
-
-    if len(theoretical_arr) != len(observed_arr):
+    theoretical = np.asarray(theoretical_ion_intensities, dtype=np.float64)
+    observed = _as_float_array(aligned_observed_ion_intensities)
+    if theoretical.size != observed.size:
         raise ValueError(
             "The intensity lists must align by m/z values.\n"
             "This means every theoretical ion must have an observed intensity "
             "or a zero intensity in the aligned observed intensity list."
         )
 
-    # Compute L2 norms
-    theoretical_norm = np.linalg.norm(theoretical_arr)
-    observed_norm = np.linalg.norm(observed_arr)
-
-    # Handle edge case: no observed matches (all zeros) or zero theoretical intensities
-    if theoretical_norm == 0.0 or observed_norm == 0.0:
-        return 0.0
-
-    # Compute normalized dot product
-    dot_product = np.dot(theoretical_arr, observed_arr) / (
-        theoretical_norm * observed_norm
-    )
-
-    # Clamp to [-1, 1] to handle floating point errors
-    dot_product = np.clip(dot_product, -1.0, 1.0)
-
-    return 1 - (2 * np.arccos(dot_product) / np.pi)
+    return _kernels.spectral_angle(theoretical, observed)
 
 
 ########################################################
 # Cross-correlation Score (xcorr)
 ########################################################
-
-
-def _bin_observed_spectrum(
-    observed_mz: List[float],
-    observed_intensities: List[float],
-    num_bins: int,
-    bin_size: float,
-    bin_offset: float,
-) -> np.ndarray:
-    """Bin an observed spectrum with sqrt intensity compression.
-
-    Places each peak into a near-unit-dalton bin, taking the square root of
-    its intensity. When multiple peaks land in the same bin, the maximum
-    sqrt-intensity is kept.
-
-    Args:
-        observed_mz: m/z values of the observed spectrum.
-        observed_intensities: Intensities corresponding to observed_mz.
-        num_bins: Total number of bins in the output array.
-        bin_size: Width of each m/z bin in Daltons.
-        bin_offset: Fractional offset for bin assignment.
-
-    Returns:
-        Array of length num_bins with sqrt-compressed, max-per-bin intensities.
-    """
-    binned = np.zeros(num_bins)
-    for mz, intensity in zip(observed_mz, observed_intensities):
-        bin_idx = int(mz / bin_size + bin_offset)
-        if 0 <= bin_idx < num_bins:
-            sqrt_intensity = np.sqrt(max(intensity, 0.0))
-            if sqrt_intensity > binned[bin_idx]:
-                binned[bin_idx] = sqrt_intensity
-    return binned
-
-
-def _normalize_windows(
-    spectrum: np.ndarray,
-    num_windows: int,
-) -> None:
-    """Normalize maximum intensity within equal m/z windows (in-place).
-
-    Divides the spectrum into num_windows equal regions and scales each so
-    that its maximum intensity equals XCORR_WINDOW_NORM_VALUE.
-
-    Args:
-        spectrum: Binned spectrum array, modified in-place.
-        num_windows: Number of equal-width windows.
-    """
-    num_bins = len(spectrum)
-    window_size = max(num_bins // num_windows, 1)
-    for w in range(num_windows):
-        start = w * window_size
-        end = min(start + window_size, num_bins) if w < num_windows - 1 else num_bins
-        window = spectrum[start:end]
-        max_val = window.max()
-        if max_val > 0:
-            spectrum[start:end] = window * (XCORR_WINDOW_NORM_VALUE / max_val)
-
-
-def _subtract_background(
-    spectrum: np.ndarray,
-    max_xcorr_offset: int,
-) -> np.ndarray:
-    """Subtract local background using the fast xcorr preprocessing.
-
-    For each bin i, computes:
-        y'[i] = y[i] - (sum of y[i-offset..i+offset] excluding y[i]) / (2 * offset)
-
-    Uses a cumulative sum for O(n) efficiency.
-
-    Args:
-        spectrum: Window-normalized binned spectrum.
-        max_xcorr_offset: Number of bins in each direction for background.
-
-    Returns:
-        Background-subtracted spectrum.
-    """
-    num_bins = len(spectrum)
-    cumsum = np.concatenate(([0.0], np.cumsum(spectrum)))
-    lo = np.maximum(0, np.arange(num_bins) - max_xcorr_offset)
-    hi = np.minimum(num_bins, np.arange(num_bins) + max_xcorr_offset + 1)
-    window_sums = cumsum[hi] - cumsum[lo]
-    divisor = 2 * max_xcorr_offset
-    return spectrum - (window_sums - spectrum) / divisor
 
 
 def compute_xcorr(
@@ -936,20 +850,17 @@ def compute_xcorr(
         return 0.0
     if len(observed_mz) == 0 or len(theoretical_mz) == 0:
         return 0.0
-
-    max_mz = max(observed_mz)
-    num_bins = int(max_mz / bin_size + bin_offset) + 1
-
-    observed_binned = _bin_observed_spectrum(
-        observed_mz, observed_intensities, num_bins, bin_size, bin_offset
+    obs_mz = _as_float_array(observed_mz)
+    theo_mz = _as_float_array(theoretical_mz)
+    return float(
+        _kernels.xcorr(
+            obs_mz,
+            _as_float_array(observed_intensities),
+            theo_mz,
+            _cast([bin_size, bin_offset], obs_mz),
+            _cast([bin_size, bin_offset], theo_mz),
+            num_windows,
+            max_xcorr_offset,
+            XCORR_WINDOW_NORM_VALUE,
+        )
     )
-    _normalize_windows(observed_binned, num_windows)
-    processed = _subtract_background(observed_binned, max_xcorr_offset)
-
-    theoretical_binned = np.zeros(num_bins)
-    for mz in theoretical_mz:
-        bin_idx = int(mz / bin_size + bin_offset)
-        if 0 <= bin_idx < num_bins:
-            theoretical_binned[bin_idx] = 1.0
-
-    return float(np.dot(theoretical_binned, processed))
