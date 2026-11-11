@@ -1,5 +1,6 @@
 """Unit tests for winnow calibration feature utility functions."""
 
+import numpy as np
 import pytest
 import pandas as pd
 from typing import Optional
@@ -1082,3 +1083,117 @@ class TestXcorr:
         """A single observed peak matching a single theoretical ion should score positive."""
         score = compute_xcorr([300.0], [5000.0], [300.0])
         assert score > 0.0
+
+
+def _random_spectra(n_rows: int) -> pd.DataFrame:
+    """Return synthetic spectra with float32 intensities and theoretical m/z."""
+    rng = np.random.default_rng(0)
+    rows = []
+    for _ in range(n_rows):
+        observed = np.sort(rng.uniform(100, 1500, 200))
+        theoretical = np.sort(
+            rng.choice(observed, 12, replace=False) + rng.normal(0, 0.002, 12)
+        ).astype(np.float32)
+        annotations = [f"{'by'[i % 2]}{i // 2 + 1}+{1 + i % 3}" for i in range(12)]
+        rows.append(
+            {
+                "mz_array": observed,
+                "intensity_array": rng.uniform(0, 1e4, 200).astype(np.float32),
+                "theoretical_mz": theoretical,
+                "theoretical_intensity": rng.uniform(0, 1, 12).tolist(),
+                "theoretical_annotation": [a.encode() for a in annotations],
+                "prediction": list("PEPTIDEK"),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+class TestDtypeFidelity:
+    """Arithmetic follows the input dtypes, matching NumPy's scalar promotion rules."""
+
+    def test_ppm_tolerance_is_computed_in_theoretical_mz_dtype(self):
+        """A peak just inside the float64 tolerance but outside the float32 one matches only for float64 m/z."""
+        observed_mz = np.array([500.0099999999])
+        observed_intensities = np.array([1.0])
+        float32_result = find_matching_ions(
+            np.array([500.0], dtype=np.float32), observed_mz, observed_intensities,
+            ["y4+1"], mz_tolerance=20, mz_tolerance_unit="ppm",
+        )  # fmt: skip
+        float64_result = find_matching_ions(
+            np.array([500.0]), observed_mz, observed_intensities,
+            ["y4+1"], mz_tolerance=20, mz_tolerance_unit="ppm",
+        )  # fmt: skip
+        assert float32_result.match_rate == 0.0
+        assert float64_result.match_rate == 1.0
+
+    def test_compute_ion_identifications_returns_scalars_in_input_dtypes(self):
+        """Matched rows carry intensity- and m/z-dtype scalars; missing rows carry Python 0.0."""
+        dataset = pd.DataFrame(
+            {
+                "mz_array": [np.array([100.0, 200.0, 300.0])] * 2,
+                "intensity_array": [np.array([1.0, 2.0, 3.0], dtype=np.float32)] * 2,
+                "theoretical_mz": [np.array([100.0, 200.0], dtype=np.float32), np.nan],
+                "theoretical_intensity": [[0.5, 0.5], np.nan],
+                "theoretical_annotation": [[b"b1+1", b"y1+1"], np.nan],
+                "prediction": [["A", "G"], ["A", "G"]],
+            }
+        )
+        result = compute_ion_identifications(
+            dataset, "theoretical_mz", "theoretical_annotation", "theoretical_intensity",
+            mz_tolerance=20, mz_tolerance_unit="ppm",
+        )  # fmt: skip
+        assert type(result.ion_match_intensity[0]) is np.float32
+        assert type(result.max_ion_gap[0]) is np.float32
+        assert type(result.b_y_intensity_ratio[0]) is np.float32
+        assert [type(v) for v in result.ion_match_intensity[1:]] == [float]
+        assert result.ion_match_intensity[0] == np.float32(3.0) / np.float32(6.0)
+
+    def test_compute_ion_identifications_is_independent_of_batch_size(self):
+        """Splitting rows into kernel batches does not change any value or type."""
+        dataset = _random_spectra(10)
+        dataset.loc[
+            4, ["theoretical_mz", "theoretical_intensity", "theoretical_annotation"]
+        ] = np.nan
+        args = (
+            dataset,
+            "theoretical_mz",
+            "theoretical_annotation",
+            "theoretical_intensity",
+        )
+        whole = compute_ion_identifications(
+            *args, mz_tolerance=20, mz_tolerance_unit="ppm"
+        )
+        with patch("winnow.calibration.features.utils._KERNEL_BATCH_ROWS", 3):
+            batched = compute_ion_identifications(
+                *args, mz_tolerance=20, mz_tolerance_unit="ppm"
+            )
+        assert batched == whole
+        assert [type(v) for v in batched.ion_match_intensity] == [
+            type(v) for v in whole.ion_match_intensity
+        ]
+
+    def test_compute_ion_identifications_matches_single_spectrum_helpers(self):
+        """The batch kernel agrees with the single-spectrum helpers on each row."""
+        dataset = _random_spectra(20)
+        rows = dataset.to_dict("records")
+        batch = compute_ion_identifications(
+            dataset, "theoretical_mz", "theoretical_annotation", "theoretical_intensity",
+            mz_tolerance=20, mz_tolerance_unit="ppm",
+        )  # fmt: skip
+        for i, row in enumerate(rows):
+            match = find_matching_ions(
+                row["theoretical_mz"], row["mz_array"], row["intensity_array"],
+                row["theoretical_annotation"], mz_tolerance=20, mz_tolerance_unit="ppm",
+            )  # fmt: skip
+            assert batch.ion_match_rate[i] == match.match_rate
+            assert batch.ion_match_intensity[i] == match.match_intensity
+            assert batch.max_ion_gap[i] == compute_max_ion_gap(match.matched_ion_mz)
+            assert batch.spectral_angle[i] == compute_spectral_angle(
+                row["theoretical_intensity"], match.aligned_m0_intensities
+            )
+            assert batch.xcorr[i] == compute_xcorr(
+                row["mz_array"], row["intensity_array"], row["theoretical_mz"]
+            )
+            assert batch.longest_b_series[i] == compute_longest_ion_series(
+                match.matched_ion_annotations, "b"
+            )
