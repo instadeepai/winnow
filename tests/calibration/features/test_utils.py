@@ -143,6 +143,46 @@ class TestIonMatchFunctions:
         assert result.match_rate == 0.0  # 0 matches / 1 source ion
         assert result.match_intensity == 0.0  # 0 match intensity / 1000 total intensity
 
+    def test_find_matching_ions_empty_spectrum(self):
+        """Test find_matching_ions on an observed spectrum with no peaks."""
+        result = find_matching_ions(
+            [100.0],
+            [],
+            [],
+            source_annotations=["b1+1"],
+            mz_tolerance=0.01,
+            mz_tolerance_unit="da",
+        )
+        assert result.match_rate == 0.0
+        assert result.match_intensity == 0.0
+        assert result.matched_ion_annotations == []
+
+    def test_find_matching_ions_zero_intensity_spectrum(self):
+        """Test find_matching_ions when every observed peak has zero intensity."""
+        result = find_matching_ions(
+            [100.0],
+            [100.0],
+            [0.0],
+            source_annotations=["b1+1"],
+            mz_tolerance=0.01,
+            mz_tolerance_unit="da",
+        )
+        assert result.match_rate == 1.0  # the peak is there, it just carries nothing
+        assert result.match_intensity == 0.0
+
+    def test_find_matching_ions_no_theoretical_ions(self):
+        """Test find_matching_ions when the prediction yields no fragments."""
+        result = find_matching_ions(
+            [],
+            [100.0],
+            [1000.0],
+            source_annotations=[],
+            mz_tolerance=0.01,
+            mz_tolerance_unit="da",
+        )
+        assert result.match_rate == 0.0
+        assert result.match_intensity == 0.0
+
     def test_find_matching_ions_prevents_double_matching(self):
         """Test that each observed peak can only be matched once."""
         # Two theoretical ions very close together, only one observed peak
