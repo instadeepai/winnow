@@ -324,6 +324,23 @@ def _validate_mz_tolerance(
     return parse_mz_tolerance_unit(mz_tolerance_unit)
 
 
+def _ratio(numerator: float, denominator: float) -> float:
+    """Return a ratio, scoring an empty denominator as zero.
+
+    A prediction with no theoretical fragments matches nothing and a spectrum
+    whose peaks carry no intensity has nothing to match against, so the
+    fraction is zero there rather than undefined.
+
+    Args:
+        numerator: The matched quantity.
+        denominator: The total the match is measured against.
+
+    Returns:
+        ``numerator / denominator``, or 0.0 when the denominator is not positive.
+    """
+    return numerator / denominator if denominator > 0 else 0.0
+
+
 def _resolve_tolerance(
     query_mz: float,
     mz_tolerance: float,
@@ -488,8 +505,8 @@ def find_matching_ions(
             aligned_m0_intensities.append(0.0)
 
     return IonMatchResult(
-        num_matches / len(source_mz),
-        matched_target_intensity / total_target_intensity,
+        _ratio(num_matches, len(source_mz)),
+        _ratio(matched_target_intensity, total_target_intensity),
         matched_ion_annotations,
         matched_ion_mz,
         matched_ion_intensities_incl_isotopic_env,
