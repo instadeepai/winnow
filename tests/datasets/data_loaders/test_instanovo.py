@@ -100,6 +100,19 @@ class TestInstaNovoDatasetLoader:
             },
         )
 
+    @pytest.fixture()
+    def beam_csv(self, tmp_path):
+        """A two-row predictions CSV with one beam, written as InstaNovo writes it."""
+        path = tmp_path / "predictions.csv"
+        path.write_text(
+            "spectrum_id,predictions,log_probs,"
+            "predictions_beam_0,predictions_log_probability_beam_0,"
+            "predictions_token_log_probabilities_0\n"
+            's1,PEPTIDEK,-0.5,PEPTIDEK,-0.5,"[-0.1, -0.25]"\n'
+            's2,PEPTIDER,-1.5,PEPTIDER,-1.5,"[]"\n'
+        )
+        return path
+
     # ------------------------------------------------------------------
     # Residue remapping configuration
     # ------------------------------------------------------------------
@@ -125,6 +138,38 @@ class TestInstaNovoDatasetLoader:
         residue_set = instanovo_loader.metrics.residue_set
         assert residue_set.residue_remapping["(+42.01)"] == "[UNIMOD:1]"
         assert residue_set.residue_remapping["(-17.03)"] == "[UNIMOD:385]"
+
+    # ------------------------------------------------------------------
+    # _load_beam_preds
+    # ------------------------------------------------------------------
+
+    def test_load_beam_preds_splits_beam_and_metadata_columns(self, loader, beam_csv):
+        """The two frames partition the file's columns between them."""
+        preds_df, beam_df = loader._load_beam_preds(beam_csv)
+
+        assert set(preds_df.columns) == {"spectrum_id", "predictions", "log_probs"}
+        assert set(beam_df.columns) == {
+            "predictions_beam_0",
+            "predictions_log_probability_beam_0",
+            "predictions_token_log_probabilities_0",
+        }
+        assert preds_df.height == beam_df.height == 2
+        assert preds_df["spectrum_id"].to_list() == ["s1", "s2"]
+
+    def test_load_beam_preds_decodes_token_log_probabilities(self, loader, beam_csv):
+        """Per-token log probabilities arrive as floats, not as their list repr."""
+        _, beam_df = loader._load_beam_preds(beam_csv)
+        column = beam_df["predictions_token_log_probabilities_0"]
+
+        assert column.dtype == pl.List(pl.Float64)
+        assert column.to_list() == [[-0.1, -0.25], []]
+
+    def test_load_beam_preds_rejects_a_non_csv(self, loader, tmp_path):
+        """A path that is not a CSV is refused before anything is read."""
+        path = tmp_path / "predictions.parquet"
+        path.write_text("not a csv")
+        with pytest.raises(ValueError, match="Unsupported file format"):
+            loader._load_beam_preds(path)
 
     # ------------------------------------------------------------------
     # _validate_beam_columns

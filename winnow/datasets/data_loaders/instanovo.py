@@ -272,7 +272,34 @@ class InstaNovoDatasetLoader(DatasetLoader):
         # Use polars column selectors to split dataframe
         beam_df = df.select(cs.contains(*self.beam_columns.values()))
         preds_df = df.select(~cs.contains([*self.beam_columns.values()]))
-        return preds_df, beam_df
+        return preds_df, self._decode_token_log_probabilities(beam_df)
+
+    def _decode_token_log_probabilities(self, beam_df: pl.DataFrame) -> pl.DataFrame:
+        """Parse the per-token log probability columns into lists of floats.
+
+        The CSV holds them as a list repr, which is also JSON, so polars decodes
+        a whole column at once. Parsing them per cell costs one trip through
+        ``ast.parse`` for every beam of every spectrum.
+
+        Args:
+            beam_df: The frame of beam columns.
+
+        Returns:
+            The same frame with its per-token log probability columns as lists.
+        """
+        assert self.beam_columns is not None  # to pass type checking
+        prefix = self.beam_columns["token_log_probabilities"]
+        encoded = [
+            column
+            for column, dtype in beam_df.schema.items()
+            if prefix in column and dtype == pl.String
+        ]
+        if not encoded:
+            return beam_df
+        return beam_df.with_columns(
+            pl.col(column).str.json_decode(dtype=pl.List(pl.Float64))
+            for column in encoded
+        )
 
     def _process_beams(
         self,
