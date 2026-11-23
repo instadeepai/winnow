@@ -7,6 +7,7 @@ import json
 import logging
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
+import math
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -248,6 +249,17 @@ class ProbabilityCalibrator:
     ``config.json`` metadata file.
     """
 
+    #: Largest distance from the training mean, in training standard
+    #: deviations, that a feature may reach before the network sees it. Beyond
+    #: this the network is extrapolating, and a ReLU MLP extrapolates to a
+    #: saturated output whose direction nothing constrains: a PSM whose
+    #: predicted mass is 900 Da from its precursor sits about 9,000 standard
+    #: deviations out on ``mass_error_da`` and comes back at confidence 1.0,
+    #: above every correct identification in the run. 50 is far outside the
+    #: range any feature of a real PSM occupies, and inside the region where
+    #: the response was measured to still be sane.
+    DEFAULT_FEATURE_CLAMP_STD: float = 50.0
+
     def __init__(
         self,
         features: Optional[
@@ -269,6 +281,7 @@ class ProbabilityCalibrator:
         val_early_stopping_max_psms: Optional[int] = None,
         val_subsample_seed: Optional[int] = None,
         training_feature_columns: Optional[List[str]] = None,
+        feature_clamp_std: Optional[float] = None,
     ) -> None:
         self.hidden_dims = tuple(hidden_dims)
         self.dropout = dropout
@@ -283,6 +296,14 @@ class ProbabilityCalibrator:
         self.seed = seed
         self.val_early_stopping_max_psms = val_early_stopping_max_psms
         self.val_subsample_seed = val_subsample_seed
+        if feature_clamp_std is None:
+            feature_clamp_std = self.DEFAULT_FEATURE_CLAMP_STD
+        if feature_clamp_std <= 0:
+            raise ValueError(
+                "feature_clamp_std must be positive; pass math.inf to disable "
+                f"clamping, got {feature_clamp_std}."
+            )
+        self.feature_clamp_std = float(feature_clamp_std)
 
         self.feature_dict: Dict[str, CalibrationFeatures] = {}
         self.dependencies: Dict[str, FeatureDependency] = {}
@@ -422,6 +443,7 @@ class ProbabilityCalibrator:
             "seed": calibrator.seed,
             "val_early_stopping_max_psms": calibrator.val_early_stopping_max_psms,
             "val_subsample_seed": calibrator.val_subsample_seed,
+            "feature_clamp_std": calibrator.feature_clamp_std,
             "feature_columns": calibrator.columns,
             "training_feature_columns": calibrator.training_feature_columns,
             "feature_names": calibrator.feature_names,
@@ -484,6 +506,9 @@ class ProbabilityCalibrator:
             seed=config.get("seed", 42),
             val_early_stopping_max_psms=config.get("val_early_stopping_max_psms"),
             val_subsample_seed=config.get("val_subsample_seed"),
+            # Checkpoints written before this field existed -- the published
+            # general model among them -- take the default rather than no bound.
+            feature_clamp_std=config.get("feature_clamp_std"),
         )
 
         _load_saved_features_section(calibrator, config.get("features", {}))
@@ -902,9 +927,41 @@ class ProbabilityCalibrator:
         for start in range(0, n, self.batch_size):
             end = min(start + self.batch_size, n)
             x = torch.as_tensor(features[start:end], dtype=torch.float32, device=device)
-            x = (x - self.feature_mean) / self.feature_std
+            x = self._standardise(x)
             probs[start:end] = torch.sigmoid(self.network(x)).cpu().numpy()
         return probs
+
+    def _standardise(self, features: torch.Tensor) -> torch.Tensor:
+        """Centre and scale features, clamping what falls outside training range.
+
+        Standardisation alone puts no bound on what the network is asked to
+        read. A feature far outside the range it was fitted on is not scored
+        conservatively, it is extrapolated, and a ReLU network extrapolates to a
+        saturated output in whichever direction its weights happen to point. On
+        the shipped general model that direction is *towards confidence*:
+        ``mass_error_da`` was fitted with mean 0.08 Da and standard deviation
+        0.10 Da, so a prediction 900 Da from its precursor arrives about 9,000
+        standard deviations out and is returned at confidence 1.0 -- ranked
+        above every correct identification in the run, with no fragment
+        agreement at all.
+
+        Clamping is the smallest fix that holds for an already-trained model: a
+        PSM beyond the bound scores as if it sat at the bound, which is the most
+        extreme judgement the network has evidence for. Rows inside the bound
+        are untouched, so scores an existing model already gave do not move.
+
+        Args:
+            features: Raw feature matrix, on the network's device.
+
+        Returns:
+            The standardised matrix, clamped to +/- ``feature_clamp_std``.
+        """
+        assert self.feature_mean is not None
+        assert self.feature_std is not None
+        standardised = (features - self.feature_mean) / self.feature_std
+        if math.isinf(self.feature_clamp_std):
+            return standardised
+        return standardised.clamp(-self.feature_clamp_std, self.feature_clamp_std)
 
     def _early_stopping_validation_split(
         self,
@@ -1109,7 +1166,7 @@ class ProbabilityCalibrator:
         correct = 0
         total = 0
         for features, labels in loader:
-            features = (features.to(device) - self.feature_mean) / self.feature_std
+            features = self._standardise(features.to(device))
             labels = labels.to(device)
             logits = self.network(features)
             total_loss += criterion(logits, labels).item() * len(labels)
@@ -1140,7 +1197,7 @@ class ProbabilityCalibrator:
         epoch_loss = 0.0
         n_batches = 0
         for features, labels in train_loader:
-            features = (features.to(device) - self.feature_mean) / self.feature_std
+            features = self._standardise(features.to(device))
             labels = labels.to(device)
             optimizer.zero_grad()
             logits = self.network(features)
