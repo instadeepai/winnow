@@ -17,3 +17,8 @@ XCORR_NUM_WINDOWS = 10
 XCORR_MAX_OFFSET = 75
 # Normalization target for the maximum intensity within each window.
 XCORR_WINDOW_NORM_VALUE = 50.0
+# Observed peaks above this m/z are left out of the xcorr binning. No peptide
+# fragment reaches it, so this is a no-op on a well-formed spectrum; what it
+# bounds is the bin array, which is otherwise sized from whatever the largest
+# observed m/z happens to be.
+XCORR_MAX_OBSERVED_MZ = 10_000.0

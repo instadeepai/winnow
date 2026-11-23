@@ -5,6 +5,7 @@ fragmentation spectra match observed experimental spectra. These features
 are used by the calibrator to distinguish high-quality PSMs from low-quality ones.
 """
 
+import warnings
 from math import isnan
 from typing import (
     Dict,
@@ -30,6 +31,7 @@ from winnow.calibration.features.constants import (
     XCORR_BIN_OFFSET,
     XCORR_NUM_WINDOWS,
     XCORR_MAX_OFFSET,
+    XCORR_MAX_OBSERVED_MZ,
     XCORR_WINDOW_NORM_VALUE,
 )
 
@@ -895,6 +897,52 @@ def _subtract_background(
     return spectrum - (window_sums - spectrum) / divisor
 
 
+def _drop_unreachable_peaks(
+    observed_mz: List[float],
+    observed_intensities: List[float],
+    max_observed_mz: float,
+) -> Tuple[List[float], List[float]]:
+    """Drop observed peaks at an m/z no peptide fragment can reach.
+
+    The bin array is sized from the largest observed m/z, so one out-of-range
+    value decides what the score costs to compute. At m/z 1e34 numpy refuses the
+    allocation and the run dies with ``Maximum allowed dimension exceeded``, far
+    from the spectrum that caused it. Well short of that the peak is still
+    harmful, because the normalisation windows are cut from the same range: one
+    junk value drives every real peak into the first window and the score stops
+    meaning anything.
+
+    Args:
+        observed_mz: m/z values of the observed spectrum.
+        observed_intensities: Intensities corresponding to observed_mz.
+        max_observed_mz: Largest m/z to keep.
+
+    Returns:
+        The peaks in range. The inputs are returned unchanged when all of them
+        are, which is every well-formed spectrum.
+    """
+    if max(observed_mz) <= max_observed_mz:
+        return observed_mz, observed_intensities
+
+    kept = [
+        (mz, intensity)
+        for mz, intensity in zip(observed_mz, observed_intensities)
+        if mz <= max_observed_mz
+    ]
+    warnings.warn(
+        f"Ignoring {len(observed_mz) - len(kept)} observed peak(s) above m/z "
+        f"{max_observed_mz:g} (largest: {max(observed_mz):g}) when computing "
+        "xcorr. No peptide fragment reaches these, so they are taken as a "
+        "defect in the spectrum rather than a signal.",
+        RuntimeWarning,
+        stacklevel=3,
+    )
+    if not kept:
+        return [], []
+    mz_values, intensities = zip(*kept)
+    return list(mz_values), list(intensities)
+
+
 def compute_xcorr(
     observed_mz: List[float],
     observed_intensities: List[float],
@@ -903,6 +951,7 @@ def compute_xcorr(
     bin_offset: float = XCORR_BIN_OFFSET,
     num_windows: int = XCORR_NUM_WINDOWS,
     max_xcorr_offset: int = XCORR_MAX_OFFSET,
+    max_observed_mz: float = XCORR_MAX_OBSERVED_MZ,
 ) -> float:
     """Compute the SEQUEST fast xcorr score between observed and theoretical spectra.
 
@@ -928,13 +977,23 @@ def compute_xcorr(
             Defaults to 10.
         max_xcorr_offset: Number of bins in each direction for background estimation.
             The background is divided by 2 * max_xcorr_offset. Defaults to 75.
+        max_observed_mz: Observed peaks above this m/z are ignored, since no
+            peptide fragment reaches them and the bin array is sized from the
+            largest observed value. Defaults to 10000.0.
 
     Returns:
-        The xcorr score. Returns 0.0 for missing/empty inputs.
+        The xcorr score. Returns 0.0 for missing/empty inputs, and for a
+        spectrum with no peak at or below max_observed_mz.
     """
     if isinstance(theoretical_mz, float):
         return 0.0
     if len(observed_mz) == 0 or len(theoretical_mz) == 0:
+        return 0.0
+
+    observed_mz, observed_intensities = _drop_unreachable_peaks(
+        observed_mz, observed_intensities, max_observed_mz
+    )
+    if len(observed_mz) == 0:
         return 0.0
 
     max_mz = max(observed_mz)
