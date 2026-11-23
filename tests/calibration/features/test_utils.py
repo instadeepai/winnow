@@ -21,6 +21,7 @@ from winnow.calibration.features.utils import (
     parse_mz_tolerance_unit,
     _validate_mz_tolerance,
 )
+from winnow.calibration.features.constants import XCORR_MAX_OBSERVED_MZ
 from winnow.calibration.features.fragment_match import FragmentMatchFeatures
 from winnow.calibration.features.chimeric import ChimericFeatures
 from winnow.datasets.calibration_dataset import CalibrationDataset
@@ -1013,6 +1014,54 @@ class TestXcorr:
     def test_empty_observed_returns_zero(self):
         """Empty observed spectrum returns 0.0."""
         score = compute_xcorr([], [], [100.0, 200.0])
+        assert score == 0.0
+
+    def test_peak_above_the_fragment_range_is_ignored(self):
+        """One out-of-range peak must not decide the size of the bin array.
+
+        1.6e34 is a value read off a real spectrum, in a whole-run conversion of
+        PXD046182: one scan in about 107,000 carried it. The bin array is sized
+        from the largest observed m/z, so before this guard numpy refused the
+        allocation and the rescoring step died with ``Maximum allowed dimension
+        exceeded``, naming neither the spectrum nor the peak.
+        """
+        theoretical_mz = [200.0, 400.0, 600.0]
+        observed_mz = [200.0, 400.0, 600.0]
+        observed_intensities = [1000.0, 2000.0, 1500.0]
+
+        clean = compute_xcorr(observed_mz, observed_intensities, theoretical_mz)
+        with pytest.warns(RuntimeWarning, match="above m/z"):
+            polluted = compute_xcorr(
+                observed_mz + [1.6014e34],
+                observed_intensities + [10.0],
+                theoretical_mz,
+            )
+
+        assert polluted == pytest.approx(clean)
+
+    def test_peaks_within_the_fragment_range_are_kept(self):
+        """The guard drops nothing a spectrum could legitimately carry.
+
+        A peak just below the limit still moves the score, which is what says
+        the cut-off is doing nothing to ordinary data.
+        """
+        theoretical_mz = [200.0, 400.0, 600.0]
+        observed_mz = [200.0, 400.0, 600.0]
+        observed_intensities = [1000.0, 2000.0, 1500.0]
+
+        without = compute_xcorr(observed_mz, observed_intensities, theoretical_mz)
+        with_high_peak = compute_xcorr(
+            observed_mz + [XCORR_MAX_OBSERVED_MZ - 1.0],
+            observed_intensities + [10.0],
+            theoretical_mz,
+        )
+
+        assert with_high_peak != pytest.approx(without)
+
+    def test_every_peak_out_of_range_returns_zero(self):
+        """A spectrum with nothing left to bin scores 0.0 rather than raising."""
+        with pytest.warns(RuntimeWarning, match="above m/z"):
+            score = compute_xcorr([1e20, 2e20], [100.0, 200.0], [200.0, 400.0])
         assert score == 0.0
 
     def test_uniform_spectrum_much_lower_than_matching(self):
