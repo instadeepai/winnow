@@ -1,6 +1,7 @@
 """Unit tests for winnow ProbabilityCalibrator."""
 
 import json
+import math
 
 import numpy as np
 import pandas as pd
@@ -1285,3 +1286,81 @@ class TestProbabilityCalibrator:
             match=r"Training and validation FeatureDataset.columns must be identical",
         ):
             calibrator.fit_from_features(train_ds, val_ds)
+
+
+class TestFeatureClamp:
+    """The bound that stops the network extrapolating off the training range."""
+
+    def test_ordinary_features_are_untouched(self):
+        """Inside the bound, standardisation is exactly what it always was."""
+        calibrator = _hand_wired_freeze_calibrator()
+        raw = torch.tensor([[1.0, 2.0, 0.3], [0.2, 1.0, 0.1]], dtype=torch.float32)
+        plain = (raw - calibrator.feature_mean) / calibrator.feature_std
+
+        assert torch.allclose(calibrator._standardise(raw), plain)
+
+    def test_an_absurd_feature_is_capped_rather_than_saturating(self):
+        """A value far off the training range must not outrank a plausible one.
+
+        This is winnow#314 in miniature. The hand-wired network has positive
+        weights throughout, so a large positive input drives the logit up and
+        the sigmoid to 1.0 -- which is how a PSM whose predicted mass is 900 Da
+        from its precursor, about 9,000 standard deviations out on
+        ``mass_error_da``, came back as the single most confident row in a run.
+        """
+        calibrator = _hand_wired_freeze_calibrator()
+        # A bound the toy network has not already saturated at. Its weights are
+        # all positive and small, so by 50 standard deviations the sigmoid is
+        # 1.0 either way and the comparison below could not fail.
+        calibrator.feature_clamp_std = 2.0
+        bound = calibrator.feature_clamp_std
+        mean = calibrator.feature_mean
+        std = calibrator.feature_std
+
+        at_bound = (mean + bound * std).unsqueeze(0)
+        far_outside = (mean + 10_000.0 * std).unsqueeze(0)
+
+        capped = calibrator._standardise(far_outside)
+        assert torch.allclose(capped, torch.full_like(capped, bound))
+        assert torch.allclose(
+            calibrator._standardise(at_bound), calibrator._standardise(far_outside)
+        )
+
+        with torch.no_grad():
+            unbounded = torch.sigmoid(
+                calibrator.network((far_outside - mean) / std)
+            ).item()
+            bounded = torch.sigmoid(calibrator.network(capped)).item()
+        assert unbounded == pytest.approx(1.0)
+        assert bounded < unbounded
+
+    def test_the_bound_can_be_lifted(self):
+        """math.inf restores the old behaviour for anyone who wants it."""
+        calibrator = _hand_wired_freeze_calibrator()
+        calibrator.feature_clamp_std = math.inf
+        raw = (calibrator.feature_mean + 10_000.0 * calibrator.feature_std).unsqueeze(0)
+
+        plain = (raw - calibrator.feature_mean) / calibrator.feature_std
+        assert torch.allclose(calibrator._standardise(raw), plain)
+
+    def test_a_non_positive_bound_is_refused(self):
+        """Zero would send every feature to the mean and score nothing."""
+        with pytest.raises(ValueError, match="must be positive"):
+            ProbabilityCalibrator(feature_clamp_std=0.0)
+
+    def test_a_checkpoint_without_the_field_takes_the_default(self, tmp_path):
+        """Models published before this existed must gain the bound, not lose it."""
+        calibrator = _hand_wired_freeze_calibrator()
+        ProbabilityCalibrator.save(calibrator, tmp_path)
+
+        config_path = tmp_path / "config.json"
+        config = json.loads(config_path.read_text())
+        assert config["feature_clamp_std"] == calibrator.feature_clamp_std
+        del config["feature_clamp_std"]
+        config_path.write_text(json.dumps(config))
+
+        reloaded = ProbabilityCalibrator.load(tmp_path)
+        assert (
+            reloaded.feature_clamp_std
+            == ProbabilityCalibrator.DEFAULT_FEATURE_CLAMP_STD
+        )
